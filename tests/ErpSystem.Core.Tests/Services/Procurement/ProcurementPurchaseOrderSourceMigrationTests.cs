@@ -195,6 +195,25 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
         sql.Should().NotContain("DISABLE TRIGGER");
     }
 
+    [Fact]
+    public void RfqItemMasterLineageMigrationMatchesCommercialTriggerBaselineCounts()
+    {
+        var sql = Sql(new AlignRfqCommercialIdentityWithReceiptItemMaster());
+
+        sql.Should().Contain(
+            "TR_PurchaseOrders_ApprovedCommercialCapacity",
+            "the purchase-order header trigger has four item identity branches in the baseline definition");
+        sql.Should().Contain(
+            "IF @identityCount <> 4",
+            "the corrective migration must match the deployed purchase-order header trigger baseline");
+        sql.Should().Contain(
+            "TR_PurchaseOrderItems_ApprovedCommercialCapacity",
+            "the purchase-order item trigger has two item identity branches in the baseline definition");
+        sql.Should().Contain(
+            "IF @identityCount <> 2",
+            "the corrective migration must match the deployed purchase-order item trigger baseline");
+    }
+
     private static int Count(string value, string fragment) =>
         (value.Length - value.Replace(fragment, string.Empty).Length) /
         fragment.Length;

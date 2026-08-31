@@ -40,6 +40,7 @@ import type {
     SupplierDebitNoteApplicationResult,
     ApSupplierIdentity
 } from '../types/ap';
+import type { FinanceSourceDocumentDimension } from '../types/finance';
 
 // Re-using the PagedResult structure from ar-service
 export interface PagedResult<T> {
@@ -167,6 +168,13 @@ class AccountsPayableService {
 
     public async submitInvoiceForApproval(id: string): Promise<VendorInvoice> {
         return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/submit`, {});
+    }
+
+    public async refreshInvoiceBudget(id: string): Promise<FinanceSourceDocumentDimension> {
+        return apiService.post<FinanceSourceDocumentDimension>(
+            `${this.baseUrl}/invoices/${id}/budget-refresh`,
+            {},
+        );
     }
 
     public async getThreeWayMatchReadiness(id: string): Promise<InvoiceMatchingResult> {

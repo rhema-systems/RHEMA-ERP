@@ -250,6 +250,25 @@ public sealed class ArInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task PendingApprovalArInvoice_ShouldPostWhenFinalApprovalReleasesIt()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = InvoiceStatus.PendingApproval;
+        });
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.SendInvoiceAsync(fixture.Invoice.Id);
+
+        result.Status.Should().Be(nameof(InvoiceStatus.Sent));
+        result.JournalEntryId.Should().NotBeNull();
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
     [Trait("Category", "AccountsReceivable")]
     public async Task FixedAssetDisposalDeduction_ShouldDebitClearingOnlyForMatchingCompletedDisposal()

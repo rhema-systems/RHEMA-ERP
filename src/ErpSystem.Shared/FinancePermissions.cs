@@ -29,9 +29,11 @@ public static class FinancePermissions
 
     public const string ManageChartOfAccounts = "Finance.ChartOfAccounts.Manage";
     public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
+    public const string ManageDimensionCertification = "Finance.Dimensions.Certification.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
     public const string ConfigureTaxPolicy = "Finance.Policy.ConfigureTax";
     public const string ConfigureFixedAssetCategoriesPolicy = "Finance.Policy.ConfigureFixedAssetCategories";
+    public const string WithdrawJournalApprovalPolicy = "Finance.Policy.WithdrawJournalApproval";
 
     public const string CreateJournalEntries = "Finance.JournalEntries.Create";
     public const string EditJournalEntries = "Finance.JournalEntries.Edit";
@@ -171,6 +173,7 @@ public static class FinancePermissions
 
         new(ManageChartOfAccounts, "Manage Chart of Accounts", "Create, update, delete, and configure chart of accounts structures and account combinations.", CategoryGeneralLedger),
         new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
+        new(ManageDimensionCertification, "Manage Dimension Certification", "Assess and promote recognized Finance dimension routes using governed readiness evidence.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),
         new(EditJournalEntries, "Edit Journal Entries", "Edit draft journal entries.", CategoryGeneralLedger),
         new(DeleteJournalEntries, "Delete Journal Entries", "Delete draft journal entries.", CategoryGeneralLedger),
@@ -301,4 +304,14 @@ public static class FinancePermissions
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
+
+    public static readonly string[] AllPolicyNames = AllNames
+        .Concat(new[]
+        {
+            ConfigureChartOfAccountsPolicy,
+            ConfigureTaxPolicy,
+            ConfigureFixedAssetCategoriesPolicy,
+            WithdrawJournalApprovalPolicy
+        })
+        .ToArray();
 }

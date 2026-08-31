@@ -36,6 +36,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? JournalEntryId { get; set; }
         public List<InvoiceLineItemDto> LineItems { get; set; } = new();
         public List<PaymentDto> Payments { get; set; } = new();
+        public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
     }

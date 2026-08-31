@@ -71,6 +71,9 @@ public sealed class FinanceDimensionAccountRuleDto
     public string? SourceModule { get; set; }
     public string? SourceDocumentType { get; set; }
     public string? PostingAction { get; set; }
+    public ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId? RouteId { get; set; }
+    public string? SourceRoute { get; set; }
+    public string? ContractVersion { get; set; }
     public DateTime EffectiveDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public bool IsActive { get; set; }
@@ -85,6 +88,11 @@ public sealed class UpsertFinanceDimensionAccountRuleDto
     [MaxLength(50)] public string? SourceModule { get; set; }
     [MaxLength(100)] public string? SourceDocumentType { get; set; }
     [MaxLength(50)] public string? PostingAction { get; set; }
+    /// <summary>
+    /// Recognized compiled route. When supplied, the server derives producer/document/version and
+    /// ignores any attempt to claim those values through free text.
+    /// </summary>
+    public ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId? RouteId { get; set; }
     public DateTime EffectiveDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public bool IsActive { get; set; } = true;

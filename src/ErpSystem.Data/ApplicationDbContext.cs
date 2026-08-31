@@ -112,6 +112,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinanceDimensionSet> FinanceDimensionSets { get; set; }
     public DbSet<FinanceDimensionSetItem> FinanceDimensionSetItems { get; set; }
     public DbSet<FinanceDimensionAccountRule> FinanceDimensionAccountRules { get; set; }
+    public DbSet<FinanceDimensionSnapshot> FinanceDimensionSnapshots { get; set; }
+    public DbSet<FinanceDimensionSnapshotItem> FinanceDimensionSnapshotItems { get; set; }
+    public DbSet<FinanceSourceDimensionAssignment> FinanceSourceDimensionAssignments { get; set; }
+    public DbSet<FinanceSourceDimensionChange> FinanceSourceDimensionChanges { get; set; }
+    public DbSet<FinanceDimensionRouteCertification> FinanceDimensionRouteCertifications { get; set; }
+    public DbSet<FinanceDimensionCertificationTransition> FinanceDimensionCertificationTransitions { get; set; }
+    public DbSet<FinanceDimensionReadinessAssessment> FinanceDimensionReadinessAssessments { get; set; }
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
@@ -3014,15 +3021,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FinanceDimensionAccountRule>(entity =>
         {
             entity.ToTable("FinanceDimensionAccountRules");
+            entity.HasIndex(e => new { e.TenantId, e.RuleFamilyId, e.RuleVersion }).IsUnique();
             entity.HasIndex(e => new
             {
                 e.TenantId,
                 e.AccountId,
                 e.FinanceDimensionDefinitionId,
+                e.RouteId,
+                e.SourceRoute,
+                e.ContractVersion,
                 e.SourceModule,
                 e.SourceDocumentType,
                 e.PostingAction
-            }).IsUnique();
+            }).HasDatabaseName("IX_FinanceDimensionAccountRules_RouteScope");
+            entity.Property(e => e.RowVersion).IsRowVersion();
             entity.HasCheckConstraint("CK_FinanceDimensionAccountRules_RuleType",
                 "[RuleType] IN ('Required','Optional','Prohibited','Fixed')");
             entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
@@ -3030,6 +3042,101 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.FinanceDimensionDefinitionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.DefaultDimensionValue).WithMany()
                 .HasForeignKey(e => e.DefaultDimensionValueId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SupersedesRule).WithMany()
+                .HasForeignKey(e => e.SupersedesRuleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionSnapshot>(entity =>
+        {
+            entity.ToTable("FinanceDimensionSnapshots");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionSetId });
+            entity.HasOne(e => e.FinanceDimensionSet).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionSnapshotItem>(entity =>
+        {
+            entity.ToTable("FinanceDimensionSnapshotItems");
+            entity.HasIndex(e => new
+                { e.TenantId, e.FinanceDimensionSnapshotId, e.FinanceDimensionDefinitionId })
+                .HasDatabaseName("IX_FinanceDimensionSnapshotItems_TenantId_SnapshotId_DefinitionId")
+                .IsUnique();
+            entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany(e => e.Items)
+                .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionDefinition).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionValue).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionValueId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionAccountRule).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionAccountRuleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceSourceDimensionAssignment>(entity =>
+        {
+            entity.ToTable("FinanceSourceDimensionAssignments");
+            entity.HasIndex(e => new
+                { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.SourceLineId })
+                .HasDatabaseName("IX_FinanceSourceDimensionAssignments_SourceKey")
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId });
+            entity.HasIndex(e => e.FinanceDimensionSnapshotId).IsUnique()
+                .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.Property(e => e.BudgetEvidenceStatus).HasDefaultValue("NotApplicable");
+            entity.HasOne(e => e.FinanceDimensionSet).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceSourceDimensionChange>(entity =>
+        {
+            entity.ToTable("FinanceSourceDimensionChanges");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId, e.ChangedAt });
+            entity.HasIndex(e => new { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.SourceLineId });
+            entity.HasOne<FinanceDimensionSet>().WithMany()
+                .HasForeignKey(e => e.PreviousFinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinanceDimensionSet>().WithMany()
+                .HasForeignKey(e => e.NewFinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PreviousFinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.PreviousFinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.NewFinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.NewFinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionRouteCertification>(entity =>
+        {
+            entity.ToTable("FinanceDimensionRouteCertifications");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId }).IsUnique();
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.HasCheckConstraint("CK_FinanceDimensionRouteCertifications_State", "[State] IN (0,1,2)");
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionCertificationTransition>(entity =>
+        {
+            entity.ToTable("FinanceDimensionCertificationTransitions");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionRouteCertificationId, e.TransitionedAt })
+                .HasDatabaseName("IX_FinanceDimensionCertificationTransitions_TenantId_Certification_TransitionedAt");
+            entity.HasOne(e => e.FinanceDimensionRouteCertification).WithMany(e => e.Transitions)
+                .HasForeignKey(e => e.FinanceDimensionRouteCertificationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReadinessAssessment).WithMany()
+                .HasForeignKey(e => e.ReadinessAssessmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionReadinessAssessment>(entity =>
+        {
+            entity.ToTable("FinanceDimensionReadinessAssessments");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId, e.AssessedAt });
+            entity.HasCheckConstraint("CK_FinanceDimensionReadinessAssessments_States",
+                "[CurrentState] IN (0,1,2) AND [TargetState] IN (0,1,2)");
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3053,6 +3160,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             });
             entity.HasIndex(e => e.ExchangeRateId);
             entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionSetId, e.TransactionDate, e.AccountId });
+            entity.HasIndex(e => e.FinanceDimensionSnapshotId).IsUnique()
+                .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL");
             entity.HasIndex(e => new { e.TenantId, e.TransactionCurrency, e.ExchangeRateId });
             entity.HasIndex(e => new { e.TenantId, e.SourceDocumentId, e.SourceDocumentLineId });
             entity.HasOne(e => e.Account)
@@ -3066,6 +3175,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.FinanceDimensionSet)
                 .WithMany(e => e.AccountTransactions)
                 .HasForeignKey(e => e.FinanceDimensionSetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionSnapshot)
+                .WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSnapshotId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany(j => j.Transactions)
@@ -8960,6 +9073,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+            entity.HasIndex(item => new { item.TenantId, item.TemplateFileUploadRecordId });
         });
 
         builder.Entity<CentralDocumentAnnotationReview>(entity =>
@@ -9358,6 +9472,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             if (entry.Entity is WorkflowActivityLog && entry.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException("Workflow audit events are immutable and cannot be changed or deleted.");
+            if (entry.Entity is FinanceSourceDimensionChange && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Finance source-dimension change evidence is immutable and cannot be changed or deleted.");
             switch (entry.State)
             {
                 case EntityState.Added:

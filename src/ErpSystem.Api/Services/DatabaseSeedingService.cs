@@ -113,7 +113,10 @@ namespace ErpSystem.Web.Services
             string RoleName,
             string Description,
             IReadOnlyList<string> Checklist,
-            IReadOnlyList<string> Documents);
+            IReadOnlyList<string> Documents,
+            string TaskActionType = "estate-sop-example",
+            string DocumentType = "EstateSopEvidence",
+            string? Instructions = null);
 
         public DatabaseSeedingService(
             ApplicationDbContext context,
@@ -401,6 +404,8 @@ namespace ErpSystem.Web.Services
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Legal procedure workflows are seeded...");
+            await EnsureLegalProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
 
@@ -557,6 +562,25 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed Estate SOP example workflows");
+            }
+        }
+
+        private async Task EnsureLegalProcedureWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetLegalProcedureWorkflowSeedSpecs())
+                    {
+                        await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, spec);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Legal procedure workflows");
             }
         }
 
@@ -801,16 +825,16 @@ namespace ErpSystem.Web.Services
                 },
                 TaskConfig = new WorkflowTaskConfigDto
                 {
-                    TaskActionType = "estate-sop-example",
+                    TaskActionType = step.TaskActionType,
                     RequiresDocument = false,
-                    Instructions = $"Example SOP step for {step.RoleName}. Replace or refine this in Workflow Setup for the live operating procedure.",
+                    Instructions = step.Instructions ?? $"Example SOP step for {step.RoleName}. Replace or refine this in Workflow Setup for the live operating procedure.",
                     DocumentRequirements = step.Documents
                         .Select((document, index) => new WorkflowDocumentRequirementDto
                         {
                             Id = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-DOC-{index + 1}",
                             RequirementKey = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-DOC-{index + 1}",
                             DocumentName = document,
-                            DocumentType = "EstateSopEvidence",
+                            DocumentType = step.DocumentType,
                             IsRequired = true
                         })
                         .ToList()
@@ -954,6 +978,76 @@ namespace ErpSystem.Web.Services
                     $"Estate SOP Example - {entityName}",
                     $"Example TDC Estate SOP workflow for {entityName}. It provides practical stages, checklist controls, and document requirements that can be cloned/refined in Workflow Setup.",
                     steps);
+        }
+
+        private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetLegalProcedureWorkflowSeedSpecs()
+        {
+            const string TaskActionType = "legal-property-agreement-review";
+            const string DocumentType = "LegalAgreementReviewEvidence";
+
+            return
+            [
+                new(
+                    "LegalPropertyAgreementReview",
+                    "LegalPropertyAgreementReview",
+                    "Legal Property Agreement Review",
+                    "Workflow for Legal review of draft rental, lease, and sale agreements submitted from Property Management.",
+                    [
+                        LegalStep(
+                            "Legal Intake",
+                            WorkflowStepType.Manual,
+                            "Legal Admin Assistant",
+                            [
+                                "Confirm Estate source reference",
+                                "Confirm draft agreement is attached",
+                                "Assign Legal Officer"
+                            ],
+                            [
+                                "Generated draft agreement"
+                            ]),
+                        LegalStep(
+                            "Agreement Vetting",
+                            WorkflowStepType.Manual,
+                            "Legal Officer",
+                            [
+                                "Verify parties and property",
+                                "Review clauses and schedules",
+                                "Approve or return for correction"
+                            ],
+                            [
+                                "Legal review note"
+                            ]),
+                        LegalStep(
+                            "Head of Legal Release",
+                            WorkflowStepType.Approval,
+                            "Head of Legal",
+                            [
+                                "Confirm Legal Officer recommendation",
+                                "Record release decision",
+                                "Return approved reference to Property Management"
+                            ],
+                            [
+                                "Approved / released agreement"
+                            ])
+                    ])
+            ];
+
+            static EstateSopWorkflowStepSeed LegalStep(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> documents)
+                => new(
+                    name,
+                    type,
+                    role,
+                    string.Join(" ", checks),
+                    checks,
+                    documents,
+                    TaskActionType,
+                    DocumentType,
+                    $"Complete the {name} task for the property agreement review workflow.");
         }
 
         private async Task EnsureFinanceWorkflowsSeededAsync()
@@ -7214,6 +7308,8 @@ namespace ErpSystem.Web.Services
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.officer2", First = "Abena", Last = "Legal", Role = "Legal Officer", Number = "LA-LEG-002" },
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager1", First = "Fiifi", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-003" },
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager2", First = "Mansa", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-004" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.admin", First = "Efua", Last = "Admin", Role = "Legal Admin Assistant", Number = "LA-LEG-005" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.head", First = "Yaw", Last = "Head", Role = "Head of Legal", Number = "LA-LEG-006" },
 
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "finance.officer", First = "Daniel", Last = "Finance", Role = "Finance Officer", Number = "LA-FIN-001" },
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "acquisition.finance.manager", First = "Grace", Last = "Finance", Role = "Finance Manager", Number = "LA-FIN-002" },
@@ -7908,6 +8004,8 @@ namespace ErpSystem.Web.Services
                 new { Name = "Senior Surveyor", Description = "Verifies cadastral surveys" },
                 new { Name = "Legal Officer", Description = "Handles ownership classification and instrument execution" },
                 new { Name = "Legal Manager", Description = "Approves ownership verification and statutory consent" },
+                new { Name = "Legal Admin Assistant", Description = "Records Legal intake, files, dispatch, and matter routing" },
+                new { Name = "Head of Legal", Description = "Approves Legal release, signatures, and final legal decisions" },
                 new { Name = "Acquisition Committee", Description = "Handles land agreement negotiations" },
                 new { Name = "Executive Approver", Description = "Approves negotiated land agreements" },
                 new { Name = "Lands Commission Liaison", Description = "Submits statutory consent applications" },
@@ -8484,6 +8582,14 @@ namespace ErpSystem.Web.Services
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
                 [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
                 [PropertyManagementRoles.Manager] = PropertyManagementPermissions.ManagerNames,
+                ["Estate Officer"] = new[]
+                {
+                    "estate.land.project-readiness"
+                },
+                ["Estate Manager"] = new[]
+                {
+                    "estate.land.project-readiness"
+                },
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",

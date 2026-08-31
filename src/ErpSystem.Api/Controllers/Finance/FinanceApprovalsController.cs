@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Procurement;
@@ -1083,7 +1084,7 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("Invoice"))
         {
             var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            if (invoice?.Status == InvoiceStatus.Draft)
+            if (invoice?.Status == InvoiceStatus.PendingApproval)
             {
                 await RecordCustomerInvoiceAuditAsync(
                     tenantId,
@@ -1098,7 +1099,19 @@ public class FinanceApprovalsController : ControllerBase
                     comments,
                     cancellationToken);
 
-                await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
+                var trustedManualRoute = await HasTrustedDimensionRouteAsync(
+                    tenantId,
+                    "CustomerInvoice",
+                    entityId,
+                    FinanceDimensionRouteId.FinanceArCustomerInvoice,
+                    cancellationToken);
+                if (trustedManualRoute)
+                    await _invoiceService.SendInvoiceAsync(
+                        entityId,
+                        new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                        cancellationToken);
+                else
+                    await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
             }
             return;
         }
@@ -1678,29 +1691,14 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("VendorInvoice"))
         {
-            var invoice = await _db.VendorInvoices.FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
-                cancellationToken);
-            if (invoice == null)
-            {
-                return;
-            }
+            if (_vendorInvoiceService == null)
+                throw new InvalidOperationException("AP invoice lifecycle service is not configured.");
 
-            invoice.Status = VendorInvoiceStatus.Rejected;
-            invoice.ApprovalStatus = "Rejected";
-            invoice.ApprovalComments = reason;
-            await _db.SaveChangesAsync(cancellationToken);
-
-            await RecordVendorInvoiceAuditAsync(
-                tenantId,
-                invoice,
-                FinanceAuditEvents.ApInvoiceRejected,
-                new
-                {
-                    invoice.Status,
-                    invoice.ApprovalStatus,
-                    invoice.ApprovalComments
-                },
+            // The shared workbench owns the workflow action; AP still owns its document and
+            // Finance-budget outcome. Delegate instead of directly changing status so rejection
+            // cannot strand an active expense reservation.
+            await _vendorInvoiceService.ApplyRejectedWorkflowOutcomeAsync(
+                entityId,
                 reason,
                 cancellationToken);
             return;
@@ -2226,8 +2224,35 @@ public class FinanceApprovalsController : ControllerBase
             throw new InvalidOperationException("Vendor invoice posting service is not configured.");
         }
 
-        await _vendorInvoiceService.PostAsync(invoice.Id, cancellationToken);
+        var trustedManualRoute = await HasTrustedDimensionRouteAsync(
+            tenantId,
+            "VendorInvoice",
+            invoice.Id,
+            FinanceDimensionRouteId.FinanceApVendorInvoice,
+            cancellationToken);
+        if (trustedManualRoute)
+            await _vendorInvoiceService.PostAsync(
+                invoice.Id,
+                new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceApVendorInvoice),
+                cancellationToken);
+        else
+            await _vendorInvoiceService.PostAsync(invoice.Id, cancellationToken);
     }
+
+    private Task<bool> HasTrustedDimensionRouteAsync(
+        Guid tenantId,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        FinanceDimensionRouteId routeId,
+        CancellationToken cancellationToken) =>
+        _db.FinanceSourceDimensionAssignments.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId
+            && item.SourceDocumentType == sourceDocumentType
+            && item.SourceDocumentId == sourceDocumentId
+            && item.RouteId == routeId
+            && item.SourceLineId == null
+            && !item.IsDeleted,
+            cancellationToken);
 
     private async Task RecordFinanceWorkflowAuditAsync(
         Guid tenantId,

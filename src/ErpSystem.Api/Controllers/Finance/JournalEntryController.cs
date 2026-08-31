@@ -9,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -607,14 +608,19 @@ namespace ErpSystem.Api.Controllers.Finance
         /// Withdraws a pending approval request and returns the journal entry to Draft.
         /// </summary>
         [HttpPost("{id}/withdraw-approval")]
-        public async Task<ActionResult<JournalEntryDto>> WithdrawApproval(Guid id, [FromBody] ApprovalActionDto? request = null)
+        public async Task<ActionResult<JournalEntryDto>> WithdrawApproval(
+            Guid id,
+            [FromBody] WithdrawApprovalDto? request,
+            CancellationToken cancellationToken = default)
         {
             try
             {
                 if (!await HasAnyPermissionAsync(
-                        "Finance.JournalEntries.SubmitForApproval",
-                        "Finance.JournalEntries.Write",
-                        "Finance.JournalEntries.Delete"))
+                        FinancePermissions.SubmitJournalEntries,
+                        FinancePermissions.WorkflowCancel))
+                    return Forbid();
+
+                if (!Guid.TryParse(_currentUserService.UserId, out var currentUserId))
                     return Forbid();
 
                 var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
@@ -630,15 +636,62 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 var reason = request?.Reason?.Trim();
                 if (string.IsNullOrWhiteSpace(reason))
-                    reason = request?.Comments?.Trim();
-                if (string.IsNullOrWhiteSpace(reason))
-                    reason = "Approval request withdrawn.";
+                    return BadRequest("A withdrawal reason is required.");
 
-                var workflowResult = await _workflowService.CancelWorkflowAsync("JournalEntry", id, reason);
-                if (!workflowResult.Success)
-                    return BadRequest(workflowResult.Message ?? "Unable to cancel the active approval workflow.");
+                var canCancelAnyWorkflow = await HasAnyPermissionAsync(FinancePermissions.WorkflowCancel);
 
-                await _journalEntryService.UpdateApprovalStatusAsync(id, "Draft", "Withdrawn", rejectionReason: reason);
+                async Task<WorkflowExecutionResult> CancelWorkflowAndReturnToDraftAsync()
+                {
+                    var workflowResult = canCancelAnyWorkflow
+                        ? await _workflowService.CancelWorkflowAsync("JournalEntry", id, reason)
+                        : await _workflowService.RecallWorkflowAsync("JournalEntry", id, currentUserId, reason);
+
+                    if (!workflowResult.Success)
+                        return workflowResult;
+
+                    await _journalEntryService.WithdrawApprovalAsync(
+                        id,
+                        currentUserId,
+                        reason,
+                        cancellationToken);
+                    return workflowResult;
+                }
+
+                WorkflowExecutionResult result;
+                if (!_dbContext.Database.IsRelational() || _dbContext.Database.CurrentTransaction != null)
+                {
+                    result = await CancelWorkflowAndReturnToDraftAsync();
+                }
+                else
+                {
+                    var strategy = _dbContext.Database.CreateExecutionStrategy();
+                    result = await strategy.ExecuteAsync(async () =>
+                    {
+                        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                        try
+                        {
+                            var workflowResult = await CancelWorkflowAndReturnToDraftAsync();
+                            if (!workflowResult.Success)
+                            {
+                                await transaction.RollbackAsync(cancellationToken);
+                                _dbContext.ChangeTracker.Clear();
+                                return workflowResult;
+                            }
+
+                            await transaction.CommitAsync(cancellationToken);
+                            return workflowResult;
+                        }
+                        catch
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+                            _dbContext.ChangeTracker.Clear();
+                            throw;
+                        }
+                    });
+                }
+
+                if (!result.Success)
+                    return BadRequest(result.Message ?? "Unable to withdraw the active approval workflow.");
 
                 var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 return Ok(updated);

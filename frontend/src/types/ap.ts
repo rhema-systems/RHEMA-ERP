@@ -1,3 +1,5 @@
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+
 export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
 export type InvoiceMatchingStatus = 'Unmatched' | 'TwoWayMatched' | 'ThreeWayMatched' | 'MatchException';
@@ -22,6 +24,7 @@ export interface ApInvoiceSupplier {
     code: string;
     name: string;
     paymentTermId?: string | null;
+    currency?: string | null;
 }
 
 export interface VendorInvoice {
@@ -46,11 +49,16 @@ export interface VendorInvoice {
     exchangeRateId?: string;
     baseCurrencyAmount: number;
     paymentTermsDays: number;
+    paymentTermId?: string;
     earlyPaymentDiscountPercentage: number;
     earlyPaymentDiscountDueDate?: string;
     earlyPaymentDiscountAmount: number;
     withholdingTaxRate: number;
     withholdingTaxAmount: number;
+    withholdingTaxId?: string;
+    withholdingTaxAccountId?: string;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     matchingType: InvoiceMatchingType;
     matchingStatus: InvoiceMatchingStatus;
     matchingNotes?: string;
@@ -81,6 +89,7 @@ export interface VendorInvoice {
     paymentAllocations: VendorPaymentAllocation[];
     createdAt: string;
     updatedAt?: string;
+    financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface InvoiceMatchingResult {
@@ -295,6 +304,8 @@ export interface VendorInvoiceCreateRequest {
     withholdingTaxRate?: number;
     withholdingTaxId?: string | null;
     withholdingTaxAccountId?: string | null;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;
@@ -302,6 +313,7 @@ export interface VendorInvoiceCreateRequest {
     reference?: string;
     isOpeningBalance?: boolean;
     lineItems: VendorInvoiceLineItemCreateRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ProcurementAcceptedSupplyOption {
@@ -359,6 +371,7 @@ export interface VendorInvoiceLineItem {
 }
 
 export interface VendorInvoiceLineItemCreateRequest {
+    id?: string;
     lineItemType?: string;
     glAccountId?: string;
     budgetEntryId?: string;
@@ -556,6 +569,7 @@ export interface SupplierDebitNote {
     applications: SupplierDebitNoteApplication[];
     createdAt: string;
     rowVersion: string;
+    financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 /**
@@ -570,6 +584,7 @@ export interface ApSupplierIdentity {
 }
 
 export interface SupplierDebitNoteLineRequest {
+    id?: string;
     originalVendorInvoiceLineItemId?: string;
     glAccountId?: string;
     description: string;
@@ -593,6 +608,7 @@ export interface SupplierDebitNoteCreateRequest {
     currencyCode: string;
     exchangeRate: number;
     lines: SupplierDebitNoteLineRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface SupplierDebitNoteUpdateRequest extends SupplierDebitNoteCreateRequest {

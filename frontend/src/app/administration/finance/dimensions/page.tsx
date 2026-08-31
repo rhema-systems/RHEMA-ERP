@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Loader2, Plus, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { AlertCircle, Loader2, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +17,7 @@ import type {
     Account,
     FinanceDimensionAccountRule,
     FinanceDimensionDefinition,
+    FinanceDimensionRouteCertification,
     UpsertFinanceDimensionAccountRule,
     UpsertFinanceDimensionDefinition,
     UpsertFinanceDimensionValue,
@@ -34,7 +36,7 @@ const emptyValue = (): UpsertFinanceDimensionValue => ({
 
 const emptyRule = (): UpsertFinanceDimensionAccountRule => ({
     accountId: '', financeDimensionDefinitionId: '', ruleType: 'Optional',
-    sourceModule: 'GL', sourceDocumentType: 'ManualJournalEntry', postingAction: 'Post',
+    routeId: 'ManualJournalEntry',
     effectiveDate: today(), isActive: true,
 });
 
@@ -43,6 +45,7 @@ export default function FinanceDimensionsPage() {
     const [definitions, setDefinitions] = useState<FinanceDimensionDefinition[]>([]);
     const [rules, setRules] = useState<FinanceDimensionAccountRule[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
+    const [routes, setRoutes] = useState<FinanceDimensionRouteCertification[]>([]);
     const [selectedDefinitionId, setSelectedDefinitionId] = useState('');
     const [definitionForm, setDefinitionForm] = useState(emptyDefinition());
     const [valueForm, setValueForm] = useState(emptyValue());
@@ -63,14 +66,16 @@ export default function FinanceDimensionsPage() {
         setLoading(true);
         setError(null);
         try {
-            const [dimensionRows, ruleRows, accountRows] = await Promise.all([
+            const [dimensionRows, ruleRows, accountRows, routeRows] = await Promise.all([
                 financeDataService.getFinanceDimensions(true),
                 financeDataService.getFinanceDimensionRules(),
                 financeDataService.getAccounts({ status: 'Active' }),
+                financeDataService.getFinanceDimensionCertificationRoutes(),
             ]);
             setDefinitions(dimensionRows);
             setRules(ruleRows);
             setAccounts(accountRows.filter(account => account.allowDirectPosting ?? true));
+            setRoutes(routeRows);
             if (!selectedDefinitionId && dimensionRows.length) setSelectedDefinitionId(dimensionRows[0].id);
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : 'Failed to load Finance coding dimensions.');
@@ -126,7 +131,7 @@ export default function FinanceDimensionsPage() {
             setRuleForm(emptyRule());
             setEditingRuleId(null);
             await load();
-            toast({ title: 'Manual-journal rule created' });
+            toast({ title: 'Dimension rule saved' });
         } catch (cause) {
             toast({ title: 'Rule not saved', description: cause instanceof Error ? cause.message : 'Request failed.', variant: 'destructive' });
         } finally { setSaving(false); }
@@ -139,15 +144,17 @@ export default function FinanceDimensionsPage() {
                     <h1 className="text-3xl font-bold">Finance Coding Dimensions</h1>
                     <p className="text-muted-foreground">Configure transaction classifications independently of the natural GL account.</p>
                 </div>
-                <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" asChild><Link href="/administration/finance/dimensions/readiness"><ShieldCheck className="mr-2 h-4 w-4" />Route readiness</Link></Button>
+                    <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+                </div>
             </div>
 
             <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Controlled rollout</AlertTitle>
                 <AlertDescription>
-                    Manual journals are the first certified producer. Required, fixed, and prohibited rules must remain scoped to
-                    GL / ManualJournalEntry / Post until each operational adapter has its own tested contract.
+                    Rules are scoped to compiled producer routes. AP and AR routes capture optionally until route-level UAT and a governed promotion.
                 </AlertDescription>
             </Alert>
 
@@ -188,8 +195,9 @@ export default function FinanceDimensionsPage() {
                     </Card>
 
                     <Card>
-                        <CardHeader><CardTitle>Account rules</CardTitle><CardDescription>Certified manual-journal scope only</CardDescription></CardHeader>
+                        <CardHeader><CardTitle>Account rules</CardTitle><CardDescription>Scoped to compiled producer routes</CardDescription></CardHeader>
                         <CardContent className="space-y-4">
+                            <div className="space-y-1"><Label>Source route</Label><Select value={ruleForm.routeId ?? 'ManualJournalEntry'} onValueChange={routeId => setRuleForm({ ...ruleForm, routeId: routeId as UpsertFinanceDimensionAccountRule['routeId'], sourceModule: undefined, sourceDocumentType: undefined, postingAction: undefined })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{routes.map(route => <SelectItem key={route.routeId} value={route.routeId}>{route.sourceRoute} · {route.contractVersion} · {route.state}</SelectItem>)}</SelectContent></Select></div>
                             <div className="space-y-1"><Label>Account</Label><Select value={ruleForm.accountId} onValueChange={accountId => setRuleForm({ ...ruleForm, accountId })}><SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger><SelectContent>{accounts.map(account => <SelectItem key={account.id} value={account.id}>{account.accountNumber} — {account.accountName}</SelectItem>)}</SelectContent></Select></div>
                             <div className="space-y-1"><Label>Dimension</Label><Select value={ruleForm.financeDimensionDefinitionId} onValueChange={financeDimensionDefinitionId => setRuleForm({ ...ruleForm, financeDimensionDefinitionId, defaultDimensionValueId: undefined })}><SelectTrigger><SelectValue placeholder="Select dimension" /></SelectTrigger><SelectContent>{definitions.filter(item => item.isActive).map(item => <SelectItem key={item.id} value={item.id}>{item.code} — {item.name}</SelectItem>)}</SelectContent></Select></div>
                             <div className="space-y-1"><Label>Rule</Label><Select value={ruleForm.ruleType} onValueChange={ruleType => setRuleForm({ ...ruleForm, ruleType: ruleType as UpsertFinanceDimensionAccountRule['ruleType'] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Optional">Optional</SelectItem><SelectItem value="Required">Required</SelectItem><SelectItem value="Fixed">Fixed</SelectItem><SelectItem value="Prohibited">Prohibited</SelectItem></SelectContent></Select></div>
@@ -197,7 +205,7 @@ export default function FinanceDimensionsPage() {
                             <div className="space-y-1"><Label>Effective date</Label><Input type="date" value={ruleForm.effectiveDate} onChange={event => setRuleForm({ ...ruleForm, effectiveDate: event.target.value })} /></div>
                             <div className="flex items-center gap-2"><Switch checked={ruleForm.isActive} onCheckedChange={checked => setRuleForm({ ...ruleForm, isActive: checked })} /><Label>Active</Label></div>
                             <div className="flex gap-2"><Button onClick={() => void saveRule()} disabled={saving || !ruleForm.accountId || !ruleForm.financeDimensionDefinitionId}><Plus className="mr-2 h-4 w-4" />{editingRuleId ? 'Save rule' : 'Create rule'}</Button>{editingRuleId && <Button variant="outline" onClick={() => { setEditingRuleId(null); setRuleForm(emptyRule()); }}>Cancel</Button>}</div>
-                            <div className="space-y-2 border-t pt-4">{rules.map(rule => <button type="button" key={rule.id} className="w-full rounded border p-3 text-left" onClick={() => { setEditingRuleId(rule.id); setRuleForm({ accountId: rule.accountId, financeDimensionDefinitionId: rule.financeDimensionDefinitionId, ruleType: rule.ruleType, defaultDimensionValueId: rule.defaultDimensionValueId, sourceModule: rule.sourceModule, sourceDocumentType: rule.sourceDocumentType, postingAction: rule.postingAction, effectiveDate: rule.effectiveDate.slice(0, 10), expiryDate: rule.expiryDate?.slice(0, 10), isActive: rule.isActive }); }}><div className="font-medium">{rule.accountNumber} · {rule.dimensionCode}</div><div className="text-sm">{rule.ruleType}{rule.defaultValueCode ? ` = ${rule.defaultValueCode}` : ''}</div><div className="text-xs text-muted-foreground">{rule.sourceModule ?? '*'} / {rule.sourceDocumentType ?? '*'} / {rule.postingAction ?? '*'}</div></button>)}</div>
+                            <div className="space-y-2 border-t pt-4">{rules.map(rule => <button type="button" key={rule.id} className="w-full rounded border p-3 text-left" onClick={() => { setEditingRuleId(rule.id); setRuleForm({ accountId: rule.accountId, financeDimensionDefinitionId: rule.financeDimensionDefinitionId, ruleType: rule.ruleType, defaultDimensionValueId: rule.defaultDimensionValueId, routeId: rule.routeId, sourceModule: rule.sourceModule, sourceDocumentType: rule.sourceDocumentType, postingAction: rule.postingAction, effectiveDate: rule.effectiveDate.slice(0, 10), expiryDate: rule.expiryDate?.slice(0, 10), isActive: rule.isActive }); }}><div className="font-medium">{rule.accountNumber} · {rule.dimensionCode}</div><div className="text-sm">{rule.ruleType}{rule.defaultValueCode ? ` = ${rule.defaultValueCode}` : ''}</div><div className="text-xs text-muted-foreground">{rule.sourceRoute ?? rule.sourceDocumentType ?? 'Unscoped optional rule'}{rule.contractVersion ? ` · ${rule.contractVersion}` : ''}</div></button>)}</div>
                         </CardContent>
                     </Card>
                 </div>

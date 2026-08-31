@@ -63,6 +63,13 @@ describe('AllSettingsPage', () => {
       'Audit & Monitoring',
       'Notifications & Communications',
     ]));
+    expect(administration?.cards.find(card => card.title === 'General Administration')?.links)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Document Templates',
+          href: '/administration/document-management/document-templates',
+        }),
+      ]));
   });
 
   it('searches setting children and closes back to the previous workspace', () => {

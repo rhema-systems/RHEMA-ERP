@@ -1,5 +1,7 @@
+using System.Globalization;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -7,12 +9,16 @@ using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Models;
+using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
+using QuestPDF.Infrastructure;
+using QColors = QuestPDF.Helpers.Colors;
 
 namespace ErpSystem.Api.Controllers.Estate;
 
@@ -22,11 +28,11 @@ namespace ErpSystem.Api.Controllers.Estate;
 public sealed class EstateExternalDocumentsController : ControllerBase
 {
     private const string PortalRecipientFieldKey = "dispatchedto";
-
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IProcedureCaseService _procedureCaseService;
     private readonly IFileStorageService _fileStorageService;
+    private readonly ICentralDocumentRenditionService _renditionService;
     private readonly INotificationService _notificationService;
 
     public EstateExternalDocumentsController(
@@ -34,12 +40,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         ICurrentUserService currentUserService,
         IProcedureCaseService procedureCaseService,
         IFileStorageService fileStorageService,
+        ICentralDocumentRenditionService renditionService,
         INotificationService notificationService)
     {
         _db = db;
         _currentUserService = currentUserService;
         _procedureCaseService = procedureCaseService;
         _fileStorageService = fileStorageService;
+        _renditionService = renditionService;
         _notificationService = notificationService;
     }
 
@@ -215,6 +223,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var cases = await _db.ProcedureCases
             .AsNoTracking()
             .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
             .Where(item => item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.OpenedById == userId.Value
@@ -225,29 +234,725 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .Take(100)
             .ToListAsync(cancellationToken);
 
+        var propertyReferences = cases
+            .SelectMany(item => item.Fields)
+            .Where(field => field.Key == "listingReference" || field.Key == "propertyUnit")
+            .Select(field => field.Value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var managedAssets = propertyReferences.Count == 0
+            ? []
+            : await _db.EstateManagedAssets
+                .AsNoTracking()
+                .Where(asset => asset.TenantId == tenantId
+                    && !asset.IsDeleted
+                    && (propertyReferences.Contains(asset.AssetCode)
+                        || (asset.ProjectUnitCode != null
+                            && propertyReferences.Contains(asset.ProjectUnitCode))))
+                .ToListAsync(cancellationToken);
+
         var requests = cases
-            .Select(item => new
+            .Select(item =>
             {
-                item.Id,
-                item.Module,
-                item.EntityType,
-                item.Title,
-                item.ReferenceNumber,
-                item.ApplicantName,
-                item.SourceDepartment,
-                item.Status,
-                item.CurrentStageName,
-                item.CurrentAssignedRole,
-                FieldValues = item.Fields.ToDictionary(
+                var fieldValues = item.Fields.ToDictionary(
                     field => field.Key,
                     field => field.Value,
-                    StringComparer.OrdinalIgnoreCase),
-                item.CreatedAt,
-                item.UpdatedAt
+                    StringComparer.OrdinalIgnoreCase);
+                var listingReference = fieldValues.GetValueOrDefault("listingReference");
+                var propertyUnit = fieldValues.GetValueOrDefault("propertyUnit");
+                var asset = managedAssets.FirstOrDefault(candidate =>
+                    string.Equals(candidate.AssetCode, listingReference, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase));
+                if (asset?.RightOfEntryDate is { } actualPossessionDate)
+                {
+                    fieldValues["actualPossessionDate"] = actualPossessionDate.ToString("yyyy-MM-dd");
+                }
+
+                return new
+                {
+                    item.Id,
+                    item.Module,
+                    item.EntityType,
+                    item.Title,
+                    item.ReferenceNumber,
+                    item.ApplicantName,
+                    item.SourceDepartment,
+                    item.Status,
+                    item.CurrentStageIndex,
+                    item.CurrentStageName,
+                    item.CurrentAssignedRole,
+                    CustomerIntakeUploadClosed = HasFirstInternalStageBeenRoutedForward(item),
+                    FieldValues = fieldValues,
+                    Documents = item.Documents
+                        .Where(document => string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(document => document.CreatedAt)
+                        .Select(ToExternalDocumentDto)
+                        .ToList(),
+                    item.CreatedAt,
+                    item.UpdatedAt
+                };
             })
             .ToList();
 
         return Ok(new { success = true, data = requests });
+    }
+
+    [HttpPost("/api/estate/external/requests/{requestId:guid}/customer-intake-documents/{documentId:guid}/upload")]
+    [RequestSizeLimit(52_428_800)]
+    public async Task<IActionResult> UploadCustomerIntakeDocument(
+        Guid requestId,
+        Guid documentId,
+        [FromForm] IFormFile? file,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { success = false, message = "Select a document to upload." });
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var uploaded = await _procedureCaseService.UploadCustomerIntakeDocumentAsync(
+                requestId,
+                documentId,
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                notes);
+
+            if (uploaded is null)
+            {
+                return NotFound(new { success = false, message = "Property request document was not found." });
+            }
+
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var userId = GetUserId();
+            if (tenantId == Guid.Empty || userId is null)
+            {
+                return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+            }
+
+            var procedureCase = await LoadOwnedExternalListingCaseAsync(tenantId, userId.Value, requestId, cancellationToken);
+            return procedureCase is null
+                ? NotFound(new { success = false, message = "Property request was not found." })
+                : Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpGet("/api/estate/external/my-properties")]
+    public async Task<IActionResult> GetMyProperties(CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var customers = await PortalCustomers(tenantId, userId.Value)
+            .Select(customer => new
+            {
+                customer.Id,
+                customer.PartnerName,
+                customer.CustomerAccountNumber
+            })
+            .ToListAsync(cancellationToken);
+
+        var customerIds = customers.Select(customer => customer.Id).ToList();
+
+        var properties = await _db.EstateManagedAssets
+            .AsNoTracking()
+            .Where(asset => asset.TenantId == tenantId
+                && !asset.IsDeleted
+                && asset.CustomerBusinessPartnerId.HasValue
+                && customerIds.Contains(asset.CustomerBusinessPartnerId.Value)
+                && (asset.Status == EstateManagedAssetStatus.Reserved
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied
+                    || asset.Status == EstateManagedAssetStatus.Sold))
+            .OrderBy(asset => asset.Name)
+            .Select(asset => new
+            {
+                asset.Id,
+                asset.AssetCode,
+                asset.ProjectUnitCode,
+                asset.Name,
+                asset.Status,
+                TransactionType = asset.Status == EstateManagedAssetStatus.Sold ? "Purchased" : "Rental",
+                asset.Location,
+                asset.Town,
+                asset.District,
+                AgreementReference = asset.PropertyFileReference,
+                AgreementDate = asset.DateOfTenancy,
+                ActualPossessionDate = asset.RightOfEntryDate,
+                asset.LeaseTermYears,
+                MonthlyRent = asset.ExternalMonthlyRent ?? asset.ExternalListingPrice,
+                CurrencyCode = string.IsNullOrWhiteSpace(asset.ExternalListingCurrency)
+                    ? asset.Currency
+                    : asset.ExternalListingCurrency,
+                asset.NextRentBillingDate,
+                asset.RentGracePeriodDays,
+                asset.RentPenaltyMethod,
+                asset.RentPenaltyValue,
+                asset.RentPenaltyCapAmount,
+                asset.CustomerBusinessPartnerId
+            })
+            .ToListAsync(cancellationToken);
+
+        var saleAgreementReferencesNeedingDates = properties
+            .Where(asset => asset.TransactionType == "Purchased"
+                && asset.AgreementDate is null
+                && !string.IsNullOrWhiteSpace(asset.AgreementReference))
+            .Select(asset => asset.AgreementReference!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var saleAgreementDates = saleAgreementReferencesNeedingDates.Count == 0
+            ? new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase)
+            : (await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(record => record.Versions.Where(version => !version.IsDeleted))
+                .Where(record => record.TenantId == tenantId
+                    && !record.IsDeleted
+                    && record.SourceModule == "Estate"
+                    && saleAgreementReferencesNeedingDates.Contains(record.DocumentReference))
+                .ToListAsync(cancellationToken))
+                .GroupBy(record => record.DocumentReference, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderByDescending(record => record.UpdatedAt ?? record.CreatedAt)
+                        .Select(ResolveAgreementDate)
+                        .FirstOrDefault(),
+                    StringComparer.OrdinalIgnoreCase);
+
+        var invoices = await _db.Invoices
+            .AsNoTracking()
+            .Where(invoice => invoice.TenantId == tenantId
+                && !invoice.IsDeleted
+                && customerIds.Contains(invoice.BusinessPartnerId)
+                && (invoice.Status == InvoiceStatus.Sent
+                    || invoice.Status == InvoiceStatus.PartiallyPaid
+                    || invoice.Status == InvoiceStatus.Paid
+                    || invoice.Status == InvoiceStatus.Overdue
+                    || invoice.Status == InvoiceStatus.Approved)
+                && ((invoice.Reference != null && invoice.Reference.StartsWith("RENT-"))
+                    || (invoice.Reference != null && invoice.Reference.StartsWith("LEGAL-TRANSFER-FEE-"))
+                    || (invoice.Notes != null
+                        && invoice.Notes.Contains("Estate / Property Management"))))
+            .OrderByDescending(invoice => invoice.InvoiceDate)
+            .Select(invoice => new
+            {
+                invoice.Id,
+                invoice.InvoiceNumber,
+                invoice.BusinessPartnerId,
+                invoice.InvoiceDate,
+                invoice.DueDate,
+                invoice.TotalAmount,
+                invoice.PaidAmount,
+                BalanceAmount = invoice.TotalAmount - invoice.PaidAmount - invoice.CreditedAmount,
+                invoice.CurrencyCode,
+                invoice.Status,
+                invoice.Reference
+            })
+            .ToListAsync(cancellationToken);
+        var invoiceIds = invoices.Select(invoice => invoice.Id).ToList();
+        var invoiceDescriptions = invoiceIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await _db.Set<InvoiceLineItem>()
+                .AsNoTracking()
+                .Where(line => !line.IsDeleted && invoiceIds.Contains(line.InvoiceId))
+                .GroupBy(line => line.InvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Description = group
+                        .OrderBy(line => line.CreatedAt)
+                        .Select(line => line.Description)
+                        .FirstOrDefault()
+                })
+                .ToDictionaryAsync(item => item.InvoiceId, item => item.Description, cancellationToken);
+        var invoiceReceipts = invoiceIds.Count == 0
+            ? new Dictionary<Guid, List<ExternalInvoiceReceiptDto>>()
+            : (await _db.Set<PaymentAllocation>()
+                .AsNoTracking()
+                .Where(allocation => !allocation.IsDeleted
+                    && !allocation.IsReversal
+                    && invoiceIds.Contains(allocation.InvoiceId)
+                    && !allocation.CustomerPayment.IsDeleted
+                    && allocation.CustomerPayment.Status != "Cancelled")
+                .OrderByDescending(allocation => allocation.AllocationDate)
+                .Select(allocation => new
+                {
+                    allocation.InvoiceId,
+                    Receipt = new ExternalInvoiceReceiptDto(
+                        allocation.CustomerPaymentId,
+                        allocation.CustomerPayment.PaymentNumber,
+                        allocation.CustomerPayment.PaymentDate,
+                        allocation.PaymentCurrencyAmount > 0
+                            ? allocation.PaymentCurrencyAmount
+                            : allocation.AllocatedAmount,
+                        allocation.PaymentCurrencyCode,
+                        allocation.CustomerPayment.PaymentMethod,
+                        allocation.CustomerPayment.TransactionReference,
+                        allocation.CustomerPayment.Status)
+                })
+                .ToListAsync(cancellationToken))
+                .GroupBy(item => item.InvoiceId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(item => item.Receipt).ToList());
+
+        var ownedListingCaseIds = await _db.ProcedureCases
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.OpenedById == userId.Value
+                && item.SourceDepartment == "External Portal - Estate Listings"
+                && item.EntityType == "EstatePropertyManagementListingApplication")
+            .Select(item => item.Id.ToString())
+            .ToListAsync(cancellationToken);
+
+        List<ProcedureCase> legalTransfers = [];
+        if (ownedListingCaseIds.Count > 0)
+        {
+            legalTransfers = await _db.ProcedureCases
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(item => item.Fields.Where(field => !field.IsDeleted))
+                .Include(item => item.Documents.Where(document => !document.IsDeleted))
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.Module == "Legal"
+                    && item.EntityType == "LegalTransfer"
+                    && item.Fields.Any(field =>
+                        !field.IsDeleted
+                        && field.Key == "sourceProcedureCaseId"
+                        && field.Value != null
+                        && ownedListingCaseIds.Contains(field.Value)))
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .ToListAsync(cancellationToken);
+        }
+
+        return Ok(new
+        {
+            success = true,
+            data = new
+            {
+                Customers = customers,
+                Properties = properties.Select(asset => new
+                {
+                    asset.Id,
+                    asset.AssetCode,
+                    asset.ProjectUnitCode,
+                    asset.Name,
+                    asset.Status,
+                    asset.TransactionType,
+                    asset.Location,
+                    asset.Town,
+                    asset.District,
+                    asset.AgreementReference,
+                    AgreementDate = asset.AgreementDate
+                        ?? (!string.IsNullOrWhiteSpace(asset.AgreementReference)
+                            && saleAgreementDates.TryGetValue(asset.AgreementReference, out var agreementDate)
+                                ? agreementDate
+                                : null),
+                    asset.ActualPossessionDate,
+                    asset.LeaseTermYears,
+                    asset.MonthlyRent,
+                    asset.CurrencyCode,
+                    asset.NextRentBillingDate,
+                    asset.RentGracePeriodDays,
+                    asset.RentPenaltyMethod,
+                    asset.RentPenaltyValue,
+                    asset.RentPenaltyCapAmount,
+                    asset.CustomerBusinessPartnerId
+                }),
+                Invoices = invoices.Select(invoice =>
+                {
+                    invoiceDescriptions.TryGetValue(invoice.Id, out var description);
+                    invoiceReceipts.TryGetValue(invoice.Id, out var receipts);
+                    return new
+                    {
+                        invoice.Id,
+                        invoice.InvoiceNumber,
+                        invoice.BusinessPartnerId,
+                        invoice.InvoiceDate,
+                        invoice.DueDate,
+                        invoice.TotalAmount,
+                        invoice.PaidAmount,
+                        invoice.BalanceAmount,
+                        invoice.CurrencyCode,
+                        invoice.Status,
+                        invoice.Reference,
+                        Description = description,
+                        Receipts = receipts ?? new List<ExternalInvoiceReceiptDto>()
+                    };
+                }),
+                LegalTransfers = legalTransfers.Select(ToExternalLegalTransferDto).ToList()
+            }
+        });
+    }
+
+    [HttpGet("/api/estate/external/legal-transfers/{legalCaseId:guid}/draft")]
+    public async Task<IActionResult> DownloadLegalTransferDraft(
+        Guid legalCaseId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var legalCase = await LoadOwnedExternalLegalTransferCaseAsync(
+            tenantId,
+            userId.Value,
+            legalCaseId,
+            asTracking: false,
+            cancellationToken);
+        if (legalCase is null)
+        {
+            return NotFound(new { success = false, message = "Legal transfer was not found." });
+        }
+
+        var fields = legalCase.Fields.ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        var draftReference = FieldValue(fields, "draftDocumentReference");
+        if (string.IsNullOrWhiteSpace(draftReference))
+        {
+            return NotFound(new { success = false, message = "The transfer draft has not been generated yet." });
+        }
+
+        var record = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(item => item.Versions.Where(version => !version.IsDeleted))
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && (item.DocumentReference == draftReference || item.SourceRecordId == legalCase.Id))
+            .OrderByDescending(item => item.DocumentReference == draftReference)
+            .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (record is null)
+        {
+            return NotFound(new { success = false, message = "The generated transfer draft was not found." });
+        }
+
+        try
+        {
+            return await DownloadCentralDocumentRecordAsPdfAsync(record, cancellationToken);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { success = false, message = "The generated transfer draft file was not found in storage." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpGet("/api/estate/external/legal-transfers/{legalCaseId:guid}/documents/{documentId:guid}/content")]
+    public async Task<IActionResult> DownloadLegalTransferDocument(
+        Guid legalCaseId,
+        Guid documentId,
+        [FromQuery] bool download = false,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var legalCase = await LoadOwnedExternalLegalTransferCaseAsync(
+            tenantId,
+            userId.Value,
+            legalCaseId,
+            asTracking: false,
+            cancellationToken);
+        if (legalCase is null)
+        {
+            return NotFound(new { success = false, message = "Legal transfer was not found." });
+        }
+
+        var fields = legalCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field.Value, StringComparer.OrdinalIgnoreCase);
+        var document = legalCase.Documents.FirstOrDefault(item =>
+            item.Id == documentId
+            && !item.IsDeleted
+            && IsCustomerReleasedLegalTransferDocument(legalCase, fields, item));
+
+        if (document is null || string.IsNullOrWhiteSpace(document.FileUrl))
+        {
+            return NotFound(new { success = false, message = "Signed transfer document was not found." });
+        }
+
+        try
+        {
+            var stream = await _fileStorageService.DownloadFileAsync(document.FileUrl, document.Id);
+            var fileName = SafeDownloadFileName(document.FileName, document.Name);
+            var contentType = IsPdfDocument(null, document.FileName, document.FileUrl)
+                ? "application/pdf"
+                : "application/octet-stream";
+            if (!download)
+            {
+                Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+            }
+
+            return File(stream, contentType, download ? fileName : null, enableRangeProcessing: true);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Signed transfer document file was not found." });
+        }
+    }
+
+    [HttpPost("/api/estate/external/legal-transfers/{legalCaseId:guid}/executed-transfer-form")]
+    [RequestSizeLimit(25_000_000)]
+    public async Task<IActionResult> UploadExecutedTransferForm(
+        Guid legalCaseId,
+        [FromForm] IFormFile? file,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { success = false, message = "Select the signed transfer form to upload." });
+        }
+
+        var legalCase = await LoadOwnedExternalLegalTransferCaseAsync(
+            tenantId,
+            userId.Value,
+            legalCaseId,
+            asTracking: true,
+            cancellationToken);
+        if (legalCase is null)
+        {
+            return NotFound(new { success = false, message = "Legal transfer was not found." });
+        }
+
+        if (!string.Equals(legalCase.CurrentStageName, "Client Execution", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "The transfer form can be uploaded only when Legal requests client execution." });
+        }
+
+        await using var stream = file.OpenReadStream();
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = stream,
+            FileName = file.FileName,
+            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+            FileSize = file.Length,
+            Category = "procedure-case-documents",
+            TenantId = tenantId.ToString(),
+            OverwriteExisting = false
+        });
+        if (!upload.Success)
+        {
+            return BadRequest(new { success = false, message = upload.ErrorMessage ?? "Signed transfer form upload failed." });
+        }
+
+        var now = DateTime.UtcNow;
+        var document = legalCase.Documents.FirstOrDefault(item =>
+            !item.IsDeleted
+            && string.Equals(item.Name, "Executed transfer form", StringComparison.OrdinalIgnoreCase));
+        if (document is null)
+        {
+            document = new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = legalCase.Id,
+                Name = "Executed transfer form",
+                RequiredFrom = "Client Execution",
+                ProvidedBy = "Client / Legal",
+                IsMandatory = true,
+                CreatedAt = now,
+                CreatedById = userId.Value
+            };
+            _db.ProcedureCaseDocuments.Add(document);
+        }
+
+        document.RequiredFrom = "Client Execution";
+        document.ProvidedBy = "Client / Legal";
+        document.FileName = upload.OriginalFileName;
+        document.FileUrl = upload.FilePath;
+        document.Notes = string.IsNullOrWhiteSpace(notes)
+            ? "Uploaded by client from External Portal."
+            : notes.Trim();
+        document.UploadedById = userId.Value;
+        document.UploadedAt = now;
+        document.UpdatedAt = now;
+        document.LastModifiedById = userId.Value;
+
+        var fields = legalCase.Fields.ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        UpsertField(legalCase, fields, "signatureStatus", "Signature status", "select", "Client signed");
+        UpsertField(legalCase, fields, "transferDeclarationReference", "Transfer declaration reference", "text", upload.OriginalFileName);
+        legalCase.LastActionById = userId.Value;
+        legalCase.LastModifiedById = userId.Value;
+        legalCase.UpdatedAt = now;
+        AddExternalCaseActivity(legalCase, userId.Value, "Client executed transfer form uploaded", upload.OriginalFileName);
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            if (!string.IsNullOrWhiteSpace(upload.FilePath))
+            {
+                await _fileStorageService.DeleteFileAsync(upload.FilePath);
+            }
+            throw;
+        }
+
+        await NotifyLegalTransferClientExecutionReceivedAsync(legalCase, cancellationToken);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Signed transfer form submitted to Legal.",
+            data = ToExternalLegalTransferDto(legalCase)
+        });
+    }
+
+    [HttpGet("/api/estate/external/invoices/{invoiceId:guid}/pdf")]
+    public async Task<IActionResult> GetPropertyInvoicePdf(
+        Guid invoiceId,
+        [FromQuery] bool download = false,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var customerIds = PortalCustomers(tenantId, userId.Value).Select(customer => customer.Id);
+        var invoice = await _db.Invoices
+            .AsNoTracking()
+            .Include(item => item.Tenant)
+            .Include(item => item.LineItems.Where(line => !line.IsDeleted))
+            .FirstOrDefaultAsync(item => item.Id == invoiceId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && customerIds.Contains(item.BusinessPartnerId)
+                && (item.Status == InvoiceStatus.Sent
+                    || item.Status == InvoiceStatus.PartiallyPaid
+                    || item.Status == InvoiceStatus.Paid
+                    || item.Status == InvoiceStatus.Overdue
+                    || item.Status == InvoiceStatus.Approved)
+                && ((item.Reference != null && item.Reference.StartsWith("RENT-"))
+                    || (item.Reference != null && item.Reference.StartsWith("LEGAL-TRANSFER-FEE-"))
+                    || (item.Notes != null && item.Notes.Contains("Estate / Property Management"))), cancellationToken);
+        if (invoice is null)
+        {
+            return NotFound(new { success = false, message = "Property invoice was not found." });
+        }
+
+        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+        var currency = string.IsNullOrWhiteSpace(invoice.CurrencyCode) ? "GHS" : invoice.CurrencyCode;
+        string Money(decimal amount) => $"{currency} {amount:N2}";
+        var balance = invoice.TotalAmount - invoice.PaidAmount - invoice.CreditedAmount;
+        var pdf = Document.Create(document =>
+        {
+            document.Page(page =>
+            {
+                page.Size(QuestPDF.Helpers.PageSizes.A4);
+                page.Margin(36);
+                page.DefaultTextStyle(style => style.FontSize(10).FontColor(QColors.Grey.Darken3));
+                page.Header().Column(header =>
+                {
+                    header.Item().Text(invoice.Tenant?.Name ?? "Invoice").FontSize(18).SemiBold().FontColor(QColors.Blue.Darken3);
+                    header.Item().PaddingTop(4).Text("CUSTOMER INVOICE").FontSize(11).SemiBold().FontColor(QColors.Grey.Darken1);
+                });
+                page.Content().PaddingVertical(24).Column(column =>
+                {
+                    column.Spacing(16);
+                    column.Item().Row(row =>
+                    {
+                        row.RelativeItem().Column(left =>
+                        {
+                            left.Item().Text("Bill to").SemiBold();
+                            left.Item().Text(invoice.CustomerName);
+                            if (!string.IsNullOrWhiteSpace(invoice.CustomerAddress)) left.Item().Text(invoice.CustomerAddress);
+                        });
+                        row.RelativeItem().AlignRight().Column(right =>
+                        {
+                            right.Item().Text(invoice.InvoiceNumber).FontSize(14).SemiBold();
+                            right.Item().Text($"Invoice date: {invoice.InvoiceDate:dd MMM yyyy}");
+                            right.Item().Text($"Due date: {(invoice.DueDate.HasValue ? invoice.DueDate.Value.ToString("dd MMM yyyy") : "Not recorded")}");
+                            right.Item().Text($"Status: {invoice.Status}");
+                        });
+                    });
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.RelativeColumn(5);
+                            columns.RelativeColumn(1);
+                            columns.RelativeColumn(2);
+                            columns.RelativeColumn(2);
+                        });
+                        table.Header(header =>
+                        {
+                            header.Cell().Background(QColors.Grey.Lighten3).Padding(7).Text("Description").SemiBold();
+                            header.Cell().Background(QColors.Grey.Lighten3).Padding(7).AlignRight().Text("Qty").SemiBold();
+                            header.Cell().Background(QColors.Grey.Lighten3).Padding(7).AlignRight().Text("Price").SemiBold();
+                            header.Cell().Background(QColors.Grey.Lighten3).Padding(7).AlignRight().Text("Amount").SemiBold();
+                        });
+                        foreach (var line in invoice.LineItems.OrderBy(item => item.CreatedAt))
+                        {
+                            table.Cell().BorderBottom(1).BorderColor(QColors.Grey.Lighten2).Padding(7).Text(line.Description);
+                            table.Cell().BorderBottom(1).BorderColor(QColors.Grey.Lighten2).Padding(7).AlignRight().Text(line.Quantity.ToString("N2"));
+                            table.Cell().BorderBottom(1).BorderColor(QColors.Grey.Lighten2).Padding(7).AlignRight().Text(Money(line.UnitPrice));
+                            table.Cell().BorderBottom(1).BorderColor(QColors.Grey.Lighten2).Padding(7).AlignRight().Text(Money(line.LineTotal));
+                        }
+                    });
+                    column.Item().AlignRight().Width(240).Column(totals =>
+                    {
+                        totals.Item().Row(row => { row.RelativeItem().Text("Total"); row.ConstantItem(120).AlignRight().Text(Money(invoice.TotalAmount)).SemiBold(); });
+                        totals.Item().Row(row => { row.RelativeItem().Text("Amount paid"); row.ConstantItem(120).AlignRight().Text(Money(invoice.PaidAmount)); });
+                        totals.Item().PaddingTop(6).BorderTop(1).Row(row => { row.RelativeItem().Text("Balance due").SemiBold(); row.ConstantItem(120).AlignRight().Text(Money(balance)).SemiBold(); });
+                    });
+                    if (!string.IsNullOrWhiteSpace(invoice.Notes))
+                    {
+                        column.Item().PaddingTop(8).Column(notes => { notes.Item().Text("Notes / Terms").SemiBold(); notes.Item().Text(invoice.Notes); });
+                    }
+                });
+                page.Footer().AlignCenter().Text(text => { text.Span("Page "); text.CurrentPageNumber(); text.Span(" of "); text.TotalPages(); });
+            });
+        }).GeneratePdf();
+
+        return new FileContentResult(pdf, "application/pdf")
+        {
+            FileDownloadName = download ? $"{invoice.InvoiceNumber}.pdf" : null,
+            EnableRangeProcessing = true
+        };
     }
 
     [HttpPost("/api/estate/external/requests/{requestId:guid}/customer-decision")]
@@ -273,7 +978,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .Where(field => !field.IsDeleted)
             .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
         var decisionStatus = FieldValue(fields, "decisionStatus");
-        if (!string.Equals(decisionStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        if (!IsApprovedDecisionStatus(decisionStatus))
         {
             return BadRequest(new { success = false, message = "Customer acceptance is available only after Property Management approves the request." });
         }
@@ -287,26 +992,61 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Choose Accept or Reject." });
         }
 
+        var isRentalRequest = IsRentalPropertyRequest(fields, procedureCase.Title);
+        if (accepted && string.IsNullOrWhiteSpace(FieldValue(fields, "generatedAgreementReference")))
+        {
+            return BadRequest(new { success = false, message = "The approved agreement must be generated before you can accept this request." });
+        }
+        if (accepted && !IsLegalAgreementReleaseApproved(fields))
+        {
+            return BadRequest(new { success = false, message = "Legal must approve the draft agreement before it can be accepted." });
+        }
+        if (accepted && isRentalRequest && !IsValidIsoDate(FieldValue(fields, "moveInDate")))
+        {
+            return BadRequest(new { success = false, message = "Property Management must set the approved move-in date before you can accept this rental." });
+        }
+
         var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
         UpsertField(procedureCase, fields, "customerAcceptanceStatus", "Customer acceptance status", "select", accepted ? "Accepted" : "Rejected");
         UpsertField(procedureCase, fields, "customerNotificationStatus", "Customer notification status", "select", accepted ? "Accepted by customer" : "Rejected by customer");
         UpsertField(procedureCase, fields, "customerAcceptanceDate", "Customer acceptance date", "date", today);
         UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", accepted ? "Customer accepted" : "Customer rejected");
-        UpsertField(procedureCase, fields, "billingStartStatus", "Billing start status", "select", accepted ? "Blocked - signature pending" : "Not applicable");
+        UpsertField(
+            procedureCase,
+            fields,
+            "billingStartStatus",
+            "Billing start status",
+            "select",
+            accepted && isRentalRequest ? "Blocked - signature pending" : "Not applicable");
         if (!string.IsNullOrWhiteSpace(request.Notes))
         {
             UpsertField(procedureCase, fields, "notes", "Property request notes", "textarea", request.Notes.Trim());
         }
 
+        procedureCase.LastActionById = userId.Value;
+        procedureCase.UpdatedAt = DateTime.UtcNow;
+        procedureCase.LastModifiedById = userId.Value;
         AddExternalCaseActivity(
             procedureCase,
             userId.Value,
             accepted ? "Customer accepted" : "Customer rejected",
             request.Notes);
-        procedureCase.LastActionById = userId.Value;
-        procedureCase.UpdatedAt = DateTime.UtcNow;
-        procedureCase.LastModifiedById = userId.Value;
+        if (accepted)
+        {
+            await MarkCompetingExternalListingRequestsUnavailableAsync(
+                procedureCase,
+                fields,
+                tenantId,
+                userId.Value,
+                cancellationToken);
+        }
         await _db.SaveChangesAsync(cancellationToken);
+        await NotifyListingCustomerActionAsync(
+            procedureCase,
+            accepted ? "Customer accepted property request" : "Customer rejected property request",
+            $"{procedureCase.ReferenceNumber ?? procedureCase.Title} was {(accepted ? "accepted" : "rejected")} by the customer.",
+            "estate.property.customer-decision",
+            cancellationToken);
 
         return Ok(new
         {
@@ -316,6 +1056,278 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 : "Your rejection has been recorded.",
             data = ToExternalRequestDto(procedureCase)
         });
+    }
+
+    [HttpPost("/api/estate/external/requests/{requestId:guid}/withdraw")]
+    public async Task<IActionResult> WithdrawPropertyRequest(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var procedureCase = await LoadOwnedExternalListingCaseAsync(
+            tenantId,
+            userId.Value,
+            requestId,
+            cancellationToken);
+        if (procedureCase is null)
+        {
+            return NotFound(new { success = false, message = "Property request was not found." });
+        }
+
+        var terminalStatuses = new[] { "Completed", "Archived", "Cancelled", "Canceled", "Rejected", "Closed" };
+        if (terminalStatuses.Contains(procedureCase.Status, StringComparer.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "This property request is already closed." });
+        }
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        if (string.Equals(FieldValue(fields, "customerAcceptanceStatus"), "Accepted", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "An accepted property request cannot be withdrawn. Contact Property Management." });
+        }
+
+        procedureCase.Status = "Cancelled";
+        procedureCase.CurrentAssignedRole = null;
+        procedureCase.CurrentStageOwner = null;
+        procedureCase.LastActionById = userId.Value;
+        procedureCase.LastModifiedById = userId.Value;
+        procedureCase.UpdatedAt = DateTime.UtcNow;
+        UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", "Withdrawn");
+        AddExternalCaseActivity(procedureCase, userId.Value, "Customer withdrew request", "Withdrawn from the customer portal.");
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            success = true,
+            message = "The property request was withdrawn.",
+            data = ToExternalRequestDto(procedureCase)
+        });
+    }
+
+    [HttpPost("/api/estate/external/requests/{requestId:guid}/clarification-response")]
+    public async Task<IActionResult> SubmitClarificationResponse(
+        Guid requestId,
+        [FromBody] ExternalPropertyClarificationResponse request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var response = request.Response?.Trim();
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            return BadRequest(new { success = false, message = "Enter your clarification response." });
+        }
+
+        var procedureCase = await LoadOwnedExternalListingCaseAsync(
+            tenantId,
+            userId.Value,
+            requestId,
+            cancellationToken);
+        if (procedureCase is null)
+        {
+            return NotFound(new { success = false, message = "Property request was not found." });
+        }
+        if (!string.Equals(procedureCase.Status, "Clarification required", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "This request is not awaiting clarification." });
+        }
+
+        var now = DateTime.UtcNow;
+        var fields = procedureCase.Fields.ToDictionary(
+            field => field.Key,
+            field => field,
+            StringComparer.OrdinalIgnoreCase);
+        UpsertField(procedureCase, fields, "clarificationResponse", "Customer clarification response", "textarea", response);
+        UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", "Clarification submitted");
+        UpsertField(procedureCase, fields, "customerNotificationStatus", "Customer notification status", "select", "Clarification submitted");
+        procedureCase.Status = "Open";
+        procedureCase.LastActionById = userId.Value;
+        procedureCase.LastModifiedById = userId.Value;
+        procedureCase.UpdatedAt = now;
+        AddExternalCaseActivity(procedureCase, userId.Value, "Submitted clarification", response);
+
+        if (procedureCase.WorkflowInstanceId.HasValue)
+        {
+            var workflow = await _db.WorkflowInstances
+                .FirstOrDefaultAsync(item => item.Id == procedureCase.WorkflowInstanceId.Value, cancellationToken);
+            if (workflow is not null)
+            {
+                workflow.Status = WorkflowInstanceStatus.InProgress;
+                workflow.UpdatedAt = now;
+                workflow.LastModifiedById = userId.Value;
+            }
+
+            var activeStep = await _db.WorkflowStepInstances
+                .Where(item => item.WorkflowInstanceId == procedureCase.WorkflowInstanceId.Value
+                    && item.WorkflowStepId == procedureCase.WorkflowStepId
+                    && (item.Status == WorkflowStepInstanceStatus.Pending
+                        || item.Status == WorkflowStepInstanceStatus.InProgress))
+                .OrderByDescending(item => item.CreatedDate)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (activeStep is not null)
+            {
+                var approvals = await _db.WorkflowApprovals
+                    .Where(item => item.StepInstanceId == activeStep.Id
+                        && item.Status == WorkflowApprovalStatus.MoreInfoRequested)
+                    .ToListAsync(cancellationToken);
+                foreach (var approval in approvals)
+                {
+                    approval.Status = WorkflowApprovalStatus.Pending;
+                    approval.ProcessedById = null;
+                    approval.ProcessedDate = null;
+                    approval.Comments = null;
+                }
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        await NotifyListingCustomerActionAsync(
+            procedureCase,
+            "Customer clarification submitted",
+            $"{procedureCase.ReferenceNumber ?? procedureCase.Title} has received the customer's clarification response.",
+            "estate.property.application-clarification-response",
+            cancellationToken);
+
+        return Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
+    }
+
+    [HttpGet("/api/estate/external/requests/{requestId:guid}/agreement")]
+    public async Task<IActionResult> DownloadGeneratedAgreement(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var procedureCase = await LoadOwnedExternalListingCaseAsync(tenantId, userId.Value, requestId, cancellationToken);
+        if (procedureCase is null)
+        {
+            return NotFound(new { success = false, message = "Property request was not found." });
+        }
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        if (!IsApprovedDecisionStatus(FieldValue(fields, "decisionStatus")))
+        {
+            return BadRequest(new { success = false, message = "The agreement is available only after Property Management approves the request." });
+        }
+        if (!IsLegalAgreementReleaseApproved(fields))
+        {
+            return BadRequest(new { success = false, message = "The agreement is still under Legal review." });
+        }
+
+        var generatedAgreementReference = FieldValue(fields, "generatedAgreementReference");
+        if (string.IsNullOrWhiteSpace(generatedAgreementReference))
+        {
+            return NotFound(new { success = false, message = "The agreement has not been generated for this request yet." });
+        }
+
+        var agreementReference = generatedAgreementReference.Trim();
+        var agreementRecord = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(record => record.Versions.Where(version => !version.IsDeleted))
+            .Where(record => record.TenantId == tenantId
+                && !record.IsDeleted
+                && record.SourceModule == "Estate"
+                && record.DocumentReference == agreementReference)
+            .OrderByDescending(record => record.UpdatedAt ?? record.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        agreementRecord ??= await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(record => record.Versions.Where(version => !version.IsDeleted))
+            .Where(record => record.TenantId == tenantId
+                && !record.IsDeleted
+                && record.SourceModule == "Estate"
+                && record.SourceRecordId == requestId)
+            .OrderByDescending(record => record.UpdatedAt ?? record.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (agreementRecord is null)
+        {
+            return NotFound(new { success = false, message = "The generated agreement document was not found." });
+        }
+
+        var version = agreementRecord.Versions
+            .OrderByDescending(item => item.PublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.RepositoryPath)
+                || !string.IsNullOrWhiteSpace(item.RenditionPath));
+        var pdfFileName = $"{Path.GetFileNameWithoutExtension(
+            SafeDownloadFileName(version?.FileName, agreementRecord.DocumentReference))}.pdf";
+
+        if (!string.IsNullOrWhiteSpace(version?.RenditionPath))
+        {
+            try
+            {
+                var renditionStream = await _fileStorageService.DownloadFileAsync(
+                    version.RenditionPath,
+                    agreementRecord.Id);
+                return File(renditionStream, "application/pdf", pdfFileName);
+            }
+            catch (FileNotFoundException)
+            {
+                // Fall back to the source document and rebuild the PDF below.
+            }
+        }
+
+        var filePath = FirstNonBlank(version?.RepositoryPath, agreementRecord.RepositoryPath);
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return NotFound(new { success = false, message = "The agreement file is not available for download." });
+        }
+
+        try
+        {
+            var stream = await _fileStorageService.DownloadFileAsync(filePath, version?.FileUploadRecordId ?? agreementRecord.Id);
+            if (IsPdfDocument(version?.ContentType, version?.FileName, filePath))
+            {
+                return File(stream, "application/pdf", pdfFileName);
+            }
+
+            await using (stream)
+            {
+                var preview = await _renditionService.CreatePdfPreviewAsync(
+                    new CentralDocumentPdfPreviewRequest(
+                        stream,
+                        version?.FileName ?? $"{agreementRecord.DocumentReference}.docx",
+                        version?.ContentType ?? "application/octet-stream"),
+                    cancellationToken);
+
+                if (!preview.Success || preview.PdfStream is null)
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = preview.ErrorMessage ?? "The agreement could not be converted to PDF."
+                    });
+                }
+
+                return File(preview.PdfStream, "application/pdf", pdfFileName);
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { success = false, message = "The agreement file was not found in storage." });
+        }
     }
 
     [HttpPost("/api/estate/external/requests/{requestId:guid}/signed-agreement")]
@@ -352,6 +1364,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Accept the approved request before uploading a signed agreement." });
         }
 
+        var isRentalRequest = IsRentalPropertyRequest(fields, procedureCase.Title);
+        var approvedMoveInDate = FieldValue(fields, "moveInDate");
+        if (isRentalRequest && !IsValidIsoDate(approvedMoveInDate))
+        {
+            return BadRequest(new { success = false, message = "Property Management must set the approved move-in date before the signed rental agreement can be uploaded." });
+        }
+
         await using var stream = file.OpenReadStream();
         var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
         {
@@ -373,8 +1392,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             TenantId = tenantId,
             ProcedureCaseId = procedureCase.Id,
-            Name = "Signed lease / tenancy agreement",
-            RequiredFrom = "Agreement generation, signing, and close",
+            Name = "Signed property agreement",
+            RequiredFrom = "Agreement signing and close",
             IsMandatory = true,
             FileName = upload.OriginalFileName,
             FileUrl = upload.FilePath,
@@ -384,7 +1403,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             CreatedAt = now,
             CreatedById = userId.Value
         };
-        procedureCase.Documents.Add(document);
+        _db.ProcedureCaseDocuments.Add(document);
 
         var agreementReference = FirstNonBlank(
             upload.OriginalFileName,
@@ -397,20 +1416,41 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             "billingStartStatus",
             "Billing start status",
             "select",
-            string.IsNullOrWhiteSpace(FieldValue(fields, "moveInDate"))
-                ? "Blocked - move-in date pending"
-                : "Ready for billing");
-        UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", "Signed agreement uploaded");
+            isRentalRequest ? "Blocked - internal approval and signature pending" : "Not applicable");
+        UpsertField(procedureCase, fields, "moveInEffectiveStatus", "Move-in effective status", "select", isRentalRequest
+            ? "Blocked - final agreement pending"
+            : "Not applicable");
+        UpsertField(procedureCase, fields, "agreementExecutionStatus", "Agreement execution status", "select", "Customer signed - internal approval pending");
+        UpsertField(procedureCase, fields, "internalApprovalStatus", "Internal agreement approval status", "select", "Not submitted");
+        UpsertField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", "Blocked - approval pending");
+        UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", "Signed agreement submitted");
         AddExternalCaseActivity(procedureCase, userId.Value, "Signed agreement uploaded", upload.OriginalFileName);
         procedureCase.LastActionById = userId.Value;
         procedureCase.UpdatedAt = now;
         procedureCase.LastModifiedById = userId.Value;
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            if (!string.IsNullOrWhiteSpace(upload.FilePath))
+            {
+                await _fileStorageService.DeleteFileAsync(upload.FilePath);
+            }
+            throw;
+        }
+        await NotifyListingCustomerActionAsync(
+            procedureCase,
+            "Customer signed agreement received",
+            $"The customer uploaded a signed agreement for {procedureCase.ReferenceNumber ?? procedureCase.Title}. Submit it for internal approval.",
+            "estate.property.signed-agreement-uploaded",
+            cancellationToken);
 
         return Ok(new
         {
             success = true,
-            message = "Signed agreement uploaded. Property Management can now complete move-in and billing readiness.",
+            message = "Signed agreement submitted. Internal signature and approval can now continue if a workflow is assigned.",
             data = ToExternalRequestDto(procedureCase)
         });
     }
@@ -465,6 +1505,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     created.Status,
                     created.CurrentStageName,
                     created.CurrentAssignedRole,
+                    created.Documents,
                     CreatedAt = DateTime.UtcNow
                 }
             });
@@ -522,6 +1563,21 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && !procedureCase.IsDeleted
                 && procedureCase.OpenedById == portalUserId.Value
                 && procedureCase.SourceDepartment == "External Portal - Estate Listings"
+                && procedureCase.Status != "Completed"
+                && procedureCase.Status != "Archived"
+                && procedureCase.Status != "Cancelled"
+                && procedureCase.Status != "Canceled"
+                && procedureCase.Status != "Rejected"
+                && procedureCase.Status != "Closed"
+                && !procedureCase.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "applicationStatus"
+                    && (field.Value == "Rejected"
+                        || field.Value == "Withdrawn"
+                        || field.Value == "Cancelled"
+                        || field.Value == "Canceled"
+                        || field.Value == "Archived"
+                        || field.Value == "Sale completed"
+                        || field.Value == "Agreement fully executed"))
                 && procedureCase.Fields.Any(field => !field.IsDeleted
                     && field.Key == "sourceReference"
                     && field.Value == selectedCustomerId)
@@ -655,6 +1711,21 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && !procedureCase.IsDeleted
                 && procedureCase.OpenedById == portalUserId.Value
                 && procedureCase.SourceDepartment == "External Portal - Estate Listings"
+                && procedureCase.Status != "Completed"
+                && procedureCase.Status != "Archived"
+                && procedureCase.Status != "Cancelled"
+                && procedureCase.Status != "Canceled"
+                && procedureCase.Status != "Rejected"
+                && procedureCase.Status != "Closed"
+                && !procedureCase.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "applicationStatus"
+                    && (field.Value == "Rejected"
+                        || field.Value == "Withdrawn"
+                        || field.Value == "Cancelled"
+                        || field.Value == "Canceled"
+                        || field.Value == "Archived"
+                        || field.Value == "Sale completed"
+                        || field.Value == "Agreement fully executed"))
                 && procedureCase.Fields.Any(field => !field.IsDeleted
                     && field.Key == "sourceReference"
                     && field.Value == customer.Id.ToString())
@@ -719,6 +1790,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["generatedAgreementReference"] = null,
             ["signedAgreementReference"] = null,
             ["moveInDate"] = null,
+            ["billingStartDate"] = null,
             ["billingStartStatus"] = requestType == "Purchase"
                 ? "Not applicable"
                 : "Blocked - agreement pending",
@@ -755,6 +1827,18 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     created.Status,
                     created.CurrentStageName,
                     created.CurrentAssignedRole,
+                    Documents = created.Documents
+                        .Where(document => string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
+                        .Select(document => new
+                        {
+                            document.Id,
+                            document.Name,
+                            document.RequiredFrom,
+                            document.ProvidedBy,
+                            document.IsMandatory,
+                            document.FileName
+                        })
+                        .ToList(),
                     CreatedAt = DateTime.UtcNow
                 }
             });
@@ -1060,8 +2144,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             procedureCase.ApplicantName,
             procedureCase.SourceDepartment,
             procedureCase.Status,
+            procedureCase.CurrentStageIndex,
             procedureCase.CurrentStageName,
             procedureCase.CurrentAssignedRole,
+            CustomerIntakeUploadClosed = HasFirstInternalStageBeenRoutedForward(procedureCase),
+            Documents = procedureCase.Documents
+                .Where(document => !document.IsDeleted
+                    && string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(document => document.CreatedAt)
+                .Select(ToExternalDocumentDto)
+                .ToList(),
             FieldValues = procedureCase.Fields
                 .Where(field => !field.IsDeleted)
                 .ToDictionary(
@@ -1072,6 +2164,219 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             procedureCase.UpdatedAt
         };
 
+    private static bool HasFirstInternalStageBeenRoutedForward(ProcedureCase procedureCase)
+        => string.Equals(procedureCase.SourceDepartment, "External Portal - Estate Listings", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(procedureCase.EntityType, "EstatePropertyManagementListingApplication", StringComparison.OrdinalIgnoreCase)
+            && procedureCase.CurrentStageIndex > 0;
+
+    private static object ToExternalDocumentDto(ProcedureCaseDocument document)
+        => new
+        {
+            document.Id,
+            document.Name,
+            document.RequiredFrom,
+            document.ProvidedBy,
+            document.IsMandatory,
+            document.FileName
+        };
+
+    private sealed record ExternalInvoiceReceiptDto(
+        Guid CustomerPaymentId,
+        string PaymentNumber,
+        DateTime PaymentDate,
+        decimal Amount,
+        string PaymentCurrencyCode,
+        string PaymentMethod,
+        string? TransactionReference,
+        string Status);
+
+    private static object ToExternalLegalTransferDto(ProcedureCase legalCase)
+    {
+        var fields = legalCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(
+                field => field.Key,
+                field => field.Value,
+                StringComparer.OrdinalIgnoreCase);
+        var executedForm = legalCase.Documents.FirstOrDefault(document =>
+            !document.IsDeleted
+            && string.Equals(document.Name, "Executed transfer form", StringComparison.OrdinalIgnoreCase)
+            && (!string.IsNullOrWhiteSpace(document.FileName) || !string.IsNullOrWhiteSpace(document.FileUrl)));
+        var draftReference = fields.GetValueOrDefault("draftDocumentReference");
+        var signedDocuments = legalCase.Documents
+            .Where(document => IsCustomerReleasedLegalTransferDocument(legalCase, fields, document))
+            .OrderBy(document => document.Name)
+            .Select(document => new
+            {
+                document.Id,
+                document.Name,
+                document.FileName,
+                document.UploadedAt
+            })
+            .ToList();
+
+        return new
+        {
+            legalCase.Id,
+            legalCase.Module,
+            legalCase.EntityType,
+            legalCase.Title,
+            legalCase.ReferenceNumber,
+            legalCase.Status,
+            legalCase.CurrentStageName,
+            legalCase.CurrentAssignedRole,
+            FieldValues = fields,
+            SourceProcedureCaseId = fields.GetValueOrDefault("sourceProcedureCaseId"),
+            SourceRecordReference = fields.GetValueOrDefault("sourceRecordReference"),
+            PropertyNumber = fields.GetValueOrDefault("propertyNumber"),
+            TransferFeePayable = fields.GetValueOrDefault("transferFeePayable"),
+            PaymentStatus = fields.GetValueOrDefault("paymentStatus"),
+            DraftDocumentReference = draftReference,
+            ExecutedTransferFormFileName = executedForm?.FileName,
+            SignedDocuments = signedDocuments,
+            CanDownloadDraft = !string.IsNullOrWhiteSpace(draftReference),
+            CanUploadExecutedTransferForm = string.Equals(legalCase.CurrentStageName, "Client Execution", StringComparison.OrdinalIgnoreCase)
+                && executedForm is null,
+            legalCase.CreatedAt,
+            legalCase.UpdatedAt
+        };
+    }
+
+    private static bool IsCustomerReleasedLegalTransferDocument(
+        ProcedureCase legalCase,
+        IReadOnlyDictionary<string, string?> fields,
+        ProcedureCaseDocument document)
+    {
+        if (!string.Equals(legalCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(document.Name, "Executed transfer form", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(document.FileUrl))
+        {
+            return false;
+        }
+
+        var signatureStatus = fields.GetValueOrDefault("signatureStatus") ?? string.Empty;
+        return string.Equals(legalCase.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+            || signatureStatus.Contains("Head of Legal signed", StringComparison.OrdinalIgnoreCase)
+            || signatureStatus.Contains("Fully signed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<ProcedureCase?> LoadOwnedExternalLegalTransferCaseAsync(
+        Guid tenantId,
+        Guid userId,
+        Guid legalCaseId,
+        bool asTracking,
+        CancellationToken cancellationToken)
+    {
+        var query = _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .Where(item => item.Id == legalCaseId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.Module == "Legal"
+                && item.EntityType == "LegalTransfer");
+
+        if (!asTracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var legalCase = await query.FirstOrDefaultAsync(cancellationToken);
+        if (legalCase is null)
+        {
+            return null;
+        }
+
+        var sourceProcedureCaseId = legalCase.Fields.FirstOrDefault(field =>
+            string.Equals(field.Key, "sourceProcedureCaseId", StringComparison.OrdinalIgnoreCase))?.Value;
+        if (!Guid.TryParse(sourceProcedureCaseId, out var sourceCaseId))
+        {
+            return null;
+        }
+
+        var ownsSourceCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == sourceCaseId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.OpenedById == userId
+                && item.SourceDepartment == "External Portal - Estate Listings"
+                && item.EntityType == "EstatePropertyManagementListingApplication", cancellationToken);
+
+        return ownsSourceCase ? legalCase : null;
+    }
+
+    private async Task<FileResult> DownloadCentralDocumentRecordAsPdfAsync(
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        var version = record.Versions
+            .OrderByDescending(item => item.PublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.RepositoryPath)
+                || !string.IsNullOrWhiteSpace(item.RenditionPath));
+        var pdfFileName = $"{Path.GetFileNameWithoutExtension(
+            SafeDownloadFileName(version?.FileName, record.DocumentReference))}.pdf";
+
+        if (!string.IsNullOrWhiteSpace(version?.RenditionPath))
+        {
+            try
+            {
+                var renditionStream = await _fileStorageService.DownloadFileAsync(
+                    version.RenditionPath,
+                    version.FileUploadRecordId ?? record.Id);
+                return File(renditionStream, "application/pdf", pdfFileName);
+            }
+            catch (FileNotFoundException)
+            {
+                // Fall back to the source document and rebuild the PDF below.
+            }
+        }
+
+        var filePath = FirstNonBlank(version?.RepositoryPath, record.RepositoryPath);
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new FileNotFoundException("The document file is not available for download.");
+        }
+
+        var stream = await _fileStorageService.DownloadFileAsync(filePath, version?.FileUploadRecordId ?? record.Id);
+        if (IsPdfDocument(version?.ContentType, version?.FileName, filePath))
+        {
+            return File(stream, "application/pdf", pdfFileName);
+        }
+
+        await using (stream)
+        {
+            var preview = await _renditionService.CreatePdfPreviewAsync(
+                new CentralDocumentPdfPreviewRequest(
+                    stream,
+                    version?.FileName ?? $"{record.DocumentReference}.docx",
+                    version?.ContentType ?? "application/octet-stream"),
+                cancellationToken);
+
+            if (!preview.Success || preview.PdfStream is null)
+            {
+                throw new InvalidOperationException(preview.ErrorMessage ?? "The document could not be converted to PDF.");
+            }
+
+            return File(preview.PdfStream, "application/pdf", pdfFileName);
+        }
+    }
+
+    private static DateTime? ResolveAgreementDate(CentralDocumentRecord record)
+    {
+        var signedVersionDate = record.Versions
+            .Where(version => string.Equals(version.Status, "Signed", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(version => version.PublishedAt ?? version.UpdatedAt ?? version.CreatedAt)
+            .Select(version => (DateTime?)(version.PublishedAt ?? version.UpdatedAt ?? version.CreatedAt))
+            .FirstOrDefault();
+
+        return signedVersionDate
+            ?? record.PublishedAt
+            ?? record.EffectiveDate
+            ?? record.UpdatedAt
+            ?? record.CreatedAt;
+    }
+
     private static string? FieldValue(
         IReadOnlyDictionary<string, ProcedureCaseField> fields,
         string key)
@@ -1079,7 +2384,199 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? field.Value
             : null;
 
-    private static void UpsertField(
+    private static bool IsApprovedDecisionStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim();
+        return normalized.Equals("Approved", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("Approved ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLegalAgreementReleaseApproved(
+        IReadOnlyDictionary<string, ProcedureCaseField> fields)
+    {
+        var reviewStatus = FieldValue(fields, "legalAgreementReviewStatus");
+        if (!string.IsNullOrWhiteSpace(reviewStatus)
+            && reviewStatus.Contains("approved", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Agreements completed before the Legal handoff was introduced remain accessible.
+        return string.Equals(
+            FieldValue(fields, "agreementExecutionStatus"),
+            "Fully executed",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsValidIsoDate(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && DateOnly.TryParseExact(
+            value.Trim(),
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out _);
+
+    private static bool IsRentalPropertyRequest(
+        IReadOnlyDictionary<string, ProcedureCaseField> fields,
+        string? title)
+    {
+        var requestType = FieldValue(fields, "requestType") ?? string.Empty;
+        var requestTitle = title ?? string.Empty;
+        return !requestType.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+            && !requestType.Contains("sale", StringComparison.OrdinalIgnoreCase)
+            && !requestTitle.StartsWith("Purchase bid", StringComparison.OrdinalIgnoreCase)
+            && !requestTitle.StartsWith("Sale request", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task MarkCompetingExternalListingRequestsUnavailableAsync(
+        ProcedureCase acceptedCase,
+        IReadOnlyDictionary<string, ProcedureCaseField> acceptedFields,
+        Guid tenantId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var listingReference = Normalize(FieldValue(acceptedFields, "listingReference"));
+        var propertyUnit = Normalize(FieldValue(acceptedFields, "propertyUnit"));
+        if (listingReference is null && propertyUnit is null)
+        {
+            return;
+        }
+
+        var acceptedRequestType = FirstNonBlank(
+            FieldValue(acceptedFields, "requestType"),
+            FieldValue(acceptedFields, "listingType"),
+            acceptedCase.Title);
+        var isPurchase = acceptedRequestType?.Contains("purchase", StringComparison.OrdinalIgnoreCase) == true
+            || acceptedRequestType?.Contains("sale", StringComparison.OrdinalIgnoreCase) == true;
+        var outcomeLabel = isPurchase ? "Sold out" : "Rented out";
+        var outcomeStatus = $"{outcomeLabel} - another customer accepted";
+        var outcomeMessage = isPurchase
+            ? "This listing has been sold because another customer accepted the approved purchase request."
+            : "This listing has been rented out because another customer accepted the approved rental request.";
+
+        var competitors = await _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Where(item => item.TenantId == tenantId
+                && item.Id != acceptedCase.Id
+                && !item.IsDeleted
+                && item.SourceDepartment == "External Portal - Estate Listings"
+                && item.EntityType == "EstatePropertyManagementListingApplication"
+                && item.Status != "Completed"
+                && item.Status != "Cancelled"
+                && item.Status != "Canceled"
+                && ((listingReference != null && item.Fields.Any(field =>
+                        !field.IsDeleted
+                        && field.Key == "listingReference"
+                        && field.Value != null
+                        && field.Value.Trim().ToLower() == listingReference))
+                    || (propertyUnit != null && item.Fields.Any(field =>
+                        !field.IsDeleted
+                        && field.Key == "propertyUnit"
+                        && field.Value != null
+                        && field.Value.Trim().ToLower() == propertyUnit))))
+            .ToListAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        foreach (var competitor in competitors)
+        {
+            var competitorFields = competitor.Fields
+                .Where(field => !field.IsDeleted)
+                .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+
+            competitor.Status = "Archived";
+            competitor.CurrentStageName = "Listing unavailable";
+            competitor.CurrentStageOwner = null;
+            competitor.CurrentAssignedRole = null;
+            competitor.LastActionById = userId;
+            competitor.UpdatedAt = now;
+            competitor.LastModifiedById = userId;
+
+            UpsertField(competitor, competitorFields, "applicationStatus", "Request status", "select", outcomeStatus);
+            UpsertField(competitor, competitorFields, "customerNotificationStatus", "Customer notification status", "select", outcomeStatus);
+            UpsertField(competitor, competitorFields, "listingOutcomeMessage", "Listing outcome", "textarea", outcomeMessage);
+            AddExternalCaseActivity(competitor, userId, outcomeLabel, outcomeMessage);
+        }
+    }
+
+    private async Task NotifyListingCustomerActionAsync(
+        ProcedureCase procedureCase,
+        string title,
+        string message,
+        string notificationType,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                procedureCase.TenantId,
+                GetUserId(),
+                new[] { "Property Management Officer", "Property Manager", "Estate Manager", "Estate Officer" },
+                title,
+                message,
+                notificationType,
+                "ProcedureCase",
+                procedureCase.Id,
+                $"/estate/property-management/EstatePropertyManagementListingApplication?caseId={procedureCase.Id}",
+                new Dictionary<string, object>
+                {
+                    ["sourceModule"] = "PropertyManagement",
+                    ["entityType"] = procedureCase.EntityType,
+                    ["referenceNumber"] = procedureCase.ReferenceNumber ?? string.Empty
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Notification delivery must not block a customer portal action.
+        }
+    }
+
+    private async Task NotifyLegalTransferClientExecutionReceivedAsync(
+        ProcedureCase legalCase,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var legalReference = legalCase.ReferenceNumber ?? legalCase.Title;
+            var assignedRole = FirstNonBlank(legalCase.CurrentAssignedRole, "Legal Admin Assistant");
+            await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                legalCase.TenantId,
+                GetUserId(),
+                assignedRole is null ? ["Legal Admin Assistant"] : [assignedRole],
+                "Client signed transfer form received",
+                $"{legalReference}: the client uploaded the signed transfer form. Review it and route the Legal transfer forward.",
+                "legal.transfer.client-executed-form-uploaded",
+                "ProcedureCase",
+                legalCase.Id,
+                $"/legal/LegalTransfer?caseId={legalCase.Id}",
+                new Dictionary<string, object>
+                {
+                    ["sourceLabel"] = "Source: External Portal -> Legal",
+                    ["sourceModule"] = "Legal",
+                    ["sourceEntityType"] = legalCase.EntityType,
+                    ["referenceNumber"] = legalReference ?? string.Empty,
+                    ["currentStage"] = legalCase.CurrentStageName ?? string.Empty,
+                    ["assignedRole"] = assignedRole ?? string.Empty
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Notification delivery must not block the customer upload.
+        }
+    }
+
+    private void UpsertField(
         ProcedureCase procedureCase,
         IDictionary<string, ProcedureCaseField> fields,
         string key,
@@ -1106,7 +2603,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             CreatedAt = DateTime.UtcNow,
             CreatedById = procedureCase.LastActionById
         };
-        procedureCase.Fields.Add(created);
+        _db.ProcedureCaseFields.Add(created);
         fields[key] = created;
     }
 
@@ -1117,7 +2614,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         string? details)
     {
         var now = DateTime.UtcNow;
-        procedureCase.Activities.Add(new ProcedureCaseActivity
+        _db.ProcedureCaseActivities.Add(new ProcedureCaseActivity
         {
             TenantId = procedureCase.TenantId,
             ProcedureCaseId = procedureCase.Id,
@@ -1349,6 +2846,8 @@ public sealed record CreateExternalListingRequest(
 public sealed record ExternalPropertyRequestDecision(
     string? Decision,
     string? Notes);
+
+public sealed record ExternalPropertyClarificationResponse(string? Response);
 
 public sealed record ExternalEstateRequestDefinition(
     string Code,

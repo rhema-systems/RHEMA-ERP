@@ -155,6 +155,56 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "PostingEngine")]
+    [Trait("Category", "FiscalPeriod")]
+    public async Task PostAsync_ShouldRejectFutureDatedPosting_WhenPeriodPolicyIsDisabled()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        period.AllowFutureDating = false;
+        var debitAccount = SeedAccount(db, tenantId, "6101", AccountType.Expense);
+        var creditAccount = SeedAccount(db, tenantId, "2101", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.PostingDate = DateTime.UtcNow.Date.AddDays(1);
+        request.FiscalPeriodId = period.Id;
+
+        var action = () => CreateService(db, tenantId).PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Future-dated posting is not allowed*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "PostingEngine")]
+    [Trait("Category", "FiscalPeriod")]
+    public async Task PostAsync_ShouldAllowFutureDatedPosting_WhenPeriodPolicyIsEnabled()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        period.AllowFutureDating = true;
+        var debitAccount = SeedAccount(db, tenantId, "6102", AccountType.Expense);
+        var creditAccount = SeedAccount(db, tenantId, "2102", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.PostingDate = DateTime.UtcNow.Date.AddDays(1);
+        request.FiscalPeriodId = period.Id;
+
+        var result = await CreateService(db, tenantId).PostAsync(request);
+
+        result.PostingStatus.Should().Be("Posted");
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-4")]
     [Trait("Category", "PostingEngine")]
     public async Task PostAsync_ShouldApplyAccountBalanceMovementUsingNormalBalanceDirection()
@@ -644,8 +694,23 @@ public sealed class FinancePostingEngineTests
             .OrderBy(x => x.LineNumber).ToListAsync();
         firstLines[0].FinanceDimensionSetId.Should().Be(sets[0].Id);
         secondLines[0].FinanceDimensionSetId.Should().Be(sets[0].Id);
+        firstLines[0].FinanceDimensionSnapshotId.Should().NotBeNull();
+        secondLines[0].FinanceDimensionSnapshotId.Should().NotBeNull();
+        firstLines[0].FinanceDimensionSnapshotId!.Value.Should().NotBe(
+            secondLines[0].FinanceDimensionSnapshotId!.Value,
+            "each posting line freezes exact evidence even when its canonical set is reused");
         firstLines[1].FinanceDimensionSetId.Should().BeNull("legacy and control lines remain compatible while adapters are certified");
         secondLines[1].FinanceDimensionSetId.Should().BeNull();
+        var snapshots = await db.FinanceDimensionSnapshots.Include(snapshot => snapshot.Items).ToListAsync();
+        snapshots.Should().HaveCount(2);
+        snapshots.Should().OnlyContain(snapshot =>
+            snapshot.FinanceDimensionSetId == sets[0].Id &&
+            snapshot.SnapshotSource == "PostingResolution" &&
+            snapshot.SnapshotQuality == "Exact");
+        snapshots.SelectMany(snapshot => snapshot.Items)
+            .Should().OnlyContain(item =>
+                (item.DimensionNameSnapshot == "Department" || item.DimensionNameSnapshot == "Fund") &&
+                (item.DimensionValueNameSnapshot == "Estate" || item.DimensionValueNameSnapshot == "Capital"));
     }
 
     [Fact]
@@ -761,6 +826,12 @@ public sealed class FinancePostingEngineTests
         reversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
         (await db.FinanceDimensionSets.CountAsync()).Should().Be(1);
         (await db.FinanceDimensionSetItems.SingleAsync()).DimensionValueNameSnapshot.Should().Be("Sales");
+        var snapshots = await db.FinanceDimensionSnapshots.Include(snapshot => snapshot.Items).ToListAsync();
+        snapshots.Should().HaveCount(4);
+        snapshots.Select(snapshot => snapshot.Id).Should().OnlyHaveUniqueItems();
+        snapshots.Should().OnlyContain(snapshot => snapshot.FinanceDimensionSetId == originalSetId);
+        snapshots.SelectMany(snapshot => snapshot.Items).Should().OnlyContain(item =>
+            item.DimensionValueNameSnapshot == "Sales" && item.SnapshotQuality == "Exact");
     }
 
     [Fact]

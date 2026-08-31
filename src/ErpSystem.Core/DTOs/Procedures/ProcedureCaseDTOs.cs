@@ -61,12 +61,19 @@ public sealed record ProcedureCaseDocumentDto(
     Guid Id,
     string Name,
     string? RequiredFrom,
+    string ProvidedBy,
     bool IsMandatory,
     string? FileName,
     string? FileUrl,
     string? Notes,
     Guid? UploadedById,
     DateTime? UploadedAt);
+
+public sealed record ProcedureCaseSubmissionDocumentRequirementDto(
+    string Name,
+    string? DocumentType,
+    string AppliesTo,
+    bool IsMandatory);
 
 public sealed record ProcedureCaseActivityDto(
     Guid Id,
@@ -92,6 +99,10 @@ public sealed record CreateProcedureCaseRequest(
     string? Description,
     IDictionary<string, string?>? FieldValues);
 
+public sealed record CreateLinkedLegalMatterRequest(
+    string MatterType,
+    string? Description);
+
 public sealed record UpdateProcedureCaseFieldsRequest(
     IDictionary<string, string?> FieldValues,
     string? ReferenceNumber,
@@ -107,4 +118,10 @@ public sealed record AttachProcedureCaseDocumentRequest(
     string? FileUrl,
     string? Notes);
 
+public sealed record SignProcedureCaseDocumentRequest(
+    string? SignatureRole,
+    string? Notes);
+
 public sealed record CompleteProcedureCaseStageRequest(string? Notes);
+
+public sealed record ReviewProcedureCaseRequest(string Action, string Reason);

@@ -502,6 +502,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentManagementService, ErpSystem.Core.Services.DocumentManagement.CentralDocumentManagementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRepositoryFileService>();
             services.AddScoped<ErpSystem.Api.Services.DocumentManagement.ICentralDocumentRenditionService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRenditionService>();
+            services.AddScoped<ErpSystem.Api.Services.DocumentManagement.ICentralDocumentPdfSigningService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentPdfSigningService>();
+            services.AddOptions<ErpSystem.Api.Services.DocumentManagement.DocumentSigningOptions>()
+                .BindConfiguration(ErpSystem.Api.Services.DocumentManagement.DocumentSigningOptions.SectionName);
             services.AddScoped<ErpSystem.Core.Interfaces.Legal.ILegalProcedureCatalogService, ErpSystem.Core.Services.Legal.LegalProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IFacilitiesProcedureCatalogService, ErpSystem.Core.Services.Estate.FacilitiesProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IPropertyManagementProcedureCatalogService, ErpSystem.Core.Services.Estate.PropertyManagementProcedureCatalogService>();
@@ -816,6 +819,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceDimensionAdministrationService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceDimensionReportingFilterService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionCertificationService, ErpSystem.Api.Services.Finance.GL.FinanceDimensionCertificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceDimensionAssignmentStore, ErpSystem.Api.Services.Finance.GL.FinanceSourceDimensionAssignmentStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceDimensionService, ErpSystem.Api.Services.Finance.GL.FinanceSourceDimensionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceApVendorInvoice));
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceApSupplierDebitNote));
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceArCustomerInvoice));
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchSpreadsheetService, ErpSystem.Api.Services.Finance.GL.JournalBatchSpreadsheetService>();
             // Recurring journals extend the existing GL posting pipeline. The
@@ -1431,7 +1449,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 .AddPolicy(FinancePermissions.ConfigureFixedAssetCategoriesPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.AdministerFinance,
-                        FinancePermissions.ManageFixedAssets)));
+                        FinancePermissions.ManageFixedAssets)))
+                .AddPolicy(FinancePermissions.WithdrawJournalApprovalPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.SubmitJournalEntries,
+                        FinancePermissions.WorkflowCancel)));
 
             foreach (var permission in FinancePermissions.All)
             {

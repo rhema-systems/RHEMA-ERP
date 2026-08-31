@@ -21,6 +21,34 @@ public sealed class FinanceBudgetCommitmentServiceTests
     private static readonly Guid ActorId = Guid.NewGuid();
 
     [Fact]
+    public async Task Eligible_cells_use_mapped_account_status_and_budget_date_effectivity()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedBudget(db, 1_000m);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+
+        var eligible = await service.GetEligibleBudgetCellsAsync(new FinanceBudgetCellQueryDto
+        {
+            BudgetDate = fixture.BudgetDate,
+            AccountId = fixture.Expense.Id
+        });
+
+        eligible.Should().ContainSingle(x => x.BudgetEntryId == fixture.Entry.Id);
+
+        fixture.Expense.EffectiveDate = fixture.BudgetDate.AddDays(1);
+        await db.SaveChangesAsync();
+
+        var notYetEffective = await service.GetEligibleBudgetCellsAsync(new FinanceBudgetCellQueryDto
+        {
+            BudgetDate = fixture.BudgetDate,
+            AccountId = fixture.Expense.Id
+        });
+
+        notYetEffective.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Position_uses_adopted_budget_posted_actuals_and_active_reservations()
     {
         await using var db = CreateContext();

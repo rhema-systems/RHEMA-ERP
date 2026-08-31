@@ -8,6 +8,7 @@ namespace ErpSystem.Api.Services.Finance.Budget;
 public partial class BudgetService
 {
     private const string PostedStatus = "Posted";
+    private const string ReservedStatus = "Reserved";
     private const string ReportingBook = "IFRS";
 
     public async Task<BudgetScenarioDto> AdoptScenarioAsync(
@@ -187,6 +188,7 @@ public partial class BudgetService
                 && allReturnIds.Contains(entry.BudgetReturnId))
             .Select(entry => new
             {
+                BudgetEntryId = entry.Id,
                 entry.BudgetReturnId,
                 entry.AccountId,
                 AccountCode = entry.Account!.AccountCode,
@@ -204,6 +206,28 @@ public partial class BudgetService
         var budgetRows = allBudgetRows
             .Where(row => includedReturnIdSet.Contains(row.BudgetReturnId))
             .ToList();
+
+        var includedBudgetEntryIds = budgetRows
+            .Select(row => row.BudgetEntryId)
+            .ToArray();
+        var activeReservations = await _context.FinanceBudgetReservations
+            .AsNoTracking()
+            .Where(reservation =>
+                reservation.TenantId == tenantId
+                && !reservation.IsDeleted
+                && reservation.Status == ReservedStatus
+                && includedBudgetEntryIds.Contains(reservation.BudgetEntryId))
+            .Select(reservation => new
+            {
+                reservation.BudgetEntryId,
+                reservation.ReservedAmount
+            })
+            .ToListAsync();
+        var reservedAmountByEntryId = activeReservations
+            .GroupBy(reservation => reservation.BudgetEntryId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(reservation => reservation.ReservedAmount));
 
         var actualRows = await _context.AccountTransactions
             .AsNoTracking()
@@ -238,13 +262,38 @@ public partial class BudgetService
             {
                 item.FinanceDimensionSetId,
                 item.FinanceDimensionDefinitionId,
-                item.FinanceDimensionValueId
+                item.FinanceDimensionValueId,
+                item.FinanceDimensionSet.CombinationHash,
+                item.FinanceDimensionSet.DisplayValue,
+                DimensionCode = item.DimensionCodeSnapshot,
+                DimensionName = item.FinanceDimensionDefinition.Name,
+                ValueCode = item.DimensionValueCodeSnapshot,
+                ValueName = item.DimensionValueNameSnapshot
             })
             .ToListAsync();
         var assignmentsBySet = dimensionItems.GroupBy(item => item.FinanceDimensionSetId)
             .ToDictionary(group => group.Key, group => group
                 .Select(item => (item.FinanceDimensionDefinitionId, item.FinanceDimensionValueId))
                 .ToHashSet());
+        var dimensionMetadataBySet = dimensionItems
+            .GroupBy(item => item.FinanceDimensionSetId)
+            .ToDictionary(group => group.Key, group => new
+            {
+                group.First().CombinationHash,
+                group.First().DisplayValue,
+                Assignments = (IReadOnlyList<BudgetDimensionAssignmentDto>)group
+                    .OrderBy(item => item.DimensionCode)
+                    .Select(item => new BudgetDimensionAssignmentDto
+                    {
+                        FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                        FinanceDimensionValueId = item.FinanceDimensionValueId,
+                        DimensionCode = item.DimensionCode,
+                        DimensionName = item.DimensionName,
+                        ValueCode = item.ValueCode,
+                        ValueName = item.ValueName
+                    })
+                    .ToList()
+            });
 
         var returnById = returns.ToDictionary(budgetReturn => budgetReturn.Id);
         var lines = budgetRows
@@ -288,6 +337,44 @@ public partial class BudgetService
                     row.AccountType == AccountType.Revenue
                         ? row.CreditAmount - row.DebitAmount
                         : row.DebitAmount - row.CreditAmount);
+                var dimensionCells = group
+                    .GroupBy(row => row.FinanceDimensionSetId)
+                    .Select(cellGroup =>
+                    {
+                        var cellActuals = cellGroup.Key.HasValue
+                            ? matchingActuals.Where(actual =>
+                                actual.FinanceDimensionSetId.HasValue
+                                && assignmentsBySet.TryGetValue(cellGroup.Key.Value, out var budgetAssignments)
+                                && assignmentsBySet.TryGetValue(actual.FinanceDimensionSetId.Value, out var actualAssignments)
+                                && budgetAssignments.IsSubsetOf(actualAssignments))
+                            : matchingActuals;
+                        var cellActualAmount = cellActuals.Sum(row =>
+                            row.AccountType == AccountType.Revenue
+                                ? row.CreditAmount - row.DebitAmount
+                                : row.DebitAmount - row.CreditAmount);
+                        var cellBudgetAmount = cellGroup.Sum(row => row.AmountBase);
+                        var cellReservedAmount = cellGroup.Sum(row =>
+                            reservedAmountByEntryId.GetValueOrDefault(row.BudgetEntryId));
+                        var metadata = cellGroup.Key.HasValue
+                            && dimensionMetadataBySet.TryGetValue(cellGroup.Key.Value, out var found)
+                                ? found
+                                : null;
+
+                        return new BudgetDimensionCellPositionDto
+                        {
+                            FinanceDimensionSetId = cellGroup.Key,
+                            DimensionDisplayValue = metadata?.DisplayValue ?? "Legacy / no dimensions",
+                            DimensionCombinationHash = metadata?.CombinationHash,
+                            DimensionAssignments = metadata?.Assignments
+                                ?? Array.Empty<BudgetDimensionAssignmentDto>(),
+                            BudgetAmount = cellBudgetAmount,
+                            ActualAmount = cellActualAmount,
+                            ReservedAmount = cellReservedAmount,
+                            AvailableAmount = cellBudgetAmount - cellActualAmount - cellReservedAmount
+                        };
+                    })
+                    .OrderBy(cell => cell.DimensionDisplayValue)
+                    .ToList();
                 var variance = actualAmount - budgetAmount;
                 return new BudgetReportLineDto
                 {
@@ -308,6 +395,7 @@ public partial class BudgetService
                     Favorability = ResolveFavorability(
                         group.Key.AccountType,
                         variance),
+                    DimensionCells = dimensionCells,
                     Contributions = group
                         .GroupBy(row => row.BudgetReturnId)
                         .Select(contribution =>

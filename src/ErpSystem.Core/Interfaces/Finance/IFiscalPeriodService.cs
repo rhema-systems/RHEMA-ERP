@@ -67,6 +67,15 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// reopening a certified Closed period, which requires maker-checker approval.
         /// </summary>
         Task<FiscalPeriodDto> OpenPeriodAsync(PeriodOpenRequestDto request, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Updates the audited future-posting policy for an open or future period.
+        /// Closed and locked period evidence is immutable.
+        /// </summary>
+        Task<FiscalPeriodDto> UpdatePostingDatePolicyAsync(
+            Guid periodId,
+            PeriodPostingDatePolicyRequestDto request,
+            CancellationToken cancellationToken = default);
         
         /// <summary>
         /// Closes a fiscal period.

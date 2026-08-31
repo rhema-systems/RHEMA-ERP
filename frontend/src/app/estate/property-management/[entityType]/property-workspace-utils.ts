@@ -42,6 +42,19 @@ export function sourceReference(asset: EstateManagedAsset) {
   return asset.propertyFileReference || propertyReference(asset);
 }
 
+export function assetMatchesWorkspacePrefill(
+  asset: EstateManagedAsset,
+  assetId?: string | null,
+  reference?: string | null
+) {
+  if (assetId && asset.id === assetId) return true;
+  const normalizedReference = reference?.trim().toLowerCase();
+  if (!normalizedReference) return false;
+  return [asset.assetCode, asset.projectUnitCode, asset.propertyFileReference]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => value.toLowerCase() === normalizedReference);
+}
+
 export function occupantName(asset: EstateManagedAsset) {
   return asset.lesseeName || 'Not linked';
 }
@@ -69,6 +82,7 @@ export function buildPropertyWorkspaceHref(
 ) {
   const reference = sourceReference(asset);
   const params = new URLSearchParams({
+    assetId: asset.id,
     title: `${titlePrefix} - ${asset.name}`,
     referenceNumber: reference,
     applicantName: asset.lesseeName || '',

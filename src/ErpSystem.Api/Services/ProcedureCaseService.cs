@@ -1,14 +1,20 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Api.Services.Notifications;
+using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Legal;
 using ErpSystem.Core.Interfaces.Planning;
 using ErpSystem.Core.Interfaces.Procedures;
@@ -22,6 +28,15 @@ namespace ErpSystem.Api.Services;
 
 public sealed class ProcedureCaseService : IProcedureCaseService
 {
+    private static readonly (string Name, string StageName, string Provider)[] LegalTransferDocumentStages =
+    [
+        ("Transfer file from Estate", "Head of Legal Minuting", "Estate / Property Management"),
+        ("Transfer fee payment receipt", "Client Payment Call", "Finance / Client"),
+        ("Draft transfer form", "Transfer Drafting", "Legal Admin Assistant"),
+        ("Executed transfer form", "Client Execution", "Client / Legal"),
+        ("Signed transfer distribution / Estate return note", "Legal Admin Closeout", "Legal Admin Assistant")
+    ];
+
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly ILegalProcedureCatalogService _legalCatalog;
@@ -32,6 +47,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private readonly IWorkflowEngine _workflowEngine;
     private readonly INotificationService _notificationService;
     private readonly IFileStorageService _fileStorageService;
+    private readonly IInvoiceService _invoiceService;
+    private readonly ICentralDocumentPdfSigningService _pdfSigningService;
 
     public ProcedureCaseService(
         ApplicationDbContext db,
@@ -43,7 +60,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         IPlanningProcedureCatalogService planningCatalog,
         IWorkflowEngine workflowEngine,
         INotificationService notificationService,
-        IFileStorageService fileStorageService)
+        IFileStorageService fileStorageService,
+        IInvoiceService invoiceService,
+        ICentralDocumentPdfSigningService pdfSigningService)
     {
         _db = db;
         _currentUser = currentUser;
@@ -55,6 +74,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _workflowEngine = workflowEngine;
         _notificationService = notificationService;
         _fileStorageService = fileStorageService;
+        _invoiceService = invoiceService;
+        _pdfSigningService = pdfSigningService;
     }
 
     public async Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly)
@@ -78,6 +99,23 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return visibleCases
             .Select(ToSummaryDto)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<ProcedureCaseSubmissionDocumentRequirementDto>> GetSubmissionDocumentRequirementsAsync(
+        string module,
+        string entityType)
+    {
+        var workspace = await BuildWorkspaceSeedAsync(NormalizeModule(module), entityType.Trim());
+        var firstStageName = workspace.Stages.OrderBy(stage => stage.Index).FirstOrDefault()?.Name;
+        return workspace.Documents
+            .Where(document => string.Equals(document.RequiredFrom, firstStageName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(ResolveDocumentProvider(document.Name, document.ProvidedBy), "Customer", StringComparison.OrdinalIgnoreCase))
+            .Select(document => new ProcedureCaseSubmissionDocumentRequirementDto(
+                document.Name,
+                document.DocumentType,
+                NormalizeDocumentApplicability(document.AppliesTo),
+                document.IsMandatory))
             .ToList();
     }
 
@@ -139,13 +177,21 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     }
 
     public async Task<ProcedureCaseDetailDto> CreateCaseAsync(CreateProcedureCaseRequest request)
+        => await CreateCaseCoreAsync(request, enforceLegalCreatePermission: true);
+
+    private async Task<ProcedureCaseDetailDto> CreateCaseCoreAsync(
+        CreateProcedureCaseRequest request,
+        bool enforceLegalCreatePermission)
     {
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
         var now = DateTime.UtcNow;
         var module = NormalizeModule(request.Module);
         var entityType = request.EntityType.Trim();
-        EnsureCanCreateProcedureCase(module);
+        if (enforceLegalCreatePermission)
+        {
+            EnsureCanCreateProcedureCase(module);
+        }
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
 
@@ -210,13 +256,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             }
         }
 
-        foreach (var document in workspace.Documents)
+        var requestApplicability = ResolveRequestApplicability(request.FieldValues);
+        foreach (var document in workspace.Documents.Where(document =>
+                     DocumentAppliesToRequest(document.AppliesTo, requestApplicability)))
         {
             procedureCase.Documents.Add(new ProcedureCaseDocument
             {
                 TenantId = tenantId,
                 Name = document.Name,
                 RequiredFrom = document.RequiredFrom,
+                ProvidedBy = ResolveDocumentProvider(document.Name, document.ProvidedBy),
                 IsMandatory = document.IsMandatory,
                 CreatedById = userId,
                 CreatedAt = now
@@ -290,6 +339,134 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return await ToDetailDtoAsync((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }
 
+    public async Task<ProcedureCaseDetailDto> CreateLinkedLegalMatterAsync(
+        Guid sourceProcedureCaseId,
+        CreateLinkedLegalMatterRequest request)
+    {
+        var tenantId = RequireTenantId();
+        var userId = RequireUserId();
+        var sourceCase = await _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == sourceProcedureCaseId
+                && !item.IsDeleted);
+        if (sourceCase is null)
+        {
+            throw new InvalidOperationException("The originating property case was not found.");
+        }
+
+        if (!IsPropertyManagementCase(sourceCase) || !CanInitiatePropertyLegalHandoff(sourceCase))
+        {
+            throw new UnauthorizedAccessException("The current user cannot lodge this property matter with Legal.");
+        }
+
+        var matter = ResolveLinkedLegalMatter(request.MatterType);
+        var existing = await _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .Where(item => item.TenantId == tenantId
+                && item.Module == "Legal"
+                && item.EntityType == matter.EntityType
+                && !item.IsDeleted)
+            .FirstOrDefaultAsync(item => item.Fields.Any(field =>
+                !field.IsDeleted
+                && field.Key == "sourceProcedureCaseId"
+                && field.Value == sourceProcedureCaseId.ToString())
+                && item.Fields.Any(field =>
+                    !field.IsDeleted
+                    && field.Key == "matterPurpose"
+                    && field.Value == matter.Purpose));
+        if (existing is not null && !matter.AllowRepeat)
+        {
+            var existingMatterLinkedAt = DateTime.UtcNow;
+            await AttachPropertyLegalHandoffDocumentsAsync(existing, sourceCase, matter, tenantId, userId, existingMatterLinkedAt);
+            await LinkSourceCaseToLegalMatterAsync(sourceCase, existing, matter, tenantId, userId, existingMatterLinkedAt);
+            return await ToDetailDtoAsync((await LoadCaseAsync(existing.Id, asTracking: false))!);
+        }
+
+        if (matter.RequiresGeneratedAgreement
+            && string.IsNullOrWhiteSpace(FieldValue(sourceCase, "generatedAgreementReference")))
+        {
+            throw new InvalidOperationException("Generate the draft agreement before lodging it for Legal review.");
+        }
+
+        if (matter.RequiresExecutedAgreement
+            && !string.Equals(FieldValue(sourceCase, "agreementExecutionStatus"), "Fully executed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The agreement must be fully executed before conveyance and registration can begin.");
+        }
+
+        var sourceReference = FirstNonBlank(sourceCase.ReferenceNumber, FieldValue(sourceCase, "applicationReference"), sourceCase.Id.ToString())!;
+        var propertyReference = FirstNonBlank(FieldValue(sourceCase, "propertyUnit"), FieldValue(sourceCase, "listingReference"));
+        var applicant = FirstNonBlank(FieldValue(sourceCase, "customerName"), sourceCase.ApplicantName);
+        var legalReference = $"LEG-{DateTime.UtcNow:yyyy}-{Guid.NewGuid():N}"[..17].ToUpperInvariant();
+        var legalCase = await CreateCaseCoreAsync(new CreateProcedureCaseRequest(
+            "Legal",
+            matter.EntityType,
+            $"{matter.Title}: {propertyReference ?? sourceReference}",
+            legalReference,
+            applicant,
+            "Property Management",
+            DateTime.UtcNow,
+            request.Description ?? $"{matter.Title} lodged from Property Management transaction {sourceReference}.",
+            new Dictionary<string, string?>
+            {
+                ["referenceNumber"] = legalReference,
+                ["sourceProcedureCaseId"] = sourceCase.Id.ToString(),
+                ["sourceEntityType"] = sourceCase.EntityType,
+                ["sourceRecordReference"] = sourceReference,
+                ["matterPurpose"] = matter.Purpose,
+                ["transactionType"] = FieldValue(sourceCase, "requestType"),
+                ["agreementReference"] = FieldValue(sourceCase, "generatedAgreementReference"),
+                ["sourceDepartment"] = "Property Management",
+                ["propertyFileReference"] = FirstNonBlank(FieldValue(sourceCase, "finalSignedAgreementReference"), FieldValue(sourceCase, "generatedAgreementReference"), sourceReference),
+                ["propertyNumber"] = propertyReference,
+                ["applicantName"] = applicant,
+                ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                ["instrumentType"] = matter.InstrumentType,
+                ["lesseeName"] = applicant,
+                ["transfereeName"] = applicant,
+                ["transferorName"] = "Rhema Systems & Associates Ltd",
+                ["dueDiligenceStatus"] = "Not started",
+                ["legalVettingStatus"] = "Under review"
+            }), enforceLegalCreatePermission: false);
+
+        var legalCaseEntity = await _db.ProcedureCases
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstAsync(item => item.TenantId == tenantId
+                && item.Id == legalCase.Id
+                && !item.IsDeleted);
+        await AttachPropertyLegalHandoffDocumentsAsync(legalCaseEntity, sourceCase, matter, tenantId, userId, DateTime.UtcNow);
+
+        var now = DateTime.UtcNow;
+        await LinkSourceCaseToLegalMatterAsync(sourceCase, legalCase, matter, tenantId, userId, now);
+
+        await RoleNotificationDispatcher.NotifyRolesAsync(
+            _db,
+            _notificationService,
+            tenantId,
+            userId,
+            ["Legal Officer", "Legal Manager", "Head of Legal", "Legal Admin Assistant"],
+            $"New property matter: {legalReference}",
+            $"{matter.Title} for {propertyReference ?? sourceReference} was lodged by Property Management.",
+            "legal.property-matter.created",
+            "ProcedureCase",
+            legalCase.Id,
+            $"/legal/{Uri.EscapeDataString(matter.EntityType)}?caseId={legalCase.Id}",
+            new Dictionary<string, object>
+            {
+                ["sourceModule"] = "PropertyManagement",
+                ["sourceProcedureCaseId"] = sourceCase.Id,
+                ["sourceReference"] = sourceReference,
+                ["legalReference"] = legalReference,
+                ["matterPurpose"] = matter.Purpose
+            },
+            CancellationToken.None);
+
+        return legalCase;
+    }
+
     public async Task<ProcedureCaseDetailDto?> UpdateFieldsAsync(Guid id, UpdateProcedureCaseFieldsRequest request)
     {
         var procedureCase = await LoadCaseAsync(id, asTracking: false);
@@ -302,6 +479,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
         var now = DateTime.UtcNow;
+        var wasLegalTransferPaymentReady = IsLegalTransferPaymentReady(procedureCase);
+        var previousLegalTransferInterviewDate = FieldValue(procedureCase, "interviewDate");
 
         await _db.ProcedureCases
             .IgnoreQueryFilters()
@@ -349,7 +528,21 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
         await _db.SaveChangesAsync();
 
-        return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
+        var updatedCase = (await LoadCaseAsync(id, asTracking: false))!;
+        await NotifyLegalTransferPaymentConfirmedAsync(
+            updatedCase,
+            wasLegalTransferPaymentReady,
+            tenantId,
+            userId,
+            now);
+        await NotifyLegalTransferInterviewDateChangedAsync(
+            updatedCase,
+            previousLegalTransferInterviewDate,
+            tenantId,
+            userId,
+            now);
+
+        return await ToDetailDtoAsync(updatedCase);
     }
 
     public async Task<ProcedureCaseDetailDto?> UpdateChecklistItemAsync(Guid id, Guid checklistItemId, UpdateProcedureCaseChecklistRequest request)
@@ -459,7 +652,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 && item.Id == document.Id
                 && !item.IsDeleted)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.FileName, string.IsNullOrWhiteSpace(fileName) ? document.FileName : fileName)
+                .SetProperty(item => item.FileName, hasFile
+                    ? string.IsNullOrWhiteSpace(fileName) ? document.FileName : fileName
+                    : null)
                 .SetProperty(item => item.FileUrl, fileUrl)
                 .SetProperty(item => item.Notes, notes)
                 .SetProperty(item => item.UploadedById, uploadedById)
@@ -500,8 +695,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         var missingDocuments = procedureCase.Documents
-            .Where(item => item.IsMandatory
-                && string.IsNullOrWhiteSpace(item.FileUrl)
+            .Where(item => IsProcedureDocumentMandatoryForSubmission(procedureCase, item)
+                && !IsProcedureDocumentSatisfied(procedureCase, item)
                 && string.Equals(item.RequiredFrom, procedureCase.CurrentStageName, StringComparison.OrdinalIgnoreCase))
             .Select(item => item.Name)
             .ToList();
@@ -510,6 +705,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             throw new InvalidOperationException($"Upload required document(s) before submitting this stage: {string.Join(", ", missingDocuments)}.");
         }
+
+        EnsureLegalTransferHeadMinutingReady(procedureCase);
+        EnsureLegalTransferClientPaymentReady(procedureCase);
+        EnsureLegalTransferRequiredStageFieldsReady(procedureCase);
+        EnsureExternalListingApprovalIsReady(procedureCase);
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
@@ -539,6 +739,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             await _db.SaveChangesAsync();
             await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, procedureCase.WorkflowInstanceId.Value, userId, request.Notes);
             var syncedCase = (await LoadCaseAsync(id, asTracking: false))!;
+            await SynchronizeLinkedLegalMatterAsync(syncedCase, tenantId, userId, now);
+            await ArchiveCompetingExternalListingRequestsAsync(syncedCase, tenantId, userId, now);
+            await NotifyLegalTransferPaymentRequestedAsync(syncedCase, completedStageName, tenantId, userId, now);
+            await NotifyLegalTransferDraftReadyForClientAsync(syncedCase, completedStageName, tenantId, userId, now);
+            await NotifyLegalProcedureStageAssignedAsync(syncedCase, completedStageName, userId, tenantId);
             await NotifyEstateProcedureHandoffsAsync(syncedCase, completedStageName, syncedCase.CurrentStageName, userId, tenantId);
             return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
         }
@@ -582,13 +787,337 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         await _db.SaveChangesAsync();
 
         var updatedCase = (await LoadCaseAsync(id, asTracking: false))!;
+        await SynchronizeLinkedLegalMatterAsync(updatedCase, tenantId, userId, now);
+        await ArchiveCompetingExternalListingRequestsAsync(updatedCase, tenantId, userId, now);
+        await NotifyLegalTransferPaymentRequestedAsync(updatedCase, completedStageName, tenantId, userId, now);
+        await NotifyLegalTransferDraftReadyForClientAsync(updatedCase, completedStageName, tenantId, userId, now);
+        await NotifyLegalProcedureStageAssignedAsync(updatedCase, completedStageName, userId, tenantId);
         await NotifyEstateProcedureHandoffsAsync(updatedCase, completedStageName, nextStage?.Name, userId, tenantId);
 
         return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
     }
 
-    public Task SyncFromWorkflowRuntimeAsync(Guid procedureCaseId, Guid workflowInstanceId, Guid actorUserId, string? notes = null)
-        => SyncCaseFromWorkflowRuntimeAsync(procedureCaseId, workflowInstanceId, actorUserId, notes);
+    public async Task<ProcedureCaseDetailDto?> ApplyReviewActionAsync(
+        Guid id,
+        ReviewProcedureCaseRequest request)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: true);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        EnsureCanEdit(procedureCase);
+        if (!string.Equals(
+                procedureCase.EntityType,
+                "EstatePropertyManagementListingApplication",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Review actions are only available for property listing applications.");
+        }
+
+        var reason = request.Reason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new InvalidOperationException("Enter a reason for this review action.");
+        }
+
+        var action = request.Action?.Trim();
+        var isReject = string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase);
+        var isClarification = string.Equals(action, "RequestClarification", StringComparison.OrdinalIgnoreCase);
+        if (!isReject && !isClarification)
+        {
+            throw new InvalidOperationException("Select Reject or Return for clarification.");
+        }
+        if (isClarification && procedureCase.CurrentStageIndex == 0)
+        {
+            throw new InvalidOperationException("Stage 1 applications should be validated or rejected. Clarification return is available from Stage 2 onward.");
+        }
+        if (!procedureCase.WorkflowInstanceId.HasValue)
+        {
+            throw new InvalidOperationException("This application is not connected to an active workflow instance.");
+        }
+
+        var stepInstance = await _db.WorkflowStepInstances
+            .Where(item => item.WorkflowInstanceId == procedureCase.WorkflowInstanceId.Value
+                && item.WorkflowStepId == procedureCase.WorkflowStepId
+                && (item.Status == WorkflowStepInstanceStatus.Pending
+                    || item.Status == WorkflowStepInstanceStatus.InProgress))
+            .OrderByDescending(item => item.CreatedDate)
+            .FirstOrDefaultAsync();
+        if (stepInstance is null)
+        {
+            throw new InvalidOperationException("The active workflow step could not be found.");
+        }
+
+        var tenantId = RequireTenantId();
+        var userId = RequireUserId();
+        var now = DateTime.UtcNow;
+        var workflowResult = await _workflowEngine.ProcessStepAsync(
+            stepInstance.Id,
+            userId,
+            isReject ? WorkflowStepAction.Reject : WorkflowStepAction.RequestInformation,
+            new { procedureCase.Id, procedureCase.ReferenceNumber, Reason = reason },
+            reason);
+        if (!workflowResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.Message ?? "The workflow review action failed.");
+        }
+
+        if (isReject)
+        {
+            procedureCase.Status = "Rejected";
+            procedureCase.CompletedAt = now;
+            procedureCase.CurrentAssignedRole = null;
+            procedureCase.CurrentStageOwner = null;
+            UpsertLinkedSourceField(procedureCase, "applicationStatus", "Application status", "Rejected", userId, now);
+            UpsertLinkedSourceField(procedureCase, "decisionStatus", "Management decision", "Rejected", userId, now);
+            UpsertLinkedSourceField(procedureCase, "rejectionReason", "Rejection reason", reason, userId, now);
+            UpsertLinkedSourceField(procedureCase, "customerNotificationStatus", "Customer notification status", "Rejection notified", userId, now);
+        }
+        else
+        {
+            procedureCase.Status = "Clarification required";
+            UpsertLinkedSourceField(procedureCase, "applicationStatus", "Application status", "Clarification required", userId, now);
+            UpsertLinkedSourceField(procedureCase, "clarificationReason", "Clarification requested", reason, userId, now);
+            UpsertLinkedSourceField(procedureCase, "customerNotificationStatus", "Customer notification status", "Clarification requested", userId, now);
+        }
+
+        procedureCase.LastActionById = userId;
+        procedureCase.UpdatedAt = now;
+        procedureCase.Activities.Add(Activity(
+            tenantId,
+            userId,
+            procedureCase.Id,
+            isReject ? "Rejected application" : "Requested clarification",
+            procedureCase.CurrentStageName,
+            reason));
+        await _db.SaveChangesAsync();
+
+        if (procedureCase.OpenedById != Guid.Empty)
+        {
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
+                    {
+                        RecipientId = procedureCase.OpenedById,
+                        Type = isReject
+                            ? "estate.property.application-rejected"
+                            : "estate.property.application-clarification",
+                        Title = isReject
+                            ? "Property application rejected"
+                            : "Property application needs clarification",
+                        Message = $"{procedureCase.ReferenceNumber ?? procedureCase.Title}: {reason}",
+                        Priority = isReject ? "High" : "Normal",
+                        EntityType = "ProcedureCase",
+                        EntityId = procedureCase.Id,
+                        ActionUrl = $"/external-portal/my-property-requests/{procedureCase.Id}"
+                    },
+                    userId,
+                    tenantId);
+            }
+            catch
+            {
+                // Notification delivery must not roll back the governed review action.
+            }
+        }
+
+        return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
+    }
+
+    public async Task SyncFromWorkflowRuntimeAsync(
+        Guid procedureCaseId,
+        Guid workflowInstanceId,
+        Guid actorUserId,
+        string? notes = null)
+    {
+        await SyncCaseFromWorkflowRuntimeAsync(procedureCaseId, workflowInstanceId, actorUserId, notes);
+        var procedureCase = await LoadCaseAsync(procedureCaseId, asTracking: false);
+        if (procedureCase is not null)
+        {
+            await SynchronizeLinkedLegalMatterAsync(
+                procedureCase,
+                procedureCase.TenantId,
+                actorUserId,
+                DateTime.UtcNow);
+        }
+    }
+
+    private async Task SynchronizeLinkedLegalMatterAsync(
+        ProcedureCase legalCase,
+        Guid tenantId,
+        Guid actorUserId,
+        DateTime now)
+    {
+        if (!string.Equals(legalCase.Module, "Legal", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(legalCase, "sourceProcedureCaseId"), out var sourceCaseId))
+        {
+            return;
+        }
+
+        var sourceCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.Id == sourceCaseId
+                && !item.IsDeleted)
+            .Select(item => new
+            {
+                item.Id,
+                item.OpenedById,
+                item.ReferenceNumber,
+                item.Title,
+                item.CurrentStageName
+            })
+            .FirstOrDefaultAsync();
+        if (sourceCase is null)
+        {
+            return;
+        }
+
+        var sourceFields = await _db.ProcedureCaseFields
+            .AsNoTracking()
+            .Where(field => field.TenantId == tenantId
+                && field.ProcedureCaseId == sourceCase.Id
+                && !field.IsDeleted)
+            .Select(field => new { field.Key, field.Value })
+            .ToListAsync();
+        string? SourceFieldValue(string key) => sourceFields
+            .FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+
+        var purpose = FieldValue(legalCase, "matterPurpose") ?? legalCase.EntityType;
+        var isCompleted = IsCompleted(legalCase);
+        var status = isCompleted ? "Completed" : $"Open - {legalCase.CurrentStageName}";
+        string? customerLegalReviewStatus = null;
+        var previousCustomerLegalReviewStatus = SourceFieldValue("legalAgreementReviewStatus");
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterCaseId", "Latest linked Legal matter ID", legalCase.Id.ToString(), actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterReference", "Latest linked Legal matter reference", legalCase.ReferenceNumber, actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterType", "Latest linked Legal matter type", purpose, actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterStatus", "Latest linked Legal matter status", status, actorUserId, now);
+
+        if (string.Equals(purpose, "AgreementReview", StringComparison.OrdinalIgnoreCase))
+        {
+            var vettingStatus = FieldValue(legalCase, "legalVettingStatus");
+            var returned = string.Equals(vettingStatus, "Returned for correction", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(vettingStatus, "Returned", StringComparison.OrdinalIgnoreCase);
+            var approved = isCompleted
+                && !returned;
+            customerLegalReviewStatus = approved
+                ? "Approved by Legal"
+                : returned
+                    ? "Returned by Legal for correction"
+                    : $"Under Legal review - {legalCase.CurrentStageName}";
+            await UpsertLinkedSourceFieldAsync(
+                tenantId,
+                sourceCase.Id,
+                "legalAgreementReviewStatus",
+                "Legal agreement review status",
+                customerLegalReviewStatus,
+                actorUserId,
+                now);
+        }
+        else if (string.Equals(purpose, "ConveyanceRegistration", StringComparison.OrdinalIgnoreCase))
+        {
+            await UpsertLinkedSourceFieldAsync(
+                tenantId,
+                sourceCase.Id,
+                "legalConveyanceStatus",
+                "Legal conveyance / registration status",
+                isCompleted ? "Completed by Legal" : $"Open - {legalCase.CurrentStageName}",
+                actorUserId,
+                now);
+            await UpsertLinkedSourceFieldAsync(
+                tenantId,
+                sourceCase.Id,
+                "ownershipTransferStatus",
+                "Ownership transfer status",
+                isCompleted ? "Ready for Estate records amendment" : "Blocked - Legal conveyance and registration pending",
+                actorUserId,
+                now);
+        }
+
+        await _db.ProcedureCases
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId
+                && item.Id == sourceCase.Id
+                && !item.IsDeleted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastActionById, actorUserId)
+                .SetProperty(item => item.UpdatedAt, now));
+
+        _db.ProcedureCaseActivities.Add(Activity(
+            tenantId,
+            actorUserId,
+            sourceCase.Id,
+            "Legal matter status updated",
+            sourceCase.CurrentStageName,
+            $"{legalCase.ReferenceNumber}: {status}."));
+        await _db.SaveChangesAsync();
+
+        var customerReviewChanged = !string.Equals(
+            previousCustomerLegalReviewStatus,
+            customerLegalReviewStatus,
+            StringComparison.OrdinalIgnoreCase);
+        var customerShouldBeNotified = customerReviewChanged
+            && sourceCase.OpenedById != Guid.Empty
+            && (string.Equals(customerLegalReviewStatus, "Approved by Legal", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(customerLegalReviewStatus, "Returned by Legal for correction", StringComparison.OrdinalIgnoreCase));
+        if (customerShouldBeNotified)
+        {
+            var approved = string.Equals(customerLegalReviewStatus, "Approved by Legal", StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
+                    {
+                        RecipientId = sourceCase.OpenedById,
+                        Type = approved ? "estate.property.agreement-released" : "estate.property.agreement-correction-required",
+                        Title = approved ? "Property agreement ready for review" : "Property agreement requires correction",
+                        Message = approved
+                            ? $"Legal has approved the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title}. You can now review and accept it."
+                            : $"Legal returned the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title} for correction.",
+                        Priority = approved ? "High" : "Normal",
+                        EntityType = "ProcedureCase",
+                        EntityId = sourceCase.Id,
+                        ActionUrl = $"/external-portal/my-property-requests/{sourceCase.Id}",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalCase.ReferenceNumber ?? string.Empty,
+                            ["status"] = customerLegalReviewStatus ?? string.Empty
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
+            catch
+            {
+                // Notification delivery must not block completion of the Legal workflow.
+            }
+        }
+
+        await RoleNotificationDispatcher.NotifyRolesAsync(
+            _db,
+            _notificationService,
+            tenantId,
+            actorUserId,
+            ["Property Manager", "Property Officer", "Estate Manager", "Head of Estate"],
+            $"Legal matter {legalCase.ReferenceNumber}: {status}",
+            $"Legal updated {purpose} for {sourceCase.ReferenceNumber ?? sourceCase.Title}.",
+            "legal.property-matter.status",
+            "ProcedureCase",
+            sourceCase.Id,
+            $"/estate/property-management/EstatePropertyManagementListingApplication?caseId={sourceCase.Id}",
+            new Dictionary<string, object>
+            {
+                ["legalCaseId"] = legalCase.Id,
+                ["legalReference"] = legalCase.ReferenceNumber ?? string.Empty,
+                ["matterPurpose"] = purpose,
+                ["status"] = status
+            },
+            CancellationToken.None);
+    }
 
     public async Task<ProcedureCaseDetailDto?> UploadDocumentAsync(
         Guid id,
@@ -639,6 +1168,146 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             isUpload: true);
     }
 
+    public async Task<ProcedureCaseDetailDto?> UploadCustomerIntakeDocumentAsync(
+        Guid id,
+        Guid documentId,
+        Stream fileStream,
+        string fileName,
+        string contentType,
+        long fileSize,
+        string? notes)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: false);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        var userId = RequireUserId();
+        if (procedureCase.OpenedById != userId
+            || !string.Equals(procedureCase.SourceDepartment, "External Portal - Estate Listings", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("Only the customer who submitted this property request can upload its intake documents.");
+        }
+
+        if (IsCompleted(procedureCase))
+        {
+            throw new InvalidOperationException("Completed property requests cannot receive new intake documents.");
+        }
+
+        if (HasFirstInternalStageBeenRoutedForward(procedureCase))
+        {
+            throw new InvalidOperationException("Customer intake documents can only be uploaded until the first internal stage is routed forward.");
+        }
+
+        var document = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId);
+        if (document is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("Customers cannot upload documents into this internal document category.");
+        }
+
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = fileStream,
+            FileName = fileName,
+            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType,
+            FileSize = fileSize,
+            Category = "procedure-case-customer-intake-documents",
+            TenantId = RequireTenantId().ToString(),
+            OverwriteExisting = false
+        });
+
+        if (!upload.Success)
+        {
+            throw new InvalidOperationException(upload.ErrorMessage ?? "Customer intake document upload failed.");
+        }
+
+        return await UpdateDocumentAttachmentAsync(
+            procedureCase,
+            document,
+            upload.OriginalFileName,
+            upload.FilePath,
+            notes,
+            RequireTenantId(),
+            userId,
+            isUpload: true);
+    }
+
+    private static string ResolveDocumentProvider(string documentName, string? configuredProvider)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredProvider)
+            && !string.Equals(configuredProvider, "Internal", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredProvider.Trim();
+        }
+
+        return documentName.StartsWith("Customer identity or eligibility evidence", StringComparison.OrdinalIgnoreCase)
+            || documentName.StartsWith("Offer, financing, or purchase supporting evidence", StringComparison.OrdinalIgnoreCase)
+            || documentName.StartsWith("Rental application or tenancy supporting evidence", StringComparison.OrdinalIgnoreCase)
+                ? "Customer"
+                : "Internal";
+    }
+
+    private static string NormalizeDocumentApplicability(string? appliesTo)
+    {
+        if (string.Equals(appliesTo, "Rent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(appliesTo, "Rental", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Rent";
+        }
+
+        if (string.Equals(appliesTo, "Sale", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(appliesTo, "Purchase", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Sale";
+        }
+
+        return "All";
+    }
+
+    private static string? ResolveRequestApplicability(IDictionary<string, string?>? fieldValues)
+    {
+        if (fieldValues is null)
+        {
+            return null;
+        }
+
+        var requestType = fieldValues.FirstOrDefault(item =>
+            string.Equals(item.Key, "requestType", StringComparison.OrdinalIgnoreCase)).Value;
+        var listingType = fieldValues.FirstOrDefault(item =>
+            string.Equals(item.Key, "listingType", StringComparison.OrdinalIgnoreCase)).Value;
+        var transactionType = $"{requestType} {listingType}";
+
+        if (transactionType.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+            || transactionType.Contains("sale", StringComparison.OrdinalIgnoreCase)
+            || transactionType.Contains("buy", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Sale";
+        }
+
+        if (transactionType.Contains("rent", StringComparison.OrdinalIgnoreCase)
+            || transactionType.Contains("rental", StringComparison.OrdinalIgnoreCase)
+            || transactionType.Contains("lease", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Rent";
+        }
+
+        return null;
+    }
+
+    private static bool DocumentAppliesToRequest(string? appliesTo, string? requestApplicability)
+    {
+        var normalized = NormalizeDocumentApplicability(appliesTo);
+        return normalized == "All"
+            || string.IsNullOrWhiteSpace(requestApplicability)
+            || string.Equals(normalized, requestApplicability, StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<ProcedureCaseDocumentContentDto?> GetDocumentContentAsync(Guid id, Guid documentId)
     {
         var procedureCase = await LoadCaseAsync(id, asTracking: false);
@@ -668,6 +1337,234 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             stream,
             string.IsNullOrWhiteSpace(document.FileName) ? document.Name : document.FileName,
             ResolveContentType(document.FileName ?? document.Name));
+    }
+
+    public async Task<ProcedureCaseDetailDto?> SignLegalTransferExecutedDocumentAsync(
+        Guid id,
+        Guid documentId,
+        SignProcedureCaseDocumentRequest request)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: true);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        EnsureCanEdit(procedureCase);
+        if (!string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only Legal transfer cases can use this signing action.");
+        }
+
+        var signatureRole = LegalTransferSignatureRoleForStage(procedureCase.CurrentStageName);
+        if (signatureRole is null)
+        {
+            throw new InvalidOperationException("This legal transfer stage does not allow signing the executed transfer form.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.SignatureRole)
+            && !string.Equals(request.SignatureRole.Trim(), signatureRole, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"This stage must be signed as {signatureRole}.");
+        }
+
+        var document = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId && !item.IsDeleted);
+        if (document is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(document.Name, "Executed transfer form", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Legal signatures must be applied to the executed transfer form submitted by the client.");
+        }
+
+        if (string.IsNullOrWhiteSpace(document.FileUrl))
+        {
+            throw new InvalidOperationException("The executed transfer form has not been submitted yet.");
+        }
+
+        if (Uri.TryCreate(document.FileUrl, UriKind.Absolute, out _)
+            || document.FileUrl.StartsWith("/document-management", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("This signing action only supports the uploaded executed transfer form.");
+        }
+
+        if (IsLegalTransferStageSignatureRecorded(procedureCase, document))
+        {
+            throw new InvalidOperationException($"{signatureRole} has already signed the executed transfer form.");
+        }
+
+        var tenantId = RequireTenantId();
+        var userId = RequireUserId();
+        var actor = string.IsNullOrWhiteSpace(_currentUser.FullName)
+            ? _currentUser.UserName ?? "System"
+            : _currentUser.FullName.Trim();
+        var now = DateTime.UtcNow;
+
+        await using var sourceStream = await _fileStorageService.DownloadFileAsync(document.FileUrl, document.Id);
+        var signature = await _pdfSigningService.SignAsync(
+            sourceStream,
+            new CentralDocumentPdfSigningRequest(
+                procedureCase.ReferenceNumber ?? procedureCase.Title,
+                actor,
+                signatureRole,
+                request.Notes,
+                now),
+            CancellationToken.None);
+
+        await using var signedStream = new MemoryStream(signature.PdfBytes);
+        var signedFileName = BuildSignedProcedureDocumentFileName(document.FileName ?? document.Name, signatureRole);
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = signedStream,
+            FileName = signedFileName,
+            ContentType = "application/pdf",
+            FileSize = signature.PdfBytes.LongLength,
+            Category = "procedure-case-documents",
+            TenantId = tenantId.ToString(),
+            Metadata = new Dictionary<string, string>
+            {
+                ["SourceDocumentId"] = document.Id.ToString(),
+                ["SignatureRole"] = signatureRole,
+                ["SignedBy"] = actor,
+                ["SignedAtUtc"] = now.ToString("O"),
+                ["SignatureField"] = signature.SignatureFieldName,
+                ["SignatureCertificateThumbprint"] = signature.CertificateThumbprint,
+                ["SignedDocumentSha256"] = signature.DocumentSha256
+            },
+            OverwriteExisting = false
+        });
+
+        if (!upload.Success)
+        {
+            throw new InvalidOperationException(upload.ErrorMessage ?? "Signed transfer document upload failed.");
+        }
+
+        document.FileName = upload.OriginalFileName;
+        document.FileUrl = upload.FilePath;
+        document.Notes = string.IsNullOrWhiteSpace(request.Notes)
+            ? $"{signatureRole} digitally signed by {actor}."
+            : request.Notes.Trim();
+        document.UploadedById = userId;
+        document.UploadedAt = now;
+        document.UpdatedAt = now;
+        document.LastModifiedById = userId;
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        if (string.Equals(procedureCase.CurrentStageName, "Legal Officer Signature", StringComparison.OrdinalIgnoreCase))
+        {
+            UpsertProcedureCaseField(procedureCase, fields, "signatureStatus", "Signature status", "select", "Legal signed", userId, now);
+        }
+        else if (string.Equals(procedureCase.CurrentStageName, "Head of Legal Signature", StringComparison.OrdinalIgnoreCase))
+        {
+            UpsertProcedureCaseField(procedureCase, fields, "signatureStatus", "Signature status", "select", "Head of Legal signed", userId, now);
+        }
+
+        procedureCase.LastActionById = userId;
+        procedureCase.LastModifiedById = userId;
+        procedureCase.UpdatedAt = now;
+
+        _db.ProcedureCaseActivities.Add(Activity(
+            tenantId,
+            userId,
+            procedureCase.Id,
+            "Signed executed transfer form",
+            procedureCase.CurrentStageName,
+            $"{signatureRole} signature applied to {upload.OriginalFileName}."));
+        await _db.SaveChangesAsync();
+
+        return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
+    }
+
+    public async Task<ProcedureCaseDetailDto?> SyncLegalTransferFeePaymentStatusAsync(Guid id)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: false);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        EnsureCanEdit(procedureCase);
+        if (!IsLegalTransferClientPaymentStage(procedureCase))
+        {
+            throw new InvalidOperationException("Transfer fee payment can only be synced during Client Payment Call.");
+        }
+
+        var tenantId = RequireTenantId();
+        var userId = RequireUserId();
+        var now = DateTime.UtcNow;
+
+        var invoice = await FindLegalTransferFeeInvoiceAsync(procedureCase, tenantId);
+        if (invoice is null)
+        {
+            var paymentRequestReference = BuildLegalTransferFeePaymentRequestReference(procedureCase);
+            throw new InvalidOperationException(
+                $"Finance has not created a transfer-fee AR invoice with reference '{paymentRequestReference}' yet.");
+        }
+
+        var receiptNumber = await _db.Set<PaymentAllocation>()
+            .AsNoTracking()
+            .Where(allocation => allocation.TenantId == tenantId
+                && !allocation.IsDeleted
+                && !allocation.IsReversal
+                && allocation.InvoiceId == invoice.Id
+                && !allocation.CustomerPayment.IsDeleted
+                && allocation.CustomerPayment.Status != "Cancelled"
+                && allocation.CustomerPayment.Status != "Bounced")
+            .OrderByDescending(allocation => allocation.AllocationDate)
+            .Select(allocation => allocation.CustomerPayment.PaymentNumber)
+            .FirstOrDefaultAsync();
+
+        var wasPaymentReady = IsLegalTransferPaymentReady(procedureCase);
+        var transferFeePayable = ParseProcedureAmount(FieldValue(procedureCase, "transferFeePayable"));
+        var invoiceAmountMatches = !transferFeePayable.HasValue || AmountsMatch(invoice.TotalAmount, transferFeePayable.Value);
+        var invoiceIsPaid = invoice.BalanceAmount <= 0m && invoice.Status == InvoiceStatus.Paid;
+        var paymentStatus = invoiceAmountMatches && invoiceIsPaid
+            ? "Paid"
+            : "Pending";
+        var paymentCheckStatus = invoiceAmountMatches
+            ? invoiceIsPaid
+                ? "Paid in full"
+                : $"Awaiting full payment; balance {invoice.CurrencyCode} {invoice.BalanceAmount:N2}"
+            : $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match transfer fee {invoice.CurrencyCode} {transferFeePayable!.Value:N2}";
+
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeInvoiceId", "Transfer fee invoice ID", invoice.Id.ToString(), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeInvoiceReference", "Transfer fee invoice reference", invoice.InvoiceNumber, userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeInvoiceStatus", "Transfer fee invoice status", invoice.Status.ToString(), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeInvoiceAmount", "Transfer fee invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeInvoicePaidAmount", "Transfer fee invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeInvoiceBalance", "Transfer fee invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeePaymentCheckStatus", "Transfer fee payment check", paymentCheckStatus, userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, id, "paymentStatus", "Payment status", paymentStatus, userId, now);
+        if (IsCustomerVisibleInvoiceStatus(invoice.Status) && invoice.BalanceAmount > 0m)
+        {
+            await NotifyLegalTransferFeeInvoiceCustomerReadyAsync(procedureCase, invoice, tenantId, userId, now);
+        }
+
+        if (!string.IsNullOrWhiteSpace(receiptNumber))
+        {
+            await UpsertLinkedSourceFieldAsync(tenantId, id, "paymentReceiptReference", "Payment / receipt reference", receiptNumber, userId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, id, "transferFeeReceipt", "Transfer fee receipt", receiptNumber, userId, now);
+        }
+
+        _db.ProcedureCaseActivities.Add(Activity(
+            tenantId,
+            userId,
+            id,
+            "Transfer fee payment synced",
+            procedureCase.CurrentStageName,
+            string.IsNullOrWhiteSpace(receiptNumber)
+                ? $"Finance invoice {invoice.InvoiceNumber} is {invoice.Status}; {paymentCheckStatus}."
+                : $"Finance receipt {receiptNumber} applied to invoice {invoice.InvoiceNumber}."));
+
+        await _db.SaveChangesAsync();
+
+        var updatedCase = (await LoadCaseAsync(id, asTracking: false))!;
+        await NotifyLegalTransferPaymentConfirmedAsync(updatedCase, wasPaymentReady, tenantId, userId, now);
+        return await ToDetailDtoAsync(updatedCase);
     }
 
     private async Task NotifyEstateProcedureHandoffsAsync(
@@ -736,6 +1633,552 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    private async Task NotifyLegalProcedureStageAssignedAsync(
+        ProcedureCase procedureCase,
+        string completedStageName,
+        Guid userId,
+        Guid tenantId)
+    {
+        if (!string.Equals(procedureCase.Module, "Legal", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(procedureCase.CurrentStageName)
+            || string.IsNullOrWhiteSpace(procedureCase.CurrentAssignedRole)
+            || string.Equals(procedureCase.CurrentStageName, completedStageName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var sourceReference = FirstNonBlank(procedureCase.ReferenceNumber, procedureCase.Title, procedureCase.Id.ToString()) ?? procedureCase.Id.ToString();
+        var actionUrl = $"/legal/{Uri.EscapeDataString(procedureCase.EntityType)}?caseId={procedureCase.Id}";
+
+        await RoleNotificationDispatcher.NotifyRolesAsync(
+            _db,
+            _notificationService,
+            tenantId,
+            userId,
+            [procedureCase.CurrentAssignedRole],
+            $"Legal matter assigned: {sourceReference}",
+            $"{sourceReference} moved from '{completedStageName}' to '{procedureCase.CurrentStageName}' and is assigned to {procedureCase.CurrentAssignedRole}.",
+            "legal.procedure.stage-assigned",
+            "ProcedureCase",
+            procedureCase.Id,
+            actionUrl,
+            new Dictionary<string, object>
+            {
+                ["sourceLabel"] = "Source: Legal workflow",
+                ["sourceModule"] = "Legal",
+                ["sourceEntityType"] = procedureCase.EntityType,
+                ["sourceRecordReference"] = sourceReference,
+                ["completedStage"] = completedStageName,
+                ["nextStage"] = procedureCase.CurrentStageName,
+                ["assignedRole"] = procedureCase.CurrentAssignedRole,
+                ["applicantName"] = procedureCase.ApplicantName ?? string.Empty
+            },
+            CancellationToken.None);
+
+        _db.ProcedureCaseActivities.Add(Activity(
+            tenantId,
+            userId,
+            procedureCase.Id,
+            "Role notified",
+            procedureCase.CurrentStageName,
+            $"Notified {procedureCase.CurrentAssignedRole} for Legal stage assignment."));
+
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task NotifyLegalTransferPaymentRequestedAsync(
+        ProcedureCase legalCase,
+        string completedStageName,
+        Guid tenantId,
+        Guid actorUserId,
+        DateTime now)
+    {
+        if (!string.Equals(legalCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(completedStageName, "Head of Legal Minuting", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(legalCase.CurrentStageName, "Client Payment Call", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(legalCase, "sourceProcedureCaseId"), out var sourceCaseId))
+        {
+            return;
+        }
+
+        var sourceCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == sourceCaseId
+                && !item.IsDeleted);
+        if (sourceCase is null)
+        {
+            throw new InvalidOperationException("The source Estate property record for the Legal transfer was not found.");
+        }
+
+        var amount = ParseProcedureAmount(FieldValue(legalCase, "transferFeePayable"));
+        var amountText = amount.HasValue
+            ? $"GHS {amount.Value:N2}"
+            : FieldValue(legalCase, "transferFeePayable") ?? "the minuted transfer fee";
+        var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
+        var paymentRequestReference = BuildLegalTransferFeePaymentRequestReference(legalCase);
+        var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
+        var invoice = await CreateOrLinkLegalTransferFeeInvoiceAsync(
+            legalCase,
+            sourceCase,
+            tenantId,
+            paymentRequestReference,
+            cancellationToken: CancellationToken.None);
+
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "paymentStatus", "Payment status", "Pending", actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeePaymentRequestReference", "Transfer fee payment request reference", paymentRequestReference, actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeInvoiceId", "Transfer fee invoice ID", invoice.Id.ToString(), actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeInvoiceReference", "Transfer fee invoice reference", invoice.InvoiceNumber, actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeInvoiceStatus", "Transfer fee invoice status", invoice.Status, actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeInvoiceAmount", "Transfer fee invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeInvoicePaidAmount", "Transfer fee invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeInvoiceBalance", "Transfer fee invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), actorUserId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeePaymentCheckStatus", "Transfer fee payment check", $"Awaiting customer payment; balance {invoice.CurrencyCode} {invoice.BalanceAmount:N2}", actorUserId, now);
+
+        try
+        {
+            await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                tenantId,
+                actorUserId,
+                ["Accounts Receivable Officer", "Finance Officer"],
+                "Transfer fee invoice created",
+                $"{legalReference}: Finance AR invoice {invoice.InvoiceNumber} was created for {sourceCase.ApplicantName ?? "the customer"} ({amountText}) using reference {paymentRequestReference}. Submit or send the invoice, then record and allocate the receipt when paid.",
+                "legal.transfer-fee.invoice-created",
+                "Invoice",
+                invoice.Id,
+                $"/finance/ar/invoices/{invoice.Id}",
+                new Dictionary<string, object>
+                {
+                    ["sourceLabel"] = "Source: Legal -> Finance AR",
+                    ["sourceModule"] = "Legal",
+                    ["sourceEntityType"] = legalCase.EntityType,
+                    ["sourceRecordReference"] = legalReference,
+                    ["transferFeePayable"] = amountText,
+                    ["paymentRequestReference"] = paymentRequestReference,
+                    ["invoiceId"] = invoice.Id,
+                    ["invoiceNumber"] = invoice.InvoiceNumber,
+                    ["invoiceStatus"] = invoice.Status,
+                    ["customerId"] = FieldValue(sourceCase, "sourceReference") ?? string.Empty,
+                    ["customerName"] = sourceCase.ApplicantName ?? string.Empty
+                },
+                CancellationToken.None);
+
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                actorUserId,
+                legalCase.Id,
+                "Transfer fee invoice created",
+                legalCase.CurrentStageName,
+                $"Finance AR invoice {invoice.InvoiceNumber} created for {amountText}."));
+        }
+        catch
+        {
+            // Notification delivery must not block the Legal workflow stage transition.
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task NotifyLegalTransferFeeInvoiceCustomerReadyAsync(
+        ProcedureCase legalCase,
+        Invoice invoice,
+        Guid tenantId,
+        Guid actorUserId,
+        DateTime now)
+    {
+        if (!Guid.TryParse(FieldValue(legalCase, "sourceProcedureCaseId"), out var sourceCaseId)
+            || string.Equals(FieldValue(legalCase, "transferFeeCustomerNotificationStatus"), "Notified", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var sourceCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == sourceCaseId
+                && !item.IsDeleted);
+        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        {
+            return;
+        }
+
+        var transferFee = ParseProcedureAmount(FieldValue(legalCase, "transferFeePayable"));
+        var amountText = transferFee.HasValue
+            ? $"{invoice.CurrencyCode} {transferFee.Value:N2}"
+            : $"{invoice.CurrencyCode} {invoice.TotalAmount:N2}";
+        var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
+        var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
+        var paymentRequestReference = BuildLegalTransferFeePaymentRequestReference(legalCase);
+
+        try
+        {
+            await _notificationService.CreateNotificationAsync(
+                new CreateNotificationDto
+                {
+                    RecipientId = sourceCase.OpenedById,
+                    Type = "estate.property.transfer-fee-invoice-ready",
+                    Title = "Transfer fee invoice ready",
+                    Message = $"Finance AR invoice {invoice.InvoiceNumber} is approved and ready for payment. Pay {amountText} for Legal transfer {legalReference} using reference {paymentRequestReference}.",
+                    Priority = "High",
+                    EntityType = "Invoice",
+                    EntityId = invoice.Id,
+                    ActionUrl = "/external-portal/my-properties",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        ["legalCaseId"] = legalCase.Id,
+                        ["legalReference"] = legalReference,
+                        ["sourceReference"] = sourceReference,
+                        ["transferFeePayable"] = amountText,
+                        ["paymentRequestReference"] = paymentRequestReference,
+                        ["invoiceId"] = invoice.Id,
+                        ["invoiceNumber"] = invoice.InvoiceNumber,
+                        ["invoiceStatus"] = invoice.Status.ToString()
+                    }
+                },
+                actorUserId,
+                tenantId);
+
+            await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeCustomerNotificationStatus", "Transfer fee customer notification status", "Notified", actorUserId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeCustomerNotifiedAt", "Transfer fee customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                actorUserId,
+                legalCase.Id,
+                "Customer transfer fee invoice notified",
+                legalCase.CurrentStageName,
+                $"Customer was notified that invoice {invoice.InvoiceNumber} is ready for payment."));
+        }
+        catch
+        {
+            // Customer notification should be retried by the next Finance payment sync instead of blocking Legal.
+        }
+    }
+
+    private async Task NotifyLegalTransferDraftReadyForClientAsync(
+        ProcedureCase legalCase,
+        string completedStageName,
+        Guid tenantId,
+        Guid actorUserId,
+        DateTime now)
+    {
+        if (!string.Equals(legalCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(completedStageName, "Legal Vetting", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(legalCase.CurrentStageName, "Client Execution", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(FieldValue(legalCase, "transferDraftCustomerNotificationStatus"), "Notified", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(legalCase, "sourceProcedureCaseId"), out var sourceCaseId))
+        {
+            return;
+        }
+
+        var sourceCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == sourceCaseId
+                && !item.IsDeleted);
+        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        {
+            return;
+        }
+
+        var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
+        var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
+        var draftReference = FirstNonBlank(FieldValue(legalCase, "draftDocumentReference"), FieldValue(legalCase, "agreementReference"));
+
+        try
+        {
+            await _notificationService.CreateNotificationAsync(
+                new CreateNotificationDto
+                {
+                    RecipientId = sourceCase.OpenedById,
+                    Type = "estate.property.legal-transfer-draft-ready",
+                    Title = "Transfer draft ready for signature",
+                    Message = $"Legal transfer {legalReference} is ready. Download the draft, sign it, and upload the signed copy from My Properties.",
+                    Priority = "High",
+                    EntityType = "ProcedureCase",
+                    EntityId = legalCase.Id,
+                    ActionUrl = "/external-portal/my-properties",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        ["legalCaseId"] = legalCase.Id,
+                        ["legalReference"] = legalReference,
+                        ["sourceReference"] = sourceReference,
+                        ["draftReference"] = draftReference ?? string.Empty,
+                        ["currentStage"] = legalCase.CurrentStageName ?? string.Empty
+                    }
+                },
+                actorUserId,
+                tenantId);
+
+            await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferDraftCustomerNotificationStatus", "Transfer draft customer notification status", "Notified", actorUserId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferDraftCustomerNotifiedAt", "Transfer draft customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                actorUserId,
+                legalCase.Id,
+                "Customer transfer draft notified",
+                legalCase.CurrentStageName,
+                $"Customer was notified to sign and upload transfer draft {draftReference ?? legalReference}."));
+            await _db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Notification delivery must not block the Legal workflow stage transition.
+        }
+    }
+
+    private async Task NotifyLegalTransferInterviewDateChangedAsync(
+        ProcedureCase legalCase,
+        string? previousInterviewDate,
+        Guid tenantId,
+        Guid actorUserId,
+        DateTime now)
+    {
+        if (!string.Equals(legalCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(legalCase.CurrentStageName, "Client Execution", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(legalCase, "sourceProcedureCaseId"), out var sourceCaseId))
+        {
+            return;
+        }
+
+        var interviewDate = NormalizeProcedureDate(FieldValue(legalCase, "interviewDate"));
+        if (string.IsNullOrWhiteSpace(interviewDate)
+            || string.Equals(interviewDate, NormalizeProcedureDate(previousInterviewDate), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(interviewDate, NormalizeProcedureDate(FieldValue(legalCase, "transferInterviewCustomerNotifiedDate")), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var sourceCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == sourceCaseId
+                && !item.IsDeleted);
+        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        {
+            return;
+        }
+
+        var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
+        var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
+        var displayDate = FormatProcedureDateForDisplay(interviewDate);
+
+        try
+        {
+            await _notificationService.CreateNotificationAsync(
+                new CreateNotificationDto
+                {
+                    RecipientId = sourceCase.OpenedById,
+                    Type = "estate.property.legal-transfer-interview-date",
+                    Title = "Transfer interview date set",
+                    Message = $"Legal transfer {legalReference} has an interview/execution date of {displayDate}. Track the transfer from My Properties.",
+                    Priority = "High",
+                    EntityType = "ProcedureCase",
+                    EntityId = legalCase.Id,
+                    ActionUrl = "/external-portal/my-properties",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        ["legalCaseId"] = legalCase.Id,
+                        ["legalReference"] = legalReference,
+                        ["sourceReference"] = sourceReference,
+                        ["interviewDate"] = interviewDate
+                    }
+                },
+                actorUserId,
+                tenantId);
+
+            await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferInterviewCustomerNotifiedDate", "Transfer interview customer notified date", interviewDate, actorUserId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferInterviewCustomerNotifiedAt", "Transfer interview customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                actorUserId,
+                legalCase.Id,
+                "Customer transfer interview notified",
+                legalCase.CurrentStageName,
+                $"Customer was notified of transfer interview/execution date {displayDate}."));
+            await _db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Notification delivery must not block saving Legal transfer intake updates.
+        }
+    }
+
+    private static string? NormalizeProcedureDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
+            ? parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : trimmed;
+    }
+
+    private static string FormatProcedureDateForDisplay(string value)
+    {
+        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
+            ? parsed.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)
+            : value;
+    }
+
+    private async Task<LegalTransferFeeInvoiceSnapshot> CreateOrLinkLegalTransferFeeInvoiceAsync(
+        ProcedureCase legalCase,
+        ProcedureCase sourceCase,
+        Guid tenantId,
+        string paymentRequestReference,
+        CancellationToken cancellationToken)
+    {
+        var existingInvoice = await FindLegalTransferFeeInvoiceAsync(legalCase, tenantId);
+        if (existingInvoice is not null)
+        {
+            return LegalTransferFeeInvoiceSnapshot.From(existingInvoice);
+        }
+
+        if (!Guid.TryParse(FieldValue(sourceCase, "sourceReference"), out var customerId))
+        {
+            throw new InvalidOperationException("The source Estate property record is not linked to a Finance AR customer.");
+        }
+
+        var amount = ParseProcedureAmount(FieldValue(legalCase, "transferFeePayable"));
+        if (!amount.HasValue || amount.Value <= 0m)
+        {
+            throw new InvalidOperationException("Enter the transfer fee payable before creating the transfer-fee invoice.");
+        }
+
+        var revenueAccount = await _db.Accounts
+            .AsNoTracking()
+            .Where(account => account.TenantId == tenantId
+                && !account.IsDeleted
+                && account.Status == AccountStatus.Active
+                && account.AccountType == AccountType.Revenue
+                && account.AllowDirectPosting
+                && !account.IsControlAccount)
+            .OrderBy(account => account.AccountCode == "4100" ? 0 : 1)
+            .ThenBy(account => account.AccountCode)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("Finance must configure an active directly-postable revenue account before Legal transfer fee invoices can be created.");
+
+        var legalReference = FirstNonBlank(legalCase.ReferenceNumber, legalCase.Id.ToString()) ?? legalCase.Id.ToString();
+        var propertyNumber = FirstNonBlank(FieldValue(legalCase, "propertyNumber"), FieldValue(sourceCase, "propertyUnit"), FieldValue(sourceCase, "listingReference"));
+        var currencyCode = FirstNonBlank(FieldValue(sourceCase, "currency"), "GHS")!;
+        var invoice = await _invoiceService.CreateAsync(
+            new InvoiceCreateDto
+                {
+                    CustomerId = customerId,
+                    InvoiceDate = DateTime.UtcNow.Date,
+                    DueDate = DateTime.UtcNow.Date,
+                    Reference = paymentRequestReference,
+                    CurrencyCode = currencyCode.Length == 3 ? currencyCode : "GHS",
+                    ExchangeRate = 1m,
+                    Notes = $"Legal transfer fee for {legalReference}; source {sourceCase.ReferenceNumber ?? sourceCase.Title}. Source: Legal -> Finance AR.",
+                    LineItems =
+                    [
+                        new InvoiceLineItemCreateDto
+                        {
+                            LineItemType = "GLAccount",
+                            GLAccountId = revenueAccount.Id,
+                            Description = string.IsNullOrWhiteSpace(propertyNumber)
+                                ? $"Legal transfer fee: {legalReference}"
+                                : $"Legal transfer fee: {propertyNumber}",
+                            Quantity = 1m,
+                            UnitPrice = amount.Value,
+                            TaxTreatment = TaxTreatment.Exempt,
+                            DiscountPercentage = 0m
+                        }
+                    ]
+                },
+            cancellationToken);
+
+        return LegalTransferFeeInvoiceSnapshot.From(invoice);
+    }
+
+    private async Task NotifyLegalTransferPaymentConfirmedAsync(
+        ProcedureCase legalCase,
+        bool wasPaymentReady,
+        Guid tenantId,
+        Guid actorUserId,
+        DateTime now)
+    {
+        if (wasPaymentReady || !IsLegalTransferPaymentReady(legalCase))
+        {
+            return;
+        }
+
+        const string notificationType = "legal.transfer-fee.payment-confirmed";
+        var alreadyNotified = await _db.Notifications
+            .AsNoTracking()
+            .AnyAsync(notification => notification.TenantId == tenantId
+                && !notification.IsDeleted
+                && notification.NotificationType == notificationType
+                && notification.EntityType == "ProcedureCase"
+                && notification.EntityId == legalCase.Id);
+        if (alreadyNotified)
+        {
+            return;
+        }
+
+        var receiptReference = FirstNonBlank(
+            FieldValue(legalCase, "paymentReceiptReference"),
+            FieldValue(legalCase, "transferFeeReceipt"),
+            legalCase.Documents.FirstOrDefault(document =>
+                !document.IsDeleted
+                && string.Equals(document.Name, "Transfer fee payment receipt", StringComparison.OrdinalIgnoreCase)
+                && (!string.IsNullOrWhiteSpace(document.FileUrl) || !string.IsNullOrWhiteSpace(document.FileName)))?.FileName);
+        var legalReference = FirstNonBlank(legalCase.ReferenceNumber, legalCase.Title, legalCase.Id.ToString())
+            ?? legalCase.Id.ToString();
+        var assignedRole = FirstNonBlank(legalCase.CurrentAssignedRole, "Legal Admin Assistant");
+
+        try
+        {
+            var count = await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                tenantId,
+                actorUserId,
+                [assignedRole],
+                "Transfer fee payment confirmed",
+                $"{legalReference}: transfer fee payment is confirmed. Continue Legal transfer processing.",
+                notificationType,
+                "ProcedureCase",
+                legalCase.Id,
+                $"/legal/{Uri.EscapeDataString(legalCase.EntityType)}?caseId={legalCase.Id}",
+                new Dictionary<string, object>
+                {
+                    ["sourceLabel"] = "Source: Finance / Client -> Legal",
+                    ["sourceModule"] = "Legal",
+                    ["sourceEntityType"] = legalCase.EntityType,
+                    ["sourceRecordReference"] = legalReference,
+                    ["currentStage"] = legalCase.CurrentStageName,
+                    ["assignedRole"] = assignedRole ?? string.Empty,
+                    ["paymentStatus"] = FieldValue(legalCase, "paymentStatus") ?? string.Empty,
+                    ["receiptReference"] = receiptReference ?? string.Empty
+                },
+                CancellationToken.None);
+
+            if (count > 0)
+            {
+                _db.ProcedureCaseActivities.Add(Activity(
+                    tenantId,
+                    actorUserId,
+                    legalCase.Id,
+                    "Legal payment confirmation notified",
+                    legalCase.CurrentStageName,
+                    $"Notified {assignedRole} that transfer fee payment is confirmed."));
+
+                await _db.SaveChangesAsync();
+            }
+        }
+        catch
+        {
+            // Notification delivery must not block saving the transfer fee payment confirmation.
+        }
     }
 
     private static IReadOnlyList<EstateProcedureHandoff> BuildEstateHandoffs(
@@ -824,6 +2267,730 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         procedureCase.Fields.FirstOrDefault(field =>
             string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase))?.Value;
 
+    private async Task<Invoice?> FindLegalTransferFeeInvoiceAsync(ProcedureCase legalCase, Guid tenantId)
+    {
+        if (Guid.TryParse(FieldValue(legalCase, "transferFeeInvoiceId"), out var linkedInvoiceId))
+        {
+            var linkedInvoice = await _db.Invoices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(invoice => invoice.TenantId == tenantId
+                    && invoice.Id == linkedInvoiceId
+                    && !invoice.IsDeleted);
+            if (linkedInvoice is not null)
+            {
+                return linkedInvoice;
+            }
+        }
+
+        var paymentRequestReference = BuildLegalTransferFeePaymentRequestReference(legalCase);
+        return await _db.Invoices
+            .AsNoTracking()
+            .Where(invoice => invoice.TenantId == tenantId
+                && !invoice.IsDeleted
+                && invoice.Reference == paymentRequestReference)
+            .OrderByDescending(invoice => invoice.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    private static bool IsCustomerVisibleInvoiceStatus(InvoiceStatus status) =>
+        status is InvoiceStatus.Sent
+            or InvoiceStatus.PartiallyPaid
+            or InvoiceStatus.Paid
+            or InvoiceStatus.Overdue
+            or InvoiceStatus.Approved;
+
+    private static bool AmountsMatch(decimal invoiceAmount, decimal transferFeePayable)
+        => Math.Abs(invoiceAmount - transferFeePayable) < 0.01m;
+
+    private static string BuildLegalTransferFeePaymentRequestReference(ProcedureCase legalCase)
+    {
+        var legalReference = FirstNonBlank(legalCase.ReferenceNumber, legalCase.Id.ToString()) ?? legalCase.Id.ToString();
+        return BuildLegalTransferFeeInvoiceReference(legalReference);
+    }
+
+    private static string BuildLegalTransferFeeInvoiceReference(string legalReference)
+    {
+        var reference = $"LEGAL-TRANSFER-FEE-{legalReference}";
+        return reference.Length <= 100 ? reference : reference[..100];
+    }
+
+    private sealed record LegalTransferFeeInvoiceSnapshot(
+        Guid Id,
+        string InvoiceNumber,
+        string Status,
+        decimal TotalAmount,
+        decimal PaidAmount,
+        decimal BalanceAmount,
+        string CurrencyCode)
+    {
+        public static LegalTransferFeeInvoiceSnapshot From(Invoice invoice) => new(
+            invoice.Id,
+            invoice.InvoiceNumber,
+            invoice.Status.ToString(),
+            invoice.TotalAmount,
+            invoice.PaidAmount,
+            invoice.BalanceAmount,
+            invoice.CurrencyCode);
+
+        public static LegalTransferFeeInvoiceSnapshot From(InvoiceDto invoice) => new(
+            invoice.Id,
+            invoice.InvoiceNumber,
+            invoice.Status,
+            invoice.TotalAmount,
+            invoice.PaidAmount,
+            invoice.BalanceAmount,
+            invoice.CurrencyCode);
+    }
+
+    private static bool IsLegalTransferClientPaymentStage(ProcedureCase procedureCase) =>
+        string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(procedureCase.CurrentStageName, "Client Payment Call", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasLegalTransferFeeReceipt(ProcedureCase procedureCase) =>
+        !string.IsNullOrWhiteSpace(FieldValue(procedureCase, "paymentReceiptReference"))
+        || !string.IsNullOrWhiteSpace(FieldValue(procedureCase, "transferFeeReceipt"))
+        || procedureCase.Documents.Any(document =>
+            !document.IsDeleted
+            && string.Equals(document.Name, "Transfer fee payment receipt", StringComparison.OrdinalIgnoreCase)
+            && (!string.IsNullOrWhiteSpace(document.FileUrl) || !string.IsNullOrWhiteSpace(document.FileName)));
+
+    private static bool IsLegalTransferPaymentReady(ProcedureCase procedureCase)
+    {
+        if (!IsLegalTransferClientPaymentStage(procedureCase))
+        {
+            return false;
+        }
+
+        return string.Equals(FieldValue(procedureCase, "paymentStatus")?.Trim(), "Paid", StringComparison.OrdinalIgnoreCase)
+            && HasLegalTransferFeeReceipt(procedureCase);
+    }
+
+    private static decimal? ParseProcedureAmount(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var cleaned = new string(value.Where(character =>
+            char.IsDigit(character) || character is '.' or '-').ToArray());
+        return decimal.TryParse(cleaned, NumberStyles.Number, CultureInfo.InvariantCulture, out var amount)
+            ? amount
+            : null;
+    }
+
+    private static void EnsureLegalTransferHeadMinutingReady(ProcedureCase procedureCase)
+    {
+        if (!string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.CurrentStageName, "Head of Legal Minuting", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var transferFee = ParseProcedureAmount(FieldValue(procedureCase, "transferFeePayable"));
+        if (!transferFee.HasValue || transferFee.Value <= 0m)
+        {
+            throw new InvalidOperationException("Enter the transfer fee payable before submitting Head of Legal Minuting.");
+        }
+    }
+
+    private static void EnsureLegalTransferClientPaymentReady(ProcedureCase procedureCase)
+    {
+        if (!IsLegalTransferClientPaymentStage(procedureCase))
+        {
+            return;
+        }
+
+        if (!string.Equals(FieldValue(procedureCase, "paymentStatus")?.Trim(), "Paid", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Finance must create and fully settle the transfer-fee AR invoice before submitting Client Payment Call.");
+        }
+
+        if (!HasLegalTransferFeeReceipt(procedureCase))
+        {
+            throw new InvalidOperationException("Refresh Finance payment after the customer receipt is allocated to the transfer-fee invoice.");
+        }
+    }
+
+    private static void EnsureLegalTransferRequiredStageFieldsReady(ProcedureCase procedureCase)
+    {
+        if (!string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var missing = procedureCase.CurrentStageName switch
+        {
+            "Head of Legal Minuting" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("assignedLegalOfficer", HasProcedureValue, "Assign the Legal Officer before submitting."),
+                ("transferFeePayable", HasPositiveProcedureAmount, "Enter a transfer fee payable greater than zero.")),
+            "Transfer Drafting" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("draftDocumentReference", HasProcedureValue, "Generate the transfer draft before submitting.")),
+            "Legal Vetting" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("dueDiligenceStatus", ValueIs("Cleared"), "Set due diligence status to Cleared."),
+                ("cadastralPlanStatus", ValueIs("Available", "Not required"), "Set cadastral plan status to Available or Not required."),
+                ("scheduleStatus", ValueIs("Inserted", "Not required"), "Set schedule insertion status to Inserted or Not required."),
+                ("legalVettingStatus", ValueIs("Approved"), "Set legal vetting status to Approved.")),
+            "Client Execution" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("interviewDate", HasProcedureValue, "Enter the applicant / transferee interview date."),
+                ("signatureStatus", ValueIs("Client signed", "Fully signed"), "Set signature status to Client signed.")),
+            "Legal Officer Signature" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("signatureStatus", ValueIs("Legal signed", "Fully signed"), "Sign the executed transfer form before submitting.")),
+            "Legal Admin Signature" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("sealStatus", ValueIs("Sealed", "Dated", "Sealed and dated"), "Set seal / dating status before submitting.")),
+            "Head of Legal Signature" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("signatureStatus", ValueIs("Head of Legal signed", "Fully signed"), "Set signature status to Head of Legal signed.")),
+            "Legal Admin Closeout" => LegalTransferRequirementFailures(
+                procedureCase,
+                ("distributionStatus", ValueIs("Distributed", "Returned to Estate Records"), "Set signed transfer distribution status."),
+                ("estateReturnStatus", ValueIs("Returned to Estate"), "Set Estate file return status to Returned to Estate.")),
+            _ => []
+        };
+
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException(missing[0]);
+        }
+    }
+
+    private static List<string> LegalTransferRequirementFailures(
+        ProcedureCase procedureCase,
+        params (string Key, Func<string?, bool> IsSatisfied, string Message)[] requirements)
+        => requirements
+            .Where(requirement => !requirement.IsSatisfied(FieldValue(procedureCase, requirement.Key)))
+            .Select(requirement => requirement.Message)
+            .ToList();
+
+    private static bool HasProcedureValue(string? value)
+        => !string.IsNullOrWhiteSpace(value);
+
+    private static bool HasPositiveProcedureAmount(string? value)
+        => ParseProcedureAmount(value) is > 0m;
+
+    private static Func<string?, bool> ValueIs(params string[] allowedValues)
+        => value => allowedValues.Any(allowed => string.Equals(value?.Trim(), allowed, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsExternalListingApplication(ProcedureCase procedureCase) =>
+        string.Equals(procedureCase.SourceDepartment, "External Portal - Estate Listings", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(procedureCase.EntityType, "EstatePropertyManagementListingApplication", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasFirstInternalStageBeenRoutedForward(ProcedureCase procedureCase)
+        => IsExternalListingApplication(procedureCase) && procedureCase.CurrentStageIndex > 0;
+
+    private static void EnsureExternalListingApprovalIsReady(ProcedureCase procedureCase)
+    {
+        if (!IsExternalListingApplication(procedureCase)
+            || !IsApprovedDecision(FieldValue(procedureCase, "decisionStatus")))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "generatedAgreementReference")))
+        {
+            throw new InvalidOperationException("Generate the agreement before completing final approval.");
+        }
+
+        if (!IsLegalAgreementReviewApproved(FieldValue(procedureCase, "legalAgreementReviewStatus")))
+        {
+            throw new InvalidOperationException("Legal must approve the generated agreement before completing final approval.");
+        }
+
+        if (!IsRentalListingApplication(procedureCase))
+        {
+            return;
+        }
+
+        var moveInDate = FieldValue(procedureCase, "moveInDate");
+        if (string.IsNullOrWhiteSpace(moveInDate)
+            || !DateOnly.TryParseExact(
+                moveInDate.Trim(),
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _))
+        {
+            throw new InvalidOperationException(
+                "Set a valid approved move-in date before completing rental approval.");
+        }
+    }
+
+    private static bool IsApprovedDecision(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim();
+        return normalized.Equals("Approved", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("Approved ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLegalAgreementReviewApproved(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+            && value.Contains("approved", StringComparison.OrdinalIgnoreCase);
+
+    private async Task AttachPropertyLegalHandoffDocumentsAsync(
+        ProcedureCase legalCase,
+        ProcedureCase sourceCase,
+        LinkedLegalMatter matter,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        await AttachGeneratedAgreementDocumentAsync(legalCase, sourceCase, matter, tenantId, userId, now);
+
+        if (matter.Purpose == "ConveyanceRegistration")
+        {
+            NormalizeLegalTransferDocuments(legalCase, tenantId, userId, now);
+            await AttachConveyanceTransferFileAsync(legalCase, sourceCase, tenantId, userId, now);
+        }
+    }
+
+    private static bool IsProcedureDocumentSatisfied(ProcedureCase procedureCase, ProcedureCaseDocument document)
+    {
+        if (!string.IsNullOrWhiteSpace(document.FileUrl))
+        {
+            return true;
+        }
+
+        if (string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(procedureCase.CurrentStageName, "Client Payment Call", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(document.Name, "Transfer fee payment receipt", StringComparison.OrdinalIgnoreCase))
+        {
+            return !string.IsNullOrWhiteSpace(FieldValue(procedureCase, "paymentReceiptReference"))
+                || !string.IsNullOrWhiteSpace(FieldValue(procedureCase, "transferFeeReceipt"));
+        }
+
+        return false;
+    }
+
+    private static bool IsProcedureDocumentMandatoryForSubmission(ProcedureCase procedureCase, ProcedureCaseDocument document)
+    {
+        if (!document.IsMandatory)
+        {
+            return false;
+        }
+
+        return !(
+            string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(procedureCase.CurrentStageName, "Head of Legal Signature", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(document.Name, "Signed transfer distribution / Estate return note", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (string StageName, string Provider)? ResolveLegalTransferDocumentStageAndProvider(string documentName)
+    {
+        var match = LegalTransferDocumentStages.FirstOrDefault(item =>
+            string.Equals(item.Name, documentName, StringComparison.OrdinalIgnoreCase));
+
+        return string.IsNullOrWhiteSpace(match.Name)
+            ? null
+            : (match.StageName, match.Provider);
+    }
+
+    private static void NormalizeLegalTransferDocuments(ProcedureCase legalCase, Guid tenantId, Guid userId, DateTime now)
+    {
+        if (!string.Equals(legalCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var document in legalCase.Documents.Where(item => !item.IsDeleted))
+        {
+            var stageAndProvider = ResolveLegalTransferDocumentStageAndProvider(document.Name);
+            if (stageAndProvider is null)
+            {
+                continue;
+            }
+
+            document.RequiredFrom = stageAndProvider.Value.StageName;
+            document.ProvidedBy = stageAndProvider.Value.Provider;
+            document.TenantId = tenantId;
+            document.UpdatedAt = now;
+            document.LastModifiedById = userId;
+        }
+
+        foreach (var (name, stageName, provider) in LegalTransferDocumentStages)
+        {
+            if (legalCase.Documents.Any(item => !item.IsDeleted && string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            legalCase.Documents.Add(new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = legalCase.Id,
+                Name = name,
+                RequiredFrom = stageName,
+                ProvidedBy = provider,
+                IsMandatory = true,
+                CreatedById = userId,
+                CreatedAt = now
+            });
+        }
+    }
+
+    private async Task AttachConveyanceTransferFileAsync(
+        ProcedureCase legalCase,
+        ProcedureCase sourceCase,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        var sourceDocument = sourceCase.Documents
+            .Where(document => !document.IsDeleted && !string.IsNullOrWhiteSpace(document.FileName))
+            .OrderByDescending(document => string.Equals(document.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(document => document.Name.Contains("agreement", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(document => document.UploadedAt ?? document.UpdatedAt ?? document.CreatedAt)
+            .FirstOrDefault();
+
+        var agreementReference = FirstNonBlank(
+            FieldValue(sourceCase, "finalSignedAgreementReference"),
+            FieldValue(sourceCase, "signedAgreementReference"),
+            FieldValue(sourceCase, "generatedAgreementReference"));
+        var dmsRecord = string.IsNullOrWhiteSpace(agreementReference)
+            ? null
+            : await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.DocumentReference == agreementReference)
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .FirstOrDefaultAsync();
+
+        if (sourceDocument is null && dmsRecord is null && string.IsNullOrWhiteSpace(agreementReference))
+        {
+            return;
+        }
+
+        var document = legalCase.Documents.FirstOrDefault(item =>
+            !item.IsDeleted
+            && string.Equals(item.Name, "Transfer file from Estate", StringComparison.OrdinalIgnoreCase));
+
+        if (document is null)
+        {
+            document = new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = legalCase.Id,
+                Name = "Transfer file from Estate",
+                RequiredFrom = "Head of Legal Minuting",
+                ProvidedBy = "Estate / Property Management",
+                IsMandatory = true,
+                CreatedById = userId,
+                CreatedAt = now
+            };
+            legalCase.Documents.Add(document);
+        }
+
+        document.FileName = FirstNonBlank(sourceDocument?.FileName, dmsRecord?.Title, agreementReference, sourceCase.ReferenceNumber)
+            ?? "Estate transfer file";
+        document.FileUrl = FirstNonBlank(
+            sourceDocument?.FileUrl,
+            dmsRecord is not null ? $"/document-management/records/{dmsRecord.Id}" : null);
+        document.Notes = $"Ported from Estate property record {sourceCase.ReferenceNumber ?? sourceCase.Id.ToString()}. Agreement reference: {agreementReference ?? document.FileName}.";
+        document.RequiredFrom = "Head of Legal Minuting";
+        document.ProvidedBy = "Estate / Property Management";
+        document.UploadedById = userId;
+        document.UploadedAt = now;
+        document.UpdatedAt = now;
+        document.LastModifiedById = userId;
+    }
+
+    private async Task AttachGeneratedAgreementDocumentAsync(
+        ProcedureCase legalCase,
+        ProcedureCase sourceCase,
+        LinkedLegalMatter matter,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        if (!matter.RequiresGeneratedAgreement)
+        {
+            return;
+        }
+
+        var agreementReference = FieldValue(sourceCase, "generatedAgreementReference")?.Trim();
+        if (string.IsNullOrWhiteSpace(agreementReference))
+        {
+            return;
+        }
+
+        var dmsRecord = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.DocumentReference == agreementReference)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        var document = legalCase.Documents.FirstOrDefault(item =>
+            !item.IsDeleted
+            && string.Equals(item.Name, "Generated draft agreement", StringComparison.OrdinalIgnoreCase));
+
+        if (document is null)
+        {
+            document = new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = legalCase.Id,
+                Name = "Generated draft agreement",
+                RequiredFrom = "Legal Intake",
+                ProvidedBy = "Estate / Property Management",
+                IsMandatory = true,
+                CreatedById = userId,
+                CreatedAt = now
+            };
+            legalCase.Documents.Add(document);
+        }
+
+        document.FileName = agreementReference;
+        document.FileUrl = dmsRecord is not null
+            ? $"/document-management/records/{dmsRecord.Id}"
+            : $"/document-management?search={Uri.EscapeDataString(agreementReference)}";
+        document.Notes = $"Generated agreement submitted from Property Management. DMS reference: {agreementReference}.";
+        document.UploadedById = userId;
+        document.UploadedAt = now;
+        document.UpdatedAt = now;
+        document.LastModifiedById = userId;
+    }
+
+    private static bool IsRentalListingApplication(ProcedureCase procedureCase)
+    {
+        var requestType = FieldValue(procedureCase, "requestType") ?? string.Empty;
+        var title = procedureCase.Title ?? string.Empty;
+        return !requestType.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+            && !requestType.Contains("sale", StringComparison.OrdinalIgnoreCase)
+            && !title.StartsWith("Purchase bid", StringComparison.OrdinalIgnoreCase)
+            && !title.StartsWith("Sale request", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeProcedureField(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim().ToLowerInvariant();
+
+    private static bool IsPropertyManagementCase(ProcedureCase procedureCase)
+        => string.Equals(procedureCase.Module, "PropertyManagement", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(procedureCase.EntityType, "EstatePropertyManagementListingApplication", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanInitiatePropertyLegalHandoff(ProcedureCase procedureCase)
+        => IsWorkflowAdmin()
+            || UserOwnsCase(procedureCase)
+            || _currentUser.Roles.Any(role =>
+                string.Equals(role, "Property Manager", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Property Officer", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Estate Manager", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Head of Estate", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Executive Approver", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Authorised Signatory", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Managing Director", StringComparison.OrdinalIgnoreCase));
+
+    private static LinkedLegalMatter ResolveLinkedLegalMatter(string matterType)
+    {
+        var normalized = matterType?.Trim().ToLowerInvariant() ?? string.Empty;
+        return normalized switch
+        {
+            "agreementreview" => new("AgreementReview", "LegalPropertyAgreementReview", "Agreement legal review", null, false, true, false),
+            "conveyanceregistration" => new("ConveyanceRegistration", "LegalTransfer", "Conveyance and registration", "Transfer", false, false, true),
+            "leaserenewal" => new("LeaseRenewal", "LegalLeaseVariationRenewalSublease", "Lease renewal", "Renewal", true, false, true),
+            "leasevariation" => new("LeaseVariation", "LegalLeaseVariationRenewalSublease", "Deed of variation", "Deed of Variation", true, false, true),
+            "sublease" => new("Sublease", "LegalLeaseVariationRenewalSublease", "Sublease", "Sublease", true, false, true),
+            "assignment" => new("Assignment", "LegalAssignmentSubleaseVesting", "Assignment / vesting", "Assignment", true, false, true),
+            "termination" => new("Termination", "LegalTerminationRecognition", "Lease termination / recognition", null, true, false, true),
+            "mortgage" => new("Mortgage", "LegalMortgage", "Consent to mortgage", "Consent to Mortgage", true, false, true),
+            "mortgageinprinciple" => new("MortgageInPrinciple", "LegalMortgageInPrinciple", "Mortgage in principle", "Mortgage in Principle", true, false, false),
+            "courtprocess" => new("CourtProcess", "LegalCourtProcess", "Court process", null, true, false, false),
+            "othercourtprocess" => new("OtherCourtProcess", "LegalOtherCourtProcess", "Other court process", null, true, false, false),
+            "disputeadvisory" => new("DisputeAdvisory", "LegalOpinionAdvisory", "Property dispute / legal advisory", null, true, false, false),
+            _ => throw new InvalidOperationException("Select a supported Legal matter type.")
+        };
+    }
+
+    private static void UpsertLinkedSourceField(
+        ProcedureCase sourceCase,
+        string key,
+        string label,
+        string? value,
+        Guid userId,
+        DateTime now)
+    {
+        var field = sourceCase.Fields.FirstOrDefault(item =>
+            !item.IsDeleted && string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (field is null)
+        {
+            sourceCase.Fields.Add(new ProcedureCaseField
+            {
+                TenantId = sourceCase.TenantId,
+                Key = key,
+                Label = label,
+                FieldType = "text",
+                Value = value,
+                CreatedById = userId,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            return;
+        }
+
+        field.Value = value;
+        field.LastModifiedById = userId;
+        field.UpdatedAt = now;
+    }
+
+    private Task LinkSourceCaseToLegalMatterAsync(
+        ProcedureCase sourceCase,
+        ProcedureCaseDetailDto legalCase,
+        LinkedLegalMatter matter,
+        Guid tenantId,
+        Guid userId,
+        DateTime now) =>
+        LinkSourceCaseToLegalMatterAsync(
+            sourceCase,
+            legalCase.Id,
+            legalCase.ReferenceNumber,
+            legalCase.CurrentStageName,
+            matter,
+            tenantId,
+            userId,
+            now);
+
+    private Task LinkSourceCaseToLegalMatterAsync(
+        ProcedureCase sourceCase,
+        ProcedureCase legalCase,
+        LinkedLegalMatter matter,
+        Guid tenantId,
+        Guid userId,
+        DateTime now) =>
+        LinkSourceCaseToLegalMatterAsync(
+            sourceCase,
+            legalCase.Id,
+            legalCase.ReferenceNumber,
+            legalCase.CurrentStageName,
+            matter,
+            tenantId,
+            userId,
+            now);
+
+    private async Task LinkSourceCaseToLegalMatterAsync(
+        ProcedureCase sourceCase,
+        Guid legalCaseId,
+        string? legalReference,
+        string legalStageName,
+        LinkedLegalMatter matter,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        var openStatus = $"Open - {legalStageName}";
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterCaseId", "Latest linked Legal matter ID", legalCaseId.ToString(), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterReference", "Latest linked Legal matter reference", legalReference, userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterType", "Latest linked Legal matter type", matter.Title, userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalLastMatterStatus", "Latest linked Legal matter status", openStatus, userId, now);
+
+        if (matter.Purpose == "AgreementReview")
+        {
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalAgreementReviewCaseId", "Legal agreement review case ID", legalCaseId.ToString(), userId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalAgreementReviewReference", "Legal agreement review reference", legalReference, userId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalAgreementReviewStatus", "Legal agreement review status", $"Under Legal review - {legalStageName}", userId, now);
+        }
+        else if (matter.Purpose == "ConveyanceRegistration")
+        {
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalConveyanceCaseId", "Legal conveyance case ID", legalCaseId.ToString(), userId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalConveyanceReference", "Legal conveyance reference", legalReference, userId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "legalConveyanceStatus", "Legal conveyance / registration status", openStatus, userId, now);
+            await UpsertLinkedSourceFieldAsync(tenantId, sourceCase.Id, "ownershipTransferStatus", "Ownership transfer status", "Blocked - Legal conveyance and registration pending", userId, now);
+        }
+
+        await _db.ProcedureCases
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId
+                && item.Id == sourceCase.Id
+                && !item.IsDeleted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastActionById, userId)
+                .SetProperty(item => item.UpdatedAt, now));
+
+        _db.ProcedureCaseActivities.Add(Activity(
+            tenantId,
+            userId,
+            sourceCase.Id,
+            "Lodged with Legal",
+            sourceCase.CurrentStageName,
+            $"{matter.Title} opened as {legalReference}."));
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task UpsertLinkedSourceFieldAsync(
+        Guid tenantId,
+        Guid sourceCaseId,
+        string key,
+        string label,
+        string? value,
+        Guid userId,
+        DateTime now)
+    {
+        var trackedField = _db.ChangeTracker
+            .Entries<ProcedureCaseField>()
+            .Select(entry => entry.Entity)
+            .FirstOrDefault(field => field.TenantId == tenantId
+                && field.ProcedureCaseId == sourceCaseId
+                && string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (trackedField is not null)
+        {
+            trackedField.Label = label;
+            trackedField.FieldType = "text";
+            trackedField.Value = value;
+            trackedField.IsDeleted = false;
+            trackedField.DeletedAt = null;
+            trackedField.DeletedBy = null;
+            trackedField.LastModifiedById = userId;
+            trackedField.UpdatedAt = now;
+            return;
+        }
+
+        var updated = await _db.ProcedureCaseFields
+            .IgnoreQueryFilters()
+            .Where(field => field.TenantId == tenantId
+                && field.ProcedureCaseId == sourceCaseId
+                && field.Key == key)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(field => field.Label, label)
+                .SetProperty(field => field.FieldType, "text")
+                .SetProperty(field => field.Value, value)
+                .SetProperty(field => field.IsDeleted, false)
+                .SetProperty(field => field.DeletedAt, (DateTime?)null)
+                .SetProperty(field => field.DeletedBy, (string?)null)
+                .SetProperty(field => field.LastModifiedById, userId)
+                .SetProperty(field => field.UpdatedAt, now));
+
+        if (updated > 0)
+        {
+            return;
+        }
+
+        _db.ProcedureCaseFields.Add(new ProcedureCaseField
+        {
+            TenantId = tenantId,
+            ProcedureCaseId = sourceCaseId,
+            Key = key,
+            Label = label,
+            FieldType = "text",
+            Value = value,
+            CreatedById = userId,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+    }
+
     private static string? FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
@@ -831,6 +2998,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         var tenantId = RequireTenantId();
         var query = _db.ProcedureCases
+            .AsSplitQuery()
             .Include(item => item.Fields)
             .Include(item => item.ChecklistItems)
             .Include(item => item.Documents)
@@ -845,6 +3013,98 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return await query.FirstOrDefaultAsync();
     }
 
+    private async Task ArchiveCompetingExternalListingRequestsAsync(
+        ProcedureCase selectedCase,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        if (!IsExternalListingApplication(selectedCase))
+        {
+            return;
+        }
+
+        var listingReference = NormalizeProcedureField(FieldValue(selectedCase, "listingReference"));
+        var propertyUnit = NormalizeProcedureField(FieldValue(selectedCase, "propertyUnit"));
+        if (listingReference is null && propertyUnit is null)
+        {
+            return;
+        }
+
+        var competingCases = await _db.ProcedureCases
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.Id != selectedCase.Id
+                && !item.IsDeleted
+                && item.SourceDepartment == "External Portal - Estate Listings"
+                && item.EntityType == "EstatePropertyManagementListingApplication"
+                && item.Status != "Archived"
+                && item.Status != "Completed"
+                && item.Status != "Cancelled"
+                && item.Status != "Canceled"
+                && ((listingReference != null && item.Fields.Any(field =>
+                        !field.IsDeleted &&
+                        field.Key == "listingReference" &&
+                        field.Value != null &&
+                        field.Value.Trim().ToLower() == listingReference))
+                    || (propertyUnit != null && item.Fields.Any(field =>
+                        !field.IsDeleted &&
+                        field.Key == "propertyUnit" &&
+                        field.Value != null &&
+                        field.Value.Trim().ToLower() == propertyUnit))))
+            .Select(item => new
+            {
+                item.Id,
+                item.CurrentStageName,
+                item.ReferenceNumber
+            })
+            .ToListAsync();
+
+        if (competingCases.Count == 0)
+        {
+            return;
+        }
+
+        var competingIds = competingCases.Select(item => item.Id).ToList();
+        await _db.ProcedureCases
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId && competingIds.Contains(item.Id) && !item.IsDeleted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, "Archived")
+                .SetProperty(item => item.CurrentStageName, "Archived")
+                .SetProperty(item => item.CurrentStageOwner, (string?)null)
+                .SetProperty(item => item.CurrentAssignedRole, (string?)null)
+                .SetProperty(item => item.LastActionById, userId)
+                .SetProperty(item => item.UpdatedAt, now));
+
+        await _db.ProcedureCaseFields
+            .IgnoreQueryFilters()
+            .Where(field => field.TenantId == tenantId
+                && competingIds.Contains(field.ProcedureCaseId)
+                && !field.IsDeleted
+                && field.Key == "applicationStatus")
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(field => field.Value, "Archived - another request routed")
+                .SetProperty(field => field.UpdatedAt, now));
+
+        var selectedReference = selectedCase.ReferenceNumber ?? selectedCase.Id.ToString();
+        var listingLabel = FieldValue(selectedCase, "listingReference")
+            ?? FieldValue(selectedCase, "propertyUnit")
+            ?? "the listing";
+        foreach (var competingCase in competingCases)
+        {
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                userId,
+                competingCase.Id,
+                "Archived competing request",
+                competingCase.CurrentStageName,
+                $"Archived because request {selectedReference} was routed for {listingLabel}."));
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
     private async Task<WorkspaceSeed> BuildWorkspaceSeedAsync(string module, string entityType)
     {
         var stages = await BuildStageSeedsAsync(module, entityType);
@@ -855,6 +3115,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "PropertyManagement" => BuildPropertyManagementSeed(entityType),
             "Facilities" => BuildFacilitiesSeed(entityType),
             "Planning" => BuildPlanningSeed(entityType),
+            "DocumentManagement" => BuildDocumentManagementSeed(entityType),
             _ => throw new InvalidOperationException($"Procedure module '{module}' is not supported.")
         };
 
@@ -951,7 +3212,27 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return (
             workspace.Procedure.Title,
             workspace.IntakeFields.Select(item => new FieldSeed(item.Key, item.Label, item.Type, item.Options)).ToList(),
-            workspace.RequiredDocuments.Select(item => new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory)).ToList());
+            BuildLegalDocumentSeeds(entityType, workspace));
+    }
+
+    private static IReadOnlyList<DocumentSeed> BuildLegalDocumentSeeds(string entityType, LegalProcedureWorkspace workspace)
+    {
+        if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            return workspace.RequiredDocuments
+                .Select(item =>
+                {
+                    var stageAndProvider = ResolveLegalTransferDocumentStageAndProvider(item.Name);
+                    return stageAndProvider is null
+                        ? new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory)
+                        : new DocumentSeed(item.Name, stageAndProvider.Value.StageName, item.IsMandatory, stageAndProvider.Value.Provider);
+                })
+                .ToList();
+        }
+
+        return workspace.RequiredDocuments
+            .Select(item => new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory))
+            .ToList();
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildFacilitiesSeed(string entityType)
@@ -1663,7 +3944,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             var config = DeserializeStepConfiguration(step.Configuration);
             var taskConfig = config?.TaskConfig;
             if (taskConfig is not null
-                && (taskConfig.RequiresDocument || string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase)))
+                && (taskConfig.RequiresDocument
+                    || taskConfig.DocumentRequirements.Count > 0
+                    || string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase)))
             {
                 var requirements = taskConfig.DocumentRequirements
                     .Where(requirement => !string.IsNullOrWhiteSpace(requirement.DocumentName))
@@ -1673,7 +3956,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 {
                     // Workflow setup: each configured stage document must become a ProcedureCaseDocument requirement.
                     documents.AddRange(requirements.Select(requirement =>
-                        new DocumentSeed(requirement.DocumentName.Trim(), step.Name, requirement.IsRequired)));
+                        new DocumentSeed(
+                            requirement.DocumentName.Trim(),
+                            step.Name,
+                            requirement.IsRequired,
+                            requirement.ProvidedBy,
+                            requirement.DocumentType,
+                            requirement.AppliesTo)));
                 }
                 else
                 {
@@ -1707,7 +3996,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private void EnsureCanEdit(ProcedureCase procedureCase)
     {
-        if (procedureCase.Status == "Completed")
+        if (IsCompleted(procedureCase))
         {
             throw new InvalidOperationException("Completed cases cannot be changed.");
         }
@@ -1730,12 +4019,120 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private bool CanEdit(ProcedureCase procedureCase)
     {
+        if (IsCompleted(procedureCase))
+        {
+            return false;
+        }
+
         if (IsWorkflowAdmin())
         {
             return true;
         }
 
         return UserHasAssignedProcedureRole(procedureCase);
+    }
+
+    private static (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents)
+        BuildDocumentManagementSeed(string entityType)
+    {
+        if (!string.Equals(entityType, "CentralDocumentVersion", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Document Management procedure workspace '{entityType}' is not supported.");
+        }
+
+        return (
+            "Document version approval",
+            [
+                new FieldSeed("documentRecordId", "DMS record ID", "text", []),
+                new FieldSeed("documentVersionId", "Working version ID", "text", []),
+                new FieldSeed("documentReference", "DMS reference", "text", []),
+                new FieldSeed("versionNumber", "Version", "text", []),
+                new FieldSeed("changeSummary", "Change summary", "textarea", [])
+            ],
+            []);
+    }
+
+    private static bool IsCompleted(ProcedureCase procedureCase)
+        => procedureCase.Status.Trim().ToLowerInvariant() is
+            "completed" or "archived" or "rejected" or "cancelled" or "canceled" or "closed";
+
+    private static string? LegalTransferSignatureRoleForStage(string? stageName)
+        => stageName switch
+        {
+            "Legal Officer Signature" => "Legal Officer",
+            "Legal Admin Signature" => "Legal Admin Assistant",
+            "Head of Legal Signature" => "Head of Legal",
+            _ => null
+        };
+
+    private static bool IsLegalTransferStageSignatureRecorded(ProcedureCase procedureCase, ProcedureCaseDocument document)
+    {
+        var fileName = document.FileName ?? string.Empty;
+        var notes = document.Notes ?? string.Empty;
+
+        return procedureCase.CurrentStageName switch
+        {
+            "Legal Officer Signature" =>
+                ContainsAny(fileName, "legal-officer-signed")
+                || ContainsAny(notes, "Legal Officer signed from Legal transfer workspace")
+                || ContainsAny(notes, "Legal Officer digitally signed"),
+            "Legal Admin Signature" =>
+                ContainsAny(fileName, "legal-admin-assistant-signed")
+                || ContainsAny(notes, "Legal Admin Assistant signed from Legal transfer workspace")
+                || ContainsAny(notes, "Legal Admin Assistant digitally signed"),
+            "Head of Legal Signature" =>
+                ContainsAny(fileName, "head-of-legal-signed")
+                || ContainsAny(notes, "Head of Legal signed from Legal transfer workspace")
+                || ContainsAny(notes, "Head of Legal digitally signed"),
+            _ => false
+        };
+    }
+
+    private static string BuildSignedProcedureDocumentFileName(string fileName, string signatureRole)
+    {
+        var safeRole = string.Join("-", signatureRole
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToLowerInvariant();
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "executed-transfer-form";
+        }
+
+        return $"{baseName}-{safeRole}-signed.pdf";
+    }
+
+    private void UpsertProcedureCaseField(
+        ProcedureCase procedureCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        string key,
+        string label,
+        string fieldType,
+        string? value,
+        Guid actorId,
+        DateTime now)
+    {
+        if (fields.TryGetValue(key, out var field))
+        {
+            field.Value = value;
+            field.UpdatedAt = now;
+            field.LastModifiedById = actorId;
+            return;
+        }
+
+        var created = new ProcedureCaseField
+        {
+            TenantId = procedureCase.TenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Key = key,
+            Label = label,
+            FieldType = fieldType,
+            Value = value,
+            CreatedAt = now,
+            CreatedById = actorId
+        };
+        _db.ProcedureCaseFields.Add(created);
+        fields[key] = created;
     }
 
     private bool CanCreateLegalProcedureCase()
@@ -1750,7 +4147,23 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || string.Equals(role, "Legal Registry", StringComparison.OrdinalIgnoreCase));
 
     private bool CanView(ProcedureCase procedureCase)
-        => IsWorkflowAdmin() || UserOwnsCase(procedureCase) || UserHasAssignedProcedureRole(procedureCase);
+        => IsWorkflowAdmin()
+            || CanOverseePropertyListingApplication(procedureCase)
+            || UserOwnsCase(procedureCase)
+            || UserHasAssignedProcedureRole(procedureCase);
+
+    private bool CanOverseePropertyListingApplication(ProcedureCase procedureCase)
+        => string.Equals(
+                procedureCase.EntityType,
+                "EstatePropertyManagementListingApplication",
+                StringComparison.OrdinalIgnoreCase)
+            && _currentUser.Roles.Any(role =>
+                string.Equals(role, "Property Manager", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Estate Manager", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Head of Estate", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Executive Approver", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Authorised Signatory", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Managing Director", StringComparison.OrdinalIgnoreCase));
 
     private bool UserOwnsCase(ProcedureCase procedureCase)
         => Guid.TryParse(_currentUser.UserId, out var userId) && procedureCase.OpenedById == userId;
@@ -1840,6 +4253,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return "Planning";
         }
 
+        if (string.Equals(module, "DocumentManagement", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "Document Management", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(module, "DMS", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DocumentManagement";
+        }
+
         throw new InvalidOperationException($"Procedure module '{module}' is not supported.");
     }
 
@@ -1895,7 +4315,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private async Task<ProcedureCaseDetailDto> ToDetailDtoAsync(ProcedureCase procedureCase)
     {
-        var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase.WorkflowStepId);
+        var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase);
         return new(
             procedureCase.Id,
             procedureCase.Module,
@@ -1921,24 +4341,45 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             procedureCase.Activities.OrderByDescending(item => item.PerformedAt).Take(20).Select(ToActivityDto).ToList());
     }
 
-    private async Task<IReadOnlyList<string>> GetCurrentStageFieldKeysAsync(Guid? workflowStepId)
+    private async Task<IReadOnlyList<string>> GetCurrentStageFieldKeysAsync(ProcedureCase procedureCase)
     {
-        if (!workflowStepId.HasValue)
+        if (!procedureCase.WorkflowStepId.HasValue)
         {
             return [];
         }
 
         var configurationJson = await _db.WorkflowSteps
             .AsNoTracking()
-            .Where(step => step.Id == workflowStepId.Value && !step.IsDeleted)
+            .Where(step => step.Id == procedureCase.WorkflowStepId.Value && !step.IsDeleted)
             .Select(step => step.Configuration)
             .FirstOrDefaultAsync();
         var configuration = DeserializeStepConfiguration(configurationJson);
-        return configuration?.FormFields
+        var configuredFields = configuration?.FormFields
             ?.Where(field => !string.IsNullOrWhiteSpace(field.Name))
             .Select(field => field.Name.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
+        if (configuredFields.Count > 0)
+        {
+            return configuredFields;
+        }
+
+        if (!string.Equals(
+                procedureCase.EntityType,
+                "EstatePropertyManagementListingApplication",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        return procedureCase.CurrentStageIndex switch
+        {
+            0 => ["customerValidationStatus", "listingValidationStatus", "applicationStatus", "notes"],
+            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "notes"],
+            2 => ["decisionStatus", "moveInDate", "notes"],
+            3 => ["customerNotificationStatus", "reservationStatus", "notes"],
+            _ => ["customerNotificationStatus", "applicationStatus", "notes"]
+        };
     }
 
     private static ProcedureCaseFieldDto ToFieldDto(ProcedureCaseField field) =>
@@ -1952,14 +4393,21 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             document.Id,
             document.Name,
             document.RequiredFrom,
+            document.ProvidedBy,
             document.IsMandatory,
             document.FileName,
             string.IsNullOrWhiteSpace(document.FileUrl)
                 ? null
+                : IsDocumentManagementUrl(document.FileUrl)
+                    ? document.FileUrl
                 : $"/api/procedure-cases/{document.ProcedureCaseId}/documents/{document.Id}/content",
             document.Notes,
             document.UploadedById,
             document.UploadedAt);
+
+    private static bool IsDocumentManagementUrl(string fileUrl)
+        => fileUrl.StartsWith("/document-management", StringComparison.OrdinalIgnoreCase)
+            || Uri.TryCreate(fileUrl, UriKind.Absolute, out _);
 
     private static ProcedureCaseActivityDto ToActivityDto(ProcedureCaseActivity activity) =>
         new(activity.Id, activity.Action, activity.StageName, activity.Details, activity.PerformedById, activity.PerformedAt);
@@ -2301,7 +4749,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private sealed record FieldSeed(string Key, string Label, string FieldType, IReadOnlyList<string>? Options);
 
-    private sealed record DocumentSeed(string Name, string? RequiredFrom, bool IsMandatory);
+    private sealed record DocumentSeed(
+        string Name,
+        string? RequiredFrom,
+        bool IsMandatory,
+        string ProvidedBy = "Internal",
+        string? DocumentType = null,
+        string AppliesTo = "All");
+
+    private sealed record LinkedLegalMatter(
+        string Purpose,
+        string EntityType,
+        string Title,
+        string? InstrumentType,
+        bool AllowRepeat,
+        bool RequiresGeneratedAgreement,
+        bool RequiresExecutedAgreement);
 
     private sealed record EstateProcedureHandoff(
         string TargetModule,

@@ -224,6 +224,28 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
+    public void WorkbenchVendorInvoiceRejection_ShouldDelegateItsApOwnedOutcome()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinanceApprovalsController.cs"));
+        var method = ExtractMember(
+            source,
+            "private async Task ApplyRejectedOutcomeAsync",
+            "private async Task FinalizeVendorInvoiceApprovalAsync");
+        var vendorStart = method.IndexOf("if (key == Normalize(\"VendorInvoice\"))", StringComparison.Ordinal);
+        var nextStart = method.IndexOf("if (key == Normalize(\"Invoice\"))", vendorStart, StringComparison.Ordinal);
+
+        vendorStart.Should().BeGreaterThan(-1);
+        nextStart.Should().BeGreaterThan(vendorStart);
+        var vendorBlock = method[vendorStart..nextStart];
+        vendorBlock.Should().Contain("_vendorInvoiceService.ApplyRejectedWorkflowOutcomeAsync", "AP owns its document and budget-release outcome");
+        vendorBlock.Should().NotContain("invoice.Status", "the shared queue must not bypass AP lifecycle invariants");
+        vendorBlock.Should().NotContain("_db.SaveChangesAsync", "the shared queue must not commit a partial AP outcome");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
     public void FinancePurchaseOrders_ShouldUseDocumentNumberReservationsForGeneratedNumbers()
     {
         var root = FindRepositoryRoot();

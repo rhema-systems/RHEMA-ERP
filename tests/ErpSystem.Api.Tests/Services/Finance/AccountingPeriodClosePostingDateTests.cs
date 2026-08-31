@@ -90,6 +90,50 @@ public sealed class AccountingPeriodClosePostingDateTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-PeriodClose")]
     [Trait("Category", "FiscalPeriod")]
+    public async Task PostingDatePolicy_ShouldExposePersistAndAuditChange_ButProtectClosedPeriods()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var openPeriod = SeedPeriod(db, tenantId);
+        var closedPeriod = CreateSiblingPeriod(
+            openPeriod,
+            6,
+            "June 2026",
+            new DateTime(2026, 6, 1),
+            new DateTime(2026, 6, 30));
+        closedPeriod.PeriodStatus = "Closed";
+        closedPeriod.IsOpen = false;
+        closedPeriod.IsClosed = true;
+        db.FiscalPeriods.Add(closedPeriod);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+        var updated = await service.UpdatePostingDatePolicyAsync(openPeriod.Id, new PeriodPostingDatePolicyRequestDto
+        {
+            AllowFutureDating = true,
+            Reason = "Permit controlled September preparation"
+        });
+
+        updated.AllowFutureDating.Should().BeTrue();
+        (await db.FiscalPeriods.AsNoTracking().SingleAsync(period => period.Id == openPeriod.Id))
+            .AllowFutureDating.Should().BeTrue();
+        (await db.AuditLogs.CountAsync(log =>
+            log.TenantId == tenantId
+            && log.Action == FinanceAuditEvents.AccountingPeriodPostingDatePolicyUpdated)).Should().Be(1);
+
+        var closedChange = () => service.UpdatePostingDatePolicyAsync(closedPeriod.Id, new PeriodPostingDatePolicyRequestDto
+        {
+            AllowFutureDating = true,
+            Reason = "Attempt change after certified close"
+        });
+        await closedChange.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*closing, closed, or locked*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-PeriodClose")]
+    [Trait("Category", "FiscalPeriod")]
     public async Task ClosePeriod_ShouldCloseOnlyCurrentTenantPeriodAndAudit()
     {
         var tenantId = Guid.NewGuid();
