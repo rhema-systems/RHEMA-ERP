@@ -162,4 +162,54 @@ describe('tender fee payment verification panel', () => {
       'This payment belongs to a different bid. (TENDER_PAYMENT_BID_MISMATCH)'
     );
   });
+
+  it('allows an authorised user to recover a legacy verified payment with no Finance posting', async () => {
+    const legacyVerifiedPayment: TenderPaymentDto = {
+      ...pendingPayment,
+      status: 'Verified',
+      verifiedDate: '2026-08-30T10:00:00Z',
+    };
+    const postedPayment: TenderPaymentDto = {
+      ...legacyVerifiedPayment,
+      postingEventId: 'posting-event-1',
+      journalEntryId: 'journal-entry-1',
+      postedAtUtc: '2026-08-31T12:00:00Z',
+    };
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    mocks.verifyBidPayment.mockResolvedValue(postedPayment);
+
+    render(
+      <TenderPaymentVerificationPanel
+        bidId="bid-1"
+        payments={[legacyVerifiedPayment]}
+        canVerifyPayment
+        onRefresh={onRefresh}
+      />
+    );
+
+    expect(screen.getByText('Posting pending')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Post payment PAY-001 to Finance',
+      })
+    );
+    expect(
+      screen.getByRole('dialog', {
+        name: 'Post tender fee payment to Finance',
+      })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Post to Finance' }));
+
+    await waitFor(() => {
+      expect(mocks.verifyBidPayment).toHaveBeenCalledWith(
+        'bid-1',
+        'payment-1',
+        { isApproved: true, notes: undefined }
+      );
+    });
+    expect(onRefresh).toHaveBeenCalledWith(postedPayment);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      'Tender fee payment posted to Finance.'
+    );
+  });
 });

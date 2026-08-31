@@ -166,6 +166,9 @@ export interface TenderPaymentDto {
   paymentDate: string;
   verifiedDate?: string;
   verifiedByName?: string;
+  postingEventId?: string;
+  journalEntryId?: string;
+  postedAtUtc?: string;
   transactionId?: string;
   paymentProof?: string;
 }

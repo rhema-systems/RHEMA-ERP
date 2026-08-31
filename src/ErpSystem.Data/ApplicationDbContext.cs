@@ -1260,6 +1260,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderConfiguration());
         builder.ApplyConfiguration(new TenderLotConfiguration());
         builder.ApplyConfiguration(new TenderBidConfiguration());
+        builder.ApplyConfiguration(new TenderFeeConfiguration());
+        builder.ApplyConfiguration(new TenderPaymentConfiguration());
         builder.ApplyConfiguration(new TenderBidLotConfiguration());
         builder.ApplyConfiguration(new TenderBidItemConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationConfiguration());

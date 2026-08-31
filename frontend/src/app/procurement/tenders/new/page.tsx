@@ -145,6 +145,8 @@ export interface TenderFormData {
     dueDate: string;
     description: string;
     bankAccountDetails?: string;
+    receivingAccountId?: string;
+    revenueAccountId?: string;
   }>;
 
   // Invitations

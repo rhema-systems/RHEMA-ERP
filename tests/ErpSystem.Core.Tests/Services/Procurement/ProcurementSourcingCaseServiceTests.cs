@@ -315,6 +315,90 @@ public sealed class ProcurementSourcingCaseServiceTests
     }
 
     [Fact]
+    public async Task TenderEntryAutomaticallyLocksAndReusesThePolicySelectedSourcingCase()
+    {
+        await using var fixture = new Fixture
+        {
+            RecommendedMethod = ProcurementMethodType.NationalCompetitiveTendering
+        };
+
+        var first = await fixture.Service.EnforceSourceEntryAsync(
+            fixture.Requisition.Id,
+            null,
+            "Tender",
+            "TND-AUTO-CASE-001",
+            "trace-tender-auto-case");
+        var retry = await fixture.Service.EnforceSourceEntryAsync(
+            fixture.Requisition.Id,
+            null,
+            "Tender",
+            "TND-AUTO-CASE-001",
+            "trace-tender-auto-case-retry");
+
+        first.SourcingReleaseId.Should().Be(fixture.ReleaseDto.Id);
+        first.SourcingCaseId.Should().NotBeNull();
+        first.SelectedMethod.Should().Be(ProcurementMethodType.NationalCompetitiveTendering);
+        retry.SourcingCaseId.Should().Be(first.SourcingCaseId);
+
+        var retained = await fixture.Service.GetAsync(first.SourcingCaseId!.Value);
+        retained.Lots.Should().ContainSingle();
+        retained.Lots[0].Items.Select(item => item.RequisitionItemId)
+            .Should().BeEquivalentTo(fixture.Items.Select(item => item.Id));
+        retained.SourceRequests.Should().ContainSingle(item =>
+            item.SourceType == "Tender" &&
+            item.Status == ProcurementSourcingCaseSourceRequestStatus.Planned);
+        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task EvaluatorRecoveryLocksAndRegistersExactCurrentTenderLineage()
+    {
+        await using var fixture = new Fixture
+        {
+            RecommendedMethod = ProcurementMethodType.NationalCompetitiveTendering
+        };
+        var tenderId = Guid.NewGuid();
+
+        var recovered = await fixture.Service.RecoverTenderSourceEntryAsync(
+            fixture.Requisition.Id,
+            fixture.ReleaseDto.Id,
+            tenderId,
+            "TND-LEGACY-001",
+            "trace-evaluation-recovery");
+
+        recovered.SourcingReleaseId.Should().Be(fixture.ReleaseDto.Id);
+        recovered.SourcingCaseId.Should().NotBeNull();
+        recovered.SelectedMethod.Should().Be(ProcurementMethodType.NationalCompetitiveTendering);
+        var retained = await fixture.Service.GetAsync(recovered.SourcingCaseId!.Value);
+        retained.Status.Should().Be(ProcurementSourcingCaseStatus.InProgress);
+        retained.SourceRequests.Should().ContainSingle(item =>
+            item.Status == ProcurementSourcingCaseSourceRequestStatus.Created &&
+            item.SourceType == "Tender" &&
+            item.SourceEntityId == tenderId &&
+            item.SourceEntityReference == "TND-LEGACY-001");
+        fixture.VerifyEvaluatorRecoveryAuthorization();
+    }
+
+    [Fact]
+    public async Task TenderLineageRecoveryRequiresTenderEvaluationPermission()
+    {
+        await using var fixture = new Fixture
+        {
+            RecommendedMethod = ProcurementMethodType.NationalCompetitiveTendering
+        };
+        fixture.DenyEvaluatorRecovery();
+
+        await fixture.Service.Invoking(service => service.RecoverTenderSourceEntryAsync(
+                fixture.Requisition.Id,
+                fixture.ReleaseDto.Id,
+                Guid.NewGuid(),
+                "TND-UNAUTHORIZED-001",
+                "trace-evaluation-recovery-denied"))
+            .Should().ThrowAsync<ProcurementSourcingCaseAuthorizationException>();
+        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task StalePolicyIntegrityAndTenantIsolationBlockUseAndDisclosure()
     {
         await using var fixture = new Fixture();
@@ -363,6 +447,7 @@ public sealed class ProcurementSourcingCaseServiceTests
         private Guid _overrideWorkflowDefinitionId;
         private bool _isAdministrator = true;
         private bool _allowOverrideCapability = true;
+        private bool _allowEvaluatorRecovery = true;
 
         public Fixture()
         {
@@ -601,6 +686,13 @@ public sealed class ProcurementSourcingCaseServiceTests
                     It.IsAny<CancellationToken>()),
                 Times.Once);
 
+        public void VerifyEvaluatorRecoveryAuthorization() =>
+            _accessControl.Verify(item => item.EnforceCapabilityAsync(
+                    It.Is<ProcurementAccessCapabilityRequest>(request =>
+                        request.PermissionCode == "procurement.tender.evaluate"),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Once);
+
         public void MakeSourceUnavailable() =>
             _releases.Setup(item => item.GetLinkedControlReadinessAsync(
                     Requisition.Id, It.IsAny<CancellationToken>()))
@@ -627,6 +719,8 @@ public sealed class ProcurementSourcingCaseServiceTests
             _isAdministrator = false;
             _allowOverrideCapability = false;
         }
+
+        public void DenyEvaluatorRecovery() => _allowEvaluatorRecovery = false;
 
         public CreateProcurementSourcingCaseRequest ValidRequest() => new()
         {
@@ -792,8 +886,10 @@ public sealed class ProcurementSourcingCaseServiceTests
 
         private ProcurementAccessCapabilityDecisionDto CapabilityDecision(ProcurementAccessCapabilityRequest request)
         {
-            var allowed = !string.Equals(request.PermissionCode, "procurement.sourcing.approve", StringComparison.Ordinal) ||
-                _allowOverrideCapability;
+            var allowed = (!string.Equals(request.PermissionCode, "procurement.sourcing.approve", StringComparison.Ordinal) ||
+                    _allowOverrideCapability) &&
+                (!string.Equals(request.PermissionCode, "procurement.tender.evaluate", StringComparison.Ordinal) ||
+                    _allowEvaluatorRecovery);
             return new ProcurementAccessCapabilityDecisionDto
             {
                 Allowed = allowed,

@@ -35,6 +35,7 @@ import {
   Download,
   DollarSign,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
@@ -140,6 +141,11 @@ export function TenderPaymentVerificationPanel({
   const [notes, setNotes] = useState('');
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const isFinanceRecovery = Boolean(
+    decision?.isApproved &&
+      decision.payment.status.trim().toLowerCase() === 'verified' &&
+      !decision.payment.journalEntryId
+  );
 
   const openDecision = (payment: TenderPaymentDto, isApproved: boolean) => {
     setDecision({ payment, isApproved });
@@ -183,7 +189,11 @@ export function TenderPaymentVerificationPanel({
         console.error('Error refreshing tender fee payments:', refreshError);
       }
 
-      const action = decision.isApproved ? 'approved' : 'rejected';
+      const action = isFinanceRecovery
+        ? 'posted to Finance'
+        : decision.isApproved
+          ? 'approved'
+          : 'rejected';
       toast.success(`Tender fee payment ${action}.`);
       if (refreshFailed) {
         toast.error(
@@ -233,6 +243,7 @@ export function TenderPaymentVerificationPanel({
                     <TableHead>Method</TableHead>
                     <TableHead>Payment date</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Finance posting</TableHead>
                     {canVerifyPayment && (
                       <TableHead className="text-right">Actions</TableHead>
                     )}
@@ -243,6 +254,9 @@ export function TenderPaymentVerificationPanel({
                     const status = paymentStatusPresentation(payment.status);
                     const isPending =
                       payment.status.trim().toLowerCase() === 'pending';
+                    const isVerifiedWithoutPosting =
+                      payment.status.trim().toLowerCase() === 'verified' &&
+                      !payment.journalEntryId;
                     return (
                       <TableRow key={payment.id}>
                         <TableCell>
@@ -278,6 +292,32 @@ export function TenderPaymentVerificationPanel({
                             </p>
                           )}
                         </TableCell>
+                        <TableCell>
+                          {payment.journalEntryId ? (
+                            <div className="space-y-1">
+                              <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800">
+                                Posted
+                              </Badge>
+                              <a
+                                href={`/finance/journal-entries/${payment.journalEntryId}`}
+                                className="block text-xs font-medium text-primary hover:underline"
+                              >
+                                View journal entry
+                              </a>
+                              {payment.postedAtUtc && (
+                                <p className="text-xs text-gray-500">
+                                  {formatPaymentDate(payment.postedAtUtc)}
+                                </p>
+                              )}
+                            </div>
+                          ) : payment.status.trim().toLowerCase() === 'verified' ? (
+                            <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800">
+                              Posting pending
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </TableCell>
                         {canVerifyPayment && (
                           <TableCell className="text-right">
                             {isPending ? (
@@ -300,6 +340,15 @@ export function TenderPaymentVerificationPanel({
                                   Reject
                                 </Button>
                               </div>
+                            ) : isVerifiedWithoutPosting ? (
+                              <Button
+                                size="sm"
+                                onClick={() => openDecision(payment, true)}
+                                aria-label={`Post payment ${payment.paymentReference} to Finance`}
+                              >
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                Post to Finance
+                              </Button>
                             ) : (
                               <span className="text-sm text-gray-500">
                                 Decision complete
@@ -323,17 +372,23 @@ export function TenderPaymentVerificationPanel({
           if (!open) closeDecision();
         }}
         title={
-          decision?.isApproved
+          isFinanceRecovery
+            ? 'Post tender fee payment to Finance'
+            : decision?.isApproved
             ? 'Approve tender fee payment'
             : 'Reject tender fee payment'
         }
         description={
           decision
-            ? `${decision.isApproved ? 'Approve' : 'Reject'} payment ${decision.payment.paymentReference || 'without a reference'} for ${formatPaymentAmount(decision.payment.amount, decision.payment.currency)}.`
+            ? `${isFinanceRecovery ? 'Create the missing Finance journal for' : decision.isApproved ? 'Approve' : 'Reject'} payment ${decision.payment.paymentReference || 'without a reference'} for ${formatPaymentAmount(decision.payment.amount, decision.payment.currency)}.`
             : undefined
         }
         confirmText={
-          decision?.isApproved ? 'Approve payment' : 'Reject payment'
+          isFinanceRecovery
+            ? 'Post to Finance'
+            : decision?.isApproved
+              ? 'Approve payment'
+              : 'Reject payment'
         }
         cancelText="Cancel"
         variant={decision?.isApproved ? 'default' : 'destructive'}
@@ -353,7 +408,9 @@ export function TenderPaymentVerificationPanel({
                 if (decisionError) setDecisionError(null);
               }}
               placeholder={
-                decision?.isApproved
+                isFinanceRecovery
+                  ? 'Add recovery notes for the audit record'
+                  : decision?.isApproved
                   ? 'Add verification notes for the audit record'
                   : 'Enter the reason this payment is being rejected'
               }

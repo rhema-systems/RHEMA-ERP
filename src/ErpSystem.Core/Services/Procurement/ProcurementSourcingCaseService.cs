@@ -20,6 +20,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     private const string EventType = "ProcurementSourcingCaseLifecycle";
     private const string ReadPermission = "procurement.records.read";
     private const string ManagePermission = "procurement.sourcing.manage";
+    private const string EvaluateTenderPermission = "procurement.tender.evaluate";
     private const string ClosePermission = "procurement.sourcing.approve";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -235,6 +236,15 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         ValidateCreate(request);
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(ManagePermission, request.RequisitionId.ToString("N"), normalizedCorrelation, cancellationToken);
+        return await CreateCoreAsync(request, normalizedCorrelation, cancellationToken);
+    }
+
+    private async Task<ProcurementSourcingCaseDto> CreateCoreAsync(
+        CreateProcurementSourcingCaseRequest request,
+        string normalizedCorrelation,
+        CancellationToken cancellationToken)
+    {
+        ValidateCreate(request);
         var requisition = await LoadRequisitionAsync(request.RequisitionId, true, cancellationToken);
         var lines = await LoadLinesAsync(requisition.Id, true, cancellationToken);
         var readiness = await GetReadinessAsync(requisition.Id, request.SelectedMethod, request.MethodOverrideReason, cancellationToken);
@@ -479,6 +489,43 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         await EnsureCapabilityAsync(ManagePermission, sourceReference, normalizedCorrelation, cancellationToken);
         var release = await _sourcingReleases.EnforceSourcingAsync(requisitionId, sourceType, sourceReference, normalizedCorrelation, cancellationToken);
         var entity = await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id, cancellationToken);
+        if (entity is null && string.Equals(sourceType, "Tender", StringComparison.OrdinalIgnoreCase))
+        {
+            var readiness = await GetReadinessAsync(requisitionId, expectedMethod, cancellationToken: cancellationToken);
+            if (!readiness.IsReleaseCurrent || readiness.CurrentRelease?.Id != release.Id)
+                throw new ProcurementRequisitionSourcingValidationException(
+                    readiness.DecisionCode,
+                    readiness.Message);
+
+            var defaultLot = new CreateProcurementSourcingCaseLotRequest
+            {
+                LotCode = "LOT-01",
+                Title = $"{readiness.RequisitionNumber} approved requirement",
+                PurchaseRequisitionItemIds = readiness.Lines.Select(item => item.Id).ToList()
+            };
+            try
+            {
+                await CreateCoreAsync(new CreateProcurementSourcingCaseRequest
+                {
+                    RequisitionId = requisitionId,
+                    SelectedMethod = expectedMethod,
+                    Lots = [defaultLot]
+                }, normalizedCorrelation, cancellationToken);
+            }
+            catch (ProcurementSourcingCaseConflictException)
+            {
+                // A concurrent request may have locked this exact immutable release.
+                // The authoritative case is reloaded and validated below; unrelated
+                // conflicts still fail because no usable case will be found.
+            }
+
+            entity = await CaseQuery(false)
+                .SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id, cancellationToken);
+            if (entity is null)
+                throw new ProcurementRequisitionSourcingValidationException(
+                    "SOURCING_CASE_REQUIRED",
+                    "The tender could not lock the current immutable sourcing release into a policy-controlled sourcing case.");
+        }
         if (entity is null)
         {
             var requisition = await LoadRequisitionAsync(requisitionId, false, cancellationToken);
@@ -500,6 +547,84 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
                 CurrencyCode = NormalizeCurrency(requisition.Currency)
             };
         }
+        return await BuildEntryGateAsync(entity, expectedMethod, sourceType, sourceReference,
+            normalizedCorrelation, cancellationToken);
+    }
+
+    public async Task<ProcurementSourcingCaseEntryGateDto> RecoverTenderSourceEntryAsync(
+        Guid requisitionId,
+        Guid? retainedSourcingReleaseId,
+        Guid tenderId,
+        string tenderReference,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (tenderId == Guid.Empty || string.IsNullOrWhiteSpace(tenderReference))
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_SOURCE_REQUIRED", "A persisted tender identity is required to recover sourcing lineage.");
+
+        var normalizedCorrelation = NormalizeCorrelation(correlationId);
+        await EnsureCapabilityAsync(EvaluateTenderPermission, tenderReference, normalizedCorrelation, cancellationToken);
+        var releaseReadiness = await _sourcingReleases.GetLinkedControlReadinessAsync(requisitionId, cancellationToken);
+        if (!releaseReadiness.IsReleased || releaseReadiness.CurrentRelease is null)
+            throw new ProcurementRequisitionSourcingValidationException(
+                releaseReadiness.DecisionCode, releaseReadiness.Message);
+        if (retainedSourcingReleaseId.HasValue &&
+            retainedSourcingReleaseId.Value != releaseReadiness.CurrentRelease.Id)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "SOURCING_CASE_LINEAGE_MISMATCH",
+                "The tender does not match the current immutable sourcing release.");
+
+        var entity = await CaseQuery(false)
+            .SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id,
+                cancellationToken);
+        if (entity is null)
+        {
+            var readiness = await GetReadinessAsync(requisitionId, cancellationToken: cancellationToken);
+            var defaultLot = new CreateProcurementSourcingCaseLotRequest
+            {
+                LotCode = "LOT-01",
+                Title = $"{readiness.RequisitionNumber} approved requirement",
+                PurchaseRequisitionItemIds = readiness.Lines.Select(item => item.Id).ToList()
+            };
+            try
+            {
+                await CreateCoreAsync(new CreateProcurementSourcingCaseRequest
+                {
+                    RequisitionId = requisitionId,
+                    Lots = [defaultLot]
+                }, normalizedCorrelation, cancellationToken);
+            }
+            catch (ProcurementSourcingCaseConflictException)
+            {
+                // A concurrent recovery may have locked this exact current release.
+            }
+
+            entity = await CaseQuery(false)
+                .SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id,
+                    cancellationToken);
+        }
+
+        if (entity is null)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "SOURCING_CASE_REQUIRED",
+                "The tender's current immutable release could not be locked into a policy-controlled sourcing case.");
+
+        var gate = await BuildEntryGateAsync(entity, null, "Tender", tenderReference,
+            normalizedCorrelation, cancellationToken);
+        await RegisterSourceRequestCoreAsync(entity.Id, "Tender", tenderId, tenderReference,
+            normalizedCorrelation, cancellationToken);
+        return gate;
+    }
+
+    private async Task<ProcurementSourcingCaseEntryGateDto> BuildEntryGateAsync(
+        ProcurementSourcingCase entity,
+        ProcurementMethodType? expectedMethod,
+        string sourceType,
+        string sourceReference,
+        string normalizedCorrelation,
+        CancellationToken cancellationToken)
+    {
         if (entity.Status is ProcurementSourcingCaseStatus.Closed or ProcurementSourcingCaseStatus.Cancelled)
             throw new ProcurementRequisitionSourcingValidationException("SOURCING_CASE_TERMINAL",
                 $"Sourcing case {entity.CaseNumber} is {entity.Status} and cannot start another source request.");
@@ -548,6 +673,18 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     {
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(ManagePermission, sourceEntityReference, normalizedCorrelation, cancellationToken);
+        await RegisterSourceRequestCoreAsync(sourcingCaseId, sourceType, sourceEntityId,
+            sourceEntityReference, normalizedCorrelation, cancellationToken);
+    }
+
+    private async Task RegisterSourceRequestCoreAsync(
+        Guid sourcingCaseId,
+        string sourceType,
+        Guid sourceEntityId,
+        string sourceEntityReference,
+        string normalizedCorrelation,
+        CancellationToken cancellationToken)
+    {
         var entity = await CaseQuery(true).SingleOrDefaultAsync(item => item.Id == sourcingCaseId, cancellationToken)
             ?? throw new ProcurementRequisitionSourcingValidationException("SOURCING_CASE_NOT_FOUND", "The sourcing case no longer exists in this tenant.");
         var existing = entity.SourceRequests.SingleOrDefault(item => item.SourceEntityId == sourceEntityId &&

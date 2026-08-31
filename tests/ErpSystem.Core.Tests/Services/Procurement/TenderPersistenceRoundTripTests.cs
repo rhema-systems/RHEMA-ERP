@@ -64,6 +64,10 @@ public sealed class TenderPersistenceRoundTripTests
         reopenedAfterCreate.RequiredDocuments.Should().Contain("TaxClearance");
         reopenedAfterCreate.RequiresAcceptanceDeclaration.Should().BeTrue();
 
+        // Reproduce an existing draft saved by the former update path, which retained
+        // the PR/release but failed to persist the case link.
+        fixture.RemoveSourcingCaseLink();
+
         var secondTemplateId = Guid.NewGuid();
         fixture.RegisterTemplate(secondTemplateId, "Template B");
         await fixture.Service.UpdateTenderAsync(created.Id, new UpdateTenderDto
@@ -108,6 +112,15 @@ public sealed class TenderPersistenceRoundTripTests
         reopenedAfterUpdate.MinimumTechnicalScore.Should().Be(80);
         reopenedAfterUpdate.RequiredDocuments.Should().Contain("SSNIT");
         reopenedAfterUpdate.Notes.Should().Be("Updated notes");
+        reopenedAfterUpdate.SourcingReleaseId.Should().Be(fixture.ReleaseId);
+        reopenedAfterUpdate.SourcingCaseId.Should().Be(fixture.SourcingCaseId);
+        fixture.SourcingCases.Verify(service => service.RegisterSourceRequestAsync(
+            fixture.SourcingCaseId,
+            "Tender",
+            created.Id,
+            created.TenderNumber,
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     private sealed class Fixture
@@ -124,7 +137,8 @@ public sealed class TenderPersistenceRoundTripTests
 
             var tenantId = Guid.NewGuid();
             var userId = Guid.NewGuid();
-            var releaseId = Guid.NewGuid();
+            ReleaseId = Guid.NewGuid();
+            SourcingCaseId = Guid.NewGuid();
 
             _tenders.Setup(repository => repository.GenerateTenderNumberAsync())
                 .ReturnsAsync("TND-2026-9001");
@@ -174,8 +188,7 @@ public sealed class TenderPersistenceRoundTripTests
             currentUser.SetupGet(provider => provider.TenantId).Returns(tenantId);
             currentUser.SetupGet(provider => provider.UserId).Returns(userId);
 
-            var sourcing = new Mock<IProcurementSourcingCaseService>();
-            sourcing.Setup(service => service.EnforceSourceEntryAsync(
+            SourcingCases.Setup(service => service.EnforceSourceEntryAsync(
                     RequisitionId,
                     It.IsAny<ProcurementMethodType?>(),
                     It.IsAny<string>(),
@@ -184,12 +197,20 @@ public sealed class TenderPersistenceRoundTripTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
                 {
-                    SourcingReleaseId = releaseId,
-                    SourcingCaseId = null,
+                    SourcingReleaseId = ReleaseId,
+                    SourcingCaseId = SourcingCaseId,
                     SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering,
                     EstimatedValue = EstimatedValue,
                     CurrencyCode = Currency
                 });
+            SourcingCases.Setup(service => service.RegisterSourceRequestAsync(
+                    SourcingCaseId,
+                    "Tender",
+                    It.IsAny<Guid>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
 
             var eventBus = new Mock<IAppEventBus>();
             eventBus.Setup(bus => bus.PublishAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
@@ -234,7 +255,7 @@ public sealed class TenderPersistenceRoundTripTests
                 roleManager.Object,
                 currentUser.Object,
                 eventBus.Object,
-                sourcing.Object,
+                SourcingCases.Object,
                 Mock.Of<IProcurementTenderControlService>(),
                 Mock.Of<IProcurementTenderDocumentControlService>(),
                 Mock.Of<IProcurementExceptionalSourcingControlService>(),
@@ -244,8 +265,17 @@ public sealed class TenderPersistenceRoundTripTests
 
         public TenderService Service { get; }
         public Guid RequisitionId { get; }
+        public Guid ReleaseId { get; }
+        public Guid SourcingCaseId { get; }
         public decimal EstimatedValue { get; }
         public string Currency { get; }
+        public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
+
+        public void RemoveSourcingCaseLink()
+        {
+            if (_storedTender is not null)
+                _storedTender.SourcingCaseId = null;
+        }
 
         public void RegisterTemplate(Guid id, string name)
         {

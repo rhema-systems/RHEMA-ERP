@@ -440,6 +440,8 @@ public class TenderFeeDto
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     public string PaymentMethod { get; set; } = "Online";
+    public Guid? ReceivingAccountId { get; set; }
+    public Guid? RevenueAccountId { get; set; }
     public bool IsMandatory { get; set; }
     public DateTime? DueDate { get; set; }
     public string? Description { get; set; }
@@ -466,6 +468,10 @@ public class CreateTenderFeeDto
     [Required]
     [MaxLength(50)]
     public string PaymentMethod { get; set; } = "Online";
+
+    public Guid? ReceivingAccountId { get; set; }
+
+    public Guid? RevenueAccountId { get; set; }
 
     public bool IsMandatory { get; set; } = true;
     public DateTime? DueDate { get; set; }

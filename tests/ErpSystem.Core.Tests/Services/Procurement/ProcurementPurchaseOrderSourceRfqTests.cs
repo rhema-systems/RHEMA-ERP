@@ -294,6 +294,23 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
             Currency = "GHS",
             Status = "Awarded"
         };
+        var contract = new Contract
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ContractNumber = "CON-DIRECT-TENDER-001",
+            ContractTitle = "Direct approved requisition tender contract",
+            ContractType = "Goods",
+            Status = "Active",
+            TenderAwardId = award.Id,
+            TenderId = tender.Id,
+            TenderBidId = bid.Id,
+            BusinessPartnerId = supplierId,
+            ContractValue = 4_900,
+            Currency = "GHS",
+            StartDate = DateTime.UtcNow.AddDays(-1),
+            EndDate = DateTime.UtcNow.AddDays(30)
+        };
         var readiness = new ProcurementAwardReadinessDecision
         {
             Id = Guid.NewGuid(),
@@ -322,7 +339,7 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
             .Options;
         await using var context = new ApplicationDbContext(options, tenantId);
         context.AddRange(
-            requisition, release, tender, tenderItem, bid, bidItem, award,
+            requisition, release, tender, tenderItem, bid, bidItem, award, contract,
             readiness);
         await context.SaveChangesAsync();
         using var unitOfWork = new UnitOfWork(context);
@@ -383,5 +400,19 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
         purchaseOrder.SourcingCaseId.Should().BeNull();
         purchaseOrder.AwardReadinessDecisionId.Should().Be(readiness.Id);
         purchaseOrder.Currency.Should().Be("GHS");
+
+        var contractSource = await service.ResolveAsync(
+            ProcurementPurchaseOrderSourceType.Contract,
+            contract.Id,
+            supplierId,
+            "release-only-tender-contract");
+
+        contractSource.PurchaseRequisitionId.Should().Be(requisition.Id);
+        contractSource.SourcingReleaseId.Should().Be(release.Id);
+        contractSource.SourcingCaseId.Should().Be(Guid.Empty);
+        contractSource.AwardReadinessDecisionId.Should().Be(readiness.Id);
+        contractSource.SourceId.Should().Be(contract.Id);
+        contractSource.ApprovedLines.Should().ContainSingle(item =>
+            item.SourceLineId == bidItem.Id && item.LineTotal == 4_900);
     }
 }

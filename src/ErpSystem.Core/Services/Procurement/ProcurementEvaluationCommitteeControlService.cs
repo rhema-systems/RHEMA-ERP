@@ -31,6 +31,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementSodGuardService _sodGuard;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IWorkflowInstanceService _workflowInstances;
     private readonly INotificationTopicPublisher _notificationTopics;
 
@@ -40,6 +41,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         IProcurementAccessControlService accessControl,
         IProcurementSodGuardService sodGuard,
         IProcurementControlEventService controlEvents,
+        IProcurementSourcingCaseService sourcingCases,
         IWorkflowInstanceService workflowInstances,
         INotificationTopicPublisher notificationTopics)
     {
@@ -48,6 +50,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         _accessControl = accessControl;
         _sodGuard = sodGuard;
         _controlEvents = controlEvents;
+        _sourcingCases = sourcingCases;
         _workflowInstances = workflowInstances;
         _notificationTopics = notificationTopics;
     }
@@ -1348,18 +1351,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
             throw Validation("EVALUATION_SOURCE_REQUIRED", "SourceId is required.");
         if (sourceType == ProcurementEvaluationSourceType.Tender)
         {
-            var tender = await Tenders.GetQueryable(item =>
-                    item.Id == sourceId &&
-                    item.TenantId == _currentUser.TenantId &&
-                    !item.IsDeleted)
-                .Include(item => item.SourcingCase!)
-                    .ThenInclude(item => item.PolicySet)
-                        .ThenInclude(item => item.SourceConfigurationProfile)
-                .Include(item => item.SourcingCase!)
-                    .ThenInclude(item => item.MethodRule)
-                .AsNoTracking()
-                .FirstOrDefaultAsync(cancellationToken)
-                ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The tender was not found.");
+            var tender = await LoadTenderSourceAsync(sourceId, cancellationToken);
+            if (tender.SourcingCase is null)
+                tender = await RecoverTenderSourceLineageAsync(tender, cancellationToken);
             return SourceLineage.From(tender);
         }
         var rfq = await Rfqs.GetQueryable(item =>
@@ -1375,6 +1369,65 @@ public sealed class ProcurementEvaluationCommitteeControlService
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The RFQ was not found.");
         return SourceLineage.From(rfq);
+    }
+
+    private async Task<Tender> LoadTenderSourceAsync(
+        Guid sourceId,
+        CancellationToken cancellationToken) =>
+        await Tenders.GetQueryable(item =>
+                    item.Id == sourceId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    !item.IsDeleted)
+                .Include(item => item.SourcingCase!)
+                    .ThenInclude(item => item.PolicySet)
+                        .ThenInclude(item => item.SourceConfigurationProfile)
+                .Include(item => item.SourcingCase!)
+                    .ThenInclude(item => item.MethodRule)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The tender was not found.");
+
+    private async Task<Tender> RecoverTenderSourceLineageAsync(
+        Tender tender,
+        CancellationToken cancellationToken)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue ||
+            tender.SourcePurchaseRequisitionId.Value == Guid.Empty)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISSING",
+                "The tender has no approved purchase-requisition lineage from which its sourcing case can be recovered.");
+
+        var isRfq = string.Equals(tender.TenderType?.Trim(), "RFQ",
+            StringComparison.OrdinalIgnoreCase);
+        if (isRfq)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISSING",
+                "RFQ evaluation must use the governed request-for-quotation record rather than a tender shell.");
+        var gate = await _sourcingCases.RecoverTenderSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            tender.SourcingReleaseId,
+            tender.Id,
+            tender.TenderNumber,
+            $"evaluation-lineage:{tender.Id:N}",
+            cancellationToken);
+
+        if (!gate.SourcingCaseId.HasValue || gate.SourcingCaseId.Value == Guid.Empty)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISSING",
+                "The tender's current immutable release has no locked sourcing case.");
+        if (tender.SourcingReleaseId.HasValue &&
+            tender.SourcingReleaseId.Value != gate.SourcingReleaseId)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISMATCH",
+                "The tender does not match the current immutable sourcing release.");
+        if (tender.SourcingCaseId.HasValue &&
+            tender.SourcingCaseId.Value != gate.SourcingCaseId.Value)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISMATCH",
+                "The tender does not match the sourcing case locked to its immutable release.");
+
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        tender.UpdatedAt = DateTime.UtcNow;
+        await Tenders.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return await LoadTenderSourceAsync(tender.Id, cancellationToken);
     }
 
     private async Task<WorkflowDefinition> LoadWorkflowAsync(

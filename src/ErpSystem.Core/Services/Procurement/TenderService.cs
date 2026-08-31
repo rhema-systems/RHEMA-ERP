@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -342,6 +343,8 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Tender with ID {id} not found");
+            Guid? sourceCaseIdToRegister = null;
+            string? sourceTypeToRegister = null;
 
             if (tender.Status != "Draft")
             {
@@ -354,6 +357,10 @@ public class TenderService : ITenderService
                     requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
                     requestForQuotation ? "RequestForQuotation" : "Tender", tender.TenderNumber, Guid.NewGuid().ToString("N"));
                 EnsureSourceLineage(tender.SourcingReleaseId, tender.SourcingCaseId, gate);
+                tender.SourcingReleaseId = gate.SourcingReleaseId;
+                tender.SourcingCaseId = gate.SourcingCaseId;
+                sourceCaseIdToRegister = gate.SourcingCaseId;
+                sourceTypeToRegister = requestForQuotation ? "RequestForQuotation" : "Tender";
                 if (dto.EstimatedValue.HasValue && dto.EstimatedValue.Value != gate.EstimatedValue)
                     throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value must remain equal to the locked sourcing-case value.");
                 if (!string.IsNullOrWhiteSpace(dto.Currency) && !string.Equals(dto.Currency.Trim(), gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
@@ -387,6 +394,15 @@ public class TenderService : ITenderService
             tender.UpdatedAt = DateTime.UtcNow;
 
             await _tenderRepository.UpdateAsync(tender);
+            if (sourceCaseIdToRegister.HasValue)
+            {
+                await _sourcingCaseService.RegisterSourceRequestAsync(
+                    sourceCaseIdToRegister.Value,
+                    sourceTypeToRegister!,
+                    tender.Id,
+                    tender.TenderNumber,
+                    Guid.NewGuid().ToString("N"));
+            }
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Updated tender {TenderId}", id);
@@ -1012,6 +1028,7 @@ public class TenderService : ITenderService
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
             await EnsureStatutoryStructureMutableAsync(tender);
+            await ValidateTenderFeePostingAccountsAsync(dto);
 
             var fee = new TenderFee
             {
@@ -1022,6 +1039,8 @@ public class TenderService : ITenderService
                 Amount = dto.Amount,
                 Currency = dto.Currency,
                 PaymentMethod = dto.PaymentMethod,
+                ReceivingAccountId = dto.ReceivingAccountId,
+                RevenueAccountId = dto.RevenueAccountId,
                 IsMandatory = dto.IsMandatory,
                 DueDate = dto.DueDate,
                 Description = dto.Description,
@@ -1052,11 +1071,14 @@ public class TenderService : ITenderService
             var tender = await _tenderRepository.GetByIdAsync(fee.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {fee.TenderId} not found");
             await EnsureStatutoryStructureMutableAsync(tender);
+            await ValidateTenderFeePostingAccountsAsync(dto);
 
             fee.FeeType = dto.FeeType;
             fee.Amount = dto.Amount;
             fee.Currency = dto.Currency;
             fee.PaymentMethod = dto.PaymentMethod;
+            fee.ReceivingAccountId = dto.ReceivingAccountId;
+            fee.RevenueAccountId = dto.RevenueAccountId;
             fee.IsMandatory = dto.IsMandatory;
             fee.DueDate = dto.DueDate;
             fee.Description = dto.Description;
@@ -1808,6 +1830,8 @@ public class TenderService : ITenderService
             Amount = fee.Amount,
             Currency = fee.Currency,
             PaymentMethod = fee.PaymentMethod,
+            ReceivingAccountId = fee.ReceivingAccountId,
+            RevenueAccountId = fee.RevenueAccountId,
             IsMandatory = fee.IsMandatory,
             DueDate = fee.DueDate,
             Description = fee.Description,
@@ -2113,6 +2137,51 @@ public class TenderService : ITenderService
             throw new ProcurementExceptionalSourcingConflictException(
                 "EXCEPTIONAL_TENDER_TERMS_LOCKED",
                 "Restricted, single-source, and petty-purchase terms are locked after approval. Use the dedicated noncompetitive-sourcing control.");
+    }
+
+    private async Task ValidateTenderFeePostingAccountsAsync(CreateTenderFeeDto dto)
+    {
+        if (!dto.ReceivingAccountId.HasValue || dto.ReceivingAccountId == Guid.Empty)
+            throw new InvalidOperationException(
+                "Select the receiving GL account for this tender fee.");
+        if (!dto.RevenueAccountId.HasValue || dto.RevenueAccountId == Guid.Empty)
+            throw new InvalidOperationException(
+                "Select the fee revenue GL account for this tender fee.");
+        if (dto.ReceivingAccountId == dto.RevenueAccountId)
+            throw new InvalidOperationException(
+                "The receiving and fee revenue GL accounts must be different.");
+
+        var accountIds = new[]
+        {
+            dto.ReceivingAccountId.Value,
+            dto.RevenueAccountId.Value
+        };
+        var accounts = await _unitOfWork.Repository<Account>()
+            .GetQueryable(account =>
+                account.TenantId == _currentUserProvider.TenantId &&
+                accountIds.Contains(account.Id) &&
+                !account.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync();
+        if (accounts.Count != accountIds.Length)
+            throw new InvalidOperationException(
+                "One or more selected tender-fee GL accounts do not belong to this tenant.");
+
+        var receiving = accounts.Single(account => account.Id == dto.ReceivingAccountId.Value);
+        if (receiving.Status != AccountStatus.Active ||
+            receiving.AccountType != AccountType.Asset ||
+            !receiving.AllowDirectPosting ||
+            receiving.IsControlAccount)
+            throw new InvalidOperationException(
+                "The receiving GL account must be an active, direct-posting, non-control Asset account.");
+
+        var revenue = accounts.Single(account => account.Id == dto.RevenueAccountId.Value);
+        if (revenue.Status != AccountStatus.Active ||
+            revenue.AccountType != AccountType.Revenue ||
+            !revenue.AllowDirectPosting ||
+            revenue.IsControlAccount)
+            throw new InvalidOperationException(
+                "The fee revenue GL account must be an active, direct-posting, non-control Revenue account.");
     }
 
     private static TenderLotDto MapToLotDto(TenderLot lot)
