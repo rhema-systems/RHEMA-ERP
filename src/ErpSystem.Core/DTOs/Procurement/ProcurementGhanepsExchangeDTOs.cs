@@ -136,6 +136,8 @@ public sealed class ProcurementGhanepsExchangeMappingOptionDto
 
 public sealed class ProcurementGhanepsExchangeOptionsDto
 {
+    public bool IsConfigured { get; init; }
+    public string? ConfigurationMessage { get; init; }
     public ProcurementGhanepsSourceType SourceType { get; init; }
     public Guid SourceId { get; init; }
     public string SourceReference { get; init; } = string.Empty;

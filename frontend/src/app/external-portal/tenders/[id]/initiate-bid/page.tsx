@@ -932,7 +932,7 @@ export default function InitiateBidPage() {
                                 <AlertDescription>
                                   {manualPayment
                                     ? 'Your manual payment evidence is awaiting verification. You may submit the sealed bid now, but it cannot be opened or evaluated until an authorised procurement user verifies the payment.'
-                                    : 'Online payment provider confirmation is still pending. The sealed bid cannot be submitted until the provider confirms payment.'}
+                                    : 'Online payment provider confirmation is still pending. You may submit the sealed bid now, but it cannot be opened or evaluated until confirmation is received.'}
                                 </AlertDescription>
                               </Alert>
                             )}
@@ -955,10 +955,10 @@ export default function InitiateBidPage() {
                     <Alert className="bg-amber-50 border-amber-200">
                       <Clock className="h-4 w-4 text-amber-700" />
                       <AlertDescription className="text-amber-900">
-                        Payment evidence has been accepted for sealed bid
-                        submission and is pending verification. The bid will
-                        remain sealed and excluded from opening and evaluation
-                        until verification is approved.
+                        Payment evidence has been recorded, so sealed bid
+                        submission is allowed. Payment remains unresolved and
+                        the bid stays excluded from opening and evaluation until
+                        an authorised procurement user verifies it.
                       </AlertDescription>
                     </Alert>
                   )}

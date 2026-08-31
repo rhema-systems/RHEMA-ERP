@@ -154,6 +154,15 @@ export function GhanepsExchangeWorkspace({
       />
     );
 
+  if (!options.data.isConfigured)
+    return (
+      <NotConfigured
+        backHref={backHref}
+        sourceLabel={sourceLabel}
+        message={options.data.configurationMessage}
+      />
+    );
+
   const eventActions = Object.fromEntries(
     status.data.events.map((event) => [event.id, event.allowedActions])
   );
@@ -264,17 +273,6 @@ export function GhanepsExchangeWorkspace({
         </div>
       </div>
 
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Server-authoritative exchange boundary</AlertTitle>
-        <AlertDescription>
-          Source, status, event family, mapping, Published/effective DEC-009
-          lineage, checksums, retry limits, actor, tenant, SOD, notification,
-          shared evidence, and immutable audit are revalidated by the server.
-          This client sends no tenant identifier and cannot overwrite history.
-        </AlertDescription>
-      </Alert>
-
       <GhanepsExchangeRegister
         overview={overview.data}
         options={options.data}
@@ -295,6 +293,38 @@ export function GhanepsExchangeWorkspace({
         onOpenChange={(open) => !open && setAction(undefined)}
         onChanged={refresh}
       />
+    </div>
+  );
+}
+
+function NotConfigured({
+  backHref,
+  sourceLabel,
+  message,
+}: {
+  backHref: string;
+  sourceLabel: string;
+  message?: string;
+}) {
+  return (
+    <div
+      className="space-y-4 p-4 md:p-6"
+      data-testid="ghaneps-exchange-not-configured"
+    >
+      <Button asChild variant="ghost" size="sm">
+        <Link href={backHref}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Return to {sourceLabel.toLowerCase()}
+        </Link>
+      </Button>
+      <Alert>
+        <ShieldCheck className="h-4 w-4" />
+        <AlertTitle>GHANEPS exchange is not configured</AlertTitle>
+        <AlertDescription>
+          {message ??
+            'Tender processing can continue. Configure GHANEPS exchange only when the integration is required.'}
+        </AlertDescription>
+      </Alert>
     </div>
   );
 }

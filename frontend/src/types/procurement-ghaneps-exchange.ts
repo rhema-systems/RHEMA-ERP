@@ -58,6 +58,8 @@ export interface ProcurementGhanepsExchangeMappingOption {
 }
 
 export interface ProcurementGhanepsExchangeOptions {
+  isConfigured: boolean;
+  configurationMessage?: string;
   sourceType: ProcurementGhanepsSourceType;
   sourceId: string;
   sourceReference: string;

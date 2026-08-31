@@ -92,6 +92,7 @@ public class TenderBidDetailDto
     public DateTime UpdatedAt { get; set; }
 
     // Related Data
+    public List<Guid> SelectedLotIds { get; set; } = new();
     public List<TenderBidLotDto> BidLots { get; set; } = new();
     public List<TenderBidItemDto> Items { get; set; } = new();
     public List<TenderBidDocumentDto> Documents { get; set; } = new();

@@ -278,6 +278,11 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var existingBid = await _bidService.GetBidByIdAsync(id);
+            if (existingBid is null || !await CanAccessBidAsync(existingBid))
+            {
+                return NotFound();
+            }
             var bid = await _bidService.UpdateBidAsync(id, dto);
             return Ok(bid);
         }
@@ -770,16 +775,9 @@ public class TenderBidsController : ControllerBase
             return false;
         }
 
-        if (bid.BusinessPartnerId == businessPartner.Id)
-        {
-            return true;
-        }
-
-        var assignments = await _assignmentRepository.GetByBusinessPartnerIdAsync(
-            businessPartner.Id);
-        return assignments.Any(item => item.TenderId == bid.TenderId &&
-            (item.AssignmentType == "AllUsers" ||
-             item.AssignedToUserId == _currentUserProvider.UserId));
+        // A tender assignment grants access to the tender, never to another
+        // supplier's sealed bid or its mutable draft children.
+        return bid.BusinessPartnerId == businessPartner.Id;
     }
 
     /// <summary>

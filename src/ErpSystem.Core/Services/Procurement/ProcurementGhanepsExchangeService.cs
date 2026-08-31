@@ -64,7 +64,29 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
     {
         EnsureInternalReader();
         var source = await ResolveSourceAsync(sourceType, sourceId, null, cancellationToken);
-        var profile = await ResolveProfileAsync(DateTime.UtcNow, cancellationToken);
+        ResolvedProfile profile;
+        try
+        {
+            profile = await ResolveProfileAsync(DateTime.UtcNow, cancellationToken);
+        }
+        catch (ProcurementGhanepsExchangeConflictException exception)
+            when (exception.Code == "GHANEPS_PROFILE_NOT_EFFECTIVE")
+        {
+            return new ProcurementGhanepsExchangeOptionsDto
+            {
+                IsConfigured = false,
+                ConfigurationMessage =
+                    "GHANEPS exchange is optional and has not been configured for this tenant.",
+                SourceType = source.Type,
+                SourceId = source.Id,
+                SourceReference = source.Reference,
+                SourceVariant = source.Variant,
+                BlockedReasons =
+                [
+                    "Configure and publish one effective DEC-009 profile before using GHANEPS exchange."
+                ]
+            };
+        }
         var mappings = profile.Mappings
             .Where(item => MappingApplies(item, source))
             .OrderBy(item => item.EventFamily)
@@ -84,10 +106,14 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         if (!capabilities.Manage)
             blocked.Add("The current actor lacks the required GHANEPS exchange capability.");
         if (mappings.Count == 0)
-            blocked.Add("The effective DEC-009 profile has no applicable mapping for this source.");
+            blocked.Add("Configure an applicable DEC-009 mapping before using GHANEPS exchange.");
 
         return new ProcurementGhanepsExchangeOptionsDto
         {
+            IsConfigured = mappings.Count > 0,
+            ConfigurationMessage = mappings.Count == 0
+                ? "No GHANEPS mapping is configured for this procurement source."
+                : null,
             SourceType = source.Type,
             SourceId = source.Id,
             SourceReference = source.Reference,

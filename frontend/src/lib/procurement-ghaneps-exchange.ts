@@ -243,15 +243,16 @@ export const isGhanepsProfileFailClosed = (
   options?: ProcurementGhanepsExchangeOptions
 ) =>
   !options ||
-  !options.configurationProfileId ||
-  !options.configurationDecisionId ||
-  !options.configurationValueHash ||
-  !options.exchangeProfileCode ||
-  options.mappings.length === 0 ||
-  options.mappings.some(
-    (mapping) =>
-      !isSupportedGhanepsContentType(mapping.payloadContentType) ||
-      !isSupportedGhanepsContentType(mapping.acknowledgementContentType) ||
-      !mapping.acknowledgementPermissionCode?.trim() ||
-      !mapping.reconciliationPermissionCode?.trim()
-  );
+  (options.isConfigured &&
+    (!options.configurationProfileId ||
+      !options.configurationDecisionId ||
+      !options.configurationValueHash ||
+      !options.exchangeProfileCode ||
+      options.mappings.length === 0 ||
+      options.mappings.some(
+        (mapping) =>
+          !isSupportedGhanepsContentType(mapping.payloadContentType) ||
+          !isSupportedGhanepsContentType(mapping.acknowledgementContentType) ||
+          !mapping.acknowledgementPermissionCode?.trim() ||
+          !mapping.reconciliationPermissionCode?.trim()
+      )));

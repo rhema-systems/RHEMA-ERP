@@ -38,6 +38,25 @@ public sealed class ProcurementAwardReadinessControllerTests
     }
 
     [Fact]
+    public void ReadinessReadsAndEvaluationUseSeparateExplicitPermissions()
+    {
+        var type = typeof(ProcurementAwardReadinessController);
+
+        type.GetMethod(nameof(ProcurementAwardReadinessController.GetLatest))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod(nameof(ProcurementAwardReadinessController.GetHistory))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod(nameof(ProcurementAwardReadinessController.GetEvaluatorAwardApproverSodStatus))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod(nameof(ProcurementAwardReadinessController.Evaluate))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.tender.approve");
+    }
+
+    [Fact]
     public async Task EvaluateForwardsTenantScopedSourceAssertionsAndCorrelation()
     {
         var fixture = new Fixture();

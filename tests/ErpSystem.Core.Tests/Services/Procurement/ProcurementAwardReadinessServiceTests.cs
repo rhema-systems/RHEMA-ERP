@@ -147,6 +147,28 @@ public sealed class ProcurementAwardReadinessServiceTests
             item.Contains("AWARD_VERIFICATION", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task SodPreflightRequiresReadPermissionRatherThanAwardApproval()
+    {
+        await using var fixture = new Fixture();
+
+        _ = await fixture.Service.GetEvaluatorAwardApproverSodStatusAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            "read-only-preflight");
+
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.records.read"),
+            "read-only-preflight",
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.tender.approve"),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly UnitOfWork _unitOfWork;
@@ -245,8 +267,8 @@ public sealed class ProcurementAwardReadinessServiceTests
                 .Returns(["TDC_HEAD_OF_PROCUREMENT"]);
             _current.Setup(item => item.HasRole(It.IsAny<string>()))
                 .Returns(false);
-            var access = new Mock<IProcurementAccessControlService>();
-            access.Setup(item => item.EnforceCapabilityAsync(
+            Access = new Mock<IProcurementAccessControlService>();
+            Access.Setup(item => item.EnforceCapabilityAsync(
                     It.IsAny<ProcurementAccessCapabilityRequest>(),
                     It.IsAny<string>(),
                     It.IsAny<CancellationToken>()))
@@ -272,7 +294,7 @@ public sealed class ProcurementAwardReadinessServiceTests
             Service = new ProcurementAwardReadinessService(
                 _unitOfWork,
                 _current.Object,
-                access.Object,
+                Access.Object,
                 sod.Object,
                 events.Object);
         }
@@ -285,6 +307,7 @@ public sealed class ProcurementAwardReadinessServiceTests
         public TenderBid Bid { get; }
         public TenderEvaluation Evaluation { get; }
         public BusinessPartner Partner { get; }
+        public Mock<IProcurementAccessControlService> Access { get; }
         public ProcurementAwardReadinessService Service { get; }
 
         public EvaluateProcurementAwardReadinessRequest Request(string key) => new()
