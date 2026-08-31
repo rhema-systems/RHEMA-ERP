@@ -2,6 +2,7 @@ import type {
   FinanceDimensionAccountRule,
   FinanceDimensionDefinition,
   FinancePostingDimensionValue,
+  FinanceSourceDocumentDimension,
   FinanceSourceDimensionValue,
 } from '@/types/finance';
 
@@ -21,6 +22,18 @@ export const toFinanceDimensionValueRecord = (
       .filter((value) => Boolean(value.dimensionCode && value.valueCode))
       .map((value) => [value.dimensionCode, value.valueCode]),
   );
+
+export const toFinanceSourceDimensionFormState = (
+  evidence?: FinanceSourceDocumentDimension,
+) => ({
+  defaultValues: toFinanceDimensionValueRecord(evidence?.defaultValues ?? []),
+  lineValues: Object.fromEntries(
+    (evidence?.lines ?? []).map((line) => [
+      line.sourceLineId,
+      toFinanceDimensionValueRecord(line.values),
+    ]),
+  ),
+});
 
 export interface FinanceDimensionRuleContext {
   sourceModule: string;

@@ -62,7 +62,10 @@ import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
-import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import {
+    toFinancePostingDimensionValues,
+    toFinanceSourceDimensionFormState,
+} from '@/lib/finance/source-document-dimensions';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -365,6 +368,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         setSelectedSupplier(supplier);
         setSelectedPurchaseOrderId(editInvoice.purchaseOrderId || '');
         suppressPurchaseOrderHydrationRef.current = Boolean(editInvoice.purchaseOrderId);
+        const dimensionState = toFinanceSourceDimensionFormState(editInvoice.financeDimensions);
+        setDefaultDimensionValues(dimensionState.defaultValues);
+        setLineDimensionValues(dimensionState.lineValues);
+        setApplyDefaultToAll(false);
 
         const invoiceDate = new Date(editInvoice.invoiceDate);
         const dueDate = editInvoice.dueDate
@@ -392,6 +399,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             withholdingTaxRate: editInvoice.withholdingTaxRate || 0,
             isOpeningBalance: editInvoice.isOpeningBalance,
             lineItems: editInvoice.lineItems.map(line => ({
+                sourceLineId: line.id,
                 lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Product' | 'Inventory',
                 glAccountId: line.glAccountId,
                 budgetEntryId: line.budgetEntryId,

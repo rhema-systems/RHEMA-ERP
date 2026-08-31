@@ -11,6 +11,7 @@ import {
   resolveSourceDimensionValues,
   toFinanceDimensionValueRecord,
   toFinancePostingDimensionValues,
+  toFinanceSourceDimensionFormState,
   type FinanceDimensionRuleContext,
 } from './source-document-dimensions';
 
@@ -165,5 +166,46 @@ describe('source document dimensions', () => {
         },
       ])
     ).toEqual({ DEPT: 'OPS' });
+  });
+
+  it('hydrates document and line values under their persisted source-line identities', () => {
+    expect(
+      toFinanceSourceDimensionFormState({
+        routeId: 'FinanceApVendorInvoice',
+        certificationState: 'CaptureOptional',
+        sourceDocumentId: 'invoice-1',
+        defaultValues: [
+          {
+            dimensionCode: 'FUND',
+            dimensionName: 'Fund',
+            valueCode: 'GENERAL',
+            valueName: 'General',
+            isReadOnly: false,
+          },
+        ],
+        lines: [
+          {
+            sourceLineId: 'persisted-line-1',
+            accountId: 'expense',
+            isFrozen: false,
+            values: [
+              {
+                dimensionCode: 'DEPT',
+                dimensionName: 'Department',
+                valueCode: 'OPS',
+                valueName: 'Operations',
+                isReadOnly: false,
+              },
+            ],
+            readinessWarnings: [],
+          },
+        ],
+        readinessWarnings: [],
+        budgetEvidenceStatus: 'NotEvaluated',
+      })
+    ).toEqual({
+      defaultValues: { FUND: 'GENERAL' },
+      lineValues: { 'persisted-line-1': { DEPT: 'OPS' } },
+    });
   });
 });

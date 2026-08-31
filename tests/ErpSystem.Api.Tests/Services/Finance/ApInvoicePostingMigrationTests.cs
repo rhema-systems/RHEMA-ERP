@@ -786,6 +786,181 @@ public sealed class ApInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceSourceDimensions")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task DraftEdit_ShouldPreserveExistingAndClientAllocatedDimensionLineIds()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        var existingLine = fixture.Invoice.LineItems.Single();
+        var newLineId = Guid.NewGuid();
+        IReadOnlyList<FinanceSourceDocumentLineContext>? synchronizedLines = null;
+        FinanceSourceDocumentDimensionInputDto? synchronizedInput = null;
+        var sourceDimensions = new Mock<IFinanceSourceDimensionService>();
+        sourceDimensions.Setup(service => service.SynchronizeDraftAsync(
+                It.IsAny<FinancePostingProducerContext>(),
+                fixture.Invoice.Id,
+                fixture.Invoice.InvoiceDate,
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(),
+                It.IsAny<FinanceSourceDocumentDimensionInputDto>(),
+                true,
+                It.IsAny<string?>(),
+                "Vendor invoice draft changed.",
+                It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingProducerContext, Guid, DateTime,
+                IReadOnlyList<FinanceSourceDocumentLineContext>, FinanceSourceDocumentDimensionInputDto?,
+                bool, string?, string, CancellationToken>((_, _, _, lines, input, _, _, _, _) =>
+                {
+                    synchronizedLines = lines;
+                    synchronizedInput = input;
+                })
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto
+            {
+                RouteId = FinanceDimensionRouteId.FinanceApVendorInvoice,
+                SourceDocumentId = fixture.Invoice.Id
+            });
+        sourceDimensions.Setup(service => service.GetAsync(
+                It.IsAny<FinancePostingProducerContext>(),
+                fixture.Invoice.Id,
+                fixture.Invoice.InvoiceDate,
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto
+            {
+                RouteId = FinanceDimensionRouteId.FinanceApVendorInvoice,
+                SourceDocumentId = fixture.Invoice.Id
+            });
+        var (service, _) = CreateService(db, tenantId, sourceDimensions: sourceDimensions.Object);
+        var dimensionInput = new FinanceSourceDocumentDimensionInputDto
+        {
+            Lines = new[]
+            {
+                new FinanceSourceLineDimensionInputDto
+                {
+                    SourceLineId = existingLine.Id,
+                    AccountId = fixture.ExpenseAccount.Id,
+                    Dimensions = Array.Empty<FinancePostingDimensionValueDto>()
+                },
+                new FinanceSourceLineDimensionInputDto
+                {
+                    SourceLineId = newLineId,
+                    AccountId = fixture.ExpenseAccount.Id,
+                    Dimensions = Array.Empty<FinancePostingDimensionValueDto>()
+                }
+            }
+        };
+
+        await service.UpdateAsync(new VendorInvoiceUpdateDto
+        {
+            Id = fixture.Invoice.Id,
+            SupplierInvoiceNumber = fixture.Invoice.SupplierInvoiceNumber,
+            InvoiceDate = fixture.Invoice.InvoiceDate,
+            ReceivedDate = fixture.Invoice.ReceivedDate,
+            DueDate = fixture.Invoice.DueDate,
+            CurrencyCode = fixture.Invoice.CurrencyCode,
+            ExchangeRate = fixture.Invoice.ExchangeRate,
+            PaymentTermsDays = fixture.Invoice.PaymentTermsDays,
+            ApAccountId = fixture.ApAccount.Id,
+            LineItems = new List<VendorInvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = existingLine.Id,
+                    LineItemType = "Expense",
+                    GLAccountId = fixture.ExpenseAccount.Id,
+                    Description = "Updated professional services",
+                    Quantity = 1m,
+                    UnitPrice = 100m
+                },
+                new()
+                {
+                    Id = newLineId,
+                    LineItemType = "Expense",
+                    GLAccountId = fixture.ExpenseAccount.Id,
+                    Description = "Additional professional services",
+                    Quantity = 1m,
+                    UnitPrice = 50m
+                }
+            },
+            FinanceDimensions = dimensionInput
+        }, new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceApVendorInvoice));
+
+        var persistedIds = await db.Set<VendorInvoiceLineItem>()
+            .Where(line => line.VendorInvoiceId == fixture.Invoice.Id && !line.IsDeleted)
+            .Select(line => line.Id)
+            .ToListAsync();
+        persistedIds.Should().BeEquivalentTo(new[] { existingLine.Id, newLineId });
+        synchronizedLines!.Select(line => line.SourceLineId)
+            .Should().BeEquivalentTo(new[] { existingLine.Id, newLineId });
+        synchronizedInput.Should().BeSameAs(dimensionInput);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceSourceDimensions")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task DraftEdit_ShouldRejectALineIdentityAlreadyPersistedByAnotherDocument()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        var conflictingLineId = Guid.NewGuid();
+        db.Set<VendorInvoiceLineItem>().Add(new VendorInvoiceLineItem
+        {
+            Id = conflictingLineId,
+            TenantId = tenantId,
+            VendorInvoiceId = Guid.NewGuid(),
+            LineItemType = "Expense",
+            GLAccountId = fixture.ExpenseAccount.Id,
+            Description = "Other document line",
+            Quantity = 1m,
+            UnitPrice = 1m,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var update = () => service.UpdateAsync(new VendorInvoiceUpdateDto
+        {
+            Id = fixture.Invoice.Id,
+            InvoiceDate = fixture.Invoice.InvoiceDate,
+            ReceivedDate = fixture.Invoice.ReceivedDate,
+            DueDate = fixture.Invoice.DueDate,
+            CurrencyCode = fixture.Invoice.CurrencyCode,
+            ExchangeRate = fixture.Invoice.ExchangeRate,
+            ApAccountId = fixture.ApAccount.Id,
+            LineItems = new List<VendorInvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = conflictingLineId,
+                    LineItemType = "Expense",
+                    GLAccountId = fixture.ExpenseAccount.Id,
+                    Description = "Attempted identity reuse",
+                    Quantity = 1m,
+                    UnitPrice = 100m
+                }
+            }
+        });
+
+        await update.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A vendor invoice line identity already belongs to a persisted document.");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
     public async Task PostedApInvoice_ShouldNotBeEditedOrDeleted()

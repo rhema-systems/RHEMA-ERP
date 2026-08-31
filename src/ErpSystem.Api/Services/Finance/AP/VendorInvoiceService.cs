@@ -520,13 +520,18 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var existingLines = invoice.LineItems.Where(line => !line.IsDeleted)
                 .ToDictionary(line => line.Id);
-            var requestedExistingIds = dto.LineItems.Where(line => line.Id.HasValue)
+            var requestedLineIds = dto.LineItems.Where(line => line.Id.HasValue)
                 .Select(line => line.Id!.Value).ToArray();
-            if (requestedExistingIds.Any(id => id == Guid.Empty)
-                || requestedExistingIds.Distinct().Count() != requestedExistingIds.Length
-                || requestedExistingIds.Any(id => !existingLines.ContainsKey(id)))
-                throw new InvalidOperationException("Vendor invoice line identities are invalid or belong to another document.");
-            foreach (var existing in existingLines.Values.Where(line => !requestedExistingIds.Contains(line.Id)).ToList())
+            if (requestedLineIds.Any(id => id == Guid.Empty)
+                || requestedLineIds.Distinct().Count() != requestedLineIds.Length)
+                throw new InvalidOperationException("Vendor invoice line identities are invalid or duplicated.");
+            var requestedNewIds = requestedLineIds.Where(id => !existingLines.ContainsKey(id)).ToArray();
+            if (requestedNewIds.Length > 0 && await _unitOfWork.Repository<VendorInvoiceLineItem>()
+                    .GetQueryable(line => requestedNewIds.Contains(line.Id))
+                    .IgnoreQueryFilters()
+                    .AnyAsync(cancellationToken))
+                throw new InvalidOperationException("A vendor invoice line identity already belongs to a persisted document.");
+            foreach (var existing in existingLines.Values.Where(line => !requestedLineIds.Contains(line.Id)).ToList())
             {
                 await _unitOfWork.Repository<VendorInvoiceLineItem>().DeleteAsync(existing);
                 invoice.LineItems.Remove(existing);
@@ -543,11 +548,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var lineNet = lineGross - lineDiscount;
                 var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, invoice.SupplierId, dto.IsOpeningBalance, cancellationToken);
 
-                var lineItem = lineDto.Id.HasValue
-                    ? existingLines[lineDto.Id.Value]
+                VendorInvoiceLineItem? persistedLine = null;
+                var isExistingLine = lineDto.Id.HasValue
+                    && existingLines.TryGetValue(lineDto.Id.Value, out persistedLine);
+                var lineItem = isExistingLine
+                    ? persistedLine!
                     : new VendorInvoiceLineItem
                     {
-                        Id = Guid.NewGuid(),
+                        Id = lineDto.Id is { } requestedLineId && requestedLineId != Guid.Empty
+                            ? requestedLineId
+                            : Guid.NewGuid(),
                         TenantId = TenantId,
                         VendorInvoiceId = invoice.Id,
                         CreatedAt = now,
@@ -571,9 +581,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 lineItem.Unit = lineDto.Unit;
                 lineItem.UpdatedAt = now;
                 lineItem.UpdatedBy = UserName;
-                if (!lineDto.Id.HasValue)
+                if (!isExistingLine)
                 {
                     invoice.LineItems.Add(lineItem);
+                    await _unitOfWork.Repository<VendorInvoiceLineItem>().AddAsync(lineItem);
                 }
                 subtotal += lineNet;
                 totalTax += lineTax.TaxAmount;
@@ -606,7 +617,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                     throw new InvalidOperationException("Finance source dimensions are not configured for the manual AP invoice route.");
                 await _unitOfWork.ExecuteInTransactionAsync(async token =>
                 {
-                    await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
                     await _unitOfWork.SaveChangesAsync(token);
                     await _sourceDimensions.SynchronizeDraftAsync(
                         producer, invoice.Id, invoice.InvoiceDate,
@@ -631,7 +641,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
             else
             {
-                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
