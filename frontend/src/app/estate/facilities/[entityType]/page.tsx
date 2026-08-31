@@ -633,7 +633,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       secondaryActions: [
         { label: 'Tenant / Occupant Register', href: '/estate/property-management/EstatePropertyManagementTenantOccupant' },
         { label: 'Move-in / Handover', href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover' },
-        { label: 'Facilities Billing', href: '/estate/facilities/EstateFacilityBillingServiceCharge' },
+        { label: 'Property Billing', href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge' },
         { label: 'Finance AR', href: '/finance/ar/invoices' },
       ],
       checkpoints: [
@@ -756,13 +756,13 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
         'Source: Source Module -> Estate / Facilities -> Central DMS',
       icon: FileText,
       primaryAction: {
-        label: 'Open Central DMS',
-        href: '/document-management',
+        label: 'Open Property & Facilities Records',
+        href: '/estate/property-management/EstatePropertyManagementDocumentRecordIndex',
       },
       secondaryActions: [
         {
-          label: 'Facilities Index',
-          href: '/estate/facilities/EstateFacilityDocument',
+          label: 'Central DMS',
+          href: '/document-management',
         },
         {
           label: 'DMS Metadata Templates',
@@ -796,10 +796,14 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       sourceLabel: 'Source: Estate / Facilities -> Finance AR',
       icon: CreditCard,
       primaryAction: {
-        label: 'Create AR Invoice',
-        href: '/finance/ar/invoices/new?source=estate-facilities',
+        label: 'Open Property Billing',
+        href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
       },
       secondaryActions: [
+        {
+          label: 'Create AR Invoice',
+          href: '/finance/ar/invoices/new?source=estate-facilities',
+        },
         { label: 'AR Invoices', href: '/finance/ar/invoices' },
         {
           label: 'Record Receipt',
@@ -807,10 +811,6 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
         },
         { label: 'AR Customers', href: '/finance/ar/customers' },
         { label: 'AR Reports', href: '/finance/ar/reports' },
-        {
-          label: 'Property Billing',
-          href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
-        },
         { label: 'Central DMS', href: '/document-management' },
       ],
       checkpoints: [

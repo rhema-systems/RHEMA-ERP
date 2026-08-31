@@ -41,6 +41,9 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
         // Estate/customer portal integration: allow only curated external Estate listing, service, and document endpoints.
         "/api/estate/external",
 
+        // Read-only workflow document requirements used to build customer submission forms.
+        "/api/procedure-cases/submission-document-requirements",
+
         // Profile self-service endpoints
         "/api/user/profile",
         "/api/user/change-password",

@@ -405,12 +405,15 @@ export function WorkflowApprovalActions({
     });
   }, [taskOpen, taskChecklistSignature]);
 
-  const runAfter = async () => {
-    if (loadWorkflowSummary && !workflowSummary) {
-      // refresh summary after an action
-      try {
-        const s = await workflowApiService.getWorkflowEntitySummary(entityType, entityId);
-        setSummaryApprovalRequired(s.approvalRequired);
+  const buildActionDescription = (baseDescription?: string, summary?: WorkflowEntitySummaryDto) => {
+    const routingText = buildWorkflowRoutingDescription(summary);
+    return [baseDescription, routingText].filter(Boolean).join(' ') || undefined;
+  };
+
+  const refreshSummaryForAction = async () => {
+    try {
+      const s = await workflowApiService.getWorkflowEntitySummary(entityType, entityId);
+      if (loadWorkflowSummary && !workflowSummary) {
         setSummaryStepName(s.currentStepName || undefined);
         setSummaryStepInstanceId(s.currentStepInstanceId || undefined);
         setSummaryStepType(s.currentStepType);
@@ -421,11 +424,17 @@ export function WorkflowApprovalActions({
         setCanCurrentUserRecall(!!s.canCurrentUserRecall);
         setCanCurrentUserComplete(!!s.canCurrentUserComplete);
         setSummaryPendingApprovers(s.pendingApprovers || []);
-      } catch {
-        // ignore
       }
+      return s;
+    } catch {
+      return undefined;
     }
+  };
+
+  const runAfter = async () => {
+    const refreshedSummary = await refreshSummaryForAction();
     if (onAfterAction) await onAfterAction();
+    return refreshedSummary;
   };
 
   const confirmSubmit = async () => {
@@ -437,14 +446,17 @@ export function WorkflowApprovalActions({
     try {
       setSubmitting(true);
       await onSubmit();
+      const refreshedSummary = await runAfter();
       toast.success(approvalSubmitCopy ? `${entityLabel} submitted for approval` : `${entityLabel} finalized`, {
-        description: entityNumber
-          ? approvalSubmitCopy
-            ? `${entityNumber} has been submitted.`
-            : `${entityNumber} has been finalized because approval is not enabled for this process.`
-          : undefined,
+        description: buildActionDescription(
+          entityNumber
+            ? approvalSubmitCopy
+              ? `${entityNumber} has been submitted.`
+              : `${entityNumber} has been finalized because approval is not enabled for this process.`
+            : undefined,
+          refreshedSummary
+        ),
       });
-      await runAfter();
       return true;
     } catch (e: any) {
       const message = e?.message || '';
@@ -520,11 +532,11 @@ export function WorkflowApprovalActions({
       }
       if (approvalMode === 'approve') await onApprove?.(comments, persistedChecklistResponses, signature);
       else await onReject?.(comments, checklistResponses);
+      const refreshedSummary = await runAfter();
       toast.success(
         approvalMode === 'approve' ? `${entityLabel} approved` : `${entityLabel} rejected`,
-        { description: entityNumber ? `${entityNumber}` : undefined }
+        { description: buildActionDescription(entityNumber ? `${entityNumber}` : undefined, refreshedSummary) }
       );
-      await runAfter();
       return true;
     } catch (e: any) {
       toast.error(`Failed to ${approvalMode} ${entityLabel.toLowerCase()}`, { description: e?.message || undefined });
@@ -721,13 +733,13 @@ export function WorkflowApprovalActions({
         throw new Error(errorMessage);
       }
 
-      toast.success('Workflow task completed', {
-        description: entityNumber ? `${entityNumber}` : undefined,
-      });
       setTaskOpen(false);
       setTaskComments('');
       setTaskFiles({});
-      await runAfter();
+      const refreshedSummary = await runAfter();
+      toast.success('Workflow task completed', {
+        description: buildActionDescription(entityNumber ? `${entityNumber}` : undefined, refreshedSummary),
+      });
     } catch (e: any) {
       toast.error('Failed to complete workflow task', { description: e?.message || undefined });
     } finally {
@@ -1566,4 +1578,24 @@ function getWorkflowChecklistAttachments(
     const attachmentKey = (attachment.checklistItemId || attachment.requirementKey || '').trim().toLowerCase();
     return attachmentKey === key;
   });
+}
+
+export function buildWorkflowRoutingDescription(summary?: WorkflowEntitySummaryDto) {
+  if (!summary?.hasActiveInstance) {
+    return undefined;
+  }
+
+  const routedTo = (summary.pendingApprovers || [])
+    .map((approver) => (approver.approverName || approver.approverRole || '').trim())
+    .filter(Boolean);
+
+  if (routedTo.length === 0) {
+    return undefined;
+  }
+
+  const shortList = routedTo.length <= 2
+    ? routedTo.join(', ')
+    : `${routedTo.slice(0, 2).join(', ')} +${routedTo.length - 2}`;
+
+  return `Routed to ${shortList}.`;
 }

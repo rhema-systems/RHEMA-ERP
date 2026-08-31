@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.DTOs.Estate;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
@@ -1939,6 +1940,7 @@ public class LandAcquisitionsController : ControllerBase
                 (item.SupplierCode == supplierCode || item.Name == vendorName),
                 cancellationToken);
 
+        var supplierWasCreated = false;
         if (supplier == null)
         {
             supplier = new Supplier
@@ -1961,6 +1963,7 @@ public class LandAcquisitionsController : ControllerBase
                 CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
             };
             _context.Set<Supplier>().Add(supplier);
+            supplierWasCreated = true;
         }
 
         var sourceReference = $"LAND-VENDOR-PAYMENT:{acquisition.Id:N}";
@@ -1975,66 +1978,50 @@ public class LandAcquisitionsController : ControllerBase
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
 
-        var shouldApprovePayable = false;
         if (invoice == null)
         {
-            var approvedAt = DateTime.UtcNow;
-            var invoiceId = Guid.NewGuid();
-            var dueDate = SnapshotDate(negotiationSnapshot, "agreementPaymentDueDate") ?? DateTime.UtcNow;
-            invoice = new VendorInvoice
+            if (supplierWasCreated)
             {
-                Id = invoiceId,
-                TenantId = acquisition.TenantId,
-                InvoiceNumber = BuildVendorPaymentInvoiceNumber(acquisition.ProjectReference),
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            var dueDate = SnapshotDate(negotiationSnapshot, "agreementPaymentDueDate") ?? DateTime.UtcNow;
+            var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
+            {
                 SupplierInvoiceNumber = acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference") ?? acquisition.ProjectReference,
                 SupplierId = supplier.Id,
-                SupplierName = supplier.Name,
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = dueDate,
-                SubTotal = agreedAmount.Value,
-                TaxAmount = 0m,
-                DiscountAmount = 0m,
-                TotalAmount = agreedAmount.Value,
-                PaidAmount = 0m,
                 CurrencyCode = "GHS",
                 ExchangeRate = 1m,
-                BaseCurrencyAmount = agreedAmount.Value,
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
-                MatchingStatus = InvoiceMatchingStatus.Unmatched,
-                Status = VendorInvoiceStatus.Draft,
-                ApprovalStatus = "Draft",
-                SubmittedById = userId == Guid.Empty ? null : userId,
-                SubmittedDate = approvedAt,
-                ApprovalComments = $"Approval inherited from land acquisition agreement approval {acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference") ?? acquisition.ProjectReference}.",
+                ExpenseAccountId = landDebitAccountId,
                 Reference = sourceReference,
                 Notes = $"Vendor consideration payable for land acquisition {acquisition.ProjectReference}.",
-                CreatedById = userId == Guid.Empty ? null : userId,
-                CreatedAt = approvedAt,
-                CreatedBy = _currentUserService.UserName ?? "Land Acquisition",
                 LineItems =
                 {
-                    new VendorInvoiceLineItem
+                    new VendorInvoiceLineItemCreateDto
                     {
-                        Id = Guid.NewGuid(),
-                        TenantId = acquisition.TenantId,
-                        VendorInvoiceId = invoiceId,
                         LineItemType = "Service",
                         Description = $"Land acquisition vendor payment for {acquisition.ProjectReference}",
                         Quantity = 1m,
                         UnitPrice = agreedAmount.Value,
                         GLAccountId = landDebitAccountId,
                         TaxTreatment = TaxTreatment.OutOfScope,
-                        Unit = "Agreement",
-                        CreatedById = userId == Guid.Empty ? null : userId,
-                        CreatedAt = approvedAt,
-                        CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
+                        Unit = "Agreement"
                     }
                 }
-            };
-            _context.Set<VendorInvoice>().Add(invoice);
-            shouldApprovePayable = true;
+            }, cancellationToken);
+
+            invoice = await _context.Set<VendorInvoice>()
+                .Include(item => item.LineItems)
+                .FirstAsync(item =>
+                    item.TenantId == acquisition.TenantId &&
+                    item.Id == createdInvoice.Id &&
+                    !item.IsDeleted,
+                    cancellationToken);
         }
         else if (!invoice.JournalEntryId.HasValue)
         {
@@ -2045,9 +2032,6 @@ public class LandAcquisitionsController : ControllerBase
                 line.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
             }
 
-            shouldApprovePayable =
-                invoice.Status != VendorInvoiceStatus.Approved ||
-                !string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase);
         }
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
@@ -2074,16 +2058,9 @@ public class LandAcquisitionsController : ControllerBase
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        if (shouldApprovePayable)
-        {
-            invoice.Status = VendorInvoiceStatus.Approved;
-            invoice.ApprovalStatus = "Approved";
-            invoice.ApprovedById = userId == Guid.Empty ? null : userId;
-            invoice.ApprovedDate = DateTime.UtcNow;
-            invoice.UpdatedAt = DateTime.UtcNow;
-            invoice.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
-            await _context.SaveChangesAsync(cancellationToken);
-        }
+        await EnsureAcquisitionPayableSubmittedForApprovalAsync(invoice, cancellationToken);
+        await SyncVendorPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     private async Task EnsureStampDutyPayableAsync(
@@ -2154,6 +2131,7 @@ public class LandAcquisitionsController : ControllerBase
                     !item.IsDeleted &&
                     (item.SupplierCode == payee.PartnerCode || item.Name == payee.PartnerName),
                     cancellationToken);
+            var supplierWasCreated = false;
             if (supplier == null)
             {
                 supplier = new Supplier
@@ -2176,64 +2154,50 @@ public class LandAcquisitionsController : ControllerBase
                     CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
                 };
                 _context.Set<Supplier>().Add(supplier);
+                supplierWasCreated = true;
             }
 
-            var approvedAt = DateTime.UtcNow;
-            var invoiceId = Guid.NewGuid();
-            invoice = new VendorInvoice
+            if (supplierWasCreated)
             {
-                Id = invoiceId,
-                TenantId = acquisition.TenantId,
-                InvoiceNumber = BuildStampDutyInvoiceNumber(acquisition.ProjectReference),
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
+            {
                 SupplierInvoiceNumber = assessment.AssessmentReference,
                 SupplierId = supplier.Id,
-                SupplierName = supplier.Name,
                 InvoiceDate = assessment.AssessmentDate ?? DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow,
-                SubTotal = assessment.DutyAmount,
-                TaxAmount = 0m,
-                DiscountAmount = 0m,
-                TotalAmount = assessment.DutyAmount,
-                PaidAmount = 0m,
                 CurrencyCode = "GHS",
                 ExchangeRate = 1m,
-                BaseCurrencyAmount = assessment.DutyAmount,
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
-                MatchingStatus = InvoiceMatchingStatus.Unmatched,
-                Status = VendorInvoiceStatus.Draft,
-                ApprovalStatus = "Draft",
-                SubmittedById = userId == Guid.Empty ? null : userId,
-                SubmittedDate = approvedAt,
-                ApprovalComments =
-                    $"Approval inherited from land acquisition finance approval {assessment.FinanceApprovalReference}.",
+                ExpenseAccountId = stampDutyDebitAccountId,
                 Reference = sourceReference,
                 Notes = $"Stamp duty payable for land acquisition {acquisition.ProjectReference}. Finance approval: {assessment.FinanceApprovalReference}.",
-                CreatedById = userId == Guid.Empty ? null : userId,
-                CreatedAt = approvedAt,
-                CreatedBy = _currentUserService.UserName ?? "Land Acquisition",
                 LineItems =
                 {
-                    new VendorInvoiceLineItem
+                    new VendorInvoiceLineItemCreateDto
                     {
-                        Id = Guid.NewGuid(),
-                        TenantId = acquisition.TenantId,
-                        VendorInvoiceId = invoiceId,
                         LineItemType = "Service",
                         Description = $"Stamp duty for {acquisition.ProjectReference} - {assessment.AssessmentReference}",
                         Quantity = 1m,
                         UnitPrice = assessment.DutyAmount,
                         GLAccountId = stampDutyDebitAccountId,
                         TaxTreatment = TaxTreatment.OutOfScope,
-                        Unit = "Assessment",
-                        CreatedById = userId == Guid.Empty ? null : userId,
-                        CreatedAt = approvedAt,
-                        CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
+                        Unit = "Assessment"
                     }
                 }
-            };
-            _context.Set<VendorInvoice>().Add(invoice);
+            }, cancellationToken);
+
+            invoice = await _context.Set<VendorInvoice>()
+                .Include(item => item.LineItems)
+                .FirstAsync(item =>
+                    item.TenantId == acquisition.TenantId &&
+                    item.Id == createdInvoice.Id &&
+                    !item.IsDeleted,
+                    cancellationToken);
         }
         else if (!invoice.JournalEntryId.HasValue)
         {
@@ -2270,16 +2234,26 @@ public class LandAcquisitionsController : ControllerBase
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        if (invoice.Status != VendorInvoiceStatus.Approved ||
-            !string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        await EnsureAcquisitionPayableSubmittedForApprovalAsync(invoice, cancellationToken);
+        await SyncStampDutyPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureAcquisitionPayableSubmittedForApprovalAsync(
+        VendorInvoice invoice,
+        CancellationToken cancellationToken)
+    {
+        if (invoice.Status == VendorInvoiceStatus.Draft)
         {
-            invoice.Status = VendorInvoiceStatus.Approved;
-            invoice.ApprovalStatus = "Approved";
-            invoice.ApprovedById = userId == Guid.Empty ? null : userId;
-            invoice.ApprovedDate = DateTime.UtcNow;
-            invoice.UpdatedAt = DateTime.UtcNow;
-            invoice.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
-            await _context.SaveChangesAsync(cancellationToken);
+            await _vendorInvoiceService.SubmitForApprovalAsync(invoice.Id, cancellationToken);
+            await _context.Entry(invoice).ReloadAsync(cancellationToken);
+            return;
+        }
+
+        if (invoice.Status == VendorInvoiceStatus.Rejected)
+        {
+            throw new InvalidOperationException(
+                $"Accounts Payable invoice {invoice.InvoiceNumber} was rejected. Correct it in Finance before continuing the acquisition payment stage.");
         }
     }
 
@@ -2383,28 +2357,40 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
-        var activeAllocation = invoice.PaymentAllocations
+        var activeAllocations = invoice.PaymentAllocations
             .Where(allocation =>
                 !allocation.IsDeleted &&
                 !allocation.IsReversal &&
                 allocation.VendorPayment != null &&
                 !allocation.VendorPayment.IsDeleted &&
                 IsActiveAccountsPayablePayment(allocation.VendorPayment.Status))
+            .ToList();
+        var completedAllocations = activeAllocations
+            .Where(allocation => IsCompletedAccountsPayablePayment(allocation.VendorPayment!.Status))
             .OrderByDescending(allocation => allocation.AllocationDate)
-            .FirstOrDefault();
-        var completedAllocation = activeAllocation?.VendorPayment.Status is VendorPaymentStatus.Processed
-                or VendorPaymentStatus.Cleared
-                or VendorPaymentStatus.Reconciled
-            ? activeAllocation
-            : null;
+            .ToList();
+        var activeAllocation = completedAllocations.FirstOrDefault() ??
+            activeAllocations
+                .OrderByDescending(allocation => allocation.AllocationDate)
+                .FirstOrDefault();
         var vendorPayment = activeAllocation?.VendorPayment;
-        var completedPayment = completedAllocation?.VendorPayment;
-        var isPaid = invoice.Status == VendorInvoiceStatus.Paid && completedPayment != null;
+        var completedPayment = completedAllocations.FirstOrDefault()?.VendorPayment;
+        var payableAmount = SnapshotDecimal(paymentSnapshot, "agreedAmount") ?? invoice.TotalAmount;
+        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+        var amountPaid = completedAllocations.Sum(allocation => allocation.AllocatedAmount);
+        var balanceAmount = Math.Max(0m, invoice.TotalAmount - amountPaid);
+        var isPaid = invoice.Status is VendorInvoiceStatus.Approved or VendorInvoiceStatus.PartiallyPaid or VendorInvoiceStatus.Paid
+            && completedPayment != null
+            && invoiceAmountMatches
+            && amountPaid >= payableAmount
+            && balanceAmount <= 0m;
         var paymentNotes = vendorPayment == null
             ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            : !invoiceAmountMatches
+                ? $"Accounts Payable invoice {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match payable amount {invoice.CurrencyCode} {payableAmount:N2}."
             : isPaid
                 ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
-                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; finance processing is still required.";
+                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
         {
@@ -2421,9 +2407,9 @@ public class LandAcquisitionsController : ControllerBase
             ["paymentReference"] = vendorPayment?.TransactionReference ?? vendorPayment?.PaymentNumber,
             ["paymentDate"] = vendorPayment?.PaymentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["paymentPurpose"] = SnapshotText(paymentSnapshot, "paymentPurpose") ?? $"Vendor payment for land acquisition {acquisition.ProjectReference}",
-            ["agreedAmount"] = SnapshotDecimal(paymentSnapshot, "agreedAmount") ?? invoice.TotalAmount,
+            ["agreedAmount"] = payableAmount,
             ["amountDue"] = invoice.TotalAmount,
-            ["amountPaid"] = invoice.PaidAmount,
+            ["amountPaid"] = amountPaid,
             ["paymentMethod"] = vendorPayment?.PaymentMethod.ToString(),
             ["vendorPaymentMethod"] = SnapshotText(paymentSnapshot, "vendorPaymentMethod"),
             ["vendorPaymentDueDate"] = SnapshotText(paymentSnapshot, "vendorPaymentDueDate"),
@@ -2437,6 +2423,14 @@ public class LandAcquisitionsController : ControllerBase
         => status is not VendorPaymentStatus.Voided
             and not VendorPaymentStatus.Failed
             and not VendorPaymentStatus.Reversed;
+
+    private static bool IsCompletedAccountsPayablePayment(VendorPaymentStatus status)
+        => status is VendorPaymentStatus.Processed
+            or VendorPaymentStatus.Cleared
+            or VendorPaymentStatus.Reconciled;
+
+    private static bool AmountsMatch(decimal left, decimal right)
+        => Math.Abs(left - right) < 0.01m;
 
     private async Task SyncStampDutyPaymentFromAccountsPayableAsync(
         LandAcquisition acquisition,
@@ -2489,35 +2483,49 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
-        var activeAllocation = invoice.PaymentAllocations
+        var activeAllocations = invoice.PaymentAllocations
             .Where(allocation =>
                 !allocation.IsDeleted &&
                 !allocation.IsReversal &&
                 allocation.VendorPayment != null &&
                 !allocation.VendorPayment.IsDeleted &&
                 IsActiveAccountsPayablePayment(allocation.VendorPayment.Status))
+            .ToList();
+        var completedAllocations = activeAllocations
+            .Where(allocation => IsCompletedAccountsPayablePayment(allocation.VendorPayment!.Status))
             .OrderByDescending(allocation => allocation.AllocationDate)
-            .FirstOrDefault();
-        var completedAllocation = activeAllocation?.VendorPayment.Status is VendorPaymentStatus.Processed
-                or VendorPaymentStatus.Cleared
-                or VendorPaymentStatus.Reconciled
-            ? activeAllocation
-            : null;
+            .ToList();
+        var activeAllocation = completedAllocations.FirstOrDefault() ??
+            activeAllocations
+                .OrderByDescending(allocation => allocation.AllocationDate)
+                .FirstOrDefault();
         var vendorPayment = activeAllocation?.VendorPayment;
-        var completedPayment = completedAllocation?.VendorPayment;
-        var isPaid = invoice.Status == VendorInvoiceStatus.Paid && completedPayment != null;
+        var completedPayment = completedAllocations.FirstOrDefault()?.VendorPayment;
+        var stampDutyAmount = acquisition.StampDutyAssessment?.DutyAmount ?? 0m;
+        var payableAmount = stampDutyAmount > 0m
+            ? stampDutyAmount
+            : invoice.TotalAmount;
+        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+        var amountPaid = completedAllocations.Sum(allocation => allocation.AllocatedAmount);
+        var balanceAmount = Math.Max(0m, invoice.TotalAmount - amountPaid);
+        var isPaid = invoice.Status is VendorInvoiceStatus.Approved or VendorInvoiceStatus.PartiallyPaid or VendorInvoiceStatus.Paid
+            && completedPayment != null
+            && invoiceAmountMatches
+            && amountPaid >= payableAmount
+            && balanceAmount <= 0m;
 
         var accountsPayablePaymentId = vendorPayment?.Id;
         var receiptNumber = vendorPayment?.PaymentNumber;
         var paymentReference = vendorPayment?.TransactionReference ?? vendorPayment?.PaymentNumber;
         var paymentDate = vendorPayment?.PaymentDate;
-        var amountPaid = invoice.PaidAmount;
         var paymentMethod = vendorPayment?.PaymentMethod.ToString();
         var notes = vendorPayment == null
             ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            : !invoiceAmountMatches
+                ? $"Accounts Payable invoice {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match payable amount {invoice.CurrencyCode} {payableAmount:N2}."
             : isPaid
                 ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
-                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; finance processing is still required.";
+                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         SetIfChanged(stampDutyPayment.AccountsPayablePaymentId, accountsPayablePaymentId,
             value => stampDutyPayment.AccountsPayablePaymentId = value);

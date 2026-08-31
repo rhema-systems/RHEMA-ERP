@@ -265,6 +265,8 @@ export interface WorkflowDocumentRequirementDto {
   requirementKey: string;
   documentName: string;
   documentType?: string;
+  providedBy?: 'Customer' | 'Estate' | 'Legal' | 'Finance' | 'Internal';
+  appliesTo?: 'All' | 'Rent' | 'Sale';
   isRequired: boolean;
 }
 

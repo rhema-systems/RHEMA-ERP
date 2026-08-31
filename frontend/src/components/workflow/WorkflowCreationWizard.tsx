@@ -65,6 +65,8 @@ interface DocumentRequirement {
   documentName: string;
   documentType?: string;
   requirementKey?: string;
+  providedBy?: 'Customer' | 'Estate' | 'Legal' | 'Finance' | 'Internal';
+  appliesTo?: 'All' | 'Rent' | 'Sale';
   isRequired: boolean;
 }
 
@@ -243,6 +245,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
               id: step.documentRequirementKey || crypto.randomUUID(),
               documentName: step.documentName,
               requirementKey: step.documentRequirementKey,
+              providedBy: 'Internal',
+              appliesTo: 'All',
               isRequired: true,
             }]
           : []
@@ -336,6 +340,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
         documentName: '',
         documentType: '',
         requirementKey: '',
+        providedBy: 'Internal',
+        appliesTo: 'All',
         isRequired: true,
       },
     ]);
@@ -379,6 +385,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
               requirementKey: item.requirementKey?.trim() || buildRequirementKey(item.documentName, requirementIndex),
               documentName: item.documentName.trim(),
               documentType: item.documentType?.trim() || undefined,
+              providedBy: item.providedBy || 'Internal',
+              appliesTo: item.appliesTo || 'All',
               isRequired: item.isRequired !== false,
             }));
           const fallbackDocumentName = s.documentName?.trim();
@@ -1022,7 +1030,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                                 </Button>
                               </div>
                             </div>
-                            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+                            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_180px_180px_auto]">
                               <div>
                                 <Label className="text-xs">Requirement Key</Label>
                                 <Input
@@ -1030,6 +1038,36 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                                   onChange={(e) => updateDocumentRequirement(index, 'requirementKey', e.target.value)}
                                   placeholder="Auto-generated if blank"
                                 />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Provided by</Label>
+                                <Select
+                                  value={item.providedBy || 'Internal'}
+                                  onValueChange={(value) => updateDocumentRequirement(index, 'providedBy', value)}
+                                >
+                                  <SelectTrigger><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Customer">Customer</SelectItem>
+                                    <SelectItem value="Estate">Estate</SelectItem>
+                                    <SelectItem value="Legal">Legal</SelectItem>
+                                    <SelectItem value="Finance">Finance</SelectItem>
+                                    <SelectItem value="Internal">Other internal team</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs">Applies to</Label>
+                                <Select
+                                  value={item.appliesTo || 'All'}
+                                  onValueChange={(value) => updateDocumentRequirement(index, 'appliesTo', value)}
+                                >
+                                  <SelectTrigger><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="All">All requests</SelectItem>
+                                    <SelectItem value="Rent">Rental only</SelectItem>
+                                    <SelectItem value="Sale">Sale only</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
                               <div className="flex items-end space-x-2 pb-2">
                                 <Checkbox

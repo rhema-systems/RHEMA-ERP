@@ -1,9 +1,17 @@
+using System.Globalization;
 using System.Text.Json;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
+using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using ErpSystem.Api.Services.DocumentManagement;
@@ -15,6 +23,7 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using CentralDocumentMetadataTemplateEntity = ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate;
+using BusinessPartner = ErpSystem.Core.Entities.Procurement.BusinessPartner;
 
 namespace ErpSystem.Api.Controllers.DocumentManagement;
 
@@ -31,7 +40,10 @@ public sealed class DocumentManagementController : ControllerBase
     private readonly IFileStorageService _fileStorageService;
     private readonly IControlledFileUploadService _controlledFiles;
     private readonly ICentralDocumentRenditionService _renditionService;
+    private readonly ICentralDocumentPdfSigningService _pdfSigningService;
     private readonly INotificationService _notificationService;
+    private readonly IProcedureCaseService _procedureCaseService;
+    private readonly ILogger<DocumentManagementController> _logger;
 
     public DocumentManagementController(
         ICentralDocumentManagementService documentManagement,
@@ -40,7 +52,10 @@ public sealed class DocumentManagementController : ControllerBase
         IFileStorageService fileStorageService,
         IControlledFileUploadService controlledFiles,
         ICentralDocumentRenditionService renditionService,
-        INotificationService notificationService)
+        ICentralDocumentPdfSigningService pdfSigningService,
+        INotificationService notificationService,
+        IProcedureCaseService procedureCaseService,
+        ILogger<DocumentManagementController> logger)
     {
         _documentManagement = documentManagement;
         _db = db;
@@ -48,7 +63,10 @@ public sealed class DocumentManagementController : ControllerBase
         _fileStorageService = fileStorageService;
         _controlledFiles = controlledFiles;
         _renditionService = renditionService;
+        _pdfSigningService = pdfSigningService;
         _notificationService = notificationService;
+        _procedureCaseService = procedureCaseService;
+        _logger = logger;
     }
 
     [HttpGet("workspaces")]
@@ -261,11 +279,6 @@ public sealed class DocumentManagementController : ControllerBase
         [FromBody] UpsertGeneratedDocumentTemplateRequest request,
         CancellationToken cancellationToken)
     {
-        if (!IsDmsAccessAdministrator())
-        {
-            return Forbid();
-        }
-
         if (string.IsNullOrWhiteSpace(templateCode))
         {
             return BadRequest(new { success = false, message = "Template code is required." });
@@ -280,8 +293,15 @@ public sealed class DocumentManagementController : ControllerBase
                 && item.TemplateCode == code
                 && !item.IsDeleted, cancellationToken);
 
+        var requestedModule = Truncate(TrimOrDefault(request.Module, template?.Module ?? string.Empty), 120);
+
         if (template is null)
         {
+            if (!IsDmsAccessAdministrator())
+            {
+                return Forbid();
+            }
+
             template = new CentralDocumentGenerationTemplate
             {
                 TenantId = tenantId,
@@ -292,10 +312,15 @@ public sealed class DocumentManagementController : ControllerBase
             };
             _db.CentralDocumentGenerationTemplates.Add(template);
         }
+        else if (!CanManageDocumentTemplateModule(template.Module)
+            || !CanManageDocumentTemplateModule(requestedModule))
+        {
+            return Forbid();
+        }
 
         template.Title = Truncate(TrimOrDefault(request.Title, template.Title), 180);
         template.TitleTemplate = Truncate(TrimOrDefault(request.TitleTemplate, template.TitleTemplate), 250);
-        template.Module = Truncate(TrimOrDefault(request.Module, template.Module), 120);
+        template.Module = requestedModule;
         template.SourceLabel = Truncate(TrimOrDefault(request.SourceLabel, template.SourceLabel), 500);
         template.DocumentType = Truncate(TrimOrDefault(request.DocumentType, template.DocumentType), 150);
         template.MetadataTemplateCode = Truncate(TrimOrDefault(request.MetadataTemplateCode, template.MetadataTemplateCode), 80);
@@ -307,6 +332,123 @@ public sealed class DocumentManagementController : ControllerBase
         template.ApprovalRole = TrimToNull(request.ApprovalRole);
         template.SignatureRole = TrimToNull(request.SignatureRole);
         template.DefaultDispatchChannel = TrimToNull(request.DefaultDispatchChannel);
+        template.UpdatedAt = now;
+        template.UpdatedBy = _currentUserService.UserName ?? "System";
+        template.LastModifiedById = GetUserId();
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { success = true, data = ToGeneratedTemplateDto(template) });
+    }
+
+    [HttpPost("document-templates/{templateCode}/word-template")]
+    public async Task<IActionResult> UploadDocumentTemplateWordSource(
+        string templateCode,
+        [FromForm] IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(templateCode))
+        {
+            return BadRequest(new { success = false, message = "Template code is required." });
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { success = false, message = "Upload a Word template file." });
+        }
+
+        if (!IsWordFile(file.ContentType, file.FileName) || !file.FileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "Generation templates must be uploaded as .docx Word files." });
+        }
+
+        var tenantId = GetTenantId();
+        await EnsureDefaultGenerationTemplatesAsync(tenantId, cancellationToken);
+        var code = templateCode.Trim();
+        var template = await _db.CentralDocumentGenerationTemplates
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.TemplateCode == code
+                && !item.IsDeleted, cancellationToken);
+
+        if (template is null)
+        {
+            return NotFound(new { success = false, message = "Document generation template was not found." });
+        }
+
+        if (!CanManageDocumentTemplateModule(template.Module))
+        {
+            return Forbid();
+        }
+
+        await using var sourceStream = file.OpenReadStream();
+        await using var templateBytes = new MemoryStream();
+        await sourceStream.CopyToAsync(templateBytes, cancellationToken);
+
+        string extractedBody;
+        try
+        {
+            using var extractionStream = new MemoryStream(templateBytes.ToArray());
+            extractedBody = DocumentTemplateWordBodyExtractor.ExtractBody(extractionStream);
+        }
+        catch (OpenXmlPackageException)
+        {
+            return BadRequest(new { success = false, message = "The uploaded .docx file could not be read as a Word document." });
+        }
+
+        if (string.IsNullOrWhiteSpace(extractedBody))
+        {
+            return BadRequest(new { success = false, message = "The uploaded Word template does not contain extractable body text." });
+        }
+
+        await using var uploadStream = new MemoryStream(templateBytes.ToArray());
+        var storageResult = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = uploadStream,
+            FileName = SafeFileName(file.FileName),
+            ContentType = WordDocumentContentType,
+            FileSize = file.Length,
+            Category = "central-dms-generation-template",
+            TenantId = tenantId.ToString(),
+            Metadata =
+            {
+                ["TemplateCode"] = template.TemplateCode,
+                ["Source"] = "Uploaded Word generation template"
+            }
+        });
+
+        if (!storageResult.Success)
+        {
+            return BadRequest(new { success = false, message = storageResult.ErrorMessage ?? "Unable to upload the Word template." });
+        }
+
+        var now = DateTime.UtcNow;
+        var uploadRecord = new FileUploadRecord
+        {
+            TenantId = tenantId,
+            Category = "central-dms-generation-template",
+            FilePath = storageResult.FilePath,
+            StoredFileName = storageResult.FileName,
+            OriginalFileName = storageResult.OriginalFileName,
+            ContentType = storageResult.ContentType,
+            FileSize = storageResult.FileSize,
+            StorageProvider = storageResult.StorageProvider,
+            UploadedByUserId = GetUserId() ?? Guid.Empty,
+            VirusScanStatus = FileVirusScanStatus.Skipped,
+            CreatedAt = now,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            CreatedById = GetUserId()
+        };
+        _db.FileUploadRecords.Add(uploadRecord);
+
+        template.TemplateFileUploadRecordId = uploadRecord.Id;
+        template.TemplateRepositoryPath = storageResult.FilePath;
+        template.TemplateFileName = storageResult.OriginalFileName;
+        template.TemplateContentType = storageResult.ContentType;
+        template.TemplateFileSize = storageResult.FileSize;
+        template.Body = extractedBody;
+        template.MergeFieldsJson = JsonSerializer.Serialize(
+            DeserializeStringArray(template.MergeFieldsJson)
+                .Concat(DocumentTemplateWordBodyExtractor.ExtractMergeFields(extractedBody))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
         template.UpdatedAt = now;
         template.UpdatedBy = _currentUserService.UserName ?? "System";
         template.LastModifiedById = GetUserId();
@@ -374,7 +516,28 @@ public sealed class DocumentManagementController : ControllerBase
             return Conflict(new { success = false, message = transitionError });
         }
 
-        var version = await _db.CentralDocumentVersions
+        if (normalizedAction is "submitapproval" or "submitforapproval" or "approve" or "sign"
+            && !await IsPropertyAgreementLegalReviewApprovedAsync(record, cancellationToken))
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = "Legal must approve the draft agreement before internal approval and digital signature can continue."
+            });
+        }
+
+        CentralDocumentVersion? projectedCustomerVersion;
+        try
+        {
+            projectedCustomerVersion = normalizedAction is "submitapproval" or "submitforapproval"
+                ? await EnsureCustomerSignedAgreementVersionAsync(record, cancellationToken)
+                : null;
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { success = false, message = exception.Message });
+        }
+        var version = projectedCustomerVersion ?? await _db.CentralDocumentVersions
             .Where(item => item.TenantId == tenantId
                 && item.DocumentRecordId == record.Id
                 && !item.IsDeleted)
@@ -382,6 +545,52 @@ public sealed class DocumentManagementController : ControllerBase
             .FirstOrDefaultAsync(cancellationToken);
         var metadata = new List<UpsertDocumentMetadataValueRequest>();
         var actor = _currentUserService.UserName ?? "System";
+        var actorDisplayName = string.IsNullOrWhiteSpace(_currentUserService.FullName)
+            ? actor
+            : _currentUserService.FullName.Trim();
+        CentralDocumentPdfSigningResult? signingResult = null;
+        var operationCancellationToken = normalizedAction == "sign"
+            ? CancellationToken.None
+            : cancellationToken;
+
+        if (normalizedAction == "sign")
+        {
+            if (version is null)
+            {
+                return Conflict(new { success = false, message = "The approved agreement does not have a document version to sign." });
+            }
+
+            try
+            {
+                var signed = await CreateDigitallySignedVersionAsync(
+                    record,
+                    version,
+                    actorDisplayName,
+                    TrimToNull(request.SignatureRole) ?? template.SignatureRole ?? "Authorised Signatory",
+                    request.Notes,
+                    now,
+                    operationCancellationToken);
+                version = signed.Version;
+                signingResult = signed.Signature;
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Conflict(new { success = false, message = exception.Message });
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Digital signing failed for DMS record {DocumentRecordId} ({DocumentReference}).",
+                    record.Id,
+                    record.DocumentReference);
+                return Conflict(new
+                {
+                    success = false,
+                    message = "The agreement could not be digitally signed. Verify the signing certificate and PDF, then try again."
+                });
+            }
+        }
 
         switch (normalizedAction)
         {
@@ -391,7 +600,7 @@ public sealed class DocumentManagementController : ControllerBase
                 record.VersionStatus = "Submitted";
                 metadata.AddRange(WorkflowMetadata(
                     ("Approval status", "Pending approval"),
-                    ("Submitted for approval by", actor),
+                    ("Submitted for approval by", actorDisplayName),
                     ("Submitted for approval at", now.ToString("O")),
                     ("Approval notes", request.Notes)));
                 break;
@@ -400,7 +609,7 @@ public sealed class DocumentManagementController : ControllerBase
                 record.VersionStatus = "Approved";
                 metadata.AddRange(WorkflowMetadata(
                     ("Approval status", "Approved"),
-                    ("Approved by", actor),
+                    ("Approved by", actorDisplayName),
                     ("Approved at", now.ToString("O")),
                     ("Approval notes", request.Notes)));
                 break;
@@ -409,10 +618,20 @@ public sealed class DocumentManagementController : ControllerBase
                 record.VersionStatus = "Signed";
                 metadata.AddRange(WorkflowMetadata(
                     ("Signature status", "Signed"),
-                    ("Signed by", actor),
+                    ("Signed by", actorDisplayName),
                     ("Signed at", now.ToString("O")),
                     ("Signature role", request.SignatureRole),
-                    ("Signature notes", request.Notes)));
+                    ("Signature notes", request.Notes),
+                    ("Signature field", signingResult?.SignatureFieldName),
+                    ("Signature certificate thumbprint", signingResult?.CertificateThumbprint),
+                    ("Signature certificate subject", signingResult?.CertificateSubject),
+                    ("Signature certificate serial", signingResult?.CertificateSerialNumber),
+                    ("Signature certificate valid from", signingResult?.CertificateValidFromUtc.ToString("O")),
+                    ("Signature certificate valid to", signingResult?.CertificateValidToUtc.ToString("O")),
+                    ("Signature digest algorithm", signingResult?.DigestAlgorithm),
+                    ("Signed document SHA-256", signingResult?.DocumentSha256),
+                    ("Signature integrity", signingResult?.SignatureIntegrityValid == true ? "Valid" : "Invalid"),
+                    ("Signature covers whole document", signingResult?.SignatureCoversWholeDocument == true ? "Yes" : "No")));
                 break;
             case "dispatch":
                 record.LifecycleStatus = "Dispatched";
@@ -433,7 +652,7 @@ public sealed class DocumentManagementController : ControllerBase
                 record.VersionStatus = "Returned";
                 metadata.AddRange(WorkflowMetadata(
                     ("Approval status", "Returned for action"),
-                    ("Returned by", actor),
+                    ("Returned by", actorDisplayName),
                     ("Returned at", now.ToString("O")),
                     ("Return notes", request.Notes)));
                 break;
@@ -458,12 +677,36 @@ public sealed class DocumentManagementController : ControllerBase
         record.UpdatedAt = now;
         record.UpdatedBy = actor;
         record.LastModifiedById = GetUserId();
-        await UpsertMetadataValuesAsync(tenantId, record, metadata, "Generated document workflow", now, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
-        await NotifyGeneratedDocumentWorkflowAsync(record, normalizedAction, request, cancellationToken);
+        await UpsertMetadataValuesAsync(tenantId, record, metadata, "Generated document workflow", now, operationCancellationToken);
+        await SynchronizePropertyAgreementWorkflowAsync(record, normalizedAction, actorDisplayName, now, operationCancellationToken);
+        await _db.SaveChangesAsync(operationCancellationToken);
+        if (normalizedAction == "sign"
+            && record.SourceRecordId.HasValue
+            && string.Equals(record.SourceModule, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            var sourceCase = await _db.ProcedureCases
+                .AsNoTracking()
+                .Include(item => item.Fields.Where(field => !field.IsDeleted))
+                .FirstOrDefaultAsync(item => item.Id == record.SourceRecordId.Value
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted,
+                    operationCancellationToken);
+            var requestType = sourceCase?.Fields.FirstOrDefault(field => field.Key == "requestType")?.Value;
+            if (sourceCase is not null
+                && (requestType?.Contains("sale", StringComparison.OrdinalIgnoreCase) == true
+                    || requestType?.Contains("purchase", StringComparison.OrdinalIgnoreCase) == true))
+            {
+                await _procedureCaseService.CreateLinkedLegalMatterAsync(
+                    sourceCase.Id,
+                    new CreateLinkedLegalMatterRequest(
+                        "ConveyanceRegistration",
+                        $"Automatic conveyance and registration handoff after execution of {record.DocumentReference}."));
+            }
+        }
+        await NotifyGeneratedDocumentWorkflowAsync(record, normalizedAction, request, operationCancellationToken);
 
-        var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
-        var values = await GetMetadataValuesAsync(tenantId, record.Id, cancellationToken);
+        var templatesByCode = await GetTemplatesByCodeAsync(tenantId, operationCancellationToken);
+        var values = await GetMetadataValuesAsync(tenantId, record.Id, operationCancellationToken);
         return Ok(new
         {
             success = true,
@@ -473,6 +716,528 @@ public sealed class DocumentManagementController : ControllerBase
                 version = version is null ? null : ToVersionDto(version)
             }
         });
+    }
+
+    private async Task<DigitallySignedVersion> CreateDigitallySignedVersionAsync(
+        CentralDocumentRecord record,
+        CentralDocumentVersion sourceVersion,
+        string actor,
+        string signerRole,
+        string? notes,
+        DateTime signedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var sourcePdf = await OpenPdfVersionFileAsync(record, sourceVersion, record.TenantId, cancellationToken);
+        if (!sourcePdf.Success || sourcePdf.Stream is null)
+        {
+            throw new InvalidOperationException(sourcePdf.ErrorMessage ?? "The approved agreement could not be opened as a PDF for signing.");
+        }
+
+        CentralDocumentPdfSigningResult signature;
+        await using (sourcePdf.Stream)
+        {
+            signature = await _pdfSigningService.SignAsync(
+                sourcePdf.Stream,
+                new CentralDocumentPdfSigningRequest(
+                    record.DocumentReference,
+                    actor,
+                    signerRole,
+                    notes,
+                    signedAtUtc),
+                cancellationToken);
+        }
+
+        var fileName = $"{Path.GetFileNameWithoutExtension(sourcePdf.FileName ?? record.DocumentReference)}-executed.pdf";
+        await using var signedStream = new MemoryStream(signature.PdfBytes, writable: false);
+        var storageResult = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = signedStream,
+            FileName = fileName,
+            ContentType = "application/pdf",
+            FileSize = signature.PdfBytes.LongLength,
+            Category = "central-dms-signed",
+            TenantId = record.TenantId.ToString(),
+            Metadata =
+            {
+                ["DocumentReference"] = record.DocumentReference,
+                ["SignatureField"] = signature.SignatureFieldName,
+                ["CertificateThumbprint"] = signature.CertificateThumbprint,
+                ["DocumentSha256"] = signature.DocumentSha256
+            }
+        });
+        if (!storageResult.Success)
+        {
+            throw new InvalidOperationException(storageResult.ErrorMessage ?? "The digitally signed PDF could not be stored.");
+        }
+
+        var actorId = GetUserId();
+        var uploadRecord = new FileUploadRecord
+        {
+            TenantId = record.TenantId,
+            Category = "central-dms-signed",
+            FilePath = storageResult.FilePath,
+            StoredFileName = storageResult.FileName,
+            OriginalFileName = storageResult.OriginalFileName,
+            ContentType = storageResult.ContentType,
+            FileSize = storageResult.FileSize,
+            StorageProvider = storageResult.StorageProvider,
+            UploadedByUserId = actorId ?? Guid.Empty,
+            VirusScanStatus = FileVirusScanStatus.Skipped,
+            CreatedAt = signedAtUtc,
+            CreatedBy = actor,
+            CreatedById = actorId
+        };
+        _db.FileUploadRecords.Add(uploadRecord);
+
+        var signedVersion = new CentralDocumentVersion
+        {
+            TenantId = record.TenantId,
+            DocumentRecordId = record.Id,
+            VersionNumber = NextVersionNumber(record.CurrentVersion),
+            Status = "Signed",
+            RepositoryPath = storageResult.FilePath,
+            RenditionPath = storageResult.FilePath,
+            FileName = storageResult.OriginalFileName,
+            ContentType = "application/pdf",
+            FileSize = storageResult.FileSize,
+            FileUploadRecordId = uploadRecord.Id,
+            CreatedByUserId = actorId,
+            ChangeSummary = $"Digitally signed with organizational certificate {signature.CertificateThumbprint}.",
+            PublishedAt = signedAtUtc,
+            PublishedById = actorId,
+            CreatedAt = signedAtUtc,
+            CreatedBy = actor,
+            CreatedById = actorId
+        };
+        _db.CentralDocumentVersions.Add(signedVersion);
+
+        record.CurrentVersion = signedVersion.VersionNumber;
+        record.RepositoryPath = storageResult.FilePath;
+        record.RepositoryStatus = "Linked";
+        record.AnnotationStatus = "Signed PDF preview ready";
+        return new DigitallySignedVersion(signedVersion, signature);
+    }
+
+    private async Task<CentralDocumentVersion?> EnsureCustomerSignedAgreementVersionAsync(
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (!record.SourceRecordId.HasValue
+            || !string.Equals(record.SourceModule, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var procedureCase = await _db.ProcedureCases
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item => item.Id == record.SourceRecordId.Value
+                && item.TenantId == record.TenantId
+                && !item.IsDeleted
+                && item.EntityType == "EstatePropertyManagementListingApplication",
+                cancellationToken);
+        var customerDocument = procedureCase?.Documents
+            .Where(document => !string.IsNullOrWhiteSpace(document.FileUrl)
+                && string.Equals(document.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(document => document.UploadedAt ?? document.CreatedAt)
+            .FirstOrDefault();
+        if (customerDocument?.FileUrl is null)
+        {
+            throw new InvalidOperationException("The customer-signed agreement must be uploaded before internal approval.");
+        }
+
+        var existing = await _db.CentralDocumentVersions
+            .FirstOrDefaultAsync(item => item.TenantId == record.TenantId
+                && item.DocumentRecordId == record.Id
+                && !item.IsDeleted
+                && item.RepositoryPath == customerDocument.FileUrl,
+                cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var fileInfo = await _fileStorageService.GetFileInfoAsync(customerDocument.FileUrl);
+        var fileName = customerDocument.FileName ?? fileInfo?.FileName ?? "customer-signed-agreement.pdf";
+        var contentType = fileInfo?.ContentType
+            ?? (fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+                ? "application/pdf"
+                : "application/octet-stream");
+        var now = customerDocument.UploadedAt ?? DateTime.UtcNow;
+        var version = new CentralDocumentVersion
+        {
+            TenantId = record.TenantId,
+            DocumentRecordId = record.Id,
+            VersionNumber = NextVersionNumber(record.CurrentVersion),
+            Status = "Customer signed",
+            RepositoryPath = customerDocument.FileUrl,
+            RenditionPath = IsPdfFile(contentType, fileName) ? customerDocument.FileUrl : null,
+            FileName = fileName,
+            ContentType = contentType,
+            FileSize = fileInfo?.FileSize,
+            CreatedByUserId = customerDocument.UploadedById,
+            ChangeSummary = "Customer-signed agreement uploaded from the External Portal.",
+            CreatedAt = now,
+            CreatedById = customerDocument.UploadedById
+        };
+
+        record.CurrentVersion = version.VersionNumber;
+        record.VersionStatus = version.Status;
+        record.RepositoryPath = version.RepositoryPath;
+        record.RepositoryStatus = "Linked";
+        record.AnnotationStatus = version.RenditionPath is null
+            ? "PDF rendition required"
+            : "PDF preview ready";
+        _db.CentralDocumentVersions.Add(version);
+        return version;
+    }
+
+    private async Task<bool> IsPropertyAgreementLegalReviewApprovedAsync(
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (!record.SourceRecordId.HasValue
+            || !string.Equals(record.SourceModule, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var values = await _db.ProcedureCaseFields
+            .AsNoTracking()
+            .Where(field => field.TenantId == record.TenantId
+                && field.ProcedureCaseId == record.SourceRecordId.Value
+                && !field.IsDeleted
+                && (field.Key == "legalAgreementReviewStatus"
+                    || field.Key == "agreementExecutionStatus"))
+            .ToDictionaryAsync(field => field.Key, field => field.Value, StringComparer.OrdinalIgnoreCase, cancellationToken);
+        if (values.TryGetValue("legalAgreementReviewStatus", out var reviewStatus)
+            && reviewStatus?.Contains("approved", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+
+        // Preserve completed historical agreements created before this gate existed.
+        return values.TryGetValue("agreementExecutionStatus", out var executionStatus)
+            && string.Equals(executionStatus, "Fully executed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task SynchronizePropertyAgreementWorkflowAsync(
+        CentralDocumentRecord record,
+        string normalizedAction,
+        string actor,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        if (!record.SourceRecordId.HasValue
+            || !string.Equals(record.SourceModule, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var procedureCase = await _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .FirstOrDefaultAsync(item => item.Id == record.SourceRecordId.Value
+                && item.TenantId == record.TenantId
+                && !item.IsDeleted
+                && item.EntityType == "EstatePropertyManagementListingApplication",
+                cancellationToken);
+        if (procedureCase is null)
+        {
+            return;
+        }
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        var actorId = GetUserId();
+
+        switch (normalizedAction)
+        {
+            case "submitapproval":
+            case "submitforapproval":
+                UpsertPropertyAgreementField(procedureCase, fields, "agreementExecutionStatus", "Agreement execution status", "select", "Customer signed - internal approval pending", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalApprovalStatus", "Internal agreement approval status", "select", "Pending approval", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", "Pending approval", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "billingStartStatus", "Billing start status", "select", "Blocked - internal approval and signature pending", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "moveInEffectiveStatus", "Move-in effective status", "select", "Blocked - final agreement pending", actorId, now);
+                break;
+            case "approve":
+                UpsertPropertyAgreementField(procedureCase, fields, "agreementExecutionStatus", "Agreement execution status", "select", "Internally approved - digital signature pending", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalApprovalStatus", "Internal agreement approval status", "select", $"Approved by {actor}", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", "Pending signature", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "billingStartStatus", "Billing start status", "select", "Blocked - internal signature pending", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "moveInEffectiveStatus", "Move-in effective status", "select", "Blocked - final signature pending", actorId, now);
+                break;
+            case "sign":
+                UpsertPropertyAgreementField(procedureCase, fields, "agreementExecutionStatus", "Agreement execution status", "select", "Fully executed", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", $"Digitally signed by {actor}", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementReference", "Final signed agreement reference", "text", record.DocumentReference, actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementVersion", "Final signed agreement version", "text", record.CurrentVersion, actorId, now);
+                var isRentalRequest = fields.TryGetValue("requestType", out var requestType)
+                    && requestType.Value?.Contains("rental", StringComparison.OrdinalIgnoreCase) == true;
+                if (isRentalRequest
+                    && fields.TryGetValue("moveInDate", out var moveInDate)
+                    && !string.IsNullOrWhiteSpace(moveInDate.Value))
+                {
+                    UpsertPropertyAgreementField(procedureCase, fields, "billingStartDate", "Billing start date", "date", moveInDate.Value, actorId, now);
+                }
+                UpsertPropertyAgreementField(
+                    procedureCase,
+                    fields,
+                    "billingStartStatus",
+                    "Billing start status",
+                    "select",
+                    isRentalRequest ? "Ready for billing from move-in date" : "Not applicable - sale request",
+                    actorId,
+                    now);
+                UpsertPropertyAgreementField(
+                    procedureCase,
+                    fields,
+                    "moveInEffectiveStatus",
+                    "Move-in effective status",
+                    "select",
+                    isRentalRequest ? "Effective - final agreement signed" : "Not applicable - sale request",
+                    actorId,
+                    now);
+                UpsertPropertyAgreementField(procedureCase, fields, "applicationStatus", "Request status", "select", "Agreement fully executed", actorId, now);
+                if (isRentalRequest)
+                {
+                    await SynchronizeExecutedRentalLeaseAsync(
+                        procedureCase,
+                        fields,
+                        record,
+                        actor,
+                        now,
+                        cancellationToken);
+                }
+                break;
+            case "return":
+            case "returnforaction":
+                UpsertPropertyAgreementField(procedureCase, fields, "agreementExecutionStatus", "Agreement execution status", "select", "Returned for correction", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalApprovalStatus", "Internal agreement approval status", "select", $"Returned by {actor}", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", "Blocked - correction pending", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "signedAgreementReference", "Signed agreement upload reference", "text", null, actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementReference", "Final signed agreement reference", "text", null, actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementVersion", "Final signed agreement version", "text", null, actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "billingStartDate", "Billing start date", "date", null, actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "billingStartStatus", "Billing start status", "select", "Blocked - agreement returned", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "moveInEffectiveStatus", "Move-in effective status", "select", "Blocked - agreement returned", actorId, now);
+                UpsertPropertyAgreementField(procedureCase, fields, "applicationStatus", "Request status", "select", "Agreement returned for correction", actorId, now);
+                break;
+        }
+
+        procedureCase.LastActionById = actorId;
+        procedureCase.LastModifiedById = actorId;
+        procedureCase.UpdatedAt = now;
+        _db.ProcedureCaseActivities.Add(new ProcedureCaseActivity
+        {
+            TenantId = procedureCase.TenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Action = $"Agreement {normalizedAction}",
+            StageName = procedureCase.CurrentStageName,
+            Details = $"DMS agreement {record.DocumentReference} was updated by {actor}.",
+            PerformedById = actorId ?? procedureCase.LastActionById ?? procedureCase.OpenedById,
+            PerformedAt = now,
+            CreatedById = actorId
+        });
+    }
+
+    private async Task SynchronizeExecutedRentalLeaseAsync(
+        ProcedureCase procedureCase,
+        IReadOnlyDictionary<string, ProcedureCaseField> fields,
+        CentralDocumentRecord record,
+        string actor,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        string? Field(string key) => fields.TryGetValue(key, out var field)
+            ? TrimToNull(field.Value)
+            : null;
+
+        var listingReference = Field("listingReference");
+        var propertyUnit = Field("propertyUnit");
+        if (listingReference is null && propertyUnit is null)
+        {
+            throw new InvalidOperationException(
+                "The executed rental agreement is missing its property listing reference.");
+        }
+
+        var asset = await _db.EstateManagedAssets.FirstOrDefaultAsync(item =>
+            item.TenantId == procedureCase.TenantId
+            && !item.IsDeleted
+            && ((listingReference != null && item.AssetCode == listingReference)
+                || (propertyUnit != null && item.ProjectUnitCode == propertyUnit)),
+            cancellationToken);
+        if (asset is null)
+        {
+            throw new InvalidOperationException(
+                "The property linked to the executed rental agreement was not found in the managed asset register.");
+        }
+
+        var customer = await ResolveRentalCustomerAsync(
+            procedureCase,
+            Field("sourceReference"),
+            Field("customerAccountReference"),
+            Field("customerName") ?? procedureCase.ApplicantName,
+            cancellationToken);
+        if (customer is null)
+        {
+            throw new InvalidOperationException(
+                "The customer linked to the executed rental agreement was not found in the business partner register.");
+        }
+
+        if (asset.CustomerBusinessPartnerId.HasValue
+            && asset.CustomerBusinessPartnerId != customer.Id)
+        {
+            throw new InvalidOperationException(
+                "The property is already assigned to a different customer in Lease Management.");
+        }
+
+        var moveInValue = Field("moveInDate") ?? Field("billingStartDate");
+        if (!DateTime.TryParse(
+                moveInValue,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var moveInDate))
+        {
+            throw new InvalidOperationException(
+                "The executed rental agreement does not have a valid move-in date for Lease Management.");
+        }
+
+        var leaseTermMonths = asset.ExternalLeaseTermMonths;
+        var requestedLeaseTerm = Field("requestedLeaseTerm");
+        if (requestedLeaseTerm is not null)
+        {
+            var monthText = new string(requestedLeaseTerm
+                .TakeWhile(character => char.IsDigit(character) || char.IsWhiteSpace(character))
+                .Where(char.IsDigit)
+                .ToArray());
+            if (int.TryParse(monthText, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedMonths)
+                && parsedMonths > 0)
+            {
+                leaseTermMonths = parsedMonths;
+            }
+        }
+
+        asset.DateOfTenancy = moveInDate.Date;
+        asset.RightOfEntryDate = moveInDate.Date;
+        asset.LeaseTermYears = leaseTermMonths.HasValue
+            ? Math.Max(1, (leaseTermMonths.Value + 11) / 12)
+            : asset.LeaseTermYears;
+        asset.CustomerBusinessPartnerId = customer.Id;
+        asset.LesseeName = customer.PartnerName;
+        asset.LesseeAddress = TrimToNull(customer.PhysicalAddress);
+        asset.PropertyFileReference = record.DocumentReference;
+        asset.Status = EstateManagedAssetStatus.Leased;
+        asset.IsAvailableForLease = false;
+        asset.IsAvailableForSale = false;
+        asset.IsPublishedToExternalPortal = false;
+        asset.ExternalListingStatus = "Withdrawn";
+        asset.ExternalPublishedAt = null;
+        asset.UpdatedAt = now;
+        asset.UpdatedBy = actor;
+        asset.LastModifiedById = GetUserId();
+    }
+
+    private async Task<BusinessPartner?> ResolveRentalCustomerAsync(
+        ProcedureCase procedureCase,
+        string? sourceReference,
+        string? customerAccountReference,
+        string? customerName,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<BusinessPartner> ActiveCustomers() => _db.BusinessPartners.Where(item =>
+            item.TenantId == procedureCase.TenantId
+            && !item.IsDeleted
+            && item.IsActive
+            && item.PartnerType == "Customer");
+
+        if (Guid.TryParse(sourceReference, out var customerId))
+        {
+            var byId = await ActiveCustomers().FirstOrDefaultAsync(
+                item => item.Id == customerId,
+                cancellationToken);
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(customerAccountReference))
+        {
+            var byAccount = await ActiveCustomers().FirstOrDefaultAsync(
+                item => item.CustomerAccountNumber == customerAccountReference
+                    || item.PartnerCode == customerAccountReference,
+                cancellationToken);
+            if (byAccount is not null)
+            {
+                return byAccount;
+            }
+        }
+
+        if (procedureCase.OpenedById != Guid.Empty)
+        {
+            var partnerId = await _db.BusinessPartnerUsers
+                .Where(item => item.TenantId == procedureCase.TenantId
+                    && !item.IsDeleted
+                    && item.IsActive
+                    && item.UserId == procedureCase.OpenedById)
+                .Select(item => (Guid?)item.BusinessPartnerId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (partnerId.HasValue)
+            {
+                var byPortalUser = await ActiveCustomers().FirstOrDefaultAsync(
+                    item => item.Id == partnerId.Value,
+                    cancellationToken);
+                if (byPortalUser is not null)
+                {
+                    return byPortalUser;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(customerName))
+        {
+            return null;
+        }
+
+        var exactNameMatches = await ActiveCustomers()
+            .Where(item => item.PartnerName == customerName)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        return exactNameMatches.Count == 1 ? exactNameMatches[0] : null;
+    }
+
+    private void UpsertPropertyAgreementField(
+        ProcedureCase procedureCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        string key,
+        string label,
+        string fieldType,
+        string? value,
+        Guid? actorId,
+        DateTime now)
+    {
+        if (fields.TryGetValue(key, out var field))
+        {
+            field.Value = value;
+            field.UpdatedAt = now;
+            field.LastModifiedById = actorId;
+            return;
+        }
+
+        var created = new ProcedureCaseField
+        {
+            TenantId = procedureCase.TenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Key = key,
+            Label = label,
+            FieldType = fieldType,
+            Value = value,
+            CreatedAt = now,
+            CreatedById = actorId
+        };
+        _db.ProcedureCaseFields.Add(created);
+        fields[key] = created;
     }
 
     private async Task NotifyGeneratedDocumentWorkflowAsync(
@@ -512,6 +1277,63 @@ public sealed class DocumentManagementController : ControllerBase
         catch
         {
             // Notification delivery must not block the DMS workflow action.
+        }
+
+        var notifyCustomer = normalizedAction is "sign" or "return" or "returnforaction";
+        if (!notifyCustomer || !record.SourceRecordId.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            var customerCase = await _db.ProcedureCases
+                .AsNoTracking()
+                .Where(item => item.Id == record.SourceRecordId.Value
+                    && item.TenantId == record.TenantId
+                    && !item.IsDeleted
+                    && item.EntityType == "EstatePropertyManagementListingApplication")
+                .Select(item => new
+                {
+                    item.Id,
+                    item.OpenedById,
+                    item.ReferenceNumber
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (customerCase is null)
+            {
+                return;
+            }
+
+            var returned = normalizedAction is "return" or "returnforaction";
+            var customerTitle = returned
+                ? "Agreement returned for correction"
+                : "Final signed agreement ready";
+            var customerMessage = returned
+                ? $"Your agreement for {customerCase.ReferenceNumber ?? record.DocumentReference} was returned for correction. {TrimToNull(request.Notes) ?? "Please upload a corrected signed PDF."}"
+                : $"Your final signed agreement for {customerCase.ReferenceNumber ?? record.DocumentReference} is ready to view and download.";
+
+            await _notificationService.CreateInAppNotificationAsync(
+                customerCase.OpenedById,
+                customerTitle,
+                customerMessage,
+                returned
+                    ? "estate.property.agreement-correction-required"
+                    : "estate.property.final-agreement-ready",
+                new Dictionary<string, object>
+                {
+                    ["EntityType"] = "ProcedureCase",
+                    ["EntityId"] = customerCase.Id,
+                    ["ActionUrl"] = "/external-portal/my-property-requests",
+                    ["documentReference"] = record.DocumentReference,
+                    ["lifecycleStatus"] = record.LifecycleStatus,
+                    ["sourceModule"] = record.SourceModule
+                },
+                record.TenantId);
+        }
+        catch
+        {
+            // Customer notification delivery must not block the workflow transition.
         }
     }
 
@@ -707,7 +1529,13 @@ public sealed class DocumentManagementController : ControllerBase
             template.RequiresApproval,
             template.ApprovalRole,
             template.SignatureRole,
-            template.DefaultDispatchChannel);
+            template.DefaultDispatchChannel,
+            template.IsActive,
+            template.TemplateFileUploadRecordId,
+            template.TemplateRepositoryPath,
+            template.TemplateFileName,
+            template.TemplateContentType,
+            template.TemplateFileSize);
 
     [HttpPost("document-templates/generate")]
     public async Task<IActionResult> GenerateDocumentFromTemplate(
@@ -728,9 +1556,6 @@ public sealed class DocumentManagementController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
-        var mergeValues = BuildMergeValues(template, request, now);
-        var content = MergeTemplate(template.Body, mergeValues);
-        var title = Truncate(MergeTemplate(template.TitleTemplate, mergeValues), 250);
         var sourceRecord = Truncate(TrimToNull(request.SourceRecordReference)
             ?? TrimToNull(request.CaseReference)
             ?? request.SourceRecordId?.ToString()
@@ -742,19 +1567,56 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
+        var procedureGenerationError = await ValidateProcedureDocumentGenerationAsync(
+            tenantId,
+            request,
+            template,
+            cancellationToken);
+        if (procedureGenerationError is not null)
+        {
+            return BadRequest(new { success = false, message = procedureGenerationError });
+        }
+
         var sourceLabel = string.IsNullOrWhiteSpace(request.SourceLabel)
             ? template.SourceLabel
             : request.SourceLabel.Trim();
 
-        var pdfBytes = BuildSimplePdf(title, content);
-        await using var pdfStream = new MemoryStream(pdfBytes);
-        var safeFileName = $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.pdf";
+        var record = await _db.CentralDocumentRecords
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.SourceModule == sourceModule
+                && item.MetadataTemplateCode == template.MetadataTemplateCode
+                && item.SourceRecordReference == generatedSourceReference,
+                cancellationToken);
+
+        if (record is not null
+            && !CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var documentReference = record?.DocumentReference
+            ?? await NextDocumentReferenceAsync(tenantId, cancellationToken);
+        var mergeValues = BuildMergeValues(template, request, now);
+        await EnrichEstateAgreementMergeValuesAsync(
+            tenantId,
+            request,
+            mergeValues,
+            documentReference,
+            now,
+            cancellationToken);
+        var content = MergeTemplate(template.Body, mergeValues);
+        var title = Truncate(MergeTemplate(template.TitleTemplate, mergeValues), 250);
+
+        var generatedFile = await BuildGeneratedTemplateFileAsync(template, mergeValues, title, content, tenantId, cancellationToken);
+        await using var generatedStream = new MemoryStream(generatedFile.Bytes);
         var storageResult = await _fileStorageService.UploadFileAsync(new FileUploadRequest
         {
-            FileStream = pdfStream,
-            FileName = safeFileName,
-            ContentType = "application/pdf",
-            FileSize = pdfBytes.Length,
+            FileStream = generatedStream,
+            FileName = generatedFile.FileName,
+            ContentType = generatedFile.ContentType,
+            FileSize = generatedFile.Bytes.Length,
             Category = "central-dms-generated",
             TenantId = tenantId.ToString(),
             Metadata =
@@ -767,23 +1629,15 @@ public sealed class DocumentManagementController : ControllerBase
 
         if (!storageResult.Success)
         {
-            return BadRequest(new { success = false, message = storageResult.ErrorMessage ?? "Unable to generate the PDF rendition." });
+            return BadRequest(new { success = false, message = storageResult.ErrorMessage ?? "Unable to generate the document." });
         }
-
-        var record = await _db.CentralDocumentRecords
-            .FirstOrDefaultAsync(item => item.TenantId == tenantId
-                && !item.IsDeleted
-                && item.SourceModule == sourceModule
-                && item.MetadataTemplateCode == template.MetadataTemplateCode
-                && item.SourceRecordReference == generatedSourceReference,
-                cancellationToken);
 
         if (record is null)
         {
             record = new CentralDocumentRecord
             {
                 TenantId = tenantId,
-                DocumentReference = await NextDocumentReferenceAsync(tenantId, cancellationToken),
+                DocumentReference = documentReference,
                 Title = title,
                 SourceModule = sourceModule,
                 SourceLabel = sourceLabel,
@@ -795,7 +1649,7 @@ public sealed class DocumentManagementController : ControllerBase
                 RepositoryPath = storageResult.FilePath,
                 CurrentVersion = "v1.0",
                 VersionStatus = "Draft",
-                AnnotationStatus = "PDF preview ready",
+                AnnotationStatus = generatedFile.IsPdf ? "PDF preview ready" : "PDF rendition required",
                 CommentStatus = "No comments",
                 AccessProfile = template.AccessProfile,
                 RetentionStatus = "Current",
@@ -809,18 +1663,13 @@ public sealed class DocumentManagementController : ControllerBase
         }
         else
         {
-            if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
-            {
-                return Forbid();
-            }
-
             record.Title = title;
             record.SourceLabel = sourceLabel;
             record.RepositoryStatus = "Linked";
             record.RepositoryPath = storageResult.FilePath;
             record.CurrentVersion = NextVersionNumber(record.CurrentVersion);
             record.VersionStatus = "Draft";
-            record.AnnotationStatus = "PDF preview ready";
+            record.AnnotationStatus = generatedFile.IsPdf ? "PDF preview ready" : "PDF rendition required";
             record.CommentStatus = "No comments";
             record.AccessProfile = template.AccessProfile;
             record.LifecycleStatus = "Draft";
@@ -829,6 +1678,34 @@ public sealed class DocumentManagementController : ControllerBase
             record.UpdatedBy = _currentUserService.UserName ?? "System";
             record.LastModifiedById = GetUserId();
         }
+
+        var pdfRenditionPath = generatedFile.IsPdf ? storageResult.FilePath : null;
+        CentralDocumentRenditionResult? generatedRendition = null;
+        if (!generatedFile.IsPdf)
+        {
+            await using var renditionSource = new MemoryStream(generatedFile.Bytes);
+            generatedRendition = await _renditionService.CreatePdfRenditionAsync(
+                new CentralDocumentRenditionRequest(
+                    renditionSource,
+                    generatedFile.FileName,
+                    generatedFile.ContentType,
+                    tenantId,
+                    record.Id,
+                    record.DocumentReference,
+                    sourceModule),
+                cancellationToken);
+
+            if (generatedRendition.Success)
+            {
+                pdfRenditionPath = generatedRendition.RenditionPath;
+            }
+        }
+
+        record.AnnotationStatus = !string.IsNullOrWhiteSpace(pdfRenditionPath)
+            ? "PDF preview ready"
+            : generatedRendition is { IsSupported: true }
+                ? "PDF rendition failed"
+                : "PDF rendition required";
 
         var uploadRecord = new FileUploadRecord
         {
@@ -855,12 +1732,14 @@ public sealed class DocumentManagementController : ControllerBase
             VersionNumber = record.CurrentVersion ?? "v1.0",
             Status = "Draft",
             RepositoryPath = storageResult.FilePath,
-            RenditionPath = storageResult.FilePath,
+            RenditionPath = pdfRenditionPath,
             FileName = storageResult.OriginalFileName,
-            ContentType = "application/pdf",
+            ContentType = generatedFile.ContentType,
             FileSize = storageResult.FileSize,
             FileUploadRecordId = uploadRecord.Id,
-            ChangeSummary = $"Generated from {template.TemplateCode}.",
+            ChangeSummary = BuildVersionChangeSummary(
+                $"Generated from {template.TemplateCode}.",
+                generatedRendition),
             CreatedByUserId = GetUserId(),
             CreatedAt = now,
             CreatedBy = _currentUserService.UserName ?? "System",
@@ -871,6 +1750,7 @@ public sealed class DocumentManagementController : ControllerBase
         var metadataValues = BuildGeneratedDocumentMetadataValues(template, mergeValues, generatedSourceReference);
         await UpsertMetadataValuesAsync(tenantId, record, metadataValues, "Generated document", now, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        await AttachGeneratedProcedureDocumentAsync(tenantId, request, template, record, version, now, cancellationToken);
 
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var values = await GetMetadataValuesAsync(tenantId, record.Id, cancellationToken);
@@ -885,6 +1765,7 @@ public sealed class DocumentManagementController : ControllerBase
                 version = ToVersionDto(version),
                 content,
                 pdfUrl = VersionContentUrl(record.Id, version.Id),
+                wordUrl = $"/api/document-management/records/{record.Id}/versions/{version.Id}/download?format=word",
                 dmsReference = record.DocumentReference,
                 sourceLabel = record.SourceLabel
             }
@@ -994,6 +1875,25 @@ public sealed class DocumentManagementController : ControllerBase
                     || item.Status == "Published"
                     || item.Status == "Pending Publication"));
         var versions = await LoadViewableVersionsAsync(tenantId, query, take, cancellationToken);
+        var recordIdValues = versions
+            .Select(version => version.DocumentRecordId.ToString())
+            .Distinct()
+            .ToList();
+        var workflowCases = recordIdValues.Count == 0
+            ? []
+            : await _db.ProcedureCases
+                .AsNoTracking()
+                .Include(item => item.Fields.Where(field => !field.IsDeleted))
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.Module == "DocumentManagement"
+                    && item.EntityType == "CentralDocumentVersion"
+                    && item.Fields.Any(field => !field.IsDeleted
+                        && field.Key == "documentRecordId"
+                        && field.Value != null
+                        && recordIdValues.Contains(field.Value)))
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .ToListAsync(cancellationToken);
 
         var queueItems = versions.Select(version => new
         {
@@ -1007,6 +1907,19 @@ public sealed class DocumentManagementController : ControllerBase
             requestedVersion = version.VersionNumber,
             reason = version.ChangeSummary ?? "Version publication pending",
             status = version.Status == "Published" ? "Pending Publication" : version.Status,
+            workflow = workflowCases
+                .Where(item => item.Fields.Any(field => field.Key == "documentRecordId"
+                    && field.Value == version.DocumentRecordId.ToString()))
+                .Select(item => new
+                {
+                    item.Id,
+                    item.Status,
+                    item.CurrentStageIndex,
+                    item.CurrentStageName,
+                    item.CurrentAssignedRole,
+                    item.WorkflowInstanceId
+                })
+                .FirstOrDefault(),
             document = ToRecordDto(version.DocumentRecord),
             version = ToVersionDto(version)
         }).ToList();
@@ -1028,7 +1941,7 @@ public sealed class DocumentManagementController : ControllerBase
         {
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        if (!await CanViewRecordAsync(tenantId, record, cancellationToken))
         {
             return Forbid();
         }
@@ -1526,6 +2439,19 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
+        var activeVersionWorkflow = await FindDmsVersionProcedureCaseAsync(
+            tenantId,
+            record.Id,
+            cancellationToken);
+        if (activeVersionWorkflow is not null)
+        {
+            var workflowDetail = await _procedureCaseService.GetCaseAsync(activeVersionWorkflow.Id);
+            if (workflowDetail is null || !workflowDetail.CanEditCurrentStage)
+            {
+                return Forbid();
+            }
+        }
+
         var clientRenditionPath = TrimToNull(renditionPath);
         var incomingIsPdf = IsPdfFile(file.ContentType, file.FileName);
         if (!incomingIsPdf
@@ -1638,7 +2564,63 @@ public sealed class DocumentManagementController : ControllerBase
         _db.CentralDocumentVersions.Add(version);
         await _db.SaveChangesAsync(cancellationToken);
 
-        return Ok(new { success = true, data = ToVersionDto(version) });
+        ProcedureCaseDetailDto? workflowCase;
+        if (activeVersionWorkflow is not null)
+        {
+            workflowCase = await _procedureCaseService.UpdateFieldsAsync(
+                activeVersionWorkflow.Id,
+                new UpdateProcedureCaseFieldsRequest(
+                    new Dictionary<string, string?>
+                    {
+                        ["documentVersionId"] = version.Id.ToString(),
+                        ["versionNumber"] = version.VersionNumber,
+                        ["changeSummary"] = version.ChangeSummary
+                    },
+                    activeVersionWorkflow.ReferenceNumber,
+                    activeVersionWorkflow.ApplicantName,
+                    activeVersionWorkflow.SourceDepartment,
+                    activeVersionWorkflow.ReceivedDate,
+                    activeVersionWorkflow.Description));
+        }
+        else if (await HasPublishedDmsVersionWorkflowAsync(tenantId, cancellationToken))
+        {
+            workflowCase = await _procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
+                "DocumentManagement",
+                "CentralDocumentVersion",
+                $"{record.Title} / {version.VersionNumber}",
+                record.DocumentReference,
+                _currentUserService.UserName,
+                "Central DMS",
+                now,
+                version.ChangeSummary,
+                new Dictionary<string, string?>
+                {
+                    ["documentRecordId"] = record.Id.ToString(),
+                    ["documentVersionId"] = version.Id.ToString(),
+                    ["documentReference"] = record.DocumentReference,
+                    ["versionNumber"] = version.VersionNumber,
+                    ["changeSummary"] = version.ChangeSummary
+                }));
+        }
+        else
+        {
+            workflowCase = null;
+        }
+
+        return Ok(new
+        {
+            success = true,
+            data = ToVersionDto(version),
+            workflow = workflowCase is null
+                ? null
+                : new
+                {
+                    workflowCase.Id,
+                    workflowCase.Status,
+                    workflowCase.CurrentStageName,
+                    workflowCase.CurrentAssignedRole
+                }
+        });
     }
 
     [HttpPut("records/{id:guid}/versions/{versionId:guid}/rendition")]
@@ -1829,7 +2811,7 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS version record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        if (!await CanViewRecordAsync(tenantId, record, cancellationToken))
         {
             return Forbid();
         }
@@ -1905,7 +2887,7 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        if (!await CanViewRecordAsync(tenantId, record, cancellationToken))
         {
             return Forbid();
         }
@@ -1949,7 +2931,7 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS version record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        if (!await CanViewRecordAsync(tenantId, record, cancellationToken))
         {
             return Forbid();
         }
@@ -2093,6 +3075,22 @@ public sealed class DocumentManagementController : ControllerBase
         if (version is null)
         {
             return NotFound(new { success = false, message = "DMS version record was not found." });
+        }
+
+        var versionWorkflow = await FindDmsVersionProcedureCaseAsync(
+            tenantId,
+            record.Id,
+            cancellationToken,
+            includeCompleted: true);
+        if (string.Equals(request.Status, "Current", StringComparison.OrdinalIgnoreCase)
+            && versionWorkflow is not null
+            && !string.Equals(versionWorkflow.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = $"Complete the document approval workflow before publishing this version. Current stage: {versionWorkflow.CurrentStageName}."
+            });
         }
 
         if (!await CanUseRecordActionAsync(
@@ -2760,6 +3758,32 @@ public sealed class DocumentManagementController : ControllerBase
             Source: Estate / Facility -> Central DMS
             """),
         Template(
+            "EST-SALE-AGREEMENT",
+            "Property Sale Agreement",
+            "Property Sale Agreement - {{ApplicantName}}",
+            "EST-LEASE-XFER",
+            ["ApplicantName", "CustomerReference", "CaseReference", "PropertyNumber", "PropertyReference", "PaymentAmount", "Currency", "AgreementDate"],
+            """
+            PROPERTY SALE AGREEMENT
+
+            Agreement date: {{AgreementDate}}
+            Estate reference: {{CaseReference}}
+            Purchaser: {{ApplicantName}}
+            Customer reference: {{CustomerReference}}
+            Property / unit: {{PropertyNumber}}
+            Property reference: {{PropertyReference}}
+            Agreed purchase price: {{Currency}} {{PaymentAmount}}
+
+            This agreement records the approved sale of the property identified above, subject to verification of the purchaser's supporting documents, Legal review, execution by both parties, settlement of the approved consideration, and completion of conveyance and registration requirements.
+
+            Purchaser signature: ____________________
+            Authorised signatory: ____________________
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Property Management -> Central DMS
+            """),
+        Template(
             "EST-DEED-VARIATION",
             "Deed of Variation",
             "Deed of Variation - {{PropertyNumber}}",
@@ -2916,11 +3940,11 @@ public sealed class DocumentManagementController : ControllerBase
             """),
         LegalTemplate(
             "LEG-TRANSFER-FORM",
-            "Legal Transfer Form",
-            "Legal Transfer - {{PropertyNumber}}",
+            "Transfer / Conveyance Form",
+            "Transfer / Conveyance - {{PropertyNumber}}",
             ["TransferorName", "TransfereeName", "CaseReference", "PropertyNumber", "TransferFeeReceipt", "MdApprovalReference", "TransferDeclarationReference"],
             """
-            LEGAL TRANSFER FORM
+            TRANSFER / CONVEYANCE FORM
 
             Legal reference: {{CaseReference}}
             Property / plot / house number: {{PropertyNumber}}
@@ -3087,7 +4111,13 @@ public sealed class DocumentManagementController : ControllerBase
         template.ApprovalRole,
         template.SignatureRole,
         template.DefaultDispatchChannel,
-        template.IsActive
+        template.IsActive,
+        template.TemplateFileUploadRecordId,
+        template.TemplateRepositoryPath,
+        template.TemplateFileName,
+        template.TemplateContentType,
+        template.TemplateFileSize,
+        HasWordTemplate = template.TemplateFileUploadRecordId.HasValue
     };
 
     private static object ToGeneratedTemplateDto(CentralDocumentGenerationTemplate template) => new
@@ -3108,6 +4138,12 @@ public sealed class DocumentManagementController : ControllerBase
         template.SignatureRole,
         template.DefaultDispatchChannel,
         template.IsActive,
+        template.TemplateFileUploadRecordId,
+        template.TemplateRepositoryPath,
+        template.TemplateFileName,
+        template.TemplateContentType,
+        template.TemplateFileSize,
+        HasWordTemplate = template.TemplateFileUploadRecordId.HasValue,
         template.UpdatedAt,
         template.CreatedAt
     };
@@ -3137,12 +4173,381 @@ public sealed class DocumentManagementController : ControllerBase
             }
         }
 
-        foreach (var field in template.MergeFields)
+        foreach (var field in EffectiveMergeFields(template))
         {
-            values.TryAdd(field, $"[{field}]");
+            values.TryAdd(field, "____________________");
         }
 
         return values;
+    }
+
+    private async Task EnrichEstateAgreementMergeValuesAsync(
+        Guid tenantId,
+        GenerateDocumentTemplateRequest request,
+        Dictionary<string, string> values,
+        string documentReference,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        if (!request.SourceRecordId.HasValue)
+        {
+            return;
+        }
+
+        var procedureCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item => item.Id == request.SourceRecordId.Value
+                && item.TenantId == tenantId
+                && !item.IsDeleted,
+                cancellationToken);
+
+        if (procedureCase is null
+            || !string.Equals(
+                procedureCase.EntityType,
+                "EstatePropertyManagementListingApplication",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(field => field.UpdatedAt ?? field.CreatedAt)
+                    .Select(field => TrimToNull(field.Value))
+                    .FirstOrDefault(value => value is not null),
+                StringComparer.OrdinalIgnoreCase);
+
+        string? Field(string key) => fields.GetValueOrDefault(key);
+
+        var tenant = await _db.Tenants
+            .AsNoTracking()
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(item => item.Id == tenantId && !item.IsDeleted, cancellationToken);
+
+        var sourceCustomerReference = Field("sourceReference");
+        Guid.TryParse(sourceCustomerReference, out var customerId);
+        var customerQuery = _db.BusinessPartners
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsActive);
+        var customer = customerId != Guid.Empty
+            ? await customerQuery.FirstOrDefaultAsync(item => item.Id == customerId, cancellationToken)
+            : await customerQuery.FirstOrDefaultAsync(item => item.UserId == procedureCase.OpenedById
+                || _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId
+                    && !link.IsDeleted
+                    && link.IsActive
+                    && link.UserId == procedureCase.OpenedById
+                    && link.BusinessPartnerId == item.Id),
+                cancellationToken);
+
+        var listingReference = Field("listingReference");
+        var propertyUnit = Field("propertyUnit");
+        var asset = await _db.EstateManagedAssets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && ((listingReference != null && item.AssetCode == listingReference)
+                    || (propertyUnit != null && (item.AssetCode == propertyUnit || item.ProjectUnitCode == propertyUnit))),
+                cancellationToken);
+
+        var acquisition = asset?.LandAcquisitionId is { } landAcquisitionId
+            ? await _db.LandAcquisitions
+                .AsNoTracking()
+                .Include(item => item.Agreement)
+                .FirstOrDefaultAsync(item => item.Id == landAcquisitionId
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted,
+                    cancellationToken)
+            : null;
+
+        var customerName = FirstPopulated(
+            customer?.LegalName,
+            customer?.PartnerName,
+            Field("customerName"),
+            procedureCase.ApplicantName);
+        var customerReference = FirstPopulated(
+            customer?.CustomerAccountNumber,
+            Field("customerAccountReference"),
+            sourceCustomerReference);
+        var customerAddress = FirstPopulated(
+            JoinPopulated(customer?.PhysicalAddress, customer?.PhysicalCity, customer?.PhysicalState, customer?.PhysicalCountry),
+            JoinPopulated(customer?.MailingAddress, customer?.MailingCity, customer?.MailingState, customer?.MailingCountry));
+        var resolvedPropertyReference = FirstPopulated(asset?.AssetCode, listingReference, propertyUnit);
+        var resolvedPropertyUnit = FirstPopulated(asset?.ProjectUnitCode, propertyUnit, asset?.AssetCode);
+        var propertyLocation = FirstPopulated(
+            asset?.Location,
+            JoinPopulated(asset?.Town, asset?.District, asset?.Region),
+            acquisition?.Location);
+        var intendedUse = FirstPopulated(asset?.Purpose, acquisition?.IntendedUse, asset?.ZoningClassification);
+        var estimatedSize = FormatEstateAssetSize(asset?.AreaSquareMeters, asset?.AreaValue, asset?.AreaUnit, acquisition?.EstimatedSize);
+        var requestType = FirstPopulated(Field("requestType"), procedureCase.Title);
+        var isPurchase = requestType?.Contains("purchase", StringComparison.OrdinalIgnoreCase) == true
+            || requestType?.Contains("sale", StringComparison.OrdinalIgnoreCase) == true;
+        var paymentAmount = FirstPopulated(
+            isPurchase ? Field("offerAmount") : Field("listingPrice"),
+            isPurchase ? asset?.ExternalSalePrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            !isPurchase ? asset?.ExternalMonthlyRent?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            asset?.ExternalListingPrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+        var currency = FirstPopulated(Field("currency"), asset?.ExternalListingCurrency, asset?.Currency, tenant?.BaseCurrency);
+        var moveInDate = Field("moveInDate");
+        var billingStartDate = FirstPopulated(Field("billingStartDate"), isPurchase ? null : moveInDate);
+        var caseReference = FirstPopulated(procedureCase.ReferenceNumber, request.CaseReference, request.SourceRecordReference);
+
+        SetAuthoritativeMergeValue(values, "AgreementReference", caseReference);
+        SetAuthoritativeMergeValue(values, "AgreementDate", now.ToString("yyyy-MM-dd"));
+        SetAuthoritativeMergeValue(values, "CaseReference", caseReference);
+        SetAuthoritativeMergeValue(values, "ApplicantName", customerName);
+        SetAuthoritativeMergeValue(values, "CustomerName", customerName);
+        SetAuthoritativeMergeValue(values, "GranteeName", customerName);
+        SetAuthoritativeMergeValue(values, "CustomerReference", customerReference);
+        SetAuthoritativeMergeValue(values, "GranteeAddress", customerAddress);
+        SetAuthoritativeMergeValue(values, "GrantorName", tenant?.Name);
+        SetAuthoritativeMergeValue(values, "GrantorAddress", tenant?.Address);
+        SetAuthoritativeMergeValue(values, "PropertyReference", resolvedPropertyReference);
+        SetAuthoritativeMergeValue(values, "PropertyUnit", resolvedPropertyUnit);
+        SetAuthoritativeMergeValue(values, "ListingReference", resolvedPropertyReference);
+        SetAuthoritativeMergeValue(values, "SourceReference", FirstPopulated(asset?.PropertyFileReference, resolvedPropertyReference));
+        SetAuthoritativeMergeValue(values, "Location", propertyLocation);
+        SetAuthoritativeMergeValue(values, "IntendedUse", intendedUse);
+        SetAuthoritativeMergeValue(values, "EstimatedSize", estimatedSize);
+        SetAuthoritativeMergeValue(values, "PropertyFileReference", FirstPopulated(asset?.PropertyFileReference, resolvedPropertyReference));
+        SetAuthoritativeMergeValue(values, "RootOfTitle", acquisition?.Agreement?.RootOfTitle);
+        SetAuthoritativeMergeValue(values, "SpecialConditions", acquisition?.Agreement?.SpecialConditions);
+        SetAuthoritativeMergeValue(values, "RequestType", requestType);
+        SetAuthoritativeMergeValue(values, "PaymentAmount", paymentAmount);
+        SetAuthoritativeMergeValue(values, "PaymentType", isPurchase ? "Purchase price" : "Monthly rent");
+        SetAuthoritativeMergeValue(values, "PaymentSchedule", isPurchase ? acquisition?.Agreement?.PaymentSchedule : "Monthly");
+        SetAuthoritativeMergeValue(values, "Currency", currency);
+        SetAuthoritativeMergeValue(values, "LeaseTerm", Field("requestedLeaseTerm"));
+        SetAuthoritativeMergeValue(values, "MoveInDate", moveInDate);
+        SetAuthoritativeMergeValue(values, "AgreementStartDate", moveInDate);
+        SetAuthoritativeMergeValue(values, "BillingStartDate", billingStartDate);
+        SetAuthoritativeMergeValue(values, "CustomerApprovalStatus", Field("customerAcceptanceStatus"));
+        SetAuthoritativeMergeValue(values, "CustomerApprovalDate", Field("customerAcceptanceDate"));
+        SetAuthoritativeMergeValue(values, "WorkflowReference", procedureCase.WorkflowInstanceId?.ToString());
+        SetAuthoritativeMergeValue(values, "NextApproverRole", procedureCase.CurrentAssignedRole);
+        SetAuthoritativeMergeValue(values, "AgreementDmsReference", documentReference);
+        SetAuthoritativeMergeValue(values, "GeneratedAgreementReference", documentReference);
+    }
+
+    private static void SetAuthoritativeMergeValue(
+        IDictionary<string, string> values,
+        string key,
+        string? value)
+    {
+        var populated = TrimToNull(value);
+        if (populated is not null)
+        {
+            values[key] = populated;
+        }
+    }
+
+    private async Task AttachGeneratedProcedureDocumentAsync(
+        Guid tenantId,
+        GenerateDocumentTemplateRequest request,
+        GeneratedDocumentTemplateDefinition template,
+        CentralDocumentRecord record,
+        CentralDocumentVersion version,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        if (!request.SourceRecordId.HasValue)
+        {
+            return;
+        }
+
+        var documentName = ResolveGeneratedProcedureDocumentName(request.SourceEntityType, template.TemplateCode);
+        if (documentName is null)
+        {
+            return;
+        }
+
+        var procedureCase = await _db.ProcedureCases
+            .Include(item => item.Documents)
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == request.SourceRecordId.Value
+                && !item.IsDeleted,
+                cancellationToken);
+
+        if (procedureCase is null)
+        {
+            return;
+        }
+
+        var document = procedureCase.Documents
+            .Where(item => !item.IsDeleted)
+            .FirstOrDefault(item => string.Equals(item.Name, documentName, StringComparison.OrdinalIgnoreCase));
+
+        if (document is null)
+        {
+            return;
+        }
+
+        var actorUserId = GetUserId();
+        var actorName = _currentUserService.UserName ?? "System";
+        document.FileName = record.DocumentReference;
+        document.FileUrl = $"/document-management/records/{record.Id}";
+        document.ProvidedBy = "Central DMS";
+        document.Notes = Truncate(
+            $"Generated from {template.TemplateCode}. DMS reference: {record.DocumentReference}. Version: {version.VersionNumber}.",
+            500);
+        document.UploadedById = actorUserId;
+        document.UploadedAt = now;
+        document.UpdatedAt = now;
+        document.UpdatedBy = actorName;
+        document.LastModifiedById = actorUserId;
+
+        UpsertGeneratedProcedureField(
+            procedureCase,
+            "draftDocumentReference",
+            "Draft document reference",
+            record.DocumentReference,
+            actorUserId,
+            actorName,
+            now);
+
+        procedureCase.LastActionById = actorUserId ?? procedureCase.LastActionById;
+        procedureCase.UpdatedAt = now;
+        procedureCase.UpdatedBy = actorName;
+        procedureCase.LastModifiedById = actorUserId;
+
+        _db.ProcedureCaseActivities.Add(new ProcedureCaseActivity
+        {
+            TenantId = tenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Action = "Attached generated DMS document",
+            StageName = procedureCase.CurrentStageName,
+            Details = $"{document.Name}: {record.DocumentReference}.",
+            PerformedById = actorUserId ?? procedureCase.LastActionById ?? procedureCase.OpenedById,
+            PerformedAt = now,
+            CreatedBy = actorName,
+            CreatedById = actorUserId
+        });
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<string?> ValidateProcedureDocumentGenerationAsync(
+        Guid tenantId,
+        GenerateDocumentTemplateRequest request,
+        GeneratedDocumentTemplateDefinition template,
+        CancellationToken cancellationToken)
+    {
+        if (!request.SourceRecordId.HasValue
+            || ResolveGeneratedProcedureDocumentName(request.SourceEntityType, template.TemplateCode) is null)
+        {
+            return null;
+        }
+
+        var procedureCase = await _db.ProcedureCases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == request.SourceRecordId.Value
+                && !item.IsDeleted,
+                cancellationToken);
+
+        if (procedureCase is null)
+        {
+            return "The source procedure case could not be found.";
+        }
+
+        if (string.Equals(procedureCase.EntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(procedureCase.CurrentStageName, "Transfer Drafting", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Generate the transfer draft during Transfer Drafting. Later Legal stages review or sign the existing draft.";
+        }
+
+        return null;
+    }
+
+    private static string? ResolveGeneratedProcedureDocumentName(string? sourceEntityType, string? templateCode)
+    {
+        if (!string.Equals(sourceEntityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return templateCode?.Trim().ToUpperInvariant() switch
+        {
+            "LEG-TRANSFER-FORM" => "Draft transfer form",
+            _ => null
+        };
+    }
+
+    private void UpsertGeneratedProcedureField(
+        ProcedureCase procedureCase,
+        string key,
+        string label,
+        string value,
+        Guid? actorUserId,
+        string actorName,
+        DateTime now)
+    {
+        var field = procedureCase.Fields
+            .Where(item => !item.IsDeleted)
+            .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+
+        if (field is null)
+        {
+            field = new ProcedureCaseField
+            {
+                TenantId = procedureCase.TenantId,
+                ProcedureCaseId = procedureCase.Id,
+                Key = key,
+                Label = label,
+                FieldType = "text",
+                CreatedAt = now,
+                CreatedBy = actorName,
+                CreatedById = actorUserId
+            };
+            _db.ProcedureCaseFields.Add(field);
+        }
+
+        field.Value = value;
+        field.UpdatedAt = now;
+        field.UpdatedBy = actorName;
+        field.LastModifiedById = actorUserId;
+    }
+
+    private static string? FirstPopulated(params string?[] values)
+        => values.Select(TrimToNull).FirstOrDefault(value => value is not null);
+
+    private static string? JoinPopulated(params string?[] values)
+    {
+        var populated = values
+            .Select(TrimToNull)
+            .Where(value => value is not null)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return populated.Count == 0 ? null : string.Join(", ", populated);
+    }
+
+    private static string? FormatEstateAssetSize(
+        decimal? areaSquareMeters,
+        decimal? areaValue,
+        string? areaUnit,
+        decimal? acquisitionEstimatedSize)
+    {
+        if (areaSquareMeters is > 0)
+        {
+            return $"{areaSquareMeters.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} square metres";
+        }
+
+        if (areaValue is > 0)
+        {
+            return $"{areaValue.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} {TrimOrDefault(areaUnit, "units")}";
+        }
+
+        return acquisitionEstimatedSize is > 0
+            ? $"{acquisitionEstimatedSize.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} acres"
+            : null;
     }
 
     private static string MergeTemplate(string template, IReadOnlyDictionary<string, string> values)
@@ -3169,7 +4574,7 @@ public sealed class DocumentManagementController : ControllerBase
             new("sourcelabel", "Source label", template.SourceLabel, "text")
         };
 
-        foreach (var field in template.MergeFields)
+        foreach (var field in EffectiveMergeFields(template))
         {
             metadata.Add(new UpsertDocumentMetadataValueRequest(
                 NormalizeMetadataField(field),
@@ -3181,12 +4586,139 @@ public sealed class DocumentManagementController : ControllerBase
         return metadata;
     }
 
+    private static IReadOnlyList<string> EffectiveMergeFields(
+        GeneratedDocumentTemplateDefinition template) =>
+        template.MergeFields
+            .Concat(DocumentTemplateWordBodyExtractor.ExtractMergeFields(template.Body))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private async Task<GeneratedTemplateFile> BuildGeneratedTemplateFileAsync(
+        GeneratedDocumentTemplateDefinition template,
+        IReadOnlyDictionary<string, string> mergeValues,
+        string title,
+        string content,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (template.TemplateFileUploadRecordId.HasValue)
+        {
+            var uploadRecord = await _db.FileUploadRecords
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == template.TemplateFileUploadRecordId.Value
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted, cancellationToken);
+
+            if (uploadRecord is not null && IsWordFile(uploadRecord.ContentType, uploadRecord.OriginalFileName))
+            {
+                await using var source = await _fileStorageService.DownloadFileAsync(uploadRecord.FilePath, uploadRecord.Id);
+                await using var documentStream = new MemoryStream();
+                await source.CopyToAsync(documentStream, cancellationToken);
+                documentStream.Position = 0;
+
+                using (var document = WordprocessingDocument.Open(documentStream, true))
+                {
+                    MergeWordPlaceholders(document, mergeValues);
+                    var mainPart = document.MainDocumentPart;
+                    mainPart?.Document?.Save();
+                    if (mainPart is not null)
+                    {
+                        foreach (var header in mainPart.HeaderParts)
+                        {
+                            header.Header?.Save();
+                        }
+                        foreach (var footer in mainPart.FooterParts)
+                        {
+                            footer.Footer?.Save();
+                        }
+                    }
+                }
+
+                return new GeneratedTemplateFile(
+                    documentStream.ToArray(),
+                    $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.docx",
+                    WordDocumentContentType,
+                    false);
+            }
+        }
+
+        var pdfBytes = BuildSimplePdf(title, content);
+        return new GeneratedTemplateFile(
+            pdfBytes,
+            $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.pdf",
+            "application/pdf",
+            true);
+    }
+
+    private static void MergeWordPlaceholders(
+        WordprocessingDocument document,
+        IReadOnlyDictionary<string, string> values)
+    {
+        var mainPart = document.MainDocumentPart;
+        if (mainPart?.Document is not null)
+        {
+            MergeParagraphPlaceholders(mainPart.Document.Descendants<Paragraph>(), values);
+        }
+
+        if (mainPart is null)
+        {
+            return;
+        }
+
+        foreach (var header in mainPart.HeaderParts)
+        {
+            if (header.Header is not null)
+            {
+                MergeParagraphPlaceholders(header.Header.Descendants<Paragraph>(), values);
+            }
+        }
+
+        foreach (var footer in mainPart.FooterParts)
+        {
+            if (footer.Footer is not null)
+            {
+                MergeParagraphPlaceholders(footer.Footer.Descendants<Paragraph>(), values);
+            }
+        }
+    }
+
+    private static void MergeParagraphPlaceholders(
+        IEnumerable<Paragraph> paragraphs,
+        IReadOnlyDictionary<string, string> values)
+    {
+        foreach (var paragraph in paragraphs)
+        {
+            var texts = paragraph.Descendants<Text>().ToList();
+            if (texts.Count == 0)
+            {
+                continue;
+            }
+
+            var original = string.Concat(texts.Select(text => text.Text));
+            if (!original.Contains("{{", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var merged = MergeTemplate(original, values);
+            foreach (var run in paragraph.Elements<Run>().ToList())
+            {
+                run.Remove();
+            }
+
+            paragraph.AppendChild(new Run(new Text(merged)
+            {
+                Space = SpaceProcessingModeValues.Preserve
+            }));
+        }
+    }
+
     private static byte[] BuildSimplePdf(string title, string content)
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
         // DMS generation: paginate tenant-editable templates and keep Unicode text intact in the PDF rendition.
-        return Document.Create(container =>
+        return QuestPDF.Fluent.Document.Create(container =>
         {
             container.Page(page =>
             {
@@ -3416,7 +4948,7 @@ public sealed class DocumentManagementController : ControllerBase
         var viewableRecords = new List<CentralDocumentRecord>();
         foreach (var record in records)
         {
-            if (await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+            if (await CanViewRecordAsync(tenantId, record, cancellationToken))
             {
                 viewableRecords.Add(record);
             }
@@ -3433,7 +4965,7 @@ public sealed class DocumentManagementController : ControllerBase
         var viewableVersions = new List<CentralDocumentVersion>();
         foreach (var version in versions)
         {
-            if (await CanUseRecordActionAsync(tenantId, version.DocumentRecord, rule => rule.CanView, cancellationToken))
+            if (await CanViewRecordAsync(tenantId, version.DocumentRecord, cancellationToken))
             {
                 viewableVersions.Add(version);
             }
@@ -4050,6 +5582,86 @@ public sealed class DocumentManagementController : ControllerBase
         return false;
     }
 
+    private async Task<bool> CanViewRecordAsync(
+        Guid tenantId,
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (CanUseSourceModuleForDms(record.SourceModule))
+        {
+            return true;
+        }
+
+        if (HasAnyRole("Executive Approver", "Authorised Signatory", "Managing Director")
+            && await IsPropertyListingAgreementAsync(record, cancellationToken))
+        {
+            return true;
+        }
+
+        if (await CanViewLinkedPropertyAgreementReviewRecordAsync(record, cancellationToken))
+        {
+            return true;
+        }
+
+        return await CanUseRecordActionAsync(
+                tenantId,
+                record,
+                rule => rule.CanView,
+                cancellationToken);
+    }
+
+    private async Task<bool> CanViewLinkedPropertyAgreementReviewRecordAsync(
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (!HasAnyRole("Legal Admin Assistant", "Legal Officer", "Head of Legal", "Legal Manager"))
+        {
+            return false;
+        }
+
+        if (!await IsPropertyListingAgreementAsync(record, cancellationToken))
+        {
+            return false;
+        }
+
+        var agreementReference = TrimToNull(record.DocumentReference);
+        if (agreementReference is null)
+        {
+            return false;
+        }
+
+        var sourceCaseId = record.SourceRecordId?.ToString();
+        var sourceReference = TrimToNull(record.SourceRecordReference);
+        if (string.IsNullOrWhiteSpace(sourceCaseId) && sourceReference is null)
+        {
+            return false;
+        }
+
+        return await _db.ProcedureCases
+            .AsNoTracking()
+            .Where(item => item.TenantId == record.TenantId
+                && !item.IsDeleted
+                && item.Module == "Legal"
+                && item.EntityType == "LegalPropertyAgreementReview"
+                && item.Status != "Completed"
+                && item.Status != "Rejected"
+                && item.Status != "Archived"
+                && item.Status != "Cancelled"
+                && item.Status != "Canceled"
+                && item.Status != "Closed")
+            .AnyAsync(item =>
+                item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "agreementReference"
+                    && field.Value == agreementReference)
+                && ((sourceCaseId != null && item.Fields.Any(field => !field.IsDeleted
+                        && field.Key == "sourceProcedureCaseId"
+                        && field.Value == sourceCaseId))
+                    || (sourceReference != null && item.Fields.Any(field => !field.IsDeleted
+                        && field.Key == "sourceRecordReference"
+                        && field.Value == sourceReference))),
+                cancellationToken);
+    }
+
     private async Task<FileUploadRecord?> ResolveAuthorizedVersionUploadRecordAsync(
         Guid tenantId,
         CentralDocumentRecord record,
@@ -4212,9 +5824,15 @@ public sealed class DocumentManagementController : ControllerBase
             return true;
         }
 
+        var isPropertyListingAgreement = await IsPropertyListingAgreementAsync(record, cancellationToken);
         var hasDocumentPermission = normalizedAction switch
         {
-            "submitapproval" or "submitforapproval" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken),
+            "submitapproval" or "submitforapproval" => CanUseSourceModuleForDms(record.SourceModule)
+                || await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken),
+            "approve" or "return" or "returnforaction" when isPropertyListingAgreement =>
+                HasAnyRole("Property Manager", "Estate Manager", "Head of Estate"),
+            "sign" when isPropertyListingAgreement =>
+                HasAnyRole("Executive Approver", "Authorised Signatory", "Managing Director"),
             "approve" or "return" or "returnforaction" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanApprove, cancellationToken),
             "sign" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanApprove, cancellationToken),
             "dispatch" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanArchive, cancellationToken),
@@ -4227,11 +5845,38 @@ public sealed class DocumentManagementController : ControllerBase
 
         return normalizedAction switch
         {
+            "approve" or "return" or "returnforaction" when isPropertyListingAgreement => true,
+            "sign" when isPropertyListingAgreement => true,
             "approve" or "return" or "returnforaction" => HasConfiguredOrSourceRole(template.ApprovalRole, record, "Authorised Signatory", "Records Officer"),
             "sign" => HasConfiguredOrSourceRole(template.SignatureRole, record, "Authorised Signatory", "Records Officer"),
             "dispatch" => HasAnyRole("Records Officer", "Estate Officer"),
             _ => true
         };
+    }
+
+    private async Task<bool> IsPropertyListingAgreementAsync(
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(record.SourceModule, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (record.SourceRecordId.HasValue)
+        {
+            return await _db.ProcedureCases
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == record.SourceRecordId.Value
+                    && item.TenantId == record.TenantId
+                    && !item.IsDeleted
+                    && item.EntityType == "EstatePropertyManagementListingApplication",
+                    cancellationToken);
+        }
+
+        // Compatibility for older generated agreements that predate the source-case foreign key.
+        return record.SourceLabel?.Contains("Property Management listing application", StringComparison.OrdinalIgnoreCase) == true
+            && record.SourceRecordReference?.StartsWith("LISTING-", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static bool IsSupportedGeneratedDocumentWorkflowAction(string normalizedAction) =>
@@ -4357,7 +6002,7 @@ public sealed class DocumentManagementController : ControllerBase
 
         if (source.Contains("Legal", StringComparison.OrdinalIgnoreCase))
         {
-            return HasAnyRole("Legal Officer", "Legal Manager", "Head of Legal");
+            return HasAnyRole("Legal Admin Assistant", "Legal Officer", "Legal Manager", "Head of Legal");
         }
 
         if (source.Contains("Planning", StringComparison.OrdinalIgnoreCase))
@@ -4378,6 +6023,18 @@ public sealed class DocumentManagementController : ControllerBase
             || _currentUserService.IsInRole("TenantAdmin")
             || _currentUserService.IsInRole("Document Control Officer")
             || _currentUserService.IsInRole("Records Officer");
+
+    private bool CanManageDocumentTemplateModule(string? module)
+    {
+        if (IsDmsAccessAdministrator())
+        {
+            return true;
+        }
+
+        var source = module ?? string.Empty;
+        return source.Contains("Estate", StringComparison.OrdinalIgnoreCase)
+            && HasAnyRole("Estate Manager", "Property Manager", "Facilities Manager", "Head of Estate");
+    }
 
     private static string? TemplateCodeFromSourceReference(string? sourceRecordReference)
     {
@@ -4669,6 +6326,51 @@ public sealed class DocumentManagementController : ControllerBase
     private static string? Value(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private async Task<ProcedureCase?> FindDmsVersionProcedureCaseAsync(
+        Guid tenantId,
+        Guid recordId,
+        CancellationToken cancellationToken,
+        bool includeCompleted = false)
+    {
+        var recordIdValue = recordId.ToString();
+        var query = _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.Module == "DocumentManagement"
+                && item.EntityType == "CentralDocumentVersion"
+                && item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "documentRecordId"
+                    && field.Value == recordIdValue));
+
+        if (!includeCompleted)
+        {
+            query = query.Where(item => item.Status != "Completed"
+                && item.Status != "Rejected"
+                && item.Status != "Archived"
+                && item.Status != "Cancelled"
+                && item.Status != "Canceled"
+                && item.Status != "Closed");
+        }
+
+        return await query
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private Task<bool> HasPublishedDmsVersionWorkflowAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+        => _db.WorkflowDefinitions
+            .AsNoTracking()
+            .AnyAsync(item => item.TenantId == tenantId
+                && item.IsActive
+                && !item.IsDeleted
+                && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                && (item.EntityType.Name == "CentralDocumentVersion"
+                    || item.EntityType.Code == "CentralDocumentVersion"),
+                cancellationToken);
+
     private static object ToVersionDto(CentralDocumentVersion version) => new
     {
         version.Id,
@@ -4939,7 +6641,18 @@ public sealed record GeneratedDocumentTemplateDefinition(
     string? ApprovalRole,
     string? SignatureRole,
     string? DefaultDispatchChannel,
-    bool IsActive = true);
+    bool IsActive = true,
+    Guid? TemplateFileUploadRecordId = null,
+    string? TemplateRepositoryPath = null,
+    string? TemplateFileName = null,
+    string? TemplateContentType = null,
+    long? TemplateFileSize = null);
+
+public sealed record GeneratedTemplateFile(
+    byte[] Bytes,
+    string FileName,
+    string ContentType,
+    bool IsPdf);
 
 public sealed record UpsertGeneratedDocumentTemplateRequest(
     string? TemplateCode,
@@ -4965,6 +6678,10 @@ public sealed record GeneratedDocumentWorkflowActionRequest(
     string? DispatchChannel,
     string? DispatchedTo,
     string? DispatchReference);
+
+public sealed record DigitallySignedVersion(
+    CentralDocumentVersion Version,
+    CentralDocumentPdfSigningResult Signature);
 
 public sealed record GenerateDocumentTemplateRequest(
     string? TemplateCode,

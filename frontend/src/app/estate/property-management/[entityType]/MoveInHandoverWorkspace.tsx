@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { ClipboardCheck, KeyRound, Loader2, RefreshCw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -10,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,6 +22,7 @@ import {
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
 import {
+  assetMatchesWorkspacePrefill,
   buildPropertyWorkspaceHref,
   estateAssetStatusLabels,
   formatEstateDate,
@@ -30,9 +34,14 @@ import {
 type HandoverAction = 'move-in' | 'move-out' | 'maintenance' | 'block';
 
 export function MoveInHandoverWorkspace() {
+  const searchParams = useSearchParams();
+  const prefillAssetId = searchParams.get('assetId');
+  const prefillReference =
+    searchParams.get('field_propertyUnit') || searchParams.get('referenceNumber');
+  const initialSearch = prefillReference || '';
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
-  const [searchDraft, setSearchDraft] = React.useState('');
-  const [search, setSearch] = React.useState('');
+  const [searchDraft, setSearchDraft] = React.useState(initialSearch);
+  const [search, setSearch] = React.useState(initialSearch);
   const [selectedAssetId, setSelectedAssetId] = React.useState('');
   const [action, setAction] = React.useState<HandoverAction>('move-in');
   const [actualDate, setActualDate] = React.useState(new Date().toISOString().slice(0, 10));
@@ -71,6 +80,7 @@ export function MoveInHandoverWorkspace() {
       ),
     [assets]
   );
+  const handoverPages = usePaginatedItems(handoverAssets, 10);
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
 
@@ -81,9 +91,24 @@ export function MoveInHandoverWorkspace() {
     setNotes('');
   };
 
+  React.useEffect(() => {
+    if (selectedAssetId || (!prefillAssetId && !prefillReference)) return;
+    const matchedAsset = assets.find((asset) =>
+      assetMatchesWorkspacePrefill(asset, prefillAssetId, prefillReference)
+    );
+    if (matchedAsset) {
+      selectAsset(matchedAsset);
+    }
+  }, [assets, prefillAssetId, prefillReference, selectedAssetId]);
+
   const saveHandover = async () => {
     if (!selectedAsset) {
       toast.error('Select a property or unit first.');
+      return;
+    }
+
+    if ((action === 'move-in' || action === 'move-out') && !actualDate) {
+      toast.error(`Enter the actual ${action === 'move-in' ? 'possession' : 'move-out'} date.`);
       return;
     }
 
@@ -100,6 +125,8 @@ export function MoveInHandoverWorkspace() {
     try {
       const updated = await estateLandManagementService.updateOccupancy(selectedAsset.id, {
         status,
+        actualDate: actualDate || null,
+        releaseOccupant: action === 'move-out',
         isAvailableForLease: action === 'move-out',
         isAvailableForSale: false,
         isPublishedToExternalPortal: false,
@@ -170,7 +197,7 @@ export function MoveInHandoverWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {handoverAssets.map((asset) => (
+                  {handoverPages.items.map((asset) => (
                     <TableRow key={asset.id} className={selectedAssetId === asset.id ? 'bg-muted/40' : ''}>
                       <TableCell><div className="font-medium">{asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(asset)}</div></TableCell>
                       <TableCell>{occupantName(asset)}</TableCell>
@@ -193,6 +220,7 @@ export function MoveInHandoverWorkspace() {
               </Table>
             </div>
           ) : null}
+          {handoverAssets.length > handoverPages.pageSize ? <Pagination currentPage={handoverPages.currentPage} totalPages={handoverPages.totalPages} totalItems={handoverPages.totalItems} pageSize={handoverPages.pageSize} onPageChange={handoverPages.setCurrentPage} /> : null}
           {!isLoading && !loadError && handoverAssets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No handover-ready records found.</div> : null}
         </CardContent>
       </Card>

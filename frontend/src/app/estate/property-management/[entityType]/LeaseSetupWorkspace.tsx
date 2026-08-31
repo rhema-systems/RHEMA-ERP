@@ -4,6 +4,7 @@ import Link from 'next/link';
 import React from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ClipboardCheck,
   CreditCard,
   FileText,
@@ -25,7 +26,15 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -118,6 +127,7 @@ function buildProcedurePrefillHref(
     10
   );
   const params = new URLSearchParams({
+    assetId: asset.id,
     title: `${titlePrefix} - ${asset.name}`,
     referenceNumber: sourceReference,
     applicantName: asset.lesseeName || '',
@@ -326,10 +336,11 @@ export function LeaseSetupWorkspace() {
         asset.propertyFileReference,
         getLeaseStatus(asset),
       ]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(normalizedSearch))
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLowerCase().includes(normalizedSearch))
     );
   }, [leaseRecords, registerSearch]);
+  const leasePages = usePaginatedItems(filteredLeaseRecords, 10);
 
   const clearForm = () => {
     setSelectedAssetId('');
@@ -738,7 +749,7 @@ export function LeaseSetupWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredLeaseRecords.map((asset) => {
+                  {leasePages.items.map((asset) => {
                     const billingAccount = billingAccountByAssetId.get(
                       asset.id
                     );
@@ -839,120 +850,104 @@ export function LeaseSetupWorkspace() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col items-start gap-1.5">
-                            <Button
-                              asChild
-                              size="sm"
-                              variant="link"
-                              className="h-auto px-0 py-0 text-xs"
-                            >
-                              <Link
-                                href={buildProcedurePrefillHref(
-                                  '/estate/EstateLeaseRenewal',
-                                  asset,
-                                  'Lease renewal',
-                                  'Lease'
-                                )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="gap-1"
+                                aria-label={`Open actions for ${asset.name}`}
                               >
-                                <RefreshCw className="mr-1 h-3.5 w-3.5" />
-                                Renewal
-                              </Link>
-                            </Button>
-                            <Button
-                              asChild
-                              size="sm"
-                              variant="link"
-                              className="h-auto px-0 py-0 text-xs"
-                            >
-                              <Link
-                                href={buildProcedurePrefillHref(
-                                  '/legal/LegalTerminationRecognition',
-                                  asset,
-                                  'Lease termination',
-                                  'Lease'
-                                )}
-                              >
-                                <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-                                Termination / Legal
-                              </Link>
-                            </Button>
-                            <Button
-                              asChild
-                              size="sm"
-                              variant="link"
-                              className="h-auto px-0 py-0 text-xs"
-                            >
-                              <Link
-                                href={buildProcedurePrefillHref(
-                                  '/estate/property-management/EstatePropertyManagementOccupancyAvailability',
-                                  asset,
-                                  'Reserve occupancy',
-                                  'Occupancy / availability',
-                                  getOccupancyHandoffFields(asset)
-                                )}
-                              >
-                                <Home className="mr-1 h-3.5 w-3.5" />
-                                Occupancy / availability
-                              </Link>
-                            </Button>
-                            <Button
-                              asChild
-                              size="sm"
-                              variant="link"
-                              className="h-auto px-0 py-0 text-xs"
-                            >
-                              <Link
-                                href={buildProcedurePrefillHref(
-                                  '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover',
-                                  asset,
-                                  'Move-in handover',
-                                  'Move-in',
-                                  getMoveInHandoffFields(asset)
-                                )}
-                              >
-                                <ClipboardCheck className="mr-1 h-3.5 w-3.5" />
-                                Move-in / handover
-                              </Link>
-                            </Button>
-                            <Button
-                              asChild
-                              size="sm"
-                              variant="link"
-                              className="h-auto px-0 py-0 text-xs"
-                            >
-                              <Link
-                                href={buildProcedurePrefillHref(
-                                  '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
-                                  asset,
-                                  'Billing start',
-                                  'Billing',
-                                  getBillingHandoffFields(asset)
-                                )}
-                              >
-                                <CreditCard className="mr-1 h-3.5 w-3.5" />
-                                Billing
-                              </Link>
-                            </Button>
-                            <Button
-                              asChild
-                              size="sm"
-                              variant="link"
-                              className="h-auto px-0 py-0 text-xs"
-                            >
-                              <Link
-                                href={buildProcedurePrefillHref(
-                                  '/estate/property-management/EstatePropertyManagementDocumentRecordIndex',
-                                  asset,
-                                  'Lease records index',
-                                  'Document record',
-                                  getRecordIndexHandoffFields(asset)
-                                )}
-                              >
-                                <FileText className="mr-1 h-3.5 w-3.5" />
-                                Records index
-                              </Link>
-                            </Button>
-                          </div>
+                                Actions
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuItem asChild>
+                                <Link
+                                  href={buildProcedurePrefillHref(
+                                    '/estate/EstateLeaseRenewal',
+                                    asset,
+                                    'Lease renewal',
+                                    'Lease'
+                                  )}
+                                >
+                                  <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                                  Renewal
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link
+                                  href={buildProcedurePrefillHref(
+                                    '/legal/LegalTerminationRecognition',
+                                    asset,
+                                    'Lease termination',
+                                    'Lease'
+                                  )}
+                                >
+                                  <ShieldCheck className="mr-2 h-3.5 w-3.5" />
+                                  Termination / Legal
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link
+                                  href={buildProcedurePrefillHref(
+                                    '/estate/property-management/EstatePropertyManagementOccupancyAvailability',
+                                    asset,
+                                    'Reserve occupancy',
+                                    'Occupancy / availability',
+                                    getOccupancyHandoffFields(asset)
+                                  )}
+                                >
+                                  <Home className="mr-2 h-3.5 w-3.5" />
+                                  Occupancy / availability
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link
+                                  href={buildProcedurePrefillHref(
+                                    '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover',
+                                    asset,
+                                    'Move-in handover',
+                                    'Move-in',
+                                    getMoveInHandoffFields(asset)
+                                  )}
+                                >
+                                  <ClipboardCheck className="mr-2 h-3.5 w-3.5" />
+                                  Move-in / handover
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link
+                                  href={buildProcedurePrefillHref(
+                                    '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
+                                    asset,
+                                    'Billing start',
+                                    'Billing',
+                                    getBillingHandoffFields(asset)
+                                  )}
+                                >
+                                  <CreditCard className="mr-2 h-3.5 w-3.5" />
+                                  Billing
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link
+                                  href={buildProcedurePrefillHref(
+                                    '/estate/property-management/EstatePropertyManagementDocumentRecordIndex',
+                                    asset,
+                                    'Lease records index',
+                                    'Document record',
+                                    getRecordIndexHandoffFields(asset)
+                                  )}
+                                >
+                                  <FileText className="mr-2 h-3.5 w-3.5" />
+                                  Records index
+                                </Link>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     );
@@ -961,6 +956,7 @@ export function LeaseSetupWorkspace() {
               </Table>
             </div>
           ) : null}
+          {filteredLeaseRecords.length > leasePages.pageSize ? <Pagination currentPage={leasePages.currentPage} totalPages={leasePages.totalPages} totalItems={leasePages.totalItems} pageSize={leasePages.pageSize} onPageChange={leasePages.setCurrentPage} /> : null}
         </CardContent>
       </Card>
     </div>

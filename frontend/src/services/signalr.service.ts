@@ -1,4 +1,9 @@
-import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
+import {
+  HubConnection,
+  HubConnectionBuilder,
+  HubConnectionState,
+  LogLevel,
+} from '@microsoft/signalr';
 import { getStoredToken } from './api.service';
 
 export interface DashboardData {
@@ -95,25 +100,34 @@ class SignalRService {
   private reconnectInterval: NodeJS.Timeout | null = null;
   private isManualDisconnect = false;
   private rateLimitBackoffUntil = 0;
-  private readonly enableSignalRDebugLogging = process.env.NEXT_PUBLIC_DEBUG_SIGNALR === 'true';
+  private readonly enableSignalRDebugLogging =
+    process.env.NEXT_PUBLIC_DEBUG_SIGNALR === 'true';
 
   constructor() {
-    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/api\/?$/, '');
+    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(
+      /\/api\/?$/,
+      ''
+    );
     this.hubUrl = `${baseUrl}/api/hubs/dashboard`;
     if (this.enableSignalRDebugLogging) {
       console.log('SignalR Service initialized:', {
         NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
         baseUrl,
-        hubUrl: this.hubUrl
+        hubUrl: this.hubUrl,
       });
     }
   }
 
   // Event handlers
-  private dashboardUpdateHandlers: Set<(data: DashboardData) => void> = new Set();
-  private notificationHandlers: Set<(notification: Notification) => void> = new Set();
-  private userSessionUpdateHandlers: Set<(update: UserSessionUpdate) => void> = new Set();
-  private connectionStateChangeHandlers: Set<(state: HubConnectionState) => void> = new Set();
+  private dashboardUpdateHandlers: Set<(data: DashboardData) => void> =
+    new Set();
+  private notificationHandlers: Set<(notification: Notification) => void> =
+    new Set();
+  private userSessionUpdateHandlers: Set<(update: UserSessionUpdate) => void> =
+    new Set();
+  private connectionStateChangeHandlers: Set<
+    (state: HubConnectionState) => void
+  > = new Set();
 
   async connect(): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
@@ -126,8 +140,12 @@ class SignalRService {
 
     const now = Date.now();
     if (this.rateLimitBackoffUntil > now) {
-      const secondsRemaining = Math.ceil((this.rateLimitBackoffUntil - now) / 1000);
-      throw new Error(`SignalR connection is paused after rate limiting. Retry in ${secondsRemaining} seconds.`);
+      const secondsRemaining = Math.ceil(
+        (this.rateLimitBackoffUntil - now) / 1000
+      );
+      throw new Error(
+        `SignalR connection is paused after rate limiting. Retry in ${secondsRemaining} seconds.`
+      );
     }
 
     this.connectPromise = this.startConnection();
@@ -164,16 +182,26 @@ class SignalRService {
         skipNegotiation: false,
         timeout: 30000, // 30 seconds
       })
-      .configureLogging(this.enableSignalRDebugLogging ? LogLevel.Information : LogLevel.Warning)
+      .configureLogging(
+        this.enableSignalRDebugLogging ? LogLevel.Information : LogLevel.Warning
+      )
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           if (retryContext.previousRetryCount === 0) return 2000; // 2 seconds
           if (retryContext.previousRetryCount === 1) return 5000; // 5 seconds
           if (retryContext.previousRetryCount === 2) return 10000; // 10 seconds
-          return Math.min(15000 + (retryContext.previousRetryCount * 5000), 30000); // Cap at 30s
-        }
+          return Math.min(
+            15000 + retryContext.previousRetryCount * 5000,
+            30000
+          ); // Cap at 30s
+        },
       })
       .build();
+
+    // The API emits server keep-alives every 30 seconds. Leave enough headroom
+    // for a delayed heartbeat before treating an otherwise healthy hub as dead.
+    this.connection.serverTimeoutInMilliseconds = 120000;
+    this.connection.keepAliveIntervalInMilliseconds = 15000;
 
     // Set up event handlers
     this.setupEventHandlers();
@@ -183,16 +211,18 @@ class SignalRService {
       if (this.enableSignalRDebugLogging) {
         console.log(`Attempting to connect to SignalR hub: ${this.hubUrl}`);
       }
-      
+
       await this.connection.start();
       this.rateLimitBackoffUntil = 0;
-      
+
       if (this.enableSignalRDebugLogging) {
-        console.log(`SignalR connection established successfully. ConnectionId: ${this.connection.connectionId}`);
+        console.log(
+          `SignalR connection established successfully. ConnectionId: ${this.connection.connectionId}`
+        );
       }
-      
+
       this.notifyConnectionStateChange(this.connection.state);
-      
+
       // Clear any reconnection intervals since auto-reconnect is handled by SignalR
       if (this.reconnectInterval) {
         clearInterval(this.reconnectInterval);
@@ -203,16 +233,16 @@ class SignalRService {
       if (this.isRateLimitError(error)) {
         this.rateLimitBackoffUntil = Date.now() + 60000;
       }
-      
+
       // Log additional debugging information
       if (error instanceof Error) {
         console.error('Error details:', {
           name: error.name,
           message: error.message,
-          stack: error.stack
+          stack: error.stack,
         });
       }
-      
+
       // Clean up failed connection
       if (this.connection) {
         try {
@@ -224,19 +254,22 @@ class SignalRService {
         }
         this.connection = null;
       }
-      
+
       throw error;
     }
   }
 
   private isRateLimitError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return message.includes('429') || message.toLowerCase().includes('too many requests');
+    return (
+      message.includes('429') ||
+      message.toLowerCase().includes('too many requests')
+    );
   }
 
   async disconnect(): Promise<void> {
     this.isManualDisconnect = true;
-    
+
     if (this.reconnectInterval) {
       clearInterval(this.reconnectInterval);
       this.reconnectInterval = null;
@@ -264,7 +297,7 @@ class SignalRService {
       if (this.enableSignalRDebugLogging) {
         console.log('Received dashboard update:', data);
       }
-      this.dashboardUpdateHandlers.forEach(handler => {
+      this.dashboardUpdateHandlers.forEach((handler) => {
         try {
           handler(data);
         } catch (error) {
@@ -278,7 +311,7 @@ class SignalRService {
       if (this.enableSignalRDebugLogging) {
         console.log('Received new notification:', notification);
       }
-      this.notificationHandlers.forEach(handler => {
+      this.notificationHandlers.forEach((handler) => {
         try {
           handler(notification);
         } catch (error) {
@@ -292,7 +325,7 @@ class SignalRService {
       if (this.enableSignalRDebugLogging) {
         console.log('Received user session update:', update);
       }
-      this.userSessionUpdateHandlers.forEach(handler => {
+      this.userSessionUpdateHandlers.forEach((handler) => {
         try {
           handler(update);
         } catch (error) {
@@ -307,7 +340,7 @@ class SignalRService {
         console.log('SignalR connection closed:', error);
       }
       this.notifyConnectionStateChange(HubConnectionState.Disconnected);
-      
+
       if (!this.isManualDisconnect) {
         if (this.enableSignalRDebugLogging) {
           console.log('Attempting to reconnect...');
@@ -331,7 +364,7 @@ class SignalRService {
   }
 
   private notifyConnectionStateChange(state: HubConnectionState): void {
-    this.connectionStateChangeHandlers.forEach(handler => {
+    this.connectionStateChangeHandlers.forEach((handler) => {
       try {
         handler(state);
       } catch (error) {
@@ -351,12 +384,16 @@ class SignalRService {
     return () => this.notificationHandlers.delete(handler);
   }
 
-  onUserSessionUpdate(handler: (update: UserSessionUpdate) => void): () => void {
+  onUserSessionUpdate(
+    handler: (update: UserSessionUpdate) => void
+  ): () => void {
     this.userSessionUpdateHandlers.add(handler);
     return () => this.userSessionUpdateHandlers.delete(handler);
   }
 
-  onConnectionStateChange(handler: (state: HubConnectionState) => void): () => void {
+  onConnectionStateChange(
+    handler: (state: HubConnectionState) => void
+  ): () => void {
     this.connectionStateChangeHandlers.add(handler);
     return () => this.connectionStateChangeHandlers.delete(handler);
   }
@@ -384,9 +421,11 @@ class SignalRService {
   }
 
   get isConnecting(): boolean {
-    return this.connectPromise != null ||
+    return (
+      this.connectPromise != null ||
       this.connection?.state === HubConnectionState.Connecting ||
-      this.connection?.state === HubConnectionState.Reconnecting;
+      this.connection?.state === HubConnectionState.Reconnecting
+    );
   }
 
   get connectionId(): string | null {

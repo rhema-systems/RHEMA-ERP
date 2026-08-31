@@ -126,6 +126,10 @@ public class ProcedureCaseDocument : TenantEntity
     [StringLength(150)]
     public string? RequiredFrom { get; set; }
 
+    [Required]
+    [StringLength(50)]
+    public string ProvidedBy { get; set; } = "Internal";
+
     public bool IsMandatory { get; set; }
 
     [StringLength(250)]

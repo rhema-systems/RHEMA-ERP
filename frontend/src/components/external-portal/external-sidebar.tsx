@@ -19,6 +19,7 @@ import {
   ListTodo,
   LifeBuoy,
   PackageCheck,
+  KeyRound,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -100,9 +101,9 @@ const menuItems: MenuItem[] = [
     icon: Home,
   },
   {
-    title: 'My Property Requests',
-    href: '/external-portal/my-property-requests',
-    icon: ClipboardList,
+    title: 'My Properties',
+    href: '/external-portal/my-properties',
+    icon: KeyRound,
   },
   {
     title: 'Estate Services',

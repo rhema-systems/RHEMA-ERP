@@ -15,6 +15,73 @@ interface ApiResponse<T> {
   data: T;
 }
 
+export interface EstateRentBillingActivationResult {
+  activated: boolean;
+  activatedAt: string;
+  nextBillingDate?: string | null;
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
+  message: string;
+}
+
+export interface EstateRentPenaltyTermsResult {
+  assetId: string;
+  gracePeriodDays: number;
+  penaltyMethod: string;
+  penaltyValue: number;
+  penaltyCapAmount?: number | null;
+  message: string;
+}
+
+export interface EstateRentPenaltyAssessmentResult {
+  penaltyInvoiceId: string;
+  penaltyInvoiceNumber: string;
+  penaltyAmount: number;
+  currencyCode: string;
+  sourceInvoiceId: string;
+  sourceInvoiceNumber: string;
+  message: string;
+}
+
+export interface EstateRentPenaltyStatus {
+  assetId: string;
+  isOverdue: boolean;
+  canAssessPenalty: boolean;
+  dueDate?: string | null;
+  graceEndsOn?: string | null;
+  outstandingAmount: number;
+}
+
+export interface EstateSaleInvoiceResult {
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  currencyCode: string;
+  status: string;
+  message: string;
+}
+
+export interface EstateSaleCompletionResult {
+  assetId: string;
+  assetCode: string;
+  purchaserCustomerId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  message: string;
+}
+
+export interface EstateSalePaymentStatusResult {
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceStatus: string;
+  totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  paymentStatus: string;
+  ownershipTransferStatus: string;
+  message: string;
+}
+
 class EstatePropertyManagementService {
   async getProcedures(): Promise<FacilitiesProcedure[]> {
     const response = await apiService.get<ApiResponse<FacilitiesProcedure[]>>(
@@ -64,6 +131,72 @@ class EstatePropertyManagementService {
         sourceRecordReference: request.reference || null,
         propertyUnit: propertyUnit || null,
       },
+    );
+  }
+
+  async activateRentBilling(
+    assetId: string,
+  ): Promise<EstateRentBillingActivationResult> {
+    return apiService.post<EstateRentBillingActivationResult>(
+      `/estate/property-management/ar-billing/rent/${encodeURIComponent(assetId)}/activate`,
+      {},
+    );
+  }
+
+  async updateRentPenaltyTerms(
+    assetId: string,
+    request: {
+      gracePeriodDays: number;
+      penaltyMethod: string;
+      penaltyValue: number;
+      penaltyCapAmount?: number | null;
+    },
+  ): Promise<EstateRentPenaltyTermsResult> {
+    return apiService.put<EstateRentPenaltyTermsResult>(
+      `/estate/property-management/ar-billing/rent/${encodeURIComponent(assetId)}/penalty-terms`,
+      request,
+    );
+  }
+
+  async assessRentPenalty(
+    assetId: string,
+  ): Promise<EstateRentPenaltyAssessmentResult> {
+    return apiService.post<EstateRentPenaltyAssessmentResult>(
+      `/estate/property-management/ar-billing/rent/${encodeURIComponent(assetId)}/penalties/assess`,
+      {},
+    );
+  }
+
+  async getRentPenaltyStatuses(): Promise<EstateRentPenaltyStatus[]> {
+    return apiService.get<EstateRentPenaltyStatus[]>(
+      '/estate/property-management/ar-billing/rent/penalty-statuses',
+    );
+  }
+
+  async createSaleInvoice(
+    procedureCaseId: string,
+  ): Promise<EstateSaleInvoiceResult> {
+    return apiService.post<EstateSaleInvoiceResult>(
+      `/estate/property-management/ar-billing/sale/${encodeURIComponent(procedureCaseId)}/invoice`,
+      {},
+    );
+  }
+
+  async completeSaleOwnership(
+    procedureCaseId: string,
+  ): Promise<EstateSaleCompletionResult> {
+    return apiService.post<EstateSaleCompletionResult>(
+      `/estate/property-management/ar-billing/sale/${encodeURIComponent(procedureCaseId)}/complete-ownership`,
+      {},
+    );
+  }
+
+  async syncSalePaymentStatus(
+    procedureCaseId: string,
+  ): Promise<EstateSalePaymentStatusResult> {
+    return apiService.post<EstateSalePaymentStatusResult>(
+      `/estate/property-management/ar-billing/sale/${encodeURIComponent(procedureCaseId)}/sync-payment-status`,
+      {},
     );
   }
 

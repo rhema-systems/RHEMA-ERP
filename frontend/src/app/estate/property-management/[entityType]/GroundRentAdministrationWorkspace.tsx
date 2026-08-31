@@ -36,6 +36,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   Select,
   SelectContent,
@@ -143,6 +145,7 @@ export function GroundRentAdministrationWorkspace() {
   const [reviewNotes, setReviewNotes] = React.useState('');
   const [receiptDialog, setReceiptDialog] =
     React.useState<ReceiptDialogState | null>(null);
+  const accountPages = usePaginatedItems(accounts, 10);
   const [receiptForm, setReceiptForm] = React.useState<RecordGroundRentReceipt>(
     {
       target: 'Base',
@@ -595,7 +598,7 @@ export function GroundRentAdministrationWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {accounts.map((account) => (
+                  {accountPages.items.map((account) => (
                     <TableRow
                       key={account.id}
                       className={
@@ -705,6 +708,7 @@ export function GroundRentAdministrationWorkspace() {
               </Table>
             </div>
           ) : null}
+          {accounts.length > accountPages.pageSize ? <Pagination currentPage={accountPages.currentPage} totalPages={accountPages.totalPages} totalItems={accountPages.totalItems} pageSize={accountPages.pageSize} onPageChange={accountPages.setCurrentPage} /> : null}
         </CardContent>
       </Card>
 

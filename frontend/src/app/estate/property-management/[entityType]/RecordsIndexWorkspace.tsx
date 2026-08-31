@@ -1,12 +1,15 @@
 'use client';
 
 import React from 'react';
+import { useSearchParams } from 'next/navigation';
 import { FileText, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -15,6 +18,7 @@ import {
   type EstateManagedAssetDocument,
 } from '@/services/estate-land-management.service';
 import {
+  assetMatchesWorkspacePrefill,
   formatEstateDate,
   occupantName,
   propertyReference,
@@ -26,13 +30,19 @@ interface DocumentRow extends EstateManagedAssetDocument {
 }
 
 export function RecordsIndexWorkspace() {
+  const searchParams = useSearchParams();
+  const prefillAssetId = searchParams.get('assetId');
+  const prefillReference =
+    searchParams.get('field_propertyUnit') || searchParams.get('referenceNumber');
+  const initialSearch = prefillReference || '';
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [documents, setDocuments] = React.useState<DocumentRow[]>([]);
-  const [searchDraft, setSearchDraft] = React.useState('');
-  const [search, setSearch] = React.useState('');
+  const [searchDraft, setSearchDraft] = React.useState(initialSearch);
+  const [search, setSearch] = React.useState(initialSearch);
   const [selectedAssetId, setSelectedAssetId] = React.useState('all');
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const documentPages = usePaginatedItems(documents, 10);
 
   const load = React.useCallback(async () => {
     setIsLoading(true);
@@ -62,6 +72,16 @@ export function RecordsIndexWorkspace() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    if (selectedAssetId !== 'all' || (!prefillAssetId && !prefillReference)) return;
+    const matchedAsset = assets.find((asset) =>
+      assetMatchesWorkspacePrefill(asset, prefillAssetId, prefillReference)
+    );
+    if (matchedAsset) {
+      setSelectedAssetId(matchedAsset.id);
+    }
+  }, [assets, prefillAssetId, prefillReference, selectedAssetId]);
 
   return (
     <div className="space-y-6">
@@ -117,7 +137,7 @@ export function RecordsIndexWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {documents.map((document) => (
+                  {documentPages.items.map((document) => (
                     <TableRow key={document.id}>
                       <TableCell><div className="font-medium">{document.documentName || document.fileName}</div><div className="text-xs text-muted-foreground">{document.fileName}</div></TableCell>
                       <TableCell><div>{document.asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(document.asset)} · {sourceReference(document.asset)}</div></TableCell>
@@ -132,6 +152,7 @@ export function RecordsIndexWorkspace() {
               </Table>
             </div>
           ) : null}
+          {documents.length > documentPages.pageSize ? <Pagination currentPage={documentPages.currentPage} totalPages={documentPages.totalPages} totalItems={documentPages.totalItems} pageSize={documentPages.pageSize} onPageChange={documentPages.setCurrentPage} /> : null}
           {!isLoading && !loadError && documents.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No documents found for the current selection.</div> : null}
         </CardContent>
       </Card>

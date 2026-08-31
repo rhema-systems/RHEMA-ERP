@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   legalProcedureService,
+  type LegalDashboard,
   type LegalProcedure,
 } from '@/services/legal-procedure.service';
 import {
@@ -57,15 +58,17 @@ const accentClasses: Record<string, string> = {
 export default function LegalDashboardPage() {
   const [procedures, setProcedures] = React.useState<LegalProcedure[]>([]);
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
+  const [dashboard, setDashboard] = React.useState<LegalDashboard | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
     let mounted = true;
 
     const load = async () => {
-      const [procedureResult, caseResult] = await Promise.allSettled([
+      const [procedureResult, caseResult, dashboardResult] = await Promise.allSettled([
         legalProcedureService.getProcedures(),
         procedureCaseService.listModuleCases('Legal'),
+        legalProcedureService.getDashboard(),
       ]);
 
       if (mounted) {
@@ -73,6 +76,7 @@ export default function LegalDashboardPage() {
           procedureResult.status === 'fulfilled' ? procedureResult.value : []
         );
         setCases(caseResult.status === 'fulfilled' ? caseResult.value : []);
+        setDashboard(dashboardResult.status === 'fulfilled' ? dashboardResult.value : null);
         setIsLoading(false);
       }
     };
@@ -86,24 +90,24 @@ export default function LegalDashboardPage() {
 
   const dashboardMetrics = React.useMemo(
     () => [
-      { label: 'Procedures', value: procedures.length.toString(), icon: BookOpen },
+      { label: 'Open matters', value: (dashboard?.openMatters ?? cases.filter((item) => item.status !== 'Completed').length).toString(), icon: FileSignature },
       {
-        label: 'Open Cases',
-        value: cases.filter((item) => item.status !== 'Completed').length.toString(),
-        icon: FileSignature,
-      },
-      {
-        label: 'Completed',
-        value: cases.filter((item) => item.status === 'Completed').length.toString(),
+        label: 'Active court cases',
+        value: (dashboard?.activeCourtCases ?? 0).toString(),
         icon: Scale,
       },
       {
-        label: 'Workflow Cases',
-        value: cases.filter((item) => item.usesConfiguredWorkflow).length.toString(),
+        label: 'Hearings in 30 days',
+        value: (dashboard?.hearingsNext30Days ?? 0).toString(),
+        icon: Gavel,
+      },
+      {
+        label: 'Overdue deadlines',
+        value: (dashboard?.overdueResponseDeadlines ?? 0).toString(),
         icon: ShieldCheck,
       },
     ],
-    [cases, procedures.length]
+    [cases, dashboard]
   );
 
   const actionQueues = React.useMemo(() => {
@@ -179,6 +183,73 @@ export default function LegalDashboardPage() {
             </Card>
           );
         })}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <Card className="border-border bg-card text-card-foreground">
+          <CardHeader>
+            <CardTitle>Court Case Outcomes</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[
+              { label: 'Pending', value: dashboard?.courtPending ?? 0 },
+              { label: 'Won', value: dashboard?.courtWon ?? 0 },
+              { label: 'Settled', value: dashboard?.courtSettled ?? 0 },
+              { label: 'Lost', value: dashboard?.courtLost ?? 0 },
+              { label: 'Withdrawn / struck out', value: dashboard?.courtWithdrawn ?? 0 },
+              { label: 'Completed matters', value: dashboard?.completedMatters ?? 0 },
+            ].map((item) => (
+              <div key={item.label} className="rounded-md border bg-background p-4">
+                <div className="text-sm text-muted-foreground">{item.label}</div>
+                <div className="mt-1 text-2xl font-semibold">{item.value}</div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border bg-card text-card-foreground">
+          <CardHeader>
+            <CardTitle>Upcoming Court Dates &amp; Deadlines</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!dashboard?.upcomingCourtEvents.length ? (
+              <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No upcoming court dates or filing deadlines.
+              </div>
+            ) : null}
+            {dashboard?.upcomingCourtEvents.map((event) => (
+              <div key={event.id} className="flex flex-col gap-3 rounded-md border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="font-medium">{event.referenceNumber || event.title}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {event.courtName || 'Court not recorded'} · {event.currentStageName}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {event.responseDeadline ? <Badge variant="outline">Response {event.responseDeadline}</Badge> : null}
+                  {event.nextHearingDate ? <Badge variant="secondary">Hearing {event.nextHearingDate}</Badge> : null}
+                  {event.risk ? <Badge variant="outline">{event.risk} risk</Badge> : null}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: 'Pending signatures', value: dashboard?.pendingSignatures ?? 0 },
+          { label: 'Pending payments', value: dashboard?.pendingPayments ?? 0 },
+          { label: 'Awaiting Estate return', value: dashboard?.awaitingEstateReturn ?? 0 },
+          { label: 'Property-linked matters', value: dashboard?.propertyLinkedMatters ?? 0 },
+        ].map((item) => (
+          <Card key={item.label} className="border-border bg-card text-card-foreground">
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">{item.label}</div>
+              <div className="mt-1 text-xl font-semibold">{item.value}</div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">

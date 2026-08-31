@@ -44,6 +44,10 @@ namespace ErpSystem.Api.Services
                 new System.Security.Claims.Claim("tenant_id", user.TenantId.ToString()),
                 new System.Security.Claims.Claim("jti", Guid.NewGuid().ToString()),
                 new System.Security.Claims.Claim("auth_provider", user.AuthenticationProvider.ToString()),
+                new System.Security.Claims.Claim(ClaimTypes.GivenName, user.FirstName ?? string.Empty),
+                new System.Security.Claims.Claim(ClaimTypes.Surname, user.LastName ?? string.Empty),
+                new System.Security.Claims.Claim("full_name", string.Join(" ", new[] { user.FirstName, user.LastName }
+                    .Where(part => !string.IsNullOrWhiteSpace(part))).Trim()),
                 new System.Security.Claims.Claim(
                     "password_change_required",
                     user.MustChangePassword ? "true" : "false")

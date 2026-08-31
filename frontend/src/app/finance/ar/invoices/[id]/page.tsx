@@ -31,6 +31,8 @@ import {
 import printStyles from '@/components/finance/ar/ArInvoicePrintDocument.module.css';
 import { useTenant } from '@/contexts/TenantContext';
 import { canRecordArReceipt } from '@/lib/finance/ar-receipt-eligibility';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useState } from 'react';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
@@ -40,23 +42,24 @@ export default function InvoiceDetailsPage() {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const { currentTenant, currentTenantCode } = useTenant();
+    const [showSubmitConfirmation, setShowSubmitConfirmation] = useState(false);
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
         queryFn: () => arService.getInvoice(id),
     });
 
-    const issueInvoiceMutation = useMutation({
-        mutationFn: () => arService.sendInvoice(id),
+    const submitInvoiceMutation = useMutation({
+        mutationFn: () => arService.submitInvoiceForApproval(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['invoice', id] });
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
-            toast({ title: 'Success', description: 'Invoice issued and posted successfully' });
+            toast({ title: 'Submitted', description: 'Invoice submitted to the Finance approval workflow' });
         },
         onError: (error: any) => {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to issue invoice',
+                description: error.message || 'Failed to submit invoice for approval',
                 variant: 'destructive',
             });
         },
@@ -109,10 +112,10 @@ export default function InvoiceDetailsPage() {
                     <Button variant="outline" size="sm" onClick={printArInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
-                    {invoice.status === 'Draft' && hasPermission('Finance.AR.Invoices.Send') && (
-                    <Button variant="outline" size="sm" onClick={() => issueInvoiceMutation.mutate()} disabled={issueInvoiceMutation.isPending}>
-                        {issueInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                        Issue / Post
+                    {(invoice.status === 'Draft' || invoice.status === 'Rejected') && hasPermission('Finance.AR.Invoices.Send') && (
+                    <Button variant="outline" size="sm" onClick={() => setShowSubmitConfirmation(true)} disabled={submitInvoiceMutation.isPending}>
+                        {submitInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                        Submit for Approval
                     </Button>
                     )}
                     {showRecordReceipt && (
@@ -233,6 +236,18 @@ export default function InvoiceDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+            <ConfirmationDialog
+                open={showSubmitConfirmation}
+                onOpenChange={setShowSubmitConfirmation}
+                title="Submit invoice for approval?"
+                description="The invoice will enter the Finance approval queue. It will only be posted and released after final approval."
+                confirmText="Submit for approval"
+                isLoading={submitInvoiceMutation.isPending}
+                onConfirm={async () => {
+                    await submitInvoiceMutation.mutateAsync();
+                }}
+                maxWidth="500px"
+            />
         </div>
         <ArInvoicePrintDocument
             invoice={invoice}

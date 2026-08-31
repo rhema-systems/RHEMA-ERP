@@ -132,6 +132,7 @@
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
+    <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
@@ -251,6 +252,8 @@
     <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
+    <Compile Include="Services\DocumentManagement\DocumentTemplateWordBodyExtractorTests.cs" />
+    <Compile Include="Services\DocumentManagement\CentralDocumentPdfSigningServiceTests.cs" />
     <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />
     <Compile Include="Services\Workflow\WorkflowApproverEligibilityTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />

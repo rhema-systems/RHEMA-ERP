@@ -27,6 +27,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   CentralDocumentViewerDialog,
   type CentralDocumentViewerFile,
@@ -107,6 +109,10 @@ export default function DocumentManagementWorkspacePage() {
   const [uploadActionId, setUploadActionId] = React.useState<string | null>(
     null
   );
+  const versionPages = usePaginatedItems(versionItems, 10);
+  const governancePages = usePaginatedItems(governanceItems, 10);
+  const templatePages = usePaginatedItems(metadataTemplateItems, 10);
+  const integrationPages = usePaginatedItems(queueItems, 10);
 
   const refreshQueues = React.useCallback(async () => {
     setIsQueueLoading(true);
@@ -384,7 +390,16 @@ export default function DocumentManagementWorkspacePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {versionItems.map((item) => {
+              {versionItems.length > versionPages.pageSize ? (
+                <Pagination
+                  currentPage={versionPages.currentPage}
+                  totalPages={versionPages.totalPages}
+                  totalItems={versionPages.totalItems}
+                  pageSize={versionPages.pageSize}
+                  onPageChange={versionPages.setCurrentPage}
+                />
+              ) : null}
+              {versionPages.items.map((item) => {
                 const isPending =
                   item.status === 'Pending Publication' ||
                   item.status === 'Submitted' ||
@@ -419,6 +434,13 @@ export default function DocumentManagementWorkspacePage() {
                           <Badge variant="outline">
                             {`${item.currentVersion} -> ${item.requestedVersion}`}
                           </Badge>
+                          {item.workflow ? (
+                            <Badge variant="outline">
+                              {item.workflow.status === 'Completed'
+                                ? 'Workflow approved'
+                                : item.workflow.currentStageName}
+                            </Badge>
+                          ) : null}
                         </div>
                         <div>
                           <div className="font-medium">{item.title}</div>
@@ -428,6 +450,11 @@ export default function DocumentManagementWorkspacePage() {
                           <p className="mt-2 text-sm text-muted-foreground">
                             {item.reason}
                           </p>
+                          {item.workflow?.currentAssignedRole ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Assigned to {item.workflow.currentAssignedRole}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2 xl:justify-end">
@@ -439,13 +466,22 @@ export default function DocumentManagementWorkspacePage() {
                           <Eye className="mr-2 h-4 w-4" />
                           View Document
                         </Button>
+                        {item.workflow && item.workflow.status !== 'Completed' ? (
+                          <Button asChild size="sm" variant="outline">
+                            <Link href="/workflow/inbox">
+                              <Workflow className="mr-2 h-4 w-4" />
+                              Workflow task
+                            </Link>
+                          </Button>
+                        ) : null}
                         <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
                           {uploadActionId === item.documentRecordId ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           ) : null}
-                          Upload File
+                          Upload edited Word
                           <input
                             type="file"
+                            accept=".doc,.docx,.rtf,.pdf"
                             className="sr-only"
                             disabled={uploadActionId === item.documentRecordId}
                             onChange={(event) => {
@@ -460,14 +496,20 @@ export default function DocumentManagementWorkspacePage() {
                         <Button
                           size="sm"
                           onClick={() => void publishVersion(item, 'Current')}
-                          disabled={!isPending}
+                          disabled={
+                            !isPending ||
+                            Boolean(
+                              item.workflow &&
+                                item.workflow.status !== 'Completed'
+                            )
+                          }
                         >
                           {versionActionId === `${item.id}-Current` ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           ) : (
                             <CheckCircle2 className="mr-2 h-4 w-4" />
                           )}
-                          Publish
+                          Final publish
                         </Button>
                         <Button
                           size="sm"
@@ -526,7 +568,16 @@ export default function DocumentManagementWorkspacePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {governanceItems.map((item) => {
+              {governanceItems.length > governancePages.pageSize ? (
+                <Pagination
+                  currentPage={governancePages.currentPage}
+                  totalPages={governancePages.totalPages}
+                  totalItems={governancePages.totalItems}
+                  pageSize={governancePages.pageSize}
+                  onPageChange={governancePages.setCurrentPage}
+                />
+              ) : null}
+              {governancePages.items.map((item) => {
                 const isPending = item.retentionStatus !== 'Current';
 
                 return (
@@ -614,7 +665,16 @@ export default function DocumentManagementWorkspacePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {metadataTemplateItems.map((item) => {
+              {metadataTemplateItems.length > templatePages.pageSize ? (
+                <Pagination
+                  currentPage={templatePages.currentPage}
+                  totalPages={templatePages.totalPages}
+                  totalItems={templatePages.totalItems}
+                  pageSize={templatePages.pageSize}
+                  onPageChange={templatePages.setCurrentPage}
+                />
+              ) : null}
+              {templatePages.items.map((item) => {
                 const isDraft = !item.isActive;
 
                 return (
@@ -675,7 +735,16 @@ export default function DocumentManagementWorkspacePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {queueItems.map((item) => {
+              {queueItems.length > integrationPages.pageSize ? (
+                <Pagination
+                  currentPage={integrationPages.currentPage}
+                  totalPages={integrationPages.totalPages}
+                  totalItems={integrationPages.totalItems}
+                  pageSize={integrationPages.pageSize}
+                  onPageChange={integrationPages.setCurrentPage}
+                />
+              ) : null}
+              {integrationPages.items.map((item) => {
                 const isPending = item.status === 'Pending Review';
 
                 return (
