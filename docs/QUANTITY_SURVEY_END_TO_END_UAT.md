@@ -42,6 +42,14 @@ The values selected for UAT must be recorded in the execution evidence. They are
 
 The supported non-production automation is deliberately narrower than this complete UAT script. Run `rebuild-db` against a uniquely named disposable SQL Server database, run `seed-hr-all` for the controlled location master, then run `scripts/quantity-survey/Invoke-QuantitySurveyE2ESeed.ps1` with `ConnectionStrings__DefaultConnection` scoped to that same database. The launcher refuses system and non-local databases. Do not point it at production or treat a persistent development fixture as a fresh UAT case.
 
+The guarded launcher performs that setup, starts the API and frontend, runs the authenticated Chromium lifecycle and SQL reconciliation, and drops only the database it created:
+
+```powershell
+& .\scripts\quantity-survey\Invoke-QuantitySurveyBrowserAcceptance.ps1
+```
+
+It refuses an existing database instead of rebuilding it. Use `-DatabaseName RhemaQsUatAssurance_YYYYMMDD` only for a verified-absent disposable target when another guarded run already owns today's default name.
+
 Use `e2e-tests/.qs-assurance-runner.mjs` for the governed automated run. After Chromium succeeds, it runs `scripts/quantity-survey/Invoke-QuantitySurveyE2EVerification.ps1`, which fails unless SQL Server proves the unique recorded measurement, approved valuation and certificate, four distinct valuation and certificate workflow performers, one budget-utilization ledger entry, matching formal commitment utilization, central DMS lineage, and one Finance AP handoff. The runner also supports an identical replay against the same disposable records to prove idempotency.
 
 `e2e-tests/tests/qs-phases-0-6-lifecycle.spec.ts` must use separate authenticated actors for every positive approval stage:

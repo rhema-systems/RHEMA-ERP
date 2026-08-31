@@ -8011,6 +8011,7 @@ namespace ErpSystem.Web.Services
                 new { ModuleName = "HR", Description = "HR and employee reports" },
                 new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
+                new { ModuleName = "Project Management", Description = "Projects, Quantity Survey, and Civil Engineering reports" },
                 new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
                 new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };

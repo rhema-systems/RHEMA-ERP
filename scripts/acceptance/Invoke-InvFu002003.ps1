@@ -2,6 +2,7 @@
 param(
     [string]$ApiBaseUrl = 'http://127.0.0.1:5100',
     [string]$FrontendBaseUrl = 'http://127.0.0.1:3001',
+    [string]$DatabaseConnection,
     [switch]$SkipBrowser
 )
 
@@ -136,20 +137,24 @@ ORDER BY d.Version DESC, d.PublishedAt DESC;
     return $id
 }
 
-$secretRaw = (& dotnet user-secrets list --project $apiProject --json | Out-String)
-$secretStart = $secretRaw.IndexOf('{')
-$secretEnd = $secretRaw.LastIndexOf('}')
-if ($secretStart -lt 0 -or $secretEnd -le $secretStart) {
-    throw 'The configured API database connection was not found in user secrets.'
+if ([string]::IsNullOrWhiteSpace($DatabaseConnection)) {
+    $DatabaseConnection = [Environment]::GetEnvironmentVariable('ConnectionStrings__DefaultConnection')
 }
-$secretObject = $secretRaw.Substring($secretStart, $secretEnd - $secretStart + 1) | ConvertFrom-Json
-$databaseConnection = [string]$secretObject.'ConnectionStrings:DefaultConnection'
-if ([string]::IsNullOrWhiteSpace($databaseConnection)) {
-    throw 'The configured API database connection was not found in user secrets.'
+if ([string]::IsNullOrWhiteSpace($DatabaseConnection)) {
+    $secretRaw = (& dotnet user-secrets list --project $apiProject --json | Out-String)
+    $secretStart = $secretRaw.IndexOf('{')
+    $secretEnd = $secretRaw.LastIndexOf('}')
+    if ($secretStart -ge 0 -and $secretEnd -gt $secretStart) {
+        $secretObject = $secretRaw.Substring($secretStart, $secretEnd - $secretStart + 1) | ConvertFrom-Json
+        $DatabaseConnection = [string]$secretObject.'ConnectionStrings:DefaultConnection'
+    }
+}
+if ([string]::IsNullOrWhiteSpace($DatabaseConnection)) {
+    throw 'Provide DatabaseConnection, ConnectionStrings__DefaultConnection, or an API user-secret connection.'
 }
 
 Add-Type -AssemblyName System.Data
-$connection = [System.Data.SqlClient.SqlConnection]::new($databaseConnection)
+$connection = [System.Data.SqlClient.SqlConnection]::new($DatabaseConnection)
 $connection.Open()
 
 $identityAssembly = Get-ChildItem 'C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App' -Recurse -Filter Microsoft.Extensions.Identity.Core.dll |
@@ -592,6 +597,16 @@ WHERE TenantId=@tenantId AND WorkOrderPartId=@partId AND IsDeleted=0;
             $tail = if (Test-Path $frontendErr) { (Get-Content $frontendErr -Tail 30) -join "`n" } else { 'No frontend error log.' }
             throw "The acceptance frontend did not become ready. $tail"
         }
+        try {
+            $null = Invoke-WebRequest -Uri "$FrontendBaseUrl/maintenance/work-orders" `
+                -SkipHttpErrorCheck -TimeoutSec 240
+        }
+        catch {
+            $tail = @($frontendOut,$frontendErr) | ForEach-Object {
+                if (Test-Path $_) { Get-Content $_ -Tail 50 }
+            }
+            throw "The Maintenance Work Orders browser route did not compile before acceptance.$([Environment]::NewLine)$($tail -join [Environment]::NewLine)"
+        }
         $env:E2E_API_URL = $ApiBaseUrl
         $env:E2E_BASE_URL = $FrontendBaseUrl
         $env:INV_FU002_USERNAME = 'admin'
@@ -609,7 +624,12 @@ WHERE TenantId=@tenantId AND WorkOrderPartId=@partId AND IsDeleted=0;
         Push-Location (Join-Path $repoRoot 'e2e-tests')
         try {
             & npx.cmd playwright test tests/inv-fu-002-maintenance-reservation.spec.ts tests/inv-fu-003-issue-return-asset.spec.ts --project=chromium --workers=1
-            if ($LASTEXITCODE -ne 0) { throw "Playwright INV-FU-002/003 acceptance failed with exit code $LASTEXITCODE." }
+            if ($LASTEXITCODE -ne 0) {
+                $tail = @($frontendOut,$frontendErr) | ForEach-Object {
+                    if (Test-Path $_) { Get-Content $_ -Tail 50 }
+                }
+                throw "Playwright INV-FU-002/003 acceptance failed with exit code $LASTEXITCODE.$([Environment]::NewLine)$($tail -join [Environment]::NewLine)"
+            }
         } finally { Pop-Location }
         if ($null -ne $priorApiUrl) { $env:NEXT_PUBLIC_API_URL = $priorApiUrl } else { Remove-Item Env:NEXT_PUBLIC_API_URL -ErrorAction SilentlyContinue }
     }
