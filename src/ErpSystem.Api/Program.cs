@@ -558,6 +558,10 @@ app.UseMiddleware<ExternalUserAccessMiddleware>();
 // fence — deliberately not folded into the ExternalUser one, whose allowlist carries the
 // procurement/projects/estate portals a candidate must never inherit.
 app.UseMiddleware<CandidateAccessMiddleware>();
+// Consultant-client contacts (invite-only accounts on the main scheme since 2026-08-31) get the
+// same treatment: their own sibling fence, narrower still — auth, profile, notifications and the
+// client-portal timesheet surface only.
+app.UseMiddleware<ConsultantClientAccessMiddleware>();
 app.UseAuthorization();
 
 // Keep aggregate diagnostics available to operators, but separate readiness from liveness.

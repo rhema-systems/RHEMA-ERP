@@ -821,7 +821,12 @@ public static class HrModuleServiceRegistration
         // with the Candidate role. ICandidatePortalService survives: its application/profile/
         // document logic is reused by the main-scheme candidate surface.
         services.AddScoped<ICandidatePortalService, CandidatePortalService>();
-        services.AddScoped<IConsultantClientPortalAuthService, ConsultantClientPortalAuthService>();
+        // The consultant-client portal's own auth (the PortalBearer scheme's LAST tenant —
+        // ConsultantClientPortalAuthService, ConsultantClientPortalJwtService) was retired
+        // 2026-08-31: contacts are invited by HR onto main-scheme Identity accounts with the
+        // ConsultantClient role. IConsultantClientPortalService survives on new signatures for
+        // the rebuilt api/client-portal surface; the contact service owns the invite lifecycle.
+        services.AddScoped<IConsultantClientContactService, ConsultantClientContactService>();
         services.AddScoped<IConsultantClientPortalService, ConsultantClientPortalService>();
 
         // HR support services (implementations outside Core/Data or outside Interfaces/HR)
@@ -837,9 +842,7 @@ public static class HrModuleServiceRegistration
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Assets.AssetsEmailEventCatalog>();
         services.AddScoped<ErpSystem.Core.Interfaces.Common.ITemplatedEmailService, ErpSystem.Core.Services.Common.TemplatedEmailService>();
         services.AddScoped<ErpSystem.Core.Interfaces.INumberSequenceService, ErpSystem.Data.Services.NumberSequenceService>();
-        services.AddScoped<ErpSystem.Core.Interfaces.IConsultantClientPortalJwtService, ErpSystem.Api.Services.ConsultantClientPortalJwtService>();
         services.AddSingleton<ErpSystem.Core.Services.Common.IEmailTemplateRenderer, ErpSystem.Core.Services.Common.EmailTemplateRenderer>();
-        services.AddScoped<IPasswordHasher<ErpSystem.Core.Entities.HR.ConsultantClientPortalAccount>, PasswordHasher<ErpSystem.Core.Entities.HR.ConsultantClientPortalAccount>>();
 
         return services;
     }

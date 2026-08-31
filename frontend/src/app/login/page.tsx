@@ -28,6 +28,7 @@ import {
 import {
   getExternalPortalPath,
   isCandidateUser,
+  isConsultantClientUser,
   isExternalPortalUser,
 } from '../../lib/auth-routing';
 
@@ -182,7 +183,8 @@ function LoginFormWithSearchParams() {
       }
 
       const isCandidate = isCandidateUser(response.user);
-      const isExternalUser = isExternalPortalUser(response.user) || isCandidate;
+      const isExternalUser =
+        isExternalPortalUser(response.user) || isCandidate || isConsultantClientUser(response.user);
 
       // External portal users (business partners AND careers candidates) land in the portal,
       // while internal users continue to tenant selection.
@@ -215,7 +217,11 @@ function LoginFormWithSearchParams() {
             router.push(
               resolveRedirectTarget(
                 redirectTarget,
-                isCandidate ? '/external-portal/careers' : getExternalPortalPath()
+                isCandidate
+                  ? '/external-portal/careers'
+                  : isConsultantClientUser(response.user)
+                    ? '/external-portal/client-timesheets'
+                    : getExternalPortalPath()
               )
             );
             return;

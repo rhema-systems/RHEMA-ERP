@@ -4,6 +4,7 @@ type RoleUser = {
 
 const EXTERNAL_PORTAL_ROLE = 'externaluser';
 const CANDIDATE_ROLE = 'candidate';
+const CONSULTANT_CLIENT_ROLE = 'consultantclient';
 const INTERNAL_ADMIN_ROLES = new Set(['superadmin', 'tenantadmin', 'admin', 'administrator']);
 
 const normalizedRoles = (user: RoleUser) =>
@@ -31,6 +32,20 @@ export const isCandidateUser = (user: RoleUser) => {
 };
 
 /**
+ * An HR-invited consultant-client contact (ConsultantClient role, 2026-08-31). Like
+ * candidates, deliberately NOT folded into isExternalPortalUser: contacts share the
+ * external-portal shell but get only the client-timesheets menu, and the server fences
+ * them narrower still (ConsultantClientAccessMiddleware).
+ */
+export const isConsultantClientUser = (user: RoleUser) => {
+  const roles = normalizedRoles(user);
+  return (
+    roles.includes(CONSULTANT_CLIENT_ROLE) &&
+    !roles.some((role) => INTERNAL_ADMIN_ROLES.has(role))
+  );
+};
+
+/**
  * Area 25 (D2): a user whose ONLY functional role is Employee lands in the self-service
  * portal. Anyone with a further role (Manager, HR, admin tiers…) is a desk user who gets
  * the two-way switcher instead.
@@ -42,7 +57,10 @@ export const isEmployeeOnlyUser = (user: RoleUser) => {
 
 /** Desk access = internal and more than the Employee role. Gates the "Back to ERP" switcher. */
 export const hasDeskAccess = (user: RoleUser) =>
-  !isExternalPortalUser(user) && !isCandidateUser(user) && !isEmployeeOnlyUser(user);
+  !isExternalPortalUser(user) &&
+  !isCandidateUser(user) &&
+  !isConsultantClientUser(user) &&
+  !isEmployeeOnlyUser(user);
 
 export const isSupportHost = (host?: string | null) => {
   const value =
@@ -58,8 +76,10 @@ export const getExternalPortalPath = (host?: string | null) =>
 export const getAuthenticatedHomePath = (user: RoleUser, host?: string | null) =>
   isCandidateUser(user)
     ? '/external-portal/careers'
-    : isExternalPortalUser(user)
-      ? getExternalPortalPath(host)
-      : isEmployeeOnlyUser(user)
-        ? '/me'
-        : '/dashboard';
+    : isConsultantClientUser(user)
+      ? '/external-portal/client-timesheets'
+      : isExternalPortalUser(user)
+        ? getExternalPortalPath(host)
+        : isEmployeeOnlyUser(user)
+          ? '/me'
+          : '/dashboard';

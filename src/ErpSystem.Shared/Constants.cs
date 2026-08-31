@@ -68,6 +68,17 @@ public static class Constants
         /// </summary>
         public const string Candidate = "Candidate";
 
+        /// <summary>
+        /// A consultant client's contact person, invited by HR from the client screen
+        /// (2026-08-31, replacing the retired PortalBearer consultant-client portal — the
+        /// scheme's last tenant). Deliberately NOT <see cref="ExternalUser"/>: that role's
+        /// path allowlist includes procurement/projects/estate surfaces meant for vetted
+        /// counterparties, and a client contact's world is only the client-portal timesheet
+        /// surface. Fenced by ConsultantClientAccessMiddleware and refused by "InternalOnly".
+        /// Invite-only — there is no self-registration path for this role.
+        /// </summary>
+        public const string ConsultantClient = "ConsultantClient";
+
         // Helpdesk / Enquiry / Complaints roles
         public const string HelpdeskAgent = "HelpdeskAgent";
         public const string HelpdeskSupervisor = "HelpdeskSupervisor";
@@ -88,6 +99,7 @@ public static class Constants
                 || string.Equals(normalizedRoleName, ReadOnly, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, ExternalUser, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, Candidate, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, ConsultantClient, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskAgent, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskSupervisor, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskManager, StringComparison.OrdinalIgnoreCase);

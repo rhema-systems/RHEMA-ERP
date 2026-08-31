@@ -94,7 +94,7 @@ public partial class ApplicationDbContext
     public DbSet<ConsultantTimesheet> ConsultantTimesheets { get; set; } = null!;
     public DbSet<ConsultantTimesheetEntry> ConsultantTimesheetEntries { get; set; } = null!;
     public DbSet<ClientTimesheetConfirmation> ClientTimesheetConfirmations { get; set; } = null!;
-    public DbSet<ConsultantClientPortalAccount> ConsultantClientPortalAccounts { get; set; } = null!;
+    public DbSet<ConsultantClientContact> ConsultantClientContacts { get; set; } = null!;
     public DbSet<TimesheetInvoice> TimesheetInvoices { get; set; } = null!;
     public DbSet<TimesheetInvoiceLink> TimesheetInvoiceLinks { get; set; } = null!;
     public DbSet<LeaveTypeEligibility> LeaveTypeEligibilities { get; set; } = null!;
@@ -12624,14 +12624,31 @@ private void ConfigureSuccessionPlanningEntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        builder.Entity<ConsultantClientPortalAccount>(entity =>
+        builder.Entity<ConsultantClientContact>(entity =>
         {
-            entity.HasIndex(e => new { e.TenantId, e.Email }).IsUnique();
-            entity.HasIndex(e => e.ConsultantClientId);
+            // One live contact row per (client, account). The filter carries IsDeleted = 0
+            // deliberately — an unfiltered unique index over a soft delete is the defect this
+            // programme has now fixed eight times (a removed row keeps the slot and the
+            // re-invite 500s naming nothing).
+            entity.HasIndex(e => new { e.TenantId, e.ConsultantClientId, e.UserId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_ConsultantClientContact_Tenant_Client_User");
+            entity.HasIndex(e => e.UserId);
 
             entity.HasOne(e => e.ConsultantClient)
-                .WithMany(c => c.PortalAccounts)
+                .WithMany(c => c.Contacts)
                 .HasForeignKey(e => e.ConsultantClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.InvitedBy)
+                .WithMany()
+                .HasForeignKey(e => e.InvitedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

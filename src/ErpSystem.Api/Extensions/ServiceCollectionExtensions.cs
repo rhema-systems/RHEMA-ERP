@@ -105,11 +105,6 @@ namespace ErpSystem.Api.Extensions
             var jwtSettings = configuration.GetSection("JwtSettings");
             var key = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey not found"));
 
-            // Fail fast if the external-portal key/audience are not distinct from the internal ones —
-            // otherwise portal tokens would validate on the default bearer scheme registered below and
-            // could satisfy internal [Authorize] attributes.
-            ErpSystem.Api.Security.PortalAuth.ValidateDistinctFromInternal(configuration);
-
             services.AddAuthentication(x =>
             {
                 x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -147,18 +142,12 @@ namespace ErpSystem.Api.Extensions
                         return Task.CompletedTask;
                     }
                 };
-            })
-            // Named bearer handler for the external portals (candidate careers + consultant-client).
-            // Portal tokens are signed with JwtSettings:PortalSecretKey and carry JwtSettings:PortalAudience,
-            // both distinct from the internal token settings above, so they only validate on this scheme.
-            // The validation parameters are the single source of truth in PortalAuth, shared with the
-            // portals' own ValidateToken methods so the two can never drift.
-            .AddJwtBearer(ErpSystem.Api.Security.PortalAuth.Scheme, x =>
-            {
-                x.RequireHttpsMetadata = false; // Set to true in production
-                x.SaveToken = true;
-                x.TokenValidationParameters = ErpSystem.Api.Security.PortalAuth.TokenValidationParameters(configuration);
             });
+            // The named PortalBearer handler (distinct signing key + audience for the bespoke
+            // candidate/consultant portals) was retired 2026-08-31 with its last tenant, the
+            // consultant-client portal. Every external principal now holds a main-scheme token
+            // whose role (Candidate, ConsultantClient, ExternalUser) is fenced by the dedicated
+            // access middlewares and named in the InternalOnly blocklist.
 
             // Register JWT service
             services.AddScoped<IJwtTokenService, JwtTokenService>();
@@ -1338,16 +1327,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
                         ctx.User.IsInRole(Constants.Roles.Candidate)))
+                // The consultant-client surface (api/client-portal/*). Role-based like
+                // CandidateOnly; ConsultantClientAccessMiddleware is the outer fence that keeps
+                // the same tokens off everything else. Replaced the PortalBearer-scheme
+                // "ConsultantClientPortal" policy 2026-08-31 when client contacts moved onto the
+                // main JWT scheme (invite-only, no self-registration).
+                .AddPolicy("ConsultantClientOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        ctx.User.IsInRole(Constants.Roles.ConsultantClient)))
                 // ⚠ InternalOnly is a BLOCKLIST, not an allowlist: every self-registered public
                 // role must be named here or its holders satisfy the policy on every internal
                 // endpoint that uses it. Candidate was added 2026-08-30 when candidates moved
                 // onto the main JWT scheme — without it, a careers signup would have counted as
-                // "internal" everywhere this policy guards.
+                // "internal" everywhere this policy guards. ConsultantClient followed 2026-08-31
+                // for exactly the same reason (invited, but still a member of the public).
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
                         !ctx.User.IsInRole(Constants.Roles.ExternalUser) &&
-                        !ctx.User.IsInRole(Constants.Roles.Candidate)))
+                        !ctx.User.IsInRole(Constants.Roles.Candidate) &&
+                        !ctx.User.IsInRole(Constants.Roles.ConsultantClient)))
                 .AddPolicy("AuditGovernanceRead", policy =>
                     policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
                 .AddPolicy("AuditGovernanceManage", policy =>
@@ -1390,24 +1390,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // without granting broader MaintenanceWrite permissions.
                 .AddPolicy("FleetInspectionWrite", policy =>
                     policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"))
-                // External portal policy. Runs ONLY on the dedicated PortalBearer scheme (portal
-                // tokens use a distinct signing key + audience, see PortalAuth) and requires the
-                // matching user_type claim, so an internal staff token can never satisfy it and
-                // vice-versa. The sibling "CandidatePortal" policy was retired 2026-08-30 with the
-                // candidate portal itself — candidates now self-register on the main JWT scheme
-                // with the Candidate role; only the consultant-client portal remains on this scheme.
-                //
-                // email_verified is required as defence in depth. The portal JWT service already
-                // emits the claim as literal "true"/"false" but nothing enforced it, so a token
-                // minted before verification stayed valid for its full seven days. Requiring it
-                // here invalidates any such token immediately — which is the point — so portal
-                // clients must treat a 403 on a portal route as "sign in again", not as a
-                // permanent refusal.
-                .AddPolicy("ConsultantClientPortal", policy =>
-                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
-                          .RequireAuthenticatedUser()
-                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.ClientUserType)
-                          .RequireClaim("email_verified", "true"));
+                // The dedicated PortalBearer scheme and its "ConsultantClientPortal" policy were
+                // retired 2026-08-31 with the bespoke consultant-client portal — its last tenant.
+                // Client contacts now hold main-scheme tokens under the ConsultantClient role,
+                // fenced by ConsultantClientAccessMiddleware and the "ConsultantClientOnly"
+                // policy above (the "CandidatePortal" sibling went the same way 2026-08-30).
+                ;
 
             authorizationBuilder
                 .AddPolicy(FinancePermissions.ConfigureChartOfAccountsPolicy, policy =>
@@ -1876,6 +1864,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Custom middleware registered as IMiddleware
             services.AddTransient<ErpSystem.Api.Middleware.ExternalUserAccessMiddleware>();
             services.AddTransient<ErpSystem.Api.Middleware.CandidateAccessMiddleware>();
+            services.AddTransient<ErpSystem.Api.Middleware.ConsultantClientAccessMiddleware>();
             services.AddScoped<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
 
             services.AddControllers(options =>

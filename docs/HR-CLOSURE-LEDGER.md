@@ -12,10 +12,10 @@ yet classified.
 
 | Measure | Count |
 | --- | ---: |
-| HR write endpoints | 2130 |
-| Wired to a screen | 1828 |
-| No caller found (instrument 01) | 302 |
-| Confirmed unreachable (01 ∩ 02) | 19 |
+| HR write endpoints | 2122 |
+| Wired to a screen | 1830 |
+| No caller found (instrument 01) | 292 |
+| Confirmed unreachable (01 ∩ 02) | 17 |
 | Write-DTO fields no form can set | 71 across 29 DTOs |
 
 ## A. Decisions taken
@@ -413,13 +413,6 @@ Decided 2026-08-28: read-only by intent — payroll owns the grade master.
 
 - [ ] `PUT    api/Awards/nomination-attachments/{}`
 - [ ] `DELETE api/Awards/nomination-attachments/{}`
-
-### ConsultantClientPortalAuth — `BUILD`
-
-Client portal authentication.
-
-- [ ] `POST   api/client-portal/auth/complete-setup`
-- [ ] `POST   api/client-portal/auth/resend-verification`
 
 ### EmployeeCompetency — `BUILD`
 
@@ -894,14 +887,12 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
 | MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
-| ConsultantClientPortalAuth | 5 | 7 | `BUILD` | Client portal authentication. |
 | Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
 | JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
 | SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SuccessionCandidates | 4 | 17 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A candidate's own files hang off a Documents dialog on the successors tab, sharing the one panel the plan and the talent-pool member use — one table and one DTO serve all three owners, so one component does. The remaining flags are the metadata-only POST and the development-activity trio that duplicates api/succession-development. |
 | AppraisalCycleTarget | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired. |
-| ConsultantClientPortal | 3 | 3 | `BUILD` | Client portal for consultant engagements. |
 | EmployeeCareerPath | 3 | 3 | `BUILD` | Decided 2026-08-28: career paths are NOT server-write-only and should have a UI. |
 | InterviewQuestionPreset | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows. |
 | PositionCompetency | 3 | 4 | `INTENTIONAL` | Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set. |
@@ -909,7 +900,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | TrainingServiceBonds | 3 | 8 | `BUILD` | Classified 2026-08-29: all 3 real. Bonds are minted server-side on nomination submit, so a bond with the wrong amount copied off its program has no correction path - and it is money. |
 | Candidate | 2 | 11 | `REVIEW` |  |
 | CheckIns | 2 | 9 | `BUILD` | Classified 2026-08-29: both real. Goals and review events wire an attachment panel; check-ins do not. |
-| ClientTimesheetConfirmation | 2 | 2 | `BUILD` | Anonymous client confirmation link. Without it consultant billing has no client step. |
+| ClientTimesheetConfirmation | 2 | 2 | `DONE` | Built 2026-08-31 (consultant-client closure). The page now exists at the exact path the confirmation emails have always carried, {PortalUrl}/client-timesheet/confirm/{token}: validate (stamps Viewed), review the entries, confirm or reject with notes; expired and already-responded links render read-only. Kept by decision alongside the logged-in portal — the door for the contact who has not completed an invite. Verified by dev-harness/hr-consulting (78 assertions ×2). |
 | ConsultantClients | 2 | 8 | `INTENTIONAL` | Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired. |
 | HrLegacyFileMigration | 2 | 2 | `INTENTIONAL` | One-off ops tool, invoked by script. |
 | JobOffer | 2 | 19 | `FALSE` | hrDocumentService.upload artefact (both letter uploads). |
@@ -961,7 +952,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**116 of the 283 queued endpoints are classified here — 27 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 167 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**116 of the 275 queued endpoints are classified here — 27 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 159 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 

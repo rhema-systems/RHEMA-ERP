@@ -31,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { authService } from '@/services/auth';
-import { isCandidateUser } from '@/lib/auth-routing';
+import { isCandidateUser, isConsultantClientUser } from '@/lib/auth-routing';
 import { useRouter } from 'next/navigation';
 import type { Tenant } from '@/types';
 
@@ -168,6 +168,22 @@ const candidateMenuItems: MenuItem[] = [
   },
 ];
 
+// The consultant-client contact's menu (ConsultantClient role, 2026-08-31). Contacts share
+// this shell but never see the partner sections — the server's ConsultantClientAccessMiddleware
+// would 403 every one of them, and a menu of dead links is worse than a short menu.
+const consultantClientMenuItems: MenuItem[] = [
+  {
+    title: 'Timesheets',
+    href: '/external-portal/client-timesheets',
+    icon: ClipboardList,
+  },
+  {
+    title: 'Notifications',
+    href: '/external-portal/notifications',
+    icon: Bell,
+  },
+];
+
 export function ExternalSidebar() {
   const pathname = usePathname() ?? '';
   const router = useRouter();
@@ -175,7 +191,12 @@ export function ExternalSidebar() {
   const user = authService.getStoredUser();
   const [tenant, setTenant] = useState<Tenant | null>(() => authService.getCurrentTenant());
   const isCandidate = isCandidateUser(user);
-  const items = isCandidate ? candidateMenuItems : menuItems;
+  const isConsultantClient = isConsultantClientUser(user);
+  const items = isCandidate
+    ? candidateMenuItems
+    : isConsultantClient
+      ? consultantClientMenuItems
+      : menuItems;
 
   useEffect(() => {
     const handler = (e: any) => setTenant(e?.detail || authService.getCurrentTenant());

@@ -3249,99 +3249,12 @@ public class ClientTimesheetConfirmationPublicDto
 // ============================================================================
 // CONSULTANT CLIENT PORTAL DTOs
 // ============================================================================
+// The bespoke auth DTO family (register/login/verify/forgot/reset/change-password/
+// complete-setup + auth result) was retired 2026-08-31 with the PortalBearer portal.
+// Contacts are invited by HR onto main-scheme Identity accounts; setup completion
+// lives on api/auth (CompleteClientSetupRequest in DTOs/Auth).
 
 #region Consultant Client Portal
-
-public class ConsultantClientPortalRegisterDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-
-    [Required, MinLength(8), MaxLength(100)]
-    public string Password { get; set; } = string.Empty;
-
-    [Required, Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-
-    [Required, MaxLength(50)]
-    public string ClientCode { get; set; } = string.Empty;
-
-    [MaxLength(200)]
-    public string? ContactName { get; set; }
-
-    [MaxLength(100)]
-    public string? ContactRole { get; set; }
-}
-
-public class ConsultantClientPortalLoginDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-
-    [Required]
-    public string Password { get; set; } = string.Empty;
-}
-
-public class ConsultantClientPortalAuthResultDto
-{
-    public string Token { get; set; } = string.Empty;
-    public DateTime ExpiresAt { get; set; }
-    public Guid AccountId { get; set; }
-    public string Email { get; set; } = string.Empty;
-    public string? ContactName { get; set; }
-    public Guid ConsultantClientId { get; set; }
-    public string ClientName { get; set; } = string.Empty;
-    public string ClientCode { get; set; } = string.Empty;
-    public bool IsEmailVerified { get; set; }
-}
-
-public class ConsultantClientPortalVerifyEmailDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-}
-
-public class ConsultantClientPortalForgotPasswordDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-}
-
-public class ConsultantClientPortalResetPasswordDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
-
-public class ConsultantClientPortalChangePasswordDto
-{
-    [Required]
-    public string CurrentPassword { get; set; } = string.Empty;
-
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
-
-public class ConsultantClientPortalCompleteSetupDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
 
 public class ConsultantClientPortalInviteDto
 {
@@ -3361,7 +3274,13 @@ public class ConsultantClientPortalResendInviteDto
     public string Email { get; set; } = string.Empty;
 }
 
-public class ConsultantClientPortalAccountSummaryDto
+/// <summary>
+/// A client contact as the HR screen sees it: the contact row joined with its Identity
+/// account's status. Keeps the retired portal-account summary's JSON shape so the wired
+/// invite panel needed no rework (Id is now the CONTACT row id; IsEmailVerified maps to
+/// Identity EmailConfirmed; IsSetupPending = the invite has not been completed).
+/// </summary>
+public class ConsultantClientContactSummaryDto
 {
     public Guid Id { get; set; }
     public string Email { get; set; } = string.Empty;
@@ -3374,15 +3293,28 @@ public class ConsultantClientPortalAccountSummaryDto
     public DateTime CreatedAt { get; set; }
 }
 
-public class ConsultantClientPortalDashboardDto
+/// <summary>One client organisation's section of the contact's portal dashboard.</summary>
+public class ConsultantClientPortalClientSectionDto
 {
     public Guid ConsultantClientId { get; set; }
     public string ClientName { get; set; } = string.Empty;
     public string ClientCode { get; set; } = string.Empty;
+    public string? ContactRole { get; set; }
+    public int PendingConfirmationCount { get; set; }
+    public List<ConsultantTimesheetSummaryDto> PendingTimesheets { get; set; } = new();
+}
+
+/// <summary>
+/// The contact's dashboard. A contact invited by several client organisations holds one
+/// contact row per client and sees one section per client — the retired single-client
+/// shape could not represent that.
+/// </summary>
+public class ConsultantClientPortalDashboardDto
+{
     public string Email { get; set; } = string.Empty;
     public string? ContactName { get; set; }
     public int PendingConfirmationCount { get; set; }
-    public List<ConsultantTimesheetSummaryDto> PendingTimesheets { get; set; } = new();
+    public List<ConsultantClientPortalClientSectionDto> Clients { get; set; } = new();
 }
 
 public class ConsultantClientPortalConfirmTimesheetDto

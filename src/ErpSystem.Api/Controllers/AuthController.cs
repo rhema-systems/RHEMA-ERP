@@ -2543,6 +2543,103 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
+        /// Completes an HR-invited consultant-client contact's account setup: consumes the
+        /// emailed setup token, sets the contact's chosen password, and activates the account.
+        /// </summary>
+        /// <remarks>
+        /// The setup token is an Identity password-reset token that only ever travelled by
+        /// email, so consuming it IS the mailbox proof — which is why this endpoint may confirm
+        /// the email and activate the account in the same step (an invited account starts
+        /// IsActive = false with EmailConfirmed = false and can neither log in nor be adopted
+        /// until here). Restricted to accounts holding ONLY the ConsultantClient role: a plain
+        /// reset flow must never become a back door that force-activates a staff account.
+        /// </remarks>
+        [HttpPost("complete-client-setup")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        public async Task<IActionResult> CompleteClientSetup([FromBody] ErpSystem.Core.DTOs.Auth.CompleteClientSetupRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(null);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.CaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                var user = await _userManager.FindByEmailAsync(request.Email);
+                if (user == null)
+                {
+                    return BadRequest(new { message = "Invalid email or setup token" });
+                }
+
+                var roles = await _userManager.GetRolesAsync(user);
+                var isClientContact = roles.Count == 1
+                    && string.Equals(roles[0], Constants.Roles.ConsultantClient, StringComparison.OrdinalIgnoreCase);
+                if (!isClientContact)
+                {
+                    _logger.LogWarning("complete-client-setup refused for non-client account {UserId}", user.Id);
+                    return BadRequest(new { message = "Invalid email or setup token" });
+                }
+
+                var success = await _passwordResetService.ResetPasswordAsync(
+                    user.Id, request.Token, request.NewPassword);
+                if (!success)
+                {
+                    return BadRequest(new { message = "Invalid or expired setup token" });
+                }
+
+                user.EmailConfirmed = true;
+                user.IsActive = true;
+                user.UpdatedAt = DateTime.UtcNow;
+                user.UpdatedBy = "ClientPortal-Setup";
+                var updateResult = await _userManager.UpdateAsync(user);
+                if (!updateResult.Succeeded)
+                {
+                    _logger.LogError("Failed to activate client contact {UserId} after setup", user.Id);
+                    return StatusCode(500, new { message = "Failed to activate account" });
+                }
+
+                await _securityLogService.CreateSecurityLogAsync(new SecurityLog
+                {
+                    Action = "ClientContactSetupCompleted",
+                    Success = true,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = user.UserName ?? request.Email,
+                    UserId = user.Id,
+                    Details = "Consultant-client contact completed account setup via invite link",
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = user.TenantId
+                });
+
+                _logger.LogInformation("Client contact {UserId} completed account setup", user.Id);
+
+                return Ok(new ErpSystem.Core.DTOs.Auth.ResetPasswordResponse
+                {
+                    Success = true,
+                    Message = "Account setup complete. You can now sign in with your new password."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during client contact setup completion");
+                return StatusCode(500, new { message = "An error occurred during account setup" });
+            }
+        }
+
+        /// <summary>
         /// Validate password reset token
         /// </summary>
         [HttpPost("validate-reset-token")]

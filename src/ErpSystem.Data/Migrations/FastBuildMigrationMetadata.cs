@@ -261,3 +261,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260829215518_AddSuccessionAndNhisDocumentDmsColumns")] partial class AddSuccessionAndNhisDocumentDmsColumns { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260830170531_AddTravelPolicyExceptionDecisionNotes")] partial class AddTravelPolicyExceptionDecisionNotes { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831000324_RetireCandidatePortalAndLinkCandidatesToUsers")] partial class RetireCandidatePortalAndLinkCandidatesToUsers { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260831083551_RetireConsultantClientPortalAndAddClientContacts")] partial class RetireConsultantClientPortalAndAddClientContacts { }

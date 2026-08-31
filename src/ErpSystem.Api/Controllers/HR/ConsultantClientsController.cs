@@ -14,16 +14,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class ConsultantClientsController : AttendanceControllerBase
 {
     private readonly IConsultantClientService _service;
-    private readonly IConsultantClientPortalAuthService _portalAuthService;
+    private readonly IConsultantClientContactService _contactService;
 
     public ConsultantClientsController(
         IConsultantClientService service,
-        IConsultantClientPortalAuthService portalAuthService,
+        IConsultantClientContactService contactService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
-        _portalAuthService = portalAuthService;
+        _contactService = contactService;
     }
 
     [HttpGet]
@@ -145,17 +145,17 @@ public class ConsultantClientsController : AttendanceControllerBase
 
     [HttpGet("{id:guid}/portal-accounts")]
     [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
-    public async Task<ActionResult<IEnumerable<ConsultantClientPortalAccountSummaryDto>>> GetPortalAccounts(
+    public async Task<ActionResult<IEnumerable<ConsultantClientContactSummaryDto>>> GetPortalAccounts(
         Guid id,
         CancellationToken ct = default)
     {
         if (TryGetTenant(out var tenantId) is { } error) return error;
-        return Ok(await _portalAuthService.GetPortalAccountsForClientAsync(id, tenantId, ct));
+        return Ok(await _contactService.GetContactsForClientAsync(id, tenantId, ct));
     }
 
     [HttpPost("{id:guid}/portal-invite")]
     [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
-    public async Task<ActionResult<ConsultantClientPortalAccountSummaryDto>> InvitePortalAccount(
+    public async Task<ActionResult<ConsultantClientContactSummaryDto>> InvitePortalAccount(
         Guid id,
         [FromBody] ConsultantClientPortalInviteDto dto,
         CancellationToken ct = default)
@@ -165,7 +165,7 @@ public class ConsultantClientsController : AttendanceControllerBase
 
         try
         {
-            var result = await _portalAuthService.InvitePortalAccountAsync(
+            var result = await _contactService.InviteContactAsync(
                 id, dto, tenantId, employeeId, ct);
             return Ok(result);
         }
@@ -187,7 +187,7 @@ public class ConsultantClientsController : AttendanceControllerBase
 
         try
         {
-            await _portalAuthService.ResendPortalInviteAsync(id, dto.Email, tenantId, ct);
+            await _contactService.ResendInviteAsync(id, dto.Email, tenantId, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)

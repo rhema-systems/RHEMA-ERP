@@ -61,11 +61,14 @@ DISPOSITIONS = {
     "OfferResponseController.cs":
         ("DONE", "Built 2026-08-31 (recruitment closure). Kept by decision — offer emails link to it — and the page now exists at the exact path those emails carry, /careers/portal/offer-response?token=…: validate, respond once, token consumed. A registered candidate sees the same offer in their portal; this is the door for the one who has not signed up."),
     "ClientTimesheetConfirmationController.cs":
-        ("BUILD", "Anonymous client confirmation link. Without it consultant billing has no client step."),
+        ("DONE", "Built 2026-08-31 (consultant-client closure). The page now exists at the exact path the confirmation emails have always carried, {PortalUrl}/client-timesheet/confirm/{token}: validate (stamps Viewed), review the entries, confirm or reject with notes; expired and already-responded links render read-only. Kept by decision alongside the logged-in portal — the door for the contact who has not completed an invite. Verified by dev-harness/hr-consulting (78 assertions ×2)."),
     "ConsultantClientPortalController.cs":
-        ("BUILD", "Client portal for consultant engagements."),
-    "ConsultantClientPortalAuthController.cs":
-        ("BUILD", "Client portal authentication."),
+        ("DONE", "Rebuilt 2026-08-31 on the main JWT scheme (consultant-client closure): the ConsultantClient role, invite-only, fenced by ConsultantClientAccessMiddleware + the ConsultantClientOnly policy, authorised inside by ConsultantClientContact rows. Dashboard is multi-client (one section per client the contact serves); confirm/reject advance the timesheet to ClientConfirmed/ClientRejected. Surfaced at /external-portal/client-timesheets inside the external-portal shell. Verified by dev-harness/hr-consulting (78 assertions ×2)."),
+    # ConsultantClientPortalAuthController.cs was DELETED 2026-08-31 — the consultant-client
+    # portal was the PortalBearer scheme's LAST tenant, and both retired together. Contacts are
+    # invited by HR (ConsultantClientContactService) onto main-scheme Identity accounts; setup
+    # completes via api/auth/complete-client-setup (the emailed token is the mailbox proof); the
+    # anonymous register-with-client-code flow retired unbuilt by decision (invite-only).
     "HrLegacyFileMigrationController.cs":
         ("INTENTIONAL", "One-off ops tool, invoked by script."),
     "EmployeesController.cs":
