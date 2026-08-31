@@ -193,6 +193,8 @@ IF NOT EXISTS (
     WHERE [object_id] = OBJECT_ID(N'dbo.SystemExceptionLogs')
       AND [name] = N'IX_SystemExceptionLogs_TenantId_Fingerprint')
     INSERT @R VALUES(N'SystemExceptionLogs fingerprint index prerequisite', 1);
+IF OBJECT_ID(N'dbo.CentralDocumentGenerationTemplates', N'U') IS NULL
+    INSERT @R VALUES(N'Central document generation template prerequisite', 1);
 IF OBJECT_ID(N'dbo.BusinessPartnerRegistrations',N'U') IS NULL
    OR OBJECT_ID(N'dbo.ProcurementSupplierEvidencePackVersions',N'U') IS NULL
    OR OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS NULL
@@ -650,6 +652,7 @@ function Invoke-Preflight {
     # trigger bodies without mutating legacy rows. The preflight probe above
     # rejects missing source tables and any partial column apply before startup.
     Write-Output 'GUARD_COVERAGE|20260820100000_AddInventoryOpeningStockBook'
+    Write-Output 'GUARD_COVERAGE|20260820120000_AddDmsGenerationTemplateWordSource'
     # The simplified PR control migration only relaxes existing columns to nullable
     # and replaces the insert-time tenant/approval-lineage trigger. Its THROW is in
     # the new trigger body and is not evaluated against stored rows during apply.

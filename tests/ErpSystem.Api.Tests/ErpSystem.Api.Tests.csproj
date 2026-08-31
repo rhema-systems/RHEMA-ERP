@@ -256,6 +256,7 @@
     <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
+    <Compile Include="Services\Documents\DmsGenerationTemplateMigrationCompatibilityTests.cs" />
     <Compile Include="Services\DocumentManagement\DocumentTemplateWordBodyExtractorTests.cs" />
     <Compile Include="Services\DocumentManagement\CentralDocumentPdfSigningServiceTests.cs" />
     <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />

@@ -11,71 +11,71 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<Guid>(
-                name: "TemplateFileUploadRecordId",
-                table: "CentralDocumentGenerationTemplates",
-                type: "uniqueidentifier",
-                nullable: true);
+            // This migration originally shipped without discovery metadata and was later
+            // duplicated by 20260822130000. Some databases therefore already contain all
+            // or part of this schema without this migration in __EFMigrationsHistory.
+            migrationBuilder.Sql(
+                """
+                IF OBJECT_ID(N'dbo.CentralDocumentGenerationTemplates', N'U') IS NULL
+                    THROW 51000, 'CentralDocumentGenerationTemplates is required before adding uploaded template metadata.', 1;
 
-            migrationBuilder.AddColumn<string>(
-                name: "TemplateRepositoryPath",
-                table: "CentralDocumentGenerationTemplates",
-                type: "nvarchar(500)",
-                maxLength: 500,
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateFileUploadRecordId') IS NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] ADD [TemplateFileUploadRecordId] uniqueidentifier NULL;
 
-            migrationBuilder.AddColumn<string>(
-                name: "TemplateFileName",
-                table: "CentralDocumentGenerationTemplates",
-                type: "nvarchar(250)",
-                maxLength: 250,
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateRepositoryPath') IS NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] ADD [TemplateRepositoryPath] nvarchar(500) NULL;
 
-            migrationBuilder.AddColumn<string>(
-                name: "TemplateContentType",
-                table: "CentralDocumentGenerationTemplates",
-                type: "nvarchar(200)",
-                maxLength: 200,
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateFileName') IS NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] ADD [TemplateFileName] nvarchar(250) NULL;
 
-            migrationBuilder.AddColumn<long>(
-                name: "TemplateFileSize",
-                table: "CentralDocumentGenerationTemplates",
-                type: "bigint",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateContentType') IS NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] ADD [TemplateContentType] nvarchar(200) NULL;
 
-            migrationBuilder.CreateIndex(
-                name: "IX_CentralDocumentGenerationTemplates_TenantId_TemplateFileUploadRecordId",
-                table: "CentralDocumentGenerationTemplates",
-                columns: new[] { "TenantId", "TemplateFileUploadRecordId" });
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateFileSize') IS NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] ADD [TemplateFileSize] bigint NULL;
+
+                IF NOT EXISTS
+                (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE [object_id] = OBJECT_ID(N'dbo.CentralDocumentGenerationTemplates')
+                      AND [name] = N'IX_CentralDocumentGenerationTemplates_TenantId_TemplateFileUploadRecordId'
+                )
+                    CREATE INDEX [IX_CentralDocumentGenerationTemplates_TenantId_TemplateFileUploadRecordId]
+                        ON [dbo].[CentralDocumentGenerationTemplates] ([TenantId], [TemplateFileUploadRecordId]);
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_CentralDocumentGenerationTemplates_TenantId_TemplateFileUploadRecordId",
-                table: "CentralDocumentGenerationTemplates");
+            migrationBuilder.Sql(
+                """
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE [object_id] = OBJECT_ID(N'dbo.CentralDocumentGenerationTemplates')
+                      AND [name] = N'IX_CentralDocumentGenerationTemplates_TenantId_TemplateFileUploadRecordId'
+                )
+                    DROP INDEX [IX_CentralDocumentGenerationTemplates_TenantId_TemplateFileUploadRecordId]
+                        ON [dbo].[CentralDocumentGenerationTemplates];
 
-            migrationBuilder.DropColumn(
-                name: "TemplateFileUploadRecordId",
-                table: "CentralDocumentGenerationTemplates");
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateFileUploadRecordId') IS NOT NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] DROP COLUMN [TemplateFileUploadRecordId];
 
-            migrationBuilder.DropColumn(
-                name: "TemplateRepositoryPath",
-                table: "CentralDocumentGenerationTemplates");
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateRepositoryPath') IS NOT NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] DROP COLUMN [TemplateRepositoryPath];
 
-            migrationBuilder.DropColumn(
-                name: "TemplateFileName",
-                table: "CentralDocumentGenerationTemplates");
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateFileName') IS NOT NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] DROP COLUMN [TemplateFileName];
 
-            migrationBuilder.DropColumn(
-                name: "TemplateContentType",
-                table: "CentralDocumentGenerationTemplates");
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateContentType') IS NOT NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] DROP COLUMN [TemplateContentType];
 
-            migrationBuilder.DropColumn(
-                name: "TemplateFileSize",
-                table: "CentralDocumentGenerationTemplates");
+                IF COL_LENGTH(N'dbo.CentralDocumentGenerationTemplates', N'TemplateFileSize') IS NOT NULL
+                    ALTER TABLE [dbo].[CentralDocumentGenerationTemplates] DROP COLUMN [TemplateFileSize];
+                """);
         }
     }
 }
