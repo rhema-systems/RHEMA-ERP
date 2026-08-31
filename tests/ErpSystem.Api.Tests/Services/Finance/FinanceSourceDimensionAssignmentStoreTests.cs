@@ -96,6 +96,27 @@ public sealed class FinanceSourceDimensionAssignmentStoreTests
         await clear.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot be cleared*");
     }
 
+    [Fact]
+    public async Task ExplicitEmptyCaptureOptionalLineCanBeFrozenWithoutInventingASet()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var store = CreateStore(db, tenantId);
+        var producer = new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice);
+        var documentId = Guid.NewGuid();
+        var lineId = Guid.NewGuid();
+
+        await store.RegisterDocumentAsync(producer, documentId);
+        var captured = await store.UpsertAsync(producer, documentId, lineId, null);
+        var frozen = await store.FreezeLineAsync(producer, documentId, lineId, null, null);
+
+        captured.FinanceDimensionSetId.Should().BeNull();
+        frozen.FinanceDimensionSetId.Should().BeNull();
+        frozen.IsFrozen.Should().BeTrue();
+        var clear = () => store.ClearAsync(producer, documentId, lineId);
+        await clear.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot be cleared*");
+    }
+
     private static FinanceDimensionSet DimensionSet(Guid tenantId, string marker) => new()
     {
         Id = Guid.NewGuid(),

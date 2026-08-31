@@ -115,6 +115,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinanceDimensionSnapshot> FinanceDimensionSnapshots { get; set; }
     public DbSet<FinanceDimensionSnapshotItem> FinanceDimensionSnapshotItems { get; set; }
     public DbSet<FinanceSourceDimensionAssignment> FinanceSourceDimensionAssignments { get; set; }
+    public DbSet<FinanceSourceDimensionChange> FinanceSourceDimensionChanges { get; set; }
     public DbSet<FinanceDimensionRouteCertification> FinanceDimensionRouteCertifications { get; set; }
     public DbSet<FinanceDimensionCertificationTransition> FinanceDimensionCertificationTransitions { get; set; }
     public DbSet<FinanceDimensionReadinessAssessment> FinanceDimensionReadinessAssessments { get; set; }
@@ -3085,10 +3086,27 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => e.FinanceDimensionSnapshotId).IsUnique()
                 .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL AND [IsDeleted] = 0");
             entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.Property(e => e.BudgetEvidenceStatus).HasDefaultValue("NotApplicable");
             entity.HasOne(e => e.FinanceDimensionSet).WithMany()
                 .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany()
                 .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceSourceDimensionChange>(entity =>
+        {
+            entity.ToTable("FinanceSourceDimensionChanges");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId, e.ChangedAt });
+            entity.HasIndex(e => new { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.SourceLineId });
+            entity.HasOne<FinanceDimensionSet>().WithMany()
+                .HasForeignKey(e => e.PreviousFinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinanceDimensionSet>().WithMany()
+                .HasForeignKey(e => e.NewFinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PreviousFinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.PreviousFinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.NewFinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.NewFinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -9454,6 +9472,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             if (entry.Entity is WorkflowActivityLog && entry.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException("Workflow audit events are immutable and cannot be changed or deleted.");
+            if (entry.Entity is FinanceSourceDimensionChange && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Finance source-dimension change evidence is immutable and cannot be changed or deleted.");
             switch (entry.State)
             {
                 case EntityState.Added:

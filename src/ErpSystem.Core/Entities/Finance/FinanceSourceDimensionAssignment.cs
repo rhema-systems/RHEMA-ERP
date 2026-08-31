@@ -28,7 +28,20 @@ public sealed class FinanceSourceDimensionAssignment : TenantEntity
 
     public Guid SourceDocumentId { get; set; }
     public Guid? SourceLineId { get; set; }
-    public Guid FinanceDimensionSetId { get; set; }
+    /// <summary>
+    /// Canonical assignment. It remains nullable for a clearable header default and for an
+    /// explicitly captured CaptureOptional line with no supplied values. The assignment row,
+    /// rather than a null set ID, distinguishes adapted evidence from a legacy/unadapted line.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
+    [Required, MaxLength(20)]
+    public string BudgetEvidenceStatus { get; set; } = "NotApplicable";
+
+    [MaxLength(64)]
+    public string? BudgetEvaluationHash { get; set; }
+
+    public DateTime? BudgetEvidenceUpdatedAt { get; set; }
 
     /// <summary>
     /// Exact line-level evidence frozen at submission/approval. Header defaults never receive a
@@ -36,11 +49,17 @@ public sealed class FinanceSourceDimensionAssignment : TenantEntity
     /// </summary>
     public Guid? FinanceDimensionSnapshotId { get; set; }
 
+    /// <summary>
+    /// Freezes both populated and explicitly empty line evidence. A snapshot is present when a
+    /// canonical set exists; EvidenceFrozenAt also protects the valid empty-set case.
+    /// </summary>
+    public DateTime? EvidenceFrozenAt { get; set; }
+
     [Timestamp]
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     [ForeignKey(nameof(FinanceDimensionSetId))]
-    public FinanceDimensionSet FinanceDimensionSet { get; set; } = null!;
+    public FinanceDimensionSet? FinanceDimensionSet { get; set; }
 
     [ForeignKey(nameof(FinanceDimensionSnapshotId))]
     public FinanceDimensionSnapshot? FinanceDimensionSnapshot { get; set; }

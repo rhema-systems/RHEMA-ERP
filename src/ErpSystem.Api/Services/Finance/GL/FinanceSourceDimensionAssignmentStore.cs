@@ -28,6 +28,12 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
     private Guid? UserId => Guid.TryParse(_currentUser.UserId, out var id) && id != Guid.Empty ? id : null;
 
+    public Task<FinanceSourceDimensionAssignmentDto> RegisterDocumentAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        CancellationToken cancellationToken = default) =>
+        UpsertAsync(producer, sourceDocumentId, null, null, null, cancellationToken);
+
     public async Task<IReadOnlyList<FinanceSourceDimensionAssignmentDto>> GetDocumentAssignmentsAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
@@ -50,20 +56,25 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
         Guid? sourceLineId,
-        Guid financeDimensionSetId,
+        Guid? financeDimensionSetId,
         Guid? financeDimensionSnapshotId = null,
         CancellationToken cancellationToken = default)
     {
         var (tenantId, route) = ValidateKey(producer, sourceDocumentId, sourceLineId, validateLineId: true);
         if (financeDimensionSetId == Guid.Empty)
-            throw new ArgumentException("A canonical Finance dimension set is required.", nameof(financeDimensionSetId));
+            throw new ArgumentException("A canonical Finance dimension set cannot be empty.", nameof(financeDimensionSetId));
+        if (financeDimensionSnapshotId.HasValue && !financeDimensionSetId.HasValue)
+            throw new InvalidOperationException("Frozen dimension evidence requires a canonical Finance dimension set.");
         if (!sourceLineId.HasValue && financeDimensionSnapshotId.HasValue)
             throw new InvalidOperationException("A draft document default cannot be frozen as line-level evidence.");
 
-        var dimensionSetExists = await _context.FinanceDimensionSets.AsNoTracking().AnyAsync(item =>
-            item.Id == financeDimensionSetId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
-        if (!dimensionSetExists)
-            throw new KeyNotFoundException("The canonical Finance dimension set was not found for this tenant.");
+        if (financeDimensionSetId.HasValue)
+        {
+            var dimensionSetExists = await _context.FinanceDimensionSets.AsNoTracking().AnyAsync(item =>
+                item.Id == financeDimensionSetId.Value && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+            if (!dimensionSetExists)
+                throw new KeyNotFoundException("The canonical Finance dimension set was not found for this tenant.");
+        }
 
         if (financeDimensionSnapshotId.HasValue)
         {
@@ -71,7 +82,7 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
                 item.Id == financeDimensionSnapshotId.Value && item.TenantId == tenantId && !item.IsDeleted,
                 cancellationToken) ?? throw new KeyNotFoundException(
                     "The Finance dimension evidence snapshot was not found for this tenant.");
-            if (snapshot.FinanceDimensionSetId != financeDimensionSetId
+            if (snapshot.FinanceDimensionSetId != financeDimensionSetId!.Value
                 || !string.Equals(snapshot.ProducerModule, route.ProducerModule, StringComparison.Ordinal)
                 || !string.Equals(snapshot.SourceRoute, route.SourceRoute, StringComparison.Ordinal)
                 || !string.Equals(snapshot.SourceDocumentType, route.DocumentType, StringComparison.Ordinal)
@@ -90,7 +101,7 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         if (assignment is not null)
         {
             EnsureSameProducer(assignment, route);
-            if (assignment.FinanceDimensionSnapshotId.HasValue)
+            if (assignment.EvidenceFrozenAt.HasValue)
             {
                 if (assignment.FinanceDimensionSetId == financeDimensionSetId
                     && assignment.FinanceDimensionSnapshotId == financeDimensionSnapshotId)
@@ -100,6 +111,7 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
 
             assignment.FinanceDimensionSetId = financeDimensionSetId;
             assignment.FinanceDimensionSnapshotId = financeDimensionSnapshotId;
+            assignment.EvidenceFrozenAt = financeDimensionSnapshotId.HasValue ? DateTime.UtcNow : null;
             assignment.ContractVersion = route.ContractVersion;
             assignment.UpdatedAt = DateTime.UtcNow;
             assignment.UpdatedBy = _currentUser.UserName;
@@ -120,6 +132,7 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
                 SourceLineId = sourceLineId,
                 FinanceDimensionSetId = financeDimensionSetId,
                 FinanceDimensionSnapshotId = financeDimensionSnapshotId,
+                EvidenceFrozenAt = financeDimensionSnapshotId.HasValue ? DateTime.UtcNow : null,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.UserName,
                 CreatedById = UserId
@@ -128,6 +141,33 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        return Map(assignment);
+    }
+
+    public async Task<FinanceSourceDimensionAssignmentDto> FreezeLineAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
+        Guid? financeDimensionSetId,
+        Guid? financeDimensionSnapshotId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceLineId == Guid.Empty)
+            throw new ArgumentException("A source line ID is required.", nameof(sourceLineId));
+        var result = await UpsertAsync(
+            producer, sourceDocumentId, sourceLineId,
+            financeDimensionSetId, financeDimensionSnapshotId, cancellationToken);
+        var assignment = await _context.FinanceSourceDimensionAssignments.SingleAsync(item =>
+            item.Id == result.Id && item.TenantId == TenantId && !item.IsDeleted,
+            cancellationToken);
+        if (!assignment.EvidenceFrozenAt.HasValue)
+        {
+            assignment.EvidenceFrozenAt = DateTime.UtcNow;
+            assignment.UpdatedAt = assignment.EvidenceFrozenAt;
+            assignment.UpdatedBy = _currentUser.UserName;
+            assignment.LastModifiedById = UserId;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
         return Map(assignment);
     }
 
@@ -147,9 +187,35 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         if (assignment is null) return;
 
         EnsureSameProducer(assignment, route);
-        if (assignment.FinanceDimensionSnapshotId.HasValue)
+        if (assignment.EvidenceFrozenAt.HasValue)
             throw new InvalidOperationException("Frozen source-dimension evidence cannot be cleared.");
 
+        assignment.FinanceDimensionSetId = null;
+        assignment.FinanceDimensionSnapshotId = null;
+        assignment.EvidenceFrozenAt = null;
+        assignment.UpdatedAt = DateTime.UtcNow;
+        assignment.UpdatedBy = _currentUser.UserName;
+        assignment.LastModifiedById = UserId;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task RemoveLineAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
+        CancellationToken cancellationToken = default)
+    {
+        var (tenantId, route) = ValidateKey(producer, sourceDocumentId, sourceLineId, validateLineId: true);
+        var assignment = await _context.FinanceSourceDimensionAssignments.SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId
+            && item.SourceDocumentType == route.DocumentType
+            && item.SourceDocumentId == sourceDocumentId
+            && item.SourceLineId == sourceLineId
+            && !item.IsDeleted, cancellationToken);
+        if (assignment is null) return;
+        EnsureSameProducer(assignment, route);
+        if (assignment.EvidenceFrozenAt.HasValue)
+            throw new InvalidOperationException("Frozen source-dimension evidence cannot be removed until the document returns to Draft.");
         assignment.IsDeleted = true;
         assignment.DeletedAt = DateTime.UtcNow;
         assignment.DeletedBy = _currentUser.UserName;
@@ -197,6 +263,10 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         SourceLineId = item.SourceLineId,
         FinanceDimensionSetId = item.FinanceDimensionSetId,
         FinanceDimensionSnapshotId = item.FinanceDimensionSnapshotId,
+        EvidenceFrozenAt = item.EvidenceFrozenAt,
+        BudgetEvidenceStatus = item.BudgetEvidenceStatus,
+        BudgetEvaluationHash = item.BudgetEvaluationHash,
+        BudgetEvidenceUpdatedAt = item.BudgetEvidenceUpdatedAt,
         RowVersion = item.RowVersion.Length == 0 ? null : Convert.ToBase64String(item.RowVersion)
     };
 }

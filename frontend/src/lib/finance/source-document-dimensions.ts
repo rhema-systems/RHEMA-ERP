@@ -1,7 +1,39 @@
 import type {
   FinanceDimensionAccountRule,
   FinanceDimensionDefinition,
+  FinancePostingDimensionValue,
+  FinanceSourceDocumentDimension,
+  FinanceSourceDimensionValue,
 } from '@/types/finance';
+
+export const toFinancePostingDimensionValues = (
+  values: Record<string, string>,
+): FinancePostingDimensionValue[] =>
+  Object.entries(values)
+    .filter(([dimensionCode, valueCode]) => Boolean(dimensionCode && valueCode))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([dimensionCode, valueCode]) => ({ dimensionCode, valueCode }));
+
+export const toFinanceDimensionValueRecord = (
+  values: FinanceSourceDimensionValue[],
+): Record<string, string> =>
+  Object.fromEntries(
+    values
+      .filter((value) => Boolean(value.dimensionCode && value.valueCode))
+      .map((value) => [value.dimensionCode, value.valueCode]),
+  );
+
+export const toFinanceSourceDimensionFormState = (
+  evidence?: FinanceSourceDocumentDimension,
+) => ({
+  defaultValues: toFinanceDimensionValueRecord(evidence?.defaultValues ?? []),
+  lineValues: Object.fromEntries(
+    (evidence?.lines ?? []).map((line) => [
+      line.sourceLineId,
+      toFinanceDimensionValueRecord(line.values),
+    ]),
+  ),
+});
 
 export interface FinanceDimensionRuleContext {
   sourceModule: string;

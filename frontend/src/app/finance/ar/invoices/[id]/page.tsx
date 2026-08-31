@@ -33,6 +33,7 @@ import { useTenant } from '@/contexts/TenantContext';
 import { canRecordArReceipt } from '@/lib/finance/ar-receipt-eligibility';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useState } from 'react';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
@@ -124,6 +125,10 @@ export default function InvoiceDetailsPage() {
                         </Button>
                     )}
                 </div>
+            </div>
+
+            <div className="no-print">
+                <SourceDocumentDimensionEvidence evidence={invoice.financeDimensions} />
             </div>
 
             <Card className="print:shadow-none print:border-none">

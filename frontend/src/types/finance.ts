@@ -525,6 +525,51 @@ export interface FinanceDimensionSnapshot {
     items: FinanceDimensionSnapshotItem[];
 }
 
+export interface FinanceSourceLineDimensionInput {
+    sourceLineId: string;
+    accountId: string;
+    dimensions: FinancePostingDimensionValue[];
+}
+
+export interface FinanceSourceDocumentDimensionInput {
+    defaultDimensions: FinancePostingDimensionValue[];
+    lines: FinanceSourceLineDimensionInput[];
+    applyDefaultToEligibleLines: boolean;
+}
+
+export interface FinanceSourceDimensionValue {
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+    ruleType?: FinanceDimensionAccountRule['ruleType'];
+    isReadOnly: boolean;
+}
+
+export interface FinanceSourceLineDimension {
+    sourceLineId: string;
+    accountId: string;
+    financeDimensionSetId?: string;
+    combinationHash?: string;
+    displayValue?: string;
+    isFrozen: boolean;
+    values: FinanceSourceDimensionValue[];
+    readinessWarnings: string[];
+}
+
+export interface FinanceSourceDocumentDimension {
+    routeId: FinanceDimensionRouteId;
+    certificationState: FinanceDimensionCertificationState;
+    sourceDocumentId: string;
+    defaultFinanceDimensionSetId?: string;
+    defaultValues: FinanceSourceDimensionValue[];
+    lines: FinanceSourceLineDimension[];
+    readinessWarnings: string[];
+    budgetEvidenceStatus: 'NotApplicable' | 'NotEvaluated' | 'Current' | 'Stale' | string;
+    budgetEvaluationHash?: string;
+    budgetEvidenceUpdatedAt?: string;
+}
+
 export interface FinanceDimensionRouteCertification {
     routeId: FinanceDimensionRouteId;
     producerModule: string;

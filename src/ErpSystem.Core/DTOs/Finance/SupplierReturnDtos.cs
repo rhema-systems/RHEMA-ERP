@@ -116,6 +116,7 @@ public class SupplierDebitNoteDto
     public string StatusName { get; set; } = string.Empty;
     public List<SupplierDebitNoteLineItemDto> LineItems { get; set; } = new();
     public List<SupplierDebitNoteApplicationDto> Applications { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
     public DateTime CreatedAt { get; set; }
     public string RowVersion { get; set; } = string.Empty;
 }
@@ -187,6 +188,7 @@ public class CreateSupplierDebitNoteDto
 
     public decimal ExchangeRate { get; set; } = 1m;
     public List<CreateSupplierDebitNoteLineItemDto> Lines { get; set; } = new();
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public sealed class UpdateSupplierDebitNoteDto : CreateSupplierDebitNoteDto
@@ -197,6 +199,7 @@ public sealed class UpdateSupplierDebitNoteDto : CreateSupplierDebitNoteDto
 
 public sealed class CreateSupplierDebitNoteLineItemDto
 {
+    public Guid? Id { get; set; }
     public Guid? OriginalVendorInvoiceLineItemId { get; set; }
     public Guid? GLAccountId { get; set; }
 

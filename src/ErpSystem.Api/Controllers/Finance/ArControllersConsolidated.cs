@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -40,6 +41,8 @@ namespace ErpSystem.Api.Controllers.Finance
     [Route("api/ar/invoices")]
     public class InvoiceController : ControllerBase
     {
+        private static readonly FinancePostingProducerContext DimensionProducer =
+            new(FinanceDimensionRouteId.FinanceArCustomerInvoice);
         private readonly IInvoiceService _invoiceService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ApplicationDbContext _dbContext;
@@ -131,7 +134,7 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}")]
         public async Task<ActionResult<InvoiceDto>> GetById(Guid id)
         {
-            var invoice = await _invoiceService.GetByIdAsync(id);
+            var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
             return invoice == null ? NotFound() : Ok(invoice);
         }
 
@@ -172,7 +175,7 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
-                var invoice = await _invoiceService.CreateAsync(dto);
+                var invoice = await _invoiceService.CreateAsync(dto, DimensionProducer);
                 return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, invoice);
             }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -212,7 +215,7 @@ namespace ErpSystem.Api.Controllers.Finance
             if (id != dto.Id) return BadRequest("ID mismatch");
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Edit", "Finance.AR.Invoices.Write"))
                 return Forbid();
-            try { return Ok(await _invoiceService.UpdateAsync(dto)); }
+            try { return Ok(await _invoiceService.UpdateAsync(dto, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -310,7 +313,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     return BadRequest(new { error = workflowResult.Message ?? "Unable to start the customer invoice approval workflow." });
                 }
 
-                return Ok(await _invoiceService.GetByIdAsync(id));
+                return Ok(await _invoiceService.GetByIdAsync(id, DimensionProducer));
             }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -320,7 +323,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.ApprovePost"))
                 return Forbid();
-            try { return Ok(await _invoiceService.PostAsync(id)); }
+            try { return Ok(await _invoiceService.PostAsync(id, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

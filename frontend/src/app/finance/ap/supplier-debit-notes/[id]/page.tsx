@@ -35,6 +35,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/utils';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import type { SupplierDebitNoteStatus } from '@/types/ap';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
 function statusBadge(status: SupplierDebitNoteStatus) {
   if (status === 'Posted')
@@ -268,6 +269,10 @@ export default function SupplierDebitNoteDetailPage() {
           are shown below.
         </AlertDescription>
       </Alert>
+
+      <div className="no-print">
+        <SourceDocumentDimensionEvidence evidence={note.financeDimensions} />
+      </div>
 
       <Card>
         <CardHeader>
