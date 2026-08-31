@@ -57,6 +57,13 @@ public static class CompanyHrPolicyMappingExtensions
             FitWeightTenure                = entity.FitWeightTenure,
 
             SuccessionPlanNumberPrefix     = entity.SuccessionPlanNumberPrefix,
+
+            WrittenQueryHours                     = entity.WrittenQueryHours,
+            QueryResponseWindowHours              = entity.QueryResponseWindowHours,
+            InvestigationDays                     = entity.InvestigationDays,
+            DisciplineBacklogHorizonDays          = entity.DisciplineBacklogHorizonDays,
+            SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
+            AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
         };
     }
 
@@ -104,5 +111,12 @@ public static class CompanyHrPolicyMappingExtensions
         entity.FitWeightTenure                = dto.FitWeightTenure;
 
         entity.SuccessionPlanNumberPrefix     = (dto.SuccessionPlanNumberPrefix ?? "SP").Trim().ToUpperInvariant();
+
+        entity.WrittenQueryHours                   = dto.WrittenQueryHours;
+        entity.QueryResponseWindowHours            = dto.QueryResponseWindowHours;
+        entity.InvestigationDays                   = dto.InvestigationDays;
+        entity.DisciplineBacklogHorizonDays        = dto.DisciplineBacklogHorizonDays;
+        entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
+        entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
     }
 }

@@ -76,6 +76,13 @@ const schema = z
     fiscalYearStartMonth: z.coerce.number().int().min(1).max(12),
     minimumWorkingAge: z.coerce.number().int().min(10).max(30),
 
+    writtenQueryHours: z.coerce.number().int().min(1).max(720),
+    queryResponseWindowHours: z.coerce.number().int().min(1).max(720),
+    investigationDays: z.coerce.number().int().min(1).max(365),
+    disciplineBacklogHorizonDays: z.coerce.number().int().min(1).max(3650),
+    settlementDaysPerYear: z.coerce.number().int().min(1).max(366),
+    attendanceRateIncludesApprovedLeave: z.boolean(),
+
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
 
@@ -169,6 +176,13 @@ export default function PolicySettingsPage() {
       fitWeightTenure: data.fitWeightTenure,
 
       successionPlanNumberPrefix: data.successionPlanNumberPrefix ?? 'SP',
+
+      writtenQueryHours: data.writtenQueryHours,
+      queryResponseWindowHours: data.queryResponseWindowHours,
+      investigationDays: data.investigationDays,
+      disciplineBacklogHorizonDays: data.disciplineBacklogHorizonDays,
+      settlementDaysPerYear: data.settlementDaysPerYear,
+      attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
     });
   }, [data, form]);
 
@@ -223,6 +237,13 @@ export default function PolicySettingsPage() {
         fitWeightTenure: Number(v.fitWeightTenure),
 
         successionPlanNumberPrefix: v.successionPlanNumberPrefix.trim().toUpperCase(),
+
+        writtenQueryHours: Number(v.writtenQueryHours),
+        queryResponseWindowHours: Number(v.queryResponseWindowHours),
+        investigationDays: Number(v.investigationDays),
+        disciplineBacklogHorizonDays: Number(v.disciplineBacklogHorizonDays),
+        settlementDaysPerYear: Number(v.settlementDaysPerYear),
+        attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'policy-settings'] });
@@ -407,6 +428,87 @@ export default function PolicySettingsPage() {
               name="retirementCountdownLeadDays"
               label="Upcoming retirement (days)"
               required
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Disciplinary &amp; settlement clocks</CardTitle>
+            <CardDescription>
+              Figures the system had to assume because they are not in the specification. Every one
+              starts at what the code did before, so nothing here changed when it became editable —
+              but none of them is a confirmed answer from TDC yet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="writtenQueryHours"
+                label="Written query due within (hours)"
+                required
+              />
+              <NumberField
+                form={form}
+                name="queryResponseWindowHours"
+                label="Employee's answer window (hours)"
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              FR-HR-177 sets 48 hours for issuing the query. The answer window is{' '}
+              <strong>not in the specification at all</strong> — 72 hours is this system&apos;s
+              assumption, and it is what makes the natural-justice gate workable. TDC may want it in
+              working days, which needs the holiday calendar loaded first.
+            </p>
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="investigationDays"
+                label="Investigation tracked within (days)"
+                required
+              />
+              <NumberField
+                form={form}
+                name="disciplineBacklogHorizonDays"
+                label="Reminders stop chasing after (days)"
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              Only the chasing stops. A breach stays on the record and in every report — a reminder
+              engine that shouts for ever trains people to ignore it.
+            </p>
+
+            {/* ⚠ The one setting on this page that changes what a person is paid. */}
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+              <NumberField
+                form={form}
+                name="settlementDaysPerYear"
+                label="Final settlement — days per year"
+                required
+              />
+              <p className="mt-2 text-sm">
+                <strong>This one moves money.</strong> A daily rate is monthly pay × 12 ÷ this
+                number: <strong>365</strong> for calendar days, <strong>360</strong> for thirty-day
+                months, <strong>264</strong> for a 22-day working month. On TDC&apos;s own worked
+                example the answers run from <strong>GHS 3,156.16</strong> to{' '}
+                <strong>GHS 4,363.64</strong> — a 38% spread on the same facts.
+              </p>
+              <p className="mt-2 text-sm">
+                Every settlement records which basis produced it, so changing this never rewrites
+                one already computed. That makes an early settlement auditable; it does not make it
+                right. <strong>Do not run real final settlements until TDC has confirmed the
+                basis.</strong>
+              </p>
+            </div>
+
+            <SwitchField
+              form={form}
+              name="attendanceRateIncludesApprovedLeave"
+              label="Approved leave counts as an expected working day"
+              description="On: leave sits in the attendance denominator, so a day on approved leave lowers the rate and DaysOnLeave shows why. Off: leave leaves the calculation entirely, as weekends and public holidays already do. Applies to today's rate, the trend and the chronic-absentee ranking together."
             />
           </CardContent>
         </Card>

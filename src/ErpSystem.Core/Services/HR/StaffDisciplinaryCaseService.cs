@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -33,6 +34,12 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     private readonly IStaffDisciplineFineRepository _fineRepository;
     private readonly IStaffDisciplineNotificationRepository _notificationRepository;
     private readonly IHrWorkingDayCalculator _workingDays;
+
+    // ⚠ FR-HR-177's 48 hours, FR-HR-178's 28 days and the 72-hour response window are TENANT
+    // SETTINGS, not constants — DisciplineProcessDeadlines only holds their defaults. Every message
+    // this service writes must quote the configured figure, or the sentence names a deadline that
+    // is not the one being enforced.
+    private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -46,6 +53,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         IStaffDisciplineFineRepository fineRepository,
         IStaffDisciplineNotificationRepository notificationRepository,
         IHrWorkingDayCalculator workingDays,
+        ICompanyHrPolicyProvider policyProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
@@ -58,6 +66,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         _fineRepository = fineRepository;
         _notificationRepository = notificationRepository;
         _workingDays = workingDays;
+        _policyProvider = policyProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
@@ -645,7 +654,9 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (query.AcknowledgedDate.HasValue)
             return;
 
-        var closesAt = DisciplineProcessDeadlines.QueryResponseClosesAt(query.SentDate);
+        var policy = await _policyProvider.GetAsync(cancellationToken);
+        var closesAt = DisciplineProcessDeadlines.QueryResponseClosesAt(
+            query.SentDate, policy.QueryResponseWindowHours);
         if (DateTime.UtcNow < closesAt)
             throw new InvalidOperationException(
                 $"The employee has until {closesAt:dd MMM yyyy HH:mm} UTC to answer the written query. "
@@ -712,9 +723,13 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
             ?? throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
 
         var now = DateTime.UtcNow;
+        // One read, four uses. Reading the policy per figure would let a settings change land
+        // mid-method and produce a clock whose parts disagree with each other.
+        var policy = await _policyProvider.GetAsync(cancellationToken);
         var clock = new DisciplineProcessClockDto
         {
-            QueryDueAt = DisciplineProcessDeadlines.WrittenQueryDueAt(entity.ReportedDate),
+            QueryDueAt = DisciplineProcessDeadlines.WrittenQueryDueAt(
+                entity.ReportedDate, policy.WrittenQueryHours),
             InvestigationRequired = entity.RequiresInvestigation,
         };
 
@@ -746,7 +761,8 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         clock.InvestigationOpened = investigation != null;
         clock.InvestigationStartedAt = investigation?.InvestigationStartDate;
         clock.InvestigationCompletedAt = investigation?.InvestigationEndDate;
-        clock.InvestigationDueAt = DisciplineProcessDeadlines.InvestigationDueAt(investigation?.InvestigationStartDate);
+        clock.InvestigationDueAt = DisciplineProcessDeadlines.InvestigationDueAt(
+            investigation?.InvestigationStartDate, policy.InvestigationDays);
 
         if (clock.InvestigationDueAt is DateTime due)
         {
@@ -761,7 +777,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         }
 
         clock.QueryResponseClosesAt = query != null
-            ? DisciplineProcessDeadlines.QueryResponseClosesAt(query.SentDate)
+            ? DisciplineProcessDeadlines.QueryResponseClosesAt(query.SentDate, policy.QueryResponseWindowHours)
             : null;
         clock.QueryOpportunityWaived = entity.QueryOpportunityWaivedAt.HasValue;
         clock.QueryOpportunityWaivedAt = entity.QueryOpportunityWaivedAt;
@@ -828,20 +844,20 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         if (clock.QueryBreached && !clock.QueryIssued)
             clock.Advisories.Add(
-                $"No written query has been issued. FR-HR-177 required one within {DisciplineProcessDeadlines.WrittenQueryHours} hours of the allegation; " +
+                $"No written query has been issued. FR-HR-177 required one within {policy.WrittenQueryHours} hours of the allegation; " +
                 $"it is now {clock.QueryHoursLate:0.#} hours overdue.");
         else if (clock.QueryBreached)
             clock.Advisories.Add(
-                $"The written query was issued {clock.QueryHoursLate:0.#} hours after the {DisciplineProcessDeadlines.WrittenQueryHours}-hour deadline in FR-HR-177.");
+                $"The written query was issued {clock.QueryHoursLate:0.#} hours after the {policy.WrittenQueryHours}-hour deadline in FR-HR-177.");
         else if (clock.QueryIssued && !clock.QueryAcknowledged)
             clock.Advisories.Add("The written query has been issued but the employee has not acknowledged receiving it.");
 
         if (clock.InvestigationBreached && clock.InvestigationCompletedAt == null)
             clock.Advisories.Add(
-                $"The investigation has been open {clock.InvestigationDaysLate} day(s) beyond the {DisciplineProcessDeadlines.InvestigationDays}-day limit in FR-HR-178.");
+                $"The investigation has been open {clock.InvestigationDaysLate} day(s) beyond the {policy.InvestigationDays}-day limit in FR-HR-178.");
         else if (clock.InvestigationBreached)
             clock.Advisories.Add(
-                $"The investigation completed {clock.InvestigationDaysLate} day(s) beyond the {DisciplineProcessDeadlines.InvestigationDays}-day limit in FR-HR-178.");
+                $"The investigation completed {clock.InvestigationDaysLate} day(s) beyond the {policy.InvestigationDays}-day limit in FR-HR-178.");
         else if (clock.InvestigationRequired && !clock.InvestigationOpened)
             clock.Advisories.Add("This case requires an investigation and none has been opened.");
 

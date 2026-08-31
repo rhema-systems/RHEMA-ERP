@@ -1816,14 +1816,20 @@ public class SeparationService : ISeparationService
 
     // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
 
-    /// <summary>Days per year used to turn a monthly salary into a daily rate.</summary>
+    /// <summary>Days per year used to turn a monthly salary into a daily rate — the DEFAULT only.</summary>
     /// <remarks>
     /// ⚠ <b>A policy assumption, stated rather than buried.</b> Calendar days: monthly × 12 ÷ 365.
     /// A 30-day-month or working-day basis gives different money on the same facts, and TDC has not
     /// said which it uses — so the basis is written onto every computed line in words, and the
     /// question is recorded in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
     /// </remarks>
-    private const decimal DaysPerYear = 365m;
+    /// <remarks>
+    /// ⚠ The figure in force is <c>CompanyHrPolicySettings.SettlementDaysPerYear</c>; this seeds it.
+    /// 365 calendar, 360 for thirty-day months, 264 for a 22-day working month — a 38% spread on the
+    /// same facts, and TDC has not answered which. The basis is written onto the settlement in words
+    /// derived from the configured number, so a settlement always says which basis produced it.
+    /// </remarks>
+    private const decimal DefaultDaysPerYear = 365m;
 
     /// <summary>
     /// The currency a settlement is stated in: HR's configured default, validated against Finance,
@@ -1875,9 +1881,14 @@ public class SeparationService : ISeparationService
         if (contract is null)
             return (null, "No salary is on record for this employee, so amounts based on pay cannot be computed.");
 
-        var rate = Math.Round(contract.Salary * 12m / DaysPerYear, 4, MidpointRounding.AwayFromZero);
+        // ⚠ The divisor and the SENTENCE come from the same number, so the words on the settlement
+        // can never describe a basis other than the one that produced the figure beside them.
+        var policy = await _policyProvider.GetAsync(cancellationToken);
+        decimal daysPerYear = policy.SettlementDaysPerYear;
+
+        var rate = Math.Round(contract.Salary * 12m / daysPerYear, 4, MidpointRounding.AwayFromZero);
         return (rate,
-            $"{currency} {contract.Salary:N2} per month × 12 ÷ {DaysPerYear:N0} days = "
+            $"{currency} {contract.Salary:N2} per month × 12 ÷ {daysPerYear:N0} days = "
             + $"{currency} {rate:N4} per day (contract {contract.ContractNumber}).");
     }
 

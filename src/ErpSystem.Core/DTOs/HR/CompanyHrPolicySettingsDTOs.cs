@@ -69,6 +69,15 @@ public class CompanyHrPolicySettingsDto : BaseDto
 
     // Record-number prefixes
     public string SuccessionPlanNumberPrefix { get; set; } = string.Empty;
+
+    // Answers TDC has not given yet (finish plan, lane 2a). Each default is what the code did as a
+    // constant before it moved here, so nothing changed behaviour — only who can change it.
+    public int WrittenQueryHours { get; set; }
+    public int QueryResponseWindowHours { get; set; }
+    public int InvestigationDays { get; set; }
+    public int DisciplineBacklogHorizonDays { get; set; }
+    public int SettlementDaysPerYear { get; set; }
+    public bool AttendanceRateIncludesApprovedLeave { get; set; }
 }
 
 /// <summary>
@@ -130,4 +139,18 @@ public class UpdateCompanyHrPolicySettingsDto
 
     // Record-number prefixes
     [MaxLength(10)] public string SuccessionPlanNumberPrefix { get; set; } = "SP";
+
+    // Answers TDC has not given yet (finish plan, lane 2a). Ranges match the entity's.
+    [Range(1, 720)] public int WrittenQueryHours { get; set; } = 48;
+    [Range(1, 720)] public int QueryResponseWindowHours { get; set; } = 72;
+    [Range(1, 365)] public int InvestigationDays { get; set; } = 28;
+    [Range(1, 3650)] public int DisciplineBacklogHorizonDays { get; set; } = 90;
+
+    /// <summary>
+    /// ⚠ Moves money: 365 calendar, 360 for thirty-day months, 264 for a 22-day working month —
+    /// a 38% spread on the same facts. See the entity.
+    /// </summary>
+    [Range(1, 366)] public int SettlementDaysPerYear { get; set; } = 365;
+
+    public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
 }

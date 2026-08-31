@@ -15,7 +15,8 @@ public interface IStaffDisciplineInvestigationService
     Task<IEnumerable<StaffDisciplineInvestigationDto>> GetByInvestigatorAsync(Guid investigatorId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOpenInvestigationsAsync(CancellationToken cancellationToken = default);
     /// <param name="maxDays">
-    /// Defaults to FR-HR-178's four weeks (<c>DisciplineProcessDeadlines.InvestigationDays</c>).
+    /// Defaults to the tenant's <c>CompanyHrPolicySettings.InvestigationDays</c>, which starts at
+    /// FR-HR-178's four weeks.
     /// Pass a value only for an ad-hoc wider sweep — the queue and the case advisory must otherwise
     /// answer "overdue" the same way.
     /// </param>

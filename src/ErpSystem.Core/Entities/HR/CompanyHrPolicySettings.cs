@@ -235,4 +235,82 @@ public class CompanyHrPolicySettings : TenantEntity
     /// </summary>
     [MaxLength(10)]
     public string SuccessionPlanNumberPrefix { get; set; } = "SP";
+
+    // ═══════════════════════════════════════════
+    //  ANSWERS TDC HAS NOT GIVEN YET
+    // ═══════════════════════════════════════════
+    //
+    // Every default below is EXACTLY what the code did as a constant before it moved here, so
+    // adopting these settings changed no behaviour on any tenant. What changed is that the answer
+    // stops being a deployment: when TDC says "72 hours should be five working days", somebody
+    // edits a field instead of waiting for a release.
+    //
+    // ⚠ Two questions from the same list deliberately did NOT become settings — the exit-pay
+    // basis's siblings and the grievance-document rule. See the finish plan's lane 2a: a setting
+    // whose alternative branch is unimplemented is a control that does not control, which is worse
+    // than an honest open question.
+
+    /// <summary>
+    /// Hours from an allegation being reported to the formal written query being due (FR-HR-177).
+    /// </summary>
+    [Range(1, 720)]
+    public int WrittenQueryHours { get; set; } = 48;
+
+    /// <summary>
+    /// Hours the employee has to answer a written query before a decision may be proposed without
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>This figure is not in the specification.</b> FR-HR-177 gives 48 hours for ISSUING the
+    /// query and FR-HR-180 gives five working days to appeal; nothing states how long the employee
+    /// has to respond. 72 hours was a defensible default and is now an editable one.
+    /// <para>TDC may want this in WORKING days, as the appeal window is. That needs the holiday
+    /// calendar, which is not loaded — so the unit stays hours until it is.</para>
+    /// </remarks>
+    [Range(1, 720)]
+    public int QueryResponseWindowHours { get; set; } = 72;
+
+    /// <summary>Days an investigation is tracked to completion within (FR-HR-178).</summary>
+    [Range(1, 365)]
+    public int InvestigationDays { get; set; } = 28;
+
+    /// <summary>
+    /// How long a disciplinary reminder keeps chasing an overdue step before it goes quiet.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Only the CHASING stops. The breach stays on the record and in every report — a reminder
+    /// engine that shouts for ever trains people to ignore it, which costs more than the silence.
+    /// </remarks>
+    [Range(1, 3650)]
+    public int DisciplineBacklogHorizonDays { get; set; } = 90;
+
+    /// <summary>
+    /// Days per year used to turn a monthly salary into a daily rate in a final settlement
+    /// (FR-HR-184). Calendar days by default: monthly × 12 ÷ 365.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>This one moves money and TDC has not answered it.</b> The four bases TDC was asked
+    /// about are all expressible here — 365 calendar, 360 for thirty-day months, 264 for a 22-day
+    /// working month — and they differ by <b>38% on the same facts</b> (GHS 3,156.16 against
+    /// GHS 4,363.64 on the worked example in the open-questions document).
+    /// <para>The settlement writes the basis onto every computed line <i>in words</i>, derived from
+    /// this number, so a settlement computed under one basis still says which one it used after the
+    /// setting changes. That makes an early settlement auditable — <b>it does not make it right.</b>
+    /// Do not run real final settlements until TDC has answered, or expect a correction exercise.</para>
+    /// </remarks>
+    [Range(1, 366)]
+    public int SettlementDaysPerYear { get; set; } = 365;
+
+    /// <summary>
+    /// Whether approved leave counts as an expected working day in the attendance rate.
+    /// </summary>
+    /// <remarks>
+    /// True as built: leave is a scheduled working day the person did not attend, and DaysOnLeave is
+    /// reported alongside so the reason stays visible. Set false and leave leaves the calculation
+    /// entirely, the way weekends, public holidays and off-days already do.
+    /// <para>⚠ The rate is computed in two places in <c>AttendanceDashboardService</c> — today's
+    /// figure and the trend. Both read this; a policy honoured by one and not the other would make
+    /// the dashboard disagree with itself.</para>
+    /// </remarks>
+    public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
 }

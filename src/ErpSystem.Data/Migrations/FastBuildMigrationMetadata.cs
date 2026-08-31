@@ -263,3 +263,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831000324_RetireCandidatePortalAndLinkCandidatesToUsers")] partial class RetireCandidatePortalAndLinkCandidatesToUsers { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831083551_RetireConsultantClientPortalAndAddClientContacts")] partial class RetireConsultantClientPortalAndAddClientContacts { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831135847_AddAwardAttachmentDmsColumns")] partial class AddAwardAttachmentDmsColumns { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260831232612_AddHrPolicyDeadlineSettings")] partial class AddHrPolicyDeadlineSettings { }

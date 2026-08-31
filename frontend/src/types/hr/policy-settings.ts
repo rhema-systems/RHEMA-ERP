@@ -57,6 +57,16 @@ export interface CompanyHrPolicySettings {
 
   successionPlanNumberPrefix: string;
 
+  // Answers TDC has not given yet (finish plan, lane 2a). Each default is what the code did as a
+  // constant before it moved here, so adopting these changed no behaviour — only who can change it.
+  writtenQueryHours: number;
+  queryResponseWindowHours: number;
+  investigationDays: number;
+  disciplineBacklogHorizonDays: number;
+  /** ⚠ Moves money: 365 calendar / 360 thirty-day / 264 working — a 38% spread on the same facts. */
+  settlementDaysPerYear: number;
+  attendanceRateIncludesApprovedLeave: boolean;
+
   createdAt: string;
   createdBy: string | null;
   updatedAt: string | null;

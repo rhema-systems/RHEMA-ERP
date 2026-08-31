@@ -22,7 +22,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | --- | --- | ---: | --- | --- |
 | **0** | Ledger truth — make the instruments tell the truth again | ✅ **done 2026-08-31** | — | — |
 | **1** | Close the coverage queue | ✅ **done 2026-08-31** | — | — |
-| **2** | Decisions owed — and the eight that become settings | 11 asks + 8 settings | memo + ½ slice | TDC / the user |
+| **2** | Decisions owed — 6 settings ✅ built, the rest is a memo | 13 asks | memo | TDC / the user |
 | **3** | Employee Master feedback block | 19 | 4 slices | partly lane 2 |
 | **4** | Leave · Training · Succession · Recruitment feedback | 15 | 2 slices | partly lane 2 |
 | **5** | Section E — fields no form can set | 69 fields / 27 DTOs | 2 slices | own classification pass |
@@ -156,7 +156,18 @@ for coverage's sake** — the client comment says so too.
 questions below are better answered by shipping a defensible default that TDC can change on a
 screen, and that half can start today.
 
-### 2a. The eight that become settings, not questions · ½ slice · unblocked
+### 2a. The six that become settings, not questions · ✅ **DONE 2026-08-31** · 30 assertions ×2
+
+⚠ **It was eight, and two of them did not survive contact with the code.** Both are back in 2d as
+genuine questions:
+
+| Withdrawn | Why it is not a setting |
+| --- | --- |
+| `LongServiceBasis` | The basis is `HrPolicyCalculations.CompletedYears(employee.DateEmployed, …)`. "Continuous from `DateEmployed`" versus cumulative-with-breaks versus a recognised-service date are **three different computations**, not three values of one. A setting would have had one branch implemented. |
+| `GrievanceInternalDocsVisibleToParties` | There is **no visibility mechanism in employee relations at all** — nothing withholds HR's interpretation or the investigation report from anybody today. The default "true, as built" was accurate only because no rule exists. The setting would have had nothing to switch. |
+
+Both are the D-29 trap: a control that enforces nothing creates false assurance, which is worse
+than an honest open question. Recorded rather than shipped.
 
 `CompanyHrPolicySettings` already exists: one row per tenant, coded defaults returned when no row
 exists, and a screen at `/administration/hr/settings/policy`. `GrievanceRungChaseDays` is the
@@ -172,17 +183,48 @@ it changes is that the answer stops being a blocker.
 | Employee's response window | `QueryResponseWindowHours` | 72 | `:55` — its own comment already says TDC may want working days |
 | Investigation window | `InvestigationDays` | 28 | `:34` |
 | Reminders stop after | `DisciplineBacklogHorizonDays` | 90 | `DisciplineReminderService.cs:115` |
-| Exit-pay daily rate | `DailyRateBasis` | ÷365, as built | `SeparationService.cs:1826` |
+| Exit-pay daily rate | `SettlementDaysPerYear` | 365, as built | `SeparationService.cs:1826` |
 | Attendance denominator | `AttendanceRateIncludesApprovedLeave` | true, as built | `AttendanceDashboardService.cs:38` |
-| Long-service basis | `LongServiceBasis` | continuous from `DateEmployed` | milestones are already a setting |
-| Grievance document visibility | `GrievanceInternalDocsVisibleToParties` | true, as built | two places in area 9c |
 
 ⚠ **One that must NOT become a setting.** The natural-justice gate — a decision blocked until the
 employee has been heard — stays fixed. Making due process an option means the first time it is
 switched off is the first unfair-dismissal claim. It was only ever "for confirmation" anyway.
 
 ⚠ The settlement already stores `DailyRateBasis` as a string on the row, so switching the divisor
-later does not rewrite settlements already computed.
+later does not rewrite settlements already computed. **Built so the divisor and the sentence come
+from the same number**, so the words on a settlement can never describe a basis other than the one
+that produced the figure beside them.
+
+**What shipped:** the six settings on `CompanyHrPolicySettings`, both DTO halves, both mapper
+halves, the `HasData` seed, migration `20260831232612_AddHrPolicyDeadlineSettings`, the settings
+screen with its own card, and — the part that makes them real — **every consumer rewired to read the
+policy instead of a constant**. Harness `hr-separation/run-finishplan-lane2a.mjs`, 30 assertions,
+green twice. It asserts movement, not storage: widening the query window pushes the case clock by
+**exactly** 192 hours, widening the answer window pushes the natural-justice gate by **exactly**
+648, and the settlement divisor reproduces **TDC's own worked example** — GHS 197.2603/day at 365
+against GHS 272.7273 at 264, the 38% spread the open-questions document quotes, with each
+settlement recording its own divisor in words and neither naming the other's.
+
+⚠ **The migration took three attempts and each failure hid the next.** (1) The scaffold refused
+outright: the `HasData` seed needs a value for every new non-nullable property — its own comment had
+warned of this. (2) The generated body used `defaultValue: 0` and repaired only the seeded row by
+id, which would have left any other tenant on `WrittenQueryHours = 0` (every case instantly in
+breach) and `SettlementDaysPerYear = 0` (**a divide-by-zero in the daily rate**). (3) Its
+`UpdateData` then failed at `database update` — that operation resolves column types from the
+migration's TARGET MODEL, and the fast EF build strips every `*.Designer.cs` **and** the snapshot.
+**A data operation in a migration in this repository must be raw SQL**, or it works in Release and
+breaks in Debug.
+
+⚠ **The constants were in more places than the plan knew.** FR-HR-178's investigation window turned
+out to have **five** call sites, not one: the case advisory, the overdue queue, the reminder sweep's
+cutoff, the sweep's own due-date arithmetic, and the interface doc that described it. The
+written-query clock had two. A rename of each constant to `Default*` was what surfaced them — the
+compiler found what a grep had missed.
+
+⚠ **The attendance rate is computed in THREE places, not two** — today's snapshot, the daily trend,
+and the chronic-absentee ranking. The class comment said two. All three now take the flag from a
+single read in `GetDashboardAsync`: a headline rate that counted leave while the risk list beside it
+did not would rank people by a rule the page does not state.
 
 ⚠ **`DailyRateBasis` is not like the other seven, and it is the one to hold.** The four candidate
 divisors span **GHS 3,156.16 to GHS 4,363.64 on the same facts** — a 38% swing in what a leaver is
@@ -223,11 +265,16 @@ is self-contained. **Question 4 has been answered and is struck through.**
 - [ ] **No public holiday calendar is loaded** — an ops prerequisite, not a design question.
       ⚠ Consider seeding a Ghana statutory calendar as an editable default, the same spirit as 2a.
 - [ ] **How does TDC actually pay for medical treatment?** — also a lane-8 money question.
-- [ ] **What is the basis for a long-service award?** ⚠ Only **1** employee has 10+ years on
+- [ ] **What is the basis for a long-service award?** ⚠ **Withdrawn from 2a on 2026-08-31 — it is
+      not a setting.** `CompletedYears(DateEmployed, asOf)` is continuous service; cumulative-with-
+      breaks and a recognised-service date are different computations, so answering this is a build,
+      not a configuration change. ⚠ Only **1** employee has 10+ years on
       record and **0** have 15/20/25; 38% have a `DateEmployed` at all. The answer may be a data
       question, not a policy one. (The *basis* becomes a setting under 2a; the *data* does not.)
 - [ ] **Who may read HR's interpretation and the investigation report on a grievance?**
-      (The behaviour becomes a setting under 2a; the choice is still TDC's.)
+      ⚠ **Withdrawn from 2a on 2026-08-31 — it is not a setting.** Employee relations has **no
+      visibility mechanism at all**: nothing withholds either document from anybody today. Whatever
+      TDC answers has to be built before it can be configured.
 - [ ] **Nobody holds the Internal Audit role** — an operational prerequisite; the separation
       pipeline has a review step with no possible reviewer. ⚠ Re-measured 2026-08-31: the role is
       **not in the database at all** — `AspNetRoles` has 47 rows and neither `TDC_INTERNAL_AUDIT`

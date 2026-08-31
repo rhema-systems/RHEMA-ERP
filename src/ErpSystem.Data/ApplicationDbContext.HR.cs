@@ -3654,6 +3654,23 @@ private void ConfigureHREntities(ModelBuilder builder)
                 FitWeightPotential             = 20,
                 FitWeightTenure                = 15,
                 SuccessionPlanNumberPrefix     = "SP",
+                // Finish plan lane 2a — figures the code carried as constants because TDC has not
+                // answered them. Each value here is exactly what the constant was, so the seeded
+                // tenant behaves today as it did yesterday.
+                //
+                // ⚠ The warning above proved itself: omitting these made the DbContext unbuildable
+                // at design time, and `dotnet ef migrations add` failed naming the bool. Had EF
+                // instead taken the C# defaults, the seeded row would have carried
+                // WrittenQueryHours = 0 — every disciplinary case overdue the moment it was
+                // reported. The design-time failure is the cheaper outcome by far.
+                WrittenQueryHours              = 48,
+                QueryResponseWindowHours       = 72,
+                InvestigationDays              = 28,
+                DisciplineBacklogHorizonDays   = 90,
+                // ⚠ Moves money: monthly × 12 ÷ this. 365 calendar / 360 thirty-day / 264 working,
+                // a 38% spread on the same facts, and TDC has not chosen. See the entity.
+                SettlementDaysPerYear          = 365,
+                AttendanceRateIncludesApprovedLeave = true,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",

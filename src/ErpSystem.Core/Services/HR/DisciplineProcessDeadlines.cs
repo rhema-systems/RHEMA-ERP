@@ -27,11 +27,23 @@ namespace ErpSystem.Core.Services.HR;
 /// </remarks>
 public static class DisciplineProcessDeadlines
 {
-    /// <summary>FR-HR-177 — a formal written query is due within 48 hours of the allegation.</summary>
-    public const int WrittenQueryHours = 48;
+    /// <summary>
+    /// FR-HR-177 — a formal written query is due within 48 hours of the allegation.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>This is the DEFAULT, not the rule in force.</b> The figure lives on
+    /// <c>CompanyHrPolicySettings.WrittenQueryHours</c> and this constant only seeds it, so a
+    /// service that wants the tenant's answer must read the policy and pass it to the overloads
+    /// below. Reading this constant directly gets you 48 on a tenant that has chosen otherwise —
+    /// which is exactly the defect moving it to settings existed to end.
+    /// </remarks>
+    public const int DefaultWrittenQueryHours = 48;
 
-    /// <summary>FR-HR-178 — an investigation is tracked to completion within four weeks.</summary>
-    public const int InvestigationDays = 28;
+    /// <summary>
+    /// FR-HR-178 — an investigation is tracked to completion within four weeks.
+    /// </summary>
+    /// <remarks>⚠ The default only. See <see cref="DefaultWrittenQueryHours"/>.</remarks>
+    public const int DefaultInvestigationDays = 28;
 
     /// <summary>
     /// How long the employee has to answer a written query before a decision may be proposed
@@ -52,11 +64,12 @@ public static class DisciplineProcessDeadlines
     /// ACKNOWLEDGE before a decision could be proposed would let anyone stall their own case
     /// indefinitely by ignoring the notice; silence after a fair opportunity is not a defence.
     /// </remarks>
-    public const int QueryResponseWindowHours = 72;
+    public const int DefaultQueryResponseWindowHours = 72;
 
     /// <summary>When the employee's opportunity to answer a query issued at <paramref name="issuedAt"/> closes.</summary>
-    public static DateTime QueryResponseClosesAt(DateTime issuedAt)
-        => issuedAt.AddHours(QueryResponseWindowHours);
+    /// <param name="windowHours">The tenant's configured window — <c>CompanyHrPolicySettings.QueryResponseWindowHours</c>.</param>
+    public static DateTime QueryResponseClosesAt(DateTime issuedAt, int windowHours)
+        => issuedAt.AddHours(windowHours);
 
     /// <summary>
     /// FR-HR-180 — an appeal must be filed within five WORKING days of the decision.
@@ -79,8 +92,9 @@ public static class DisciplineProcessDeadlines
     public const DisciplinaryNotificationType WrittenQueryType = DisciplinaryNotificationType.ShowCause;
 
     /// <summary>When the written query falls due for a case reported at <paramref name="reportedDate"/>.</summary>
-    public static DateTime WrittenQueryDueAt(DateTime reportedDate)
-        => reportedDate.AddHours(WrittenQueryHours);
+    /// <param name="queryHours">The tenant's configured window — <c>CompanyHrPolicySettings.WrittenQueryHours</c>.</param>
+    public static DateTime WrittenQueryDueAt(DateTime reportedDate, int queryHours)
+        => reportedDate.AddHours(queryHours);
 
     /// <summary>
     /// When an investigation started on <paramref name="startDate"/> falls due. Null when it has not
@@ -88,10 +102,10 @@ public static class DisciplineProcessDeadlines
     /// investigation is not overdue — it is in the "needs investigation" queue instead, which is a
     /// different problem with a different owner.
     /// </summary>
-    public static DateTime? InvestigationDueAt(DateTime? startDate)
-        => startDate?.AddDays(InvestigationDays);
+    public static DateTime? InvestigationDueAt(DateTime? startDate, int investigationDays)
+        => startDate?.AddDays(investigationDays);
 
     /// <summary>The cut-off an overdue-investigation query compares a start date against.</summary>
-    public static DateTime InvestigationOverdueCutoff(DateTime asAt)
-        => asAt.AddDays(-InvestigationDays);
+    public static DateTime InvestigationOverdueCutoff(DateTime asAt, int investigationDays)
+        => asAt.AddDays(-investigationDays);
 }

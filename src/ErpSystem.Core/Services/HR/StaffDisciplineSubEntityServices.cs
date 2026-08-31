@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -87,16 +88,22 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     public StaffDisciplineInvestigationService(
         IStaffDisciplineInvestigationRepository investigationRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        ICompanyHrPolicyProvider policyProvider,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineInvestigationService> logger)
     {
         _investigationRepository = investigationRepository;
         _caseRepository = caseRepository;
+        _policyProvider = policyProvider;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
+
+    // FR-HR-178's four weeks is a tenant setting now; this queue must answer the same question the
+    // case advisory does, which was the whole reason the caller's `maxDays` stopped being the rule.
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -159,7 +166,7 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     }
 
     /// <remarks>
-    /// "Overdue" is FR-HR-178's four weeks, taken from <see cref="DisciplineProcessDeadlines"/> — not
+    /// "Overdue" is FR-HR-178's four weeks, taken from the tenant's HR policy settings — not
     /// the caller's choice. It used to be a <c>maxDays</c> argument defaulting to 30, so this queue,
     /// the case advisory and any future reminder could each answer the same question differently and
     /// the spec's own figure appeared nowhere. The parameter is kept so an ad-hoc wider sweep is
@@ -168,8 +175,9 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int? maxDays = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        var policy = await _policyProvider.GetAsync(cancellationToken);
         var entities = await _investigationRepository.GetOverdueInvestigationsAsync(
-            tenantId, maxDays ?? DisciplineProcessDeadlines.InvestigationDays);
+            tenantId, maxDays ?? policy.InvestigationDays);
         return entities.Select(e => e.ToDto()).ToList();
     }
 

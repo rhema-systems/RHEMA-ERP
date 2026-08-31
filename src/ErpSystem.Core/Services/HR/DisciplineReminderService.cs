@@ -32,8 +32,8 @@ namespace ErpSystem.Core.Services.HR;
 // HR-gated run-now endpoint share exactly one code path, and a dispatch log whose
 // unique (TenantId, DedupeKey) index is the send-once guarantee.
 //
-// ⚠ EVERY THRESHOLD COMES FROM DisciplineProcessDeadlines OR THE QUEUE ITSELF.
-// Nothing here invents a number. Two definitions of "overdue" over the same
+// ⚠ EVERY THRESHOLD COMES FROM THE TENANT'S HR POLICY SETTINGS, DisciplineProcessDeadlines'
+// DEFAULTS, OR THE QUEUE ITSELF. Nothing here invents a number. Two definitions of "overdue" over the same
 // records is how a screen and its reminder end up disagreeing, and this area
 // already had that once — "overdue investigation" was a caller-supplied 30 days
 // while the requirement said 28.
@@ -111,11 +111,16 @@ public class DisciplineReminderService : IDisciplineReminderService
     ///
     /// <para>Applied to overdue reminders only. The due-soon ladders are bounded by their own
     /// thresholds and cannot reach back at all.</para>
+    ///
+    /// <para>⚠ <b>This constant is the DEFAULT only.</b> The figure in force is
+    /// <c>CompanyHrPolicySettings.DisciplineBacklogHorizonDays</c>, which this seeds. The sweep
+    /// already reads the policy for its three grievance clocks; the horizon comes from the same
+    /// read, so a tenant that wants a longer memory can have one without a deploy.</para>
     /// </remarks>
-    private const int BacklogHorizonDays = 90;
+    private const int DefaultBacklogHorizonDays = 90;
 
-    private static bool IsBeyondBacklogHorizon(PendingReminder p)
-        => p.EscalationTier > 0 && p.DaysRemaining < -BacklogHorizonDays;
+    private static bool IsBeyondBacklogHorizon(PendingReminder p, int horizonDays)
+        => p.EscalationTier > 0 && p.DaysRemaining < -horizonDays;
 
     private static int EscalationTier(int daysOverdue) => daysOverdue <= 7 ? 1 : daysOverdue <= 30 ? 2 : 3;
 
@@ -225,16 +230,11 @@ public class DisciplineReminderService : IDisciplineReminderService
         var today = now.Date;
         var pending = new List<PendingReminder>();
 
-        await SweepWrittenQueryAsync(tenantId, now, pending, cancellationToken);
-        await SweepInvestigationsAsync(tenantId, today, pending, cancellationToken);
-        await SweepHearingsAsync(tenantId, today, pending, cancellationToken);
-        await SweepAppealWindowsAsync(tenantId, today, pending, cancellationToken);
-        await SweepCorrectiveActionsAsync(tenantId, today, pending, cancellationToken);
-        await SweepWarningsExpiringAsync(tenantId, today, pending, cancellationToken);
-        await SweepFinesOverdueAsync(tenantId, today, pending, cancellationToken);
-        // Area 9c slice 7 — the employee-relations clocks. Settings read ONCE per sweep, not per
-        // record: the provider hits the database, and four sweeps over a tenant's cases would
-        // otherwise repeat that read for every row.
+        // Settings read ONCE per sweep, not per record: the provider hits the database, and the
+        // sweeps over a tenant's cases would otherwise repeat that read for every row. Read FIRST,
+        // because the disciplinary clocks need it too now — FR-HR-178's investigation window is a
+        // setting, so the sweep and the case advisory answer "overdue" identically or this area
+        // repeats the defect it already had once.
         //
         // ⚠ BY TENANT, not by current user. This collector is what the nightly host calls, and the
         // host has no HTTP context — GetAsync() resolves the tenant from the caller's identity and
@@ -243,23 +243,30 @@ public class DisciplineReminderService : IDisciplineReminderService
         // button never showed it, because a button always has a user behind it.
         var policy = await _policyProvider.GetForTenantAsync(tenantId, cancellationToken);
 
+        await SweepWrittenQueryAsync(tenantId, now, pending, policy.WrittenQueryHours, cancellationToken);
+        await SweepInvestigationsAsync(tenantId, today, pending, policy.InvestigationDays, cancellationToken);
+        await SweepHearingsAsync(tenantId, today, pending, cancellationToken);
+        await SweepAppealWindowsAsync(tenantId, today, pending, cancellationToken);
+        await SweepCorrectiveActionsAsync(tenantId, today, pending, cancellationToken);
+        await SweepWarningsExpiringAsync(tenantId, today, pending, cancellationToken);
+        await SweepFinesOverdueAsync(tenantId, today, pending, cancellationToken);
         await SweepGrievancesUnansweredAsync(tenantId, today, pending, policy.GrievanceRungChaseDays, cancellationToken);
         await SweepGrievanceInvestigationsAsync(tenantId, today, pending, cancellationToken);
         await SweepGrievanceConferencesAsync(tenantId, today, pending, cancellationToken);
         await SweepGrievanceAgreementsAsync(tenantId, today, pending, policy.GrievanceAgreementChaseDays, cancellationToken);
         await SweepConcernsUntriagedAsync(tenantId, today, pending, policy.ConcernTriageChaseDays, cancellationToken);
 
-        var ancient = pending.Where(IsBeyondBacklogHorizon).ToList();
+        var ancient = pending.Where(p => IsBeyondBacklogHorizon(p, policy.DisciplineBacklogHorizonDays)).ToList();
         if (ancient.Count > 0)
         {
             // Never silently. A cap nobody is told about reads as "everything was covered".
             _logger.LogInformation(
                 "Discipline reminder sweep for tenant {TenantId} passed over {Count} obligation(s) more than " +
                 "{Days} days overdue — beyond the reminder horizon; they remain on the queues. Breakdown: {Breakdown}",
-                tenantId, ancient.Count, BacklogHorizonDays,
+                tenantId, ancient.Count, policy.DisciplineBacklogHorizonDays,
                 string.Join(", ", ancient.GroupBy(p => p.Kind).Select(g => $"{g.Key}={g.Count()}")));
 
-            pending = pending.Where(p => !IsBeyondBacklogHorizon(p)).ToList();
+            pending = pending.Where(p => !IsBeyondBacklogHorizon(p, policy.DisciplineBacklogHorizonDays)).ToList();
         }
 
         return pending;
@@ -426,7 +433,7 @@ public class DisciplineReminderService : IDisciplineReminderService
     /// has been issued the deadline is spent, late or not, and chasing it further tells nobody
     /// anything they can act on.
     /// </summary>
-    private async Task SweepWrittenQueryAsync(Guid tenantId, DateTime now, List<PendingReminder> pending, CancellationToken cancellationToken)
+    private async Task SweepWrittenQueryAsync(Guid tenantId, DateTime now, List<PendingReminder> pending, int queryHours, CancellationToken cancellationToken)
     {
         var queried = _unitOfWork.Repository<StaffDisciplineNotification>()
             .GetQueryable(n => n.TenantId == tenantId && !n.IsDeleted
@@ -442,7 +449,7 @@ public class DisciplineReminderService : IDisciplineReminderService
 
         foreach (var item in items)
         {
-            var due = DisciplineProcessDeadlines.WrittenQueryDueAt(item.ReportedDate);
+            var due = DisciplineProcessDeadlines.WrittenQueryDueAt(item.ReportedDate, queryHours);
             if (now <= due) continue;
 
             var daysOverdue = DaysOverdue(due, now);
@@ -458,9 +465,9 @@ public class DisciplineReminderService : IDisciplineReminderService
     }
 
     /// <summary>FR-HR-178 — investigations open past four weeks.</summary>
-    private async Task SweepInvestigationsAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    private async Task SweepInvestigationsAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, int investigationDays, CancellationToken cancellationToken)
     {
-        var cutoff = DisciplineProcessDeadlines.InvestigationOverdueCutoff(today);
+        var cutoff = DisciplineProcessDeadlines.InvestigationOverdueCutoff(today, investigationDays);
 
         var items = await _unitOfWork.Repository<StaffDisciplineInvestigation>()
             .GetQueryable(i => i.TenantId == tenantId && !i.IsDeleted
@@ -472,7 +479,7 @@ public class DisciplineReminderService : IDisciplineReminderService
 
         foreach (var item in items)
         {
-            var due = item.InvestigationStartDate!.Value.Date.AddDays(DisciplineProcessDeadlines.InvestigationDays);
+            var due = item.InvestigationStartDate!.Value.Date.AddDays(investigationDays);
             var daysOverdue = DaysOverdue(due, today);
             var tier = EscalationTier(daysOverdue);
 
