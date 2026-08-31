@@ -129,6 +129,12 @@ The executable fresh-record INV-FU-002 / INV-FU-003 journey is:
 & .\scripts\acceptance\Invoke-InvFu002003.ps1
 ```
 
+For a self-contained fresh SQL Server and authenticated Chromium run, use the guarded launcher. It refuses an existing database and drops only the disposable database it created:
+
+```powershell
+& .\scripts\acceptance\Invoke-InventoryStoresBrowserAcceptance.ps1
+```
+
 Run it against the configured local acceptance database with the API listening on `127.0.0.1:5100` and branch-locked dependencies installed in `frontend` and `e2e-tests`. The script uses the central Workflow, Inventory, Maintenance, Finance and Fixed Assets owners for lifecycle mutations. Database access is limited to prerequisite discovery, temporary isolated actor setup, durable postcondition read-back and cleanup. It restores temporary passwords and grants in `finally` and starts its own frontend for the two Chromium read-back specifications.
 
 | Acceptance actor | Fresh-record responsibility | Control evidence |
