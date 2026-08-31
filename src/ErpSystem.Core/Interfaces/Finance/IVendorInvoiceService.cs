@@ -70,6 +70,16 @@ public interface IVendorInvoiceService
     Task<VendorInvoiceDto> RejectAsync(Guid id, string comments, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Applies the AP-owned terminal outcome after the shared Finance workbench has already
+    /// completed the workflow rejection. This releases any active Finance budget reservation
+    /// and is idempotent so a retry can repair interrupted outcome handling.
+    /// </summary>
+    Task<VendorInvoiceDto> ApplyRejectedWorkflowOutcomeAsync(
+        Guid id,
+        string? comments,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Voids an approved vendor invoice.
     /// Cannot void if any payment allocations exist.
     /// </summary>

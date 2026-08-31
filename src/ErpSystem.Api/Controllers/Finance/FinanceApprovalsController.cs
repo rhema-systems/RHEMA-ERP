@@ -1678,29 +1678,14 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("VendorInvoice"))
         {
-            var invoice = await _db.VendorInvoices.FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
-                cancellationToken);
-            if (invoice == null)
-            {
-                return;
-            }
+            if (_vendorInvoiceService == null)
+                throw new InvalidOperationException("AP invoice lifecycle service is not configured.");
 
-            invoice.Status = VendorInvoiceStatus.Rejected;
-            invoice.ApprovalStatus = "Rejected";
-            invoice.ApprovalComments = reason;
-            await _db.SaveChangesAsync(cancellationToken);
-
-            await RecordVendorInvoiceAuditAsync(
-                tenantId,
-                invoice,
-                FinanceAuditEvents.ApInvoiceRejected,
-                new
-                {
-                    invoice.Status,
-                    invoice.ApprovalStatus,
-                    invoice.ApprovalComments
-                },
+            // The shared workbench owns the workflow action; AP still owns its document and
+            // Finance-budget outcome. Delegate instead of directly changing status so rejection
+            // cannot strand an active expense reservation.
+            await _vendorInvoiceService.ApplyRejectedWorkflowOutcomeAsync(
+                entityId,
                 reason,
                 cancellationToken);
             return;

@@ -49,7 +49,6 @@ import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { purchasingService } from '@/services/purchasingService';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
@@ -103,7 +102,7 @@ const invoiceSchema = z.object({
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 
-export default function CreateVendorInvoicePage() {
+export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
@@ -112,6 +111,10 @@ export default function CreateVendorInvoicePage() {
     const { toast } = useToast();
     const { currentTenantCode } = useTenant();
     const exchangeRateRequestId = useRef(0);
+    const editHydratedRef = useRef(false);
+    const editBudgetCellsLoadedRef = useRef(false);
+    const suppressPurchaseOrderHydrationRef = useRef(false);
+    const isEditMode = Boolean(editInvoiceId);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
 
@@ -134,25 +137,30 @@ export default function CreateVendorInvoicePage() {
     const [inventoryItemSearch, setInventoryItemSearch] = useState('');
 
     // Queries
-    const { data: suppliersData, isLoading: suppliersLoading } = useQuery({
-        queryKey: ['active-ap-supplier-business-partners'],
+    const {
+        data: suppliersData,
+        isLoading: suppliersLoading,
+        error: suppliersError,
+    } = useQuery({
+        queryKey: ['ap-invoice-suppliers'],
         queryFn: async () => {
-            const partners = await businessPartnerService.getActivePartners();
-            const payablePartners = (partners || [])
-                .filter((partner: any) => String(partner.partnerType || '').toLowerCase() !== 'customer')
-                .map((partner: any) => ({
-                    ...partner,
-                    name: partner.name || partner.partnerName || partner.companyName || 'Unknown supplier',
-                    code: partner.code || partner.partnerCode || '',
-                }))
-                .sort((a: any, b: any) => a.name.localeCompare(b.name));
-
-            return {
-                items: Array.from(
-                    new Map(payablePartners.map((partner: any) => [partner.id, partner])).values()
-                )
-            };
+            // AP commands persist Supplier.Id. Use Finance's tenant-scoped projection of the
+            // Procurement-owned Supplier master; BusinessPartner.Id is a different identity.
+            const suppliers = await accountsPayableService.getInvoiceSuppliers();
+            return { items: suppliers };
         },
+    });
+
+    const {
+        data: editInvoice,
+        isLoading: editInvoiceLoading,
+        error: editInvoiceError,
+    } = useQuery({
+        queryKey: ['vendor-invoice', editInvoiceId],
+        queryFn: () => editInvoiceId
+            ? accountsPayableService.getInvoice(editInvoiceId)
+            : Promise.reject(new Error('An invoice id is required for editing.')),
+        enabled: isEditMode,
     });
 
     const { data: glAccountsData, isLoading: glAccountsLoading } = useQuery({
@@ -308,8 +316,15 @@ export default function CreateVendorInvoicePage() {
     const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(selectedWithholdingTax?.rate || 0);
     const watchLineItems = form.watch('lineItems') || [];
 
-    const loadBudgetCells = async (lineKey: string, index: number, accountId: string) => {
-        form.setValue(`lineItems.${index}.budgetEntryId`, undefined);
+    const loadBudgetCells = async (
+        lineKey: string,
+        index: number,
+        accountId: string,
+        preserveBudgetEntryId?: string
+    ) => {
+        if (!preserveBudgetEntryId) {
+            form.setValue(`lineItems.${index}.budgetEntryId`, undefined);
+        }
         setBudgetCellsByLine(current => ({ ...current, [lineKey]: [] }));
         if (!accountId || !watchInvoiceDate) return;
         setBudgetCellsLoading(current => ({ ...current, [lineKey]: true }));
@@ -319,6 +334,9 @@ export default function CreateVendorInvoicePage() {
                 accountId
             );
             setBudgetCellsByLine(current => ({ ...current, [lineKey]: cells }));
+            if (preserveBudgetEntryId) {
+                form.setValue(`lineItems.${index}.budgetEntryId`, preserveBudgetEntryId);
+            }
         } catch (error: any) {
             toast({
                 title: 'Budget cells unavailable',
@@ -329,6 +347,72 @@ export default function CreateVendorInvoicePage() {
             setBudgetCellsLoading(current => ({ ...current, [lineKey]: false }));
         }
     };
+
+    useEffect(() => {
+        if (!isEditMode || !editInvoice || !suppliersData?.items || editHydratedRef.current) return;
+
+        const supplier = suppliersData.items.find(item => item.id === editInvoice.supplierId);
+        if (!supplier) return;
+
+        editHydratedRef.current = true;
+        editBudgetCellsLoadedRef.current = false;
+        setSelectedSupplier(supplier);
+        setSelectedPurchaseOrderId(editInvoice.purchaseOrderId || '');
+        suppressPurchaseOrderHydrationRef.current = Boolean(editInvoice.purchaseOrderId);
+
+        const invoiceDate = new Date(editInvoice.invoiceDate);
+        const dueDate = editInvoice.dueDate
+            ? new Date(editInvoice.dueDate)
+            : addDays(invoiceDate, editInvoice.paymentTermsDays || 30);
+
+        form.reset({
+            supplierId: editInvoice.supplierId,
+            supplierInvoiceNumber: editInvoice.supplierInvoiceNumber || '',
+            purchaseOrderId: editInvoice.purchaseOrderId || undefined,
+            acceptedSupplyKind: editInvoice.acceptedSupplyKind,
+            acceptedSupplySourceId: editInvoice.acceptedSupplySourceId,
+            invoiceDate,
+            dueDate,
+            paymentTermId: editInvoice.paymentTermId || '',
+            currencyCode: editInvoice.currencyCode || 'GHS',
+            exchangeRate: editInvoice.exchangeRate || 1,
+            exchangeRateId: editInvoice.exchangeRateId,
+            exchangeRateDate: invoiceDate,
+            exchangeRateSource: editInvoice.exchangeRateId ? 'Approved rate' : 'Daily',
+            notes: editInvoice.notes || '',
+            reference: editInvoice.reference || '',
+            taxGroupId: 'none',
+            withholdingTaxId: editInvoice.withholdingTaxId || 'none',
+            withholdingTaxRate: editInvoice.withholdingTaxRate || 0,
+            isOpeningBalance: editInvoice.isOpeningBalance,
+            lineItems: editInvoice.lineItems.map(line => ({
+                lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Product' | 'Inventory',
+                glAccountId: line.glAccountId,
+                budgetEntryId: line.budgetEntryId,
+                inventoryItemId: line.inventoryItemId,
+                warehouseId: line.warehouseId,
+                purchaseOrderItemId: line.purchaseOrderItemId,
+                description: line.description,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                taxGroupId: line.taxGroupId || 'none',
+                discountPercentage: line.discountPercentage || 0,
+                unit: line.unit,
+            })),
+        });
+    }, [editInvoice, form, isEditMode, suppliersData]);
+
+    useEffect(() => {
+        if (!isEditMode || !editInvoice || !editHydratedRef.current || editBudgetCellsLoadedRef.current) return;
+        if (fields.length !== editInvoice.lineItems.length) return;
+
+        editBudgetCellsLoadedRef.current = true;
+        editInvoice.lineItems.forEach((line, index) => {
+            if (line.glAccountId) {
+                void loadBudgetCells(fields[index].id, index, line.glAccountId, line.budgetEntryId);
+            }
+        });
+    }, [editInvoice, fields, isEditMode]);
 
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
@@ -590,6 +674,12 @@ export default function CreateVendorInvoicePage() {
 
     useEffect(() => {
         if (!selectedPurchaseOrder) return;
+        if (suppressPurchaseOrderHydrationRef.current) {
+            // The saved draft is authoritative while editing. Loading its PO must not replace
+            // existing invoice lines with today's remaining PO quantities.
+            suppressPurchaseOrderHydrationRef.current = false;
+            return;
+        }
         if (selectedPurchaseOrder.procurementCategory === 'Works') {
             toast({
                 title: 'Use the QS certificate handoff',
@@ -666,7 +756,7 @@ export default function CreateVendorInvoicePage() {
                 });
                 return;
             }
-            await accountsPayableService.createInvoice({
+            const request = {
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
@@ -679,8 +769,8 @@ export default function CreateVendorInvoicePage() {
                 withholdingTaxRate: isOpeningBalance ? 0 : watchWithholdingTaxRate,
                 withholdingTaxAccountId: isOpeningBalance ? null : selectedWithholdingTax?.taxPayableAccountId || null,
                 isOpeningBalance,
-                acceptedSupplyKind: serviceCategory ? 'ServiceCompletion' : undefined,
-                acceptedSupplySourceId: serviceCategory ? data.acceptedSupplySourceId : undefined,
+                acceptedSupplyKind: serviceCategory ? ('ServiceCompletion' as const) : data.acceptedSupplyKind,
+                acceptedSupplySourceId: data.acceptedSupplySourceId,
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
                     return {
@@ -699,24 +789,97 @@ export default function CreateVendorInvoicePage() {
                         warehouseId: item.warehouseId || null,
                     } as any;
                 })
-            });
+            };
+
+            if (isEditMode && editInvoice) {
+                await accountsPayableService.updateInvoice(editInvoice.id, {
+                    ...request,
+                    id: editInvoice.id,
+                    receivedDate: editInvoice.receivedDate,
+                    paymentTermsDays: editInvoice.paymentTermsDays,
+                    earlyPaymentDiscountPercentage: editInvoice.earlyPaymentDiscountPercentage,
+                    earlyPaymentDiscountDueDate: editInvoice.earlyPaymentDiscountDueDate,
+                    withholdingCertificateNumber: editInvoice.withholdingCertificateNumber,
+                    withholdingCertificateDate: editInvoice.withholdingCertificateDate,
+                    matchingType: editInvoice.matchingType,
+                    expenseAccountId: editInvoice.expenseAccountId,
+                    apAccountId: editInvoice.apAccountId,
+                });
+            } else {
+                await accountsPayableService.createInvoice(request);
+            }
 
             toast({
                 title: 'Success',
-                description: 'Vendor invoice created successfully',
+                description: isEditMode
+                    ? 'Vendor invoice updated successfully'
+                    : 'Vendor invoice created successfully',
             });
 
-            router.push('/finance/ap/invoices');
+            router.push(isEditMode && editInvoice
+                ? `/finance/ap/invoices/${editInvoice.id}`
+                : '/finance/ap/invoices');
         } catch (error: any) {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to create vendor invoice',
+                description: error.message || `Failed to ${isEditMode ? 'update' : 'create'} vendor invoice`,
                 variant: 'destructive',
             });
         } finally {
             setIsSubmitting(false);
         }
     };
+
+    const editSupplierMissing = Boolean(
+        isEditMode &&
+        editInvoice &&
+        suppliersData &&
+        !suppliersData.items.some(item => item.id === editInvoice.supplierId)
+    );
+
+    if (
+        isEditMode &&
+        (editInvoiceLoading || !editHydratedRef.current) &&
+        !editInvoiceError &&
+        !suppliersError &&
+        !editSupplierMissing
+    ) {
+        return (
+            <div className="flex min-h-[50vh] items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
+
+    if (isEditMode && (editInvoiceError || suppliersError || editSupplierMissing)) {
+        return (
+            <div className="mx-auto max-w-2xl space-y-4 p-8">
+                <h1 className="text-2xl font-bold">Unable to edit vendor invoice</h1>
+                <p className="text-muted-foreground">
+                    {(editInvoiceError as Error | undefined)?.message ||
+                        (suppliersError as Error | undefined)?.message ||
+                        (editSupplierMissing
+                            ? 'The invoice supplier is not available in the current tenant.'
+                            : 'The invoice could not be loaded.')}
+                </p>
+                <Button variant="outline" onClick={() => router.push('/finance/ap/invoices')}>
+                    Back to invoices
+                </Button>
+            </div>
+        );
+    }
+
+    if (isEditMode && editInvoice && !['Draft', 'Rejected'].includes(editInvoice.status)) {
+        return (
+            <div className="mx-auto max-w-2xl space-y-4 p-8">
+                <h1 className="text-2xl font-bold">Invoice can no longer be edited</h1>
+                <p className="text-muted-foreground">Only Draft or Rejected invoices may be changed.</p>
+                <Button variant="outline" onClick={() => router.push(`/finance/ap/invoices/${editInvoice.id}`)}>
+                    View invoice
+                </Button>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8 p-8 max-w-[1400px] mx-auto">
@@ -725,9 +888,11 @@ export default function CreateVendorInvoicePage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Vendor Invoice</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {isEditMode ? `Edit ${editInvoice?.invoiceNumber || 'Vendor Invoice'}` : 'Record Vendor Invoice'}
+                    </h1>
                     <p className="text-muted-foreground">
-                        Enter a bill received from a supplier.
+                        {isEditMode ? 'Update this draft without losing its accounting evidence.' : 'Enter a bill received from a supplier.'}
                     </p>
                 </div>
             </div>
@@ -747,6 +912,7 @@ export default function CreateVendorInvoicePage() {
                                         role="combobox"
                                         aria-expanded={supplierComboOpen}
                                         className="w-full justify-between"
+                                        disabled={isEditMode}
                                     >
                                         {selectedSupplier
                                             ? `${selectedSupplier.name} (${selectedSupplier.code})`
@@ -1409,11 +1575,15 @@ export default function CreateVendorInvoicePage() {
                         <Button variant="outline" type="button" onClick={() => router.back()}>Cancel</Button>
                         <Button type="submit" disabled={isSubmitting}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Record Invoice
+                            {isEditMode ? 'Save Changes' : 'Record Invoice'}
                         </Button>
                     </CardFooter>
                 </Card>
             </form>
         </div>
     );
+}
+
+export default function CreateVendorInvoicePage() {
+    return <VendorInvoiceFormPage />;
 }

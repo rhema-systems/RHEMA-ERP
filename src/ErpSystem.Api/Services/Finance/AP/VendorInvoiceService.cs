@@ -972,6 +972,12 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
 
+            // A client may lose the successful response after the workflow has already reached
+            // its terminal state. Replaying the command must release any stranded budget
+            // reservation instead of rejecting the retry before AP outcome reconciliation.
+            if (invoice.Status == VendorInvoiceStatus.Rejected)
+                return await ApplyRejectedWorkflowOutcomeAsync(id, comments, cancellationToken);
+
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be rejected.");
 
@@ -995,12 +1001,28 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return MapToDto(invoice);
             }
 
+            return await ApplyRejectedWorkflowOutcomeAsync(id, comments, cancellationToken);
+        }
+
+        public async Task<VendorInvoiceDto> ApplyRejectedWorkflowOutcomeAsync(
+            Guid id,
+            string? comments,
+            CancellationToken cancellationToken = default)
+        {
+            var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
+            if (invoice.Status is not (VendorInvoiceStatus.PendingApproval or VendorInvoiceStatus.Rejected))
+                throw new InvalidOperationException(
+                    "Only a pending or already rejected invoice can receive a rejected workflow outcome.");
+
             await ReleaseVendorInvoiceBudgetAsync(
                 invoice.Id,
                 reservations: null,
                 "Vendor invoice was rejected.",
                 "Rejected",
                 cancellationToken);
+
+            if (invoice.Status == VendorInvoiceStatus.Rejected)
+                return MapToDto(invoice);
 
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.Rejected;
