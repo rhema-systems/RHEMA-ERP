@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -567,8 +568,21 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 return true;
             }
 
-            return await _unitOfWork.Repository<AccountTransaction>()
+            if (await _unitOfWork.Repository<AccountTransaction>()
                 .GetQueryable(t => t.TenantId == rate.TenantId && t.ExchangeRateId == rate.Id && !t.IsDeleted)
+                .AnyAsync(cancellationToken))
+            {
+                return true;
+            }
+
+            return await _unitOfWork.Repository<FixedAsset>()
+                .GetQueryable(asset =>
+                    asset.TenantId == rate.TenantId &&
+                    asset.CapitalizationApprovalExchangeRateId == rate.Id &&
+                    asset.CapitalizationApprovalInvalidatedAt == null &&
+                    (asset.Status == FixedAssetStatus.PendingApproval ||
+                     asset.Status == FixedAssetStatus.Acquired) &&
+                    !asset.IsDeleted)
                 .AnyAsync(cancellationToken);
         }
 

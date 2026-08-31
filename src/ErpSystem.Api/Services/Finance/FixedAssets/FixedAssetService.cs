@@ -11,11 +11,22 @@ using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using ClosedXML.Excel;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets
 {
     public class FixedAssetService : IFixedAssetService
     {
+        private static readonly JsonSerializerOptions CapitalizationSnapshotJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        };
+
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUser;
         private readonly IAccountingBookService? _accountingBookService;
@@ -185,6 +196,18 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == id)
             ?? throw new KeyNotFoundException("Fixed asset not found.");
 
+        if (asset.Status == FixedAssetStatus.PendingApproval)
+            throw new InvalidOperationException("A fixed asset pending capitalization approval cannot be edited. Reject or withdraw the request first.");
+        if (asset.Status == FixedAssetStatus.Acquired &&
+            asset.CapitalizationApprovalApprovedAt.HasValue &&
+            !asset.CapitalizationApprovalInvalidatedAt.HasValue)
+            throw new InvalidOperationException("An approved direct capitalization cannot be edited before posting. Invalidate and resubmit the approval evidence instead.");
+
+        var resetsRejectedApproval = asset.Status == FixedAssetStatus.Rejected;
+        var resetsReversedApproval = asset.Status == FixedAssetStatus.Draft &&
+            asset.CapitalizationReversalPostingEventId.HasValue &&
+            !string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash);
+
         var assetCode = NormalizeRequiredText(dto.AssetCode);
         if (string.IsNullOrWhiteSpace(assetCode))
         {
@@ -238,13 +261,18 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             asset.DiminishingBalanceRatePercent = RoundRate(dto.DiminishingBalanceRatePercent);
             asset.LifetimeProductionCapacity = dto.LifetimeProductionCapacity;
             asset.AccumulatedProductionUnits = 0m;
-            asset.Status = dto.Status;
+            asset.Status = resetsRejectedApproval || resetsReversedApproval
+                ? FixedAssetStatus.Draft
+                : dto.Status;
             asset.DisposalDate = dto.DisposalDate;
         }
         asset.MaintenanceAssetId = dto.MaintenanceAssetId;
         asset.SerialNumber = dto.SerialNumber;
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = UserName;
+
+        if (resetsRejectedApproval || resetsReversedApproval)
+            ClearCapitalizationApproval(asset);
 
         if (!isCapitalized && asset.Status == ErpSystem.Core.Enums.FixedAssetStatus.Draft)
         {
@@ -313,6 +341,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         {
             throw new InvalidOperationException("Capitalized fixed assets cannot be deleted. Use a controlled reversal or disposal workflow.");
         }
+        if (asset.Status == FixedAssetStatus.PendingApproval ||
+            (asset.Status == FixedAssetStatus.Acquired && asset.CapitalizationApprovalApprovedAt.HasValue))
+        {
+            throw new InvalidOperationException("Fixed assets with pending or approved capitalization evidence cannot be deleted.");
+        }
 
         _context.FixedAssets.Remove(asset);
         await _context.SaveChangesAsync();
@@ -361,6 +394,15 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             JournalEntryId = asset.JournalEntryId,
             PostingEventId = asset.PostingEventId,
             CapitalizedAt = asset.CapitalizedAt,
+            CapitalizationApprovalSnapshot = TryReadCapitalizationApprovalSnapshot(asset),
+            CapitalizationApprovalSnapshotHash = asset.CapitalizationApprovalSnapshotHash,
+            CapitalizationApprovalWorkflowInstanceId = asset.CapitalizationApprovalWorkflowInstanceId,
+            CapitalizationApprovalSubmittedByUserId = asset.CapitalizationApprovalSubmittedByUserId,
+            CapitalizationApprovalSubmittedAt = asset.CapitalizationApprovalSubmittedAt,
+            CapitalizationApprovalApprovedByUserId = asset.CapitalizationApprovalApprovedByUserId,
+            CapitalizationApprovalApprovedAt = asset.CapitalizationApprovalApprovedAt,
+            CapitalizationApprovalInvalidatedAt = asset.CapitalizationApprovalInvalidatedAt,
+            CapitalizationApprovalInvalidationReason = asset.CapitalizationApprovalInvalidationReason,
             CapitalizationReversalJournalEntryId = asset.CapitalizationReversalJournalEntryId,
             CapitalizationReversalPostingEventId = asset.CapitalizationReversalPostingEventId,
             CapitalizationReversedAt = asset.CapitalizationReversedAt,
@@ -1342,9 +1384,10 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
     public async Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(
         Guid id,
-        string? comments = null,
+        SubmitFixedAssetCapitalizationDto dto,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(dto);
         var asset = await _context.FixedAssets
             .Include(a => a.Category)
             .Include(a => a.BookValues)
@@ -1367,13 +1410,20 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 FinanceAuditEvents.FinancePostingBlockedAfterRejection,
                 asset,
                 reason: "Direct fixed asset capitalization was rejected by workflow.",
-                comment: comments);
+                comment: dto.Comments);
             throw new InvalidOperationException("Rejected fixed asset capitalization requests cannot be submitted again without updating the asset.");
         }
 
+        var snapshot = await BuildCapitalizationApprovalSnapshotAsync(asset, dto, cancellationToken);
+        var snapshotJson = JsonSerializer.Serialize(snapshot, CapitalizationSnapshotJsonOptions);
+        var snapshotHash = HashCapitalizationEvidence(snapshotJson);
+
         if (_workflowService == null)
         {
+            ApplyCapitalizationApprovalSubmission(asset, snapshot, snapshotJson, snapshotHash, workflowInstanceId: null);
             asset.Status = FixedAssetStatus.Acquired;
+            asset.CapitalizationApprovalApprovedByUserId = CurrentUserGuid == Guid.Empty ? null : CurrentUserGuid;
+            asset.CapitalizationApprovalApprovedAt = DateTime.UtcNow;
             asset.UpdatedAt = DateTime.UtcNow;
             asset.UpdatedBy = UserName;
             await _context.SaveChangesAsync(cancellationToken);
@@ -1381,6 +1431,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         }
 
         asset.Status = FixedAssetStatus.PendingApproval;
+        ApplyCapitalizationApprovalSubmission(asset, snapshot, snapshotJson, snapshotHash, workflowInstanceId: null);
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = UserName;
         await _context.SaveChangesAsync(cancellationToken);
@@ -1393,9 +1444,19 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 asset,
                 afterValues: new { workflowResult.Status, workflowResult.Message },
                 reason: workflowResult.Message,
-                comment: comments);
+                comment: dto.Comments);
+            asset.Status = FixedAssetStatus.Draft;
+            asset.CapitalizationApprovalInvalidatedAt = DateTime.UtcNow;
+            asset.CapitalizationApprovalInvalidationReason = workflowResult.Message
+                ?? "Fixed asset capitalization workflow could not be started.";
+            asset.UpdatedAt = DateTime.UtcNow;
+            asset.UpdatedBy = UserName;
+            await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException(workflowResult.Message ?? "Fixed asset capitalization workflow could not be started.");
         }
+
+        asset.CapitalizationApprovalWorkflowInstanceId = workflowResult.WorkflowInstanceId;
+        await _context.SaveChangesAsync(cancellationToken);
 
         await RecordFixedAssetAuditAsync(
             FinanceAuditEvents.FinanceWorkflowSubmitted,
@@ -1404,9 +1465,17 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             {
                 asset.Status,
                 workflowResult.WorkflowInstanceId,
-                Action = "DirectCapitalization"
+                Action = "DirectCapitalization",
+                SnapshotHash = snapshotHash,
+                snapshot.CapitalizationDate,
+                snapshot.TransactionAmount,
+                snapshot.FunctionalCurrencyCode,
+                snapshot.TransactionCurrencyCode,
+                snapshot.DebitAccountId,
+                snapshot.CreditAccountId,
+                snapshot.ExchangeRateId
             },
-            comment: comments ?? "Fixed asset direct capitalization submitted for workflow approval.");
+            comment: dto.Comments ?? "Fixed asset direct capitalization submitted for workflow approval.");
 
         return MapToDto(asset);
     }
@@ -1429,7 +1498,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             return MapToDto(asset);
         }
 
-        await EnsureDirectCapitalizationApprovedAsync(asset, dto.Reason);
+        dto = await ResolveApprovedDirectCapitalizationInstructionAsync(asset, dto, CancellationToken.None);
 
         try
         {
@@ -1622,7 +1691,26 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         if (dto.FunctionalAmount <= 0m || RoundMoney(dto.FunctionalAmount) != RoundMoney(handoff.FunctionalAmount))
             throw new InvalidOperationException("The capitalization amount does not match the reserved Procurement receipt carrying value.");
 
-        await EnsureDirectCapitalizationApprovedAsync(asset, dto.Reason);
+        var approvedSnapshot = await ResolveApprovedSourceCapitalizationSnapshotAsync(
+            asset,
+            dto.CapitalizationId,
+            dto.PurchaseOrderItemId,
+            dto.Reason,
+            cancellationToken);
+        if (approvedSnapshot != null)
+        {
+            dto = new ProcurementFixedAssetPostingInstructionDto
+            {
+                CapitalizationId = dto.CapitalizationId,
+                PurchaseOrderItemId = dto.PurchaseOrderItemId,
+                CapitalizationDate = approvedSnapshot.CapitalizationDate,
+                InventoryControlAccountId = approvedSnapshot.CreditAccountId,
+                FunctionalAmount = approvedSnapshot.TransactionAmount,
+                FunctionalCurrencyCode = approvedSnapshot.FunctionalCurrencyCode,
+                SourceReference = approvedSnapshot.Reference,
+                Reason = approvedSnapshot.Reason
+            };
+        }
         var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
         var assetAccount = await ResolveFixedAssetPostingAccountAsync(
             category.AssetAccountId,
@@ -3028,35 +3116,444 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         FailureReason = request.FailureReason
     };
 
-    private async Task EnsureDirectCapitalizationApprovedAsync(FixedAsset asset, string? reason)
+    private async Task<CapitalizeFixedAssetDto> ResolveApprovedDirectCapitalizationInstructionAsync(
+        FixedAsset asset,
+        CapitalizeFixedAssetDto requested,
+        CancellationToken cancellationToken)
     {
         if (_workflowService == null)
         {
-            return;
+            return requested;
         }
+
+        if (asset.Status != FixedAssetStatus.Acquired)
+        {
+            var message = asset.Status switch
+            {
+                FixedAssetStatus.PendingApproval => "Direct fixed asset capitalization is pending workflow approval.",
+                FixedAssetStatus.Rejected => "Direct fixed asset capitalization was rejected and cannot be posted.",
+                _ => "Direct fixed asset capitalization must be submitted and approved before posting."
+            };
+
+            await RecordFixedAssetAuditAsync(
+                asset.Status == FixedAssetStatus.Rejected
+                    ? FinanceAuditEvents.FinancePostingBlockedAfterRejection
+                    : FinanceAuditEvents.FinancePostingBlockedPendingApproval,
+                asset,
+                afterValues: new { asset.Status },
+                reason: message,
+                comment: requested.Reason);
+            throw new InvalidOperationException(message);
+        }
+
+        var snapshot = ReadVerifiedCapitalizationApprovalSnapshot(asset);
+        if (!string.Equals(snapshot.SourceDocumentType, "FixedAsset", StringComparison.Ordinal) ||
+            snapshot.SourceDocumentId != asset.Id)
+        {
+            throw new InvalidOperationException(
+                "This approval snapshot belongs to a source-owned capitalization. Post it through the owning Finance adapter.");
+        }
+        if (!asset.CapitalizationApprovalApprovedAt.HasValue ||
+            !asset.CapitalizationApprovalApprovedByUserId.HasValue ||
+            asset.CapitalizationApprovalInvalidatedAt.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Direct fixed asset capitalization does not have a valid immutable approval snapshot.");
+        }
+
+        var currentEvidenceHash = BuildAssetCapitalizationEvidenceHash(asset);
+        if (!string.Equals(currentEvidenceHash, snapshot.AssetEvidenceHash, StringComparison.Ordinal))
+        {
+            await InvalidateCapitalizationApprovalAsync(
+                asset,
+                "The asset's accounting evidence changed after capitalization approval.",
+                cancellationToken);
+        }
+
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        if (category.AssetAccountId != snapshot.DebitAccountId ||
+            (snapshot.UsesCategoryAucAccount && category.AucAccountId != snapshot.CreditAccountId))
+        {
+            await InvalidateCapitalizationApprovalAsync(
+                asset,
+                "The fixed-asset category posting-account configuration changed after capitalization approval.",
+                cancellationToken);
+        }
+
+        // Posting deliberately reconstructs the instruction from checker-approved evidence. The
+        // caller can provide an operational comment, but cannot replace the date, amount, account,
+        // currency, rate or reference after approval.
+        return new CapitalizeFixedAssetDto
+        {
+            CapitalizationDate = snapshot.CapitalizationDate,
+            CreditAccountId = snapshot.CreditAccountId,
+            Reference = snapshot.Reference,
+            Reason = snapshot.Reason,
+            Amount = snapshot.TransactionAmount,
+            TransactionCurrencyCode = snapshot.TransactionCurrencyCode,
+            ExchangeRate = snapshot.ExchangeRate,
+            ExchangeRateId = snapshot.ExchangeRateId,
+            ExchangeRateDate = snapshot.ExchangeRateDate
+        };
+    }
+
+    private async Task<FixedAssetCapitalizationApprovalSnapshotDto?> ResolveApprovedSourceCapitalizationSnapshotAsync(
+        FixedAsset asset,
+        Guid capitalizationId,
+        Guid purchaseOrderItemId,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        if (_workflowService == null)
+            return null;
 
         if (asset.Status == FixedAssetStatus.Acquired)
         {
-            return;
+            var snapshot = ReadVerifiedCapitalizationApprovalSnapshot(asset);
+            if (!asset.CapitalizationApprovalApprovedAt.HasValue ||
+                !asset.CapitalizationApprovalApprovedByUserId.HasValue ||
+                asset.CapitalizationApprovalInvalidatedAt.HasValue)
+                throw new InvalidOperationException("The source-owned fixed asset does not have a valid immutable approval snapshot.");
+            if (!string.Equals(snapshot.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.Ordinal) ||
+                snapshot.SourceDocumentId != capitalizationId || snapshot.SourceDocumentLineId != purchaseOrderItemId)
+                throw new InvalidOperationException("The approved capitalization evidence does not match this Procurement handoff.");
+            if (!string.Equals(BuildAssetCapitalizationEvidenceHash(asset), snapshot.AssetEvidenceHash, StringComparison.Ordinal))
+                await InvalidateCapitalizationApprovalAsync(
+                    asset,
+                    "The asset's accounting evidence changed after Procurement capitalization approval.",
+                    cancellationToken);
+
+            var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+            var settings = await GetFinanceSettingsAsync();
+            if (category.AssetAccountId != snapshot.DebitAccountId ||
+                settings.ControlAccountInventoryId != snapshot.CreditAccountId)
+                await InvalidateCapitalizationApprovalAsync(
+                    asset,
+                    "The asset or inventory-control account configuration changed after Procurement capitalization approval.",
+                    cancellationToken);
+            return snapshot;
         }
 
         var message = asset.Status switch
         {
-            FixedAssetStatus.PendingApproval => "Direct fixed asset capitalization is pending workflow approval.",
-            FixedAssetStatus.Rejected => "Direct fixed asset capitalization was rejected and cannot be posted.",
-            _ => "Direct fixed asset capitalization must be submitted and approved before posting."
+            FixedAssetStatus.PendingApproval => "Fixed asset capitalization is pending workflow approval.",
+            FixedAssetStatus.Rejected => "Fixed asset capitalization was rejected and cannot be posted.",
+            _ => "Fixed asset capitalization must be submitted and approved before posting."
         };
-
         await RecordFixedAssetAuditAsync(
             asset.Status == FixedAssetStatus.Rejected
                 ? FinanceAuditEvents.FinancePostingBlockedAfterRejection
                 : FinanceAuditEvents.FinancePostingBlockedPendingApproval,
             asset,
-            afterValues: new { asset.Status },
+            afterValues: new { asset.Status, SourceOwnedCapitalization = true },
             reason: message,
             comment: reason);
-
         throw new InvalidOperationException(message);
+    }
+
+    private static FixedAssetCapitalizationApprovalSnapshotDto? TryReadCapitalizationApprovalSnapshot(FixedAsset asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            return null;
+
+        try
+        {
+            return ReadVerifiedCapitalizationApprovalSnapshot(asset);
+        }
+        catch (InvalidOperationException)
+        {
+            // The API still returns the asset so operators can investigate corrupt historical
+            // evidence. Posting and approval remain fail-closed through the strict reader.
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<FixedAssetCapitalizationApprovalSnapshotDto> BuildCapitalizationApprovalSnapshotAsync(
+        FixedAsset asset,
+        SubmitFixedAssetCapitalizationDto dto,
+        CancellationToken cancellationToken)
+    {
+        var procurementHandoff = await _context.Set<ProcurementFixedAssetCapitalization>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(value =>
+                value.TenantId == TenantId && value.FixedAssetId == asset.Id &&
+                value.Status == ProcurementFixedAssetCapitalizationStatus.Draft && !value.IsDeleted,
+                cancellationToken);
+        if (procurementHandoff != null)
+            return await BuildProcurementCapitalizationApprovalSnapshotAsync(
+                asset,
+                procurementHandoff,
+                dto,
+                cancellationToken);
+
+        var capitalizationDate = dto.CapitalizationDate.Date;
+        if (capitalizationDate == default)
+            throw new InvalidOperationException("Capitalization date is required.");
+
+        var reason = NormalizeRequiredText(dto.Reason);
+        if (reason.Length < 5)
+            throw new InvalidOperationException("A substantive capitalization reason is required.");
+        if (reason.Length > 1000)
+            throw new InvalidOperationException("Capitalization reason cannot exceed 1000 characters.");
+
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        var debitAccount = await ResolveFixedAssetPostingAccountAsync(
+            category.AssetAccountId,
+            "fixed asset cost account",
+            AccountType.Asset);
+        var usesCategoryAuc = !dto.CreditAccountId.HasValue;
+        var creditAccountId = dto.CreditAccountId ?? category.AucAccountId
+            ?? throw new InvalidOperationException(
+                "Direct fixed asset capitalization requires a category AUC/CIP clearing account or an explicit credit account.");
+        await ResolveFixedAssetPostingAccountAsync(
+            creditAccountId,
+            "fixed asset capitalization credit account",
+            AccountType.Asset,
+            AccountType.Liability,
+            AccountType.Equity);
+
+        var settings = await GetFinanceSettingsAsync();
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var transactionCurrency = NormalizeCurrency(
+            dto.TransactionCurrencyCode ?? asset.TransactionCurrencyCode,
+            functionalCurrency);
+        if (transactionCurrency.Length != 3)
+            throw new InvalidOperationException("Transaction currency must be a three-character ISO currency code.");
+
+        var transactionAmount = RoundMoney(dto.Amount ?? asset.AcquisitionCost);
+        if (transactionAmount <= 0m)
+            throw new InvalidOperationException("Fixed asset capitalization amount must be greater than zero.");
+
+        var exchangeRateDate = (dto.ExchangeRateDate ?? capitalizationDate).Date;
+        decimal exchangeRate;
+        Guid? exchangeRateId;
+        if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            exchangeRate = 1m;
+            exchangeRateId = null;
+            exchangeRateDate = capitalizationDate;
+        }
+        else
+        {
+            exchangeRate = dto.ExchangeRate
+                ?? throw new InvalidOperationException("Foreign-currency capitalization requires an approved exchange-rate value.");
+            if (exchangeRate <= 0m)
+                throw new InvalidOperationException("Foreign-currency capitalization exchange rate must be greater than zero.");
+            exchangeRateId = dto.ExchangeRateId
+                ?? throw new InvalidOperationException("Foreign-currency capitalization requires an approved exchange-rate record ID.");
+
+            var rate = await _context.ExchangeRates.AsNoTracking().SingleOrDefaultAsync(value =>
+                value.TenantId == TenantId && value.Id == exchangeRateId.Value && !value.IsDeleted,
+                cancellationToken)
+                ?? throw new InvalidOperationException("The selected exchange rate was not found for this tenant.");
+            if (!rate.IsActive || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved))
+                throw new InvalidOperationException("The selected exchange rate must be active and approved.");
+            if (!string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The selected exchange rate currency pair does not match the capitalization currencies.");
+            if (rate.EffectiveDate.Date > exchangeRateDate ||
+                (rate.EndDate.HasValue && rate.EndDate.Value.Date < exchangeRateDate))
+                throw new InvalidOperationException("The selected exchange rate is not effective for the capitalization rate date.");
+            if (decimal.Round(rate.Rate, 6) != decimal.Round(exchangeRate, 6))
+                throw new InvalidOperationException("The supplied exchange-rate value does not match the selected approved record.");
+        }
+
+        var reference = NormalizeRequiredText(dto.Reference);
+        if (string.IsNullOrWhiteSpace(reference))
+            reference = asset.AssetCode;
+        if (reference.Length > 100)
+            throw new InvalidOperationException("Capitalization reference cannot exceed 100 characters.");
+
+        return new FixedAssetCapitalizationApprovalSnapshotDto
+        {
+            Version = 1,
+            FixedAssetId = asset.Id,
+            AssetCode = asset.AssetCode,
+            FixedAssetCategoryId = asset.FixedAssetCategoryId,
+            DebitAccountId = debitAccount.Id,
+            CreditAccountId = creditAccountId,
+            UsesCategoryAucAccount = usesCategoryAuc,
+            CapitalizationDate = capitalizationDate,
+            TransactionAmount = transactionAmount,
+            FunctionalCurrencyCode = functionalCurrency,
+            TransactionCurrencyCode = transactionCurrency,
+            ExchangeRate = decimal.Round(exchangeRate, 6),
+            ExchangeRateId = exchangeRateId,
+            ExchangeRateDate = exchangeRateDate,
+            Reference = reference,
+            Reason = reason,
+            SourceDocumentType = "FixedAsset",
+            SourceDocumentId = asset.Id,
+            SourceDocumentLineId = null,
+            AssetEvidenceHash = BuildAssetCapitalizationEvidenceHash(asset)
+        };
+    }
+
+    private async Task<FixedAssetCapitalizationApprovalSnapshotDto> BuildProcurementCapitalizationApprovalSnapshotAsync(
+        FixedAsset asset,
+        ProcurementFixedAssetCapitalization handoff,
+        SubmitFixedAssetCapitalizationDto dto,
+        CancellationToken cancellationToken)
+    {
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        var debitAccount = await ResolveFixedAssetPostingAccountAsync(
+            category.AssetAccountId,
+            "fixed asset cost account",
+            AccountType.Asset);
+        var settings = await GetFinanceSettingsAsync();
+        var inventoryControlAccountId = settings.ControlAccountInventoryId
+            ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
+        await ResolveProcurementInventoryControlAccountAsync(inventoryControlAccountId, cancellationToken);
+
+        var reason = NormalizeRequiredText(dto.Reason);
+        if (string.IsNullOrWhiteSpace(reason))
+            reason = NormalizeRequiredText(dto.Comments);
+        if (string.IsNullOrWhiteSpace(reason))
+            reason = $"Capitalize accepted Procurement supply {handoff.AcceptedSupplyReference}.";
+        if (reason.Length > 1000)
+            throw new InvalidOperationException("Capitalization reason cannot exceed 1000 characters.");
+
+        return new FixedAssetCapitalizationApprovalSnapshotDto
+        {
+            Version = 1,
+            FixedAssetId = asset.Id,
+            AssetCode = asset.AssetCode,
+            FixedAssetCategoryId = asset.FixedAssetCategoryId,
+            DebitAccountId = debitAccount.Id,
+            CreditAccountId = inventoryControlAccountId,
+            UsesCategoryAucAccount = false,
+            CapitalizationDate = handoff.CapitalizationDate.Date,
+            TransactionAmount = RoundMoney(handoff.FunctionalAmount),
+            FunctionalCurrencyCode = NormalizeCurrency(handoff.FunctionalCurrencyCode, "GHS"),
+            TransactionCurrencyCode = NormalizeCurrency(handoff.FunctionalCurrencyCode, "GHS"),
+            ExchangeRate = 1m,
+            ExchangeRateId = null,
+            ExchangeRateDate = handoff.CapitalizationDate.Date,
+            Reference = handoff.AcceptedSupplyReference,
+            Reason = reason,
+            SourceDocumentType = "ProcurementFixedAssetCapitalization",
+            SourceDocumentId = handoff.Id,
+            SourceDocumentLineId = handoff.PurchaseOrderItemId,
+            AssetEvidenceHash = BuildAssetCapitalizationEvidenceHash(asset)
+        };
+    }
+
+    private void ApplyCapitalizationApprovalSubmission(
+        FixedAsset asset,
+        FixedAssetCapitalizationApprovalSnapshotDto snapshot,
+        string snapshotJson,
+        string snapshotHash,
+        Guid? workflowInstanceId)
+    {
+        var now = DateTime.UtcNow;
+        asset.CapitalizationApprovalSnapshotJson = snapshotJson;
+        asset.CapitalizationApprovalSnapshotHash = snapshotHash;
+        asset.CapitalizationApprovalExchangeRateId = snapshot.ExchangeRateId;
+        asset.CapitalizationApprovalWorkflowInstanceId = workflowInstanceId;
+        asset.CapitalizationApprovalSubmittedByUserId = CurrentUserGuid == Guid.Empty ? null : CurrentUserGuid;
+        asset.CapitalizationApprovalSubmittedAt = now;
+        asset.CapitalizationApprovalApprovedByUserId = null;
+        asset.CapitalizationApprovalApprovedAt = null;
+        asset.CapitalizationApprovalInvalidatedAt = null;
+        asset.CapitalizationApprovalInvalidationReason = null;
+    }
+
+    private static void ClearCapitalizationApproval(FixedAsset asset)
+    {
+        asset.CapitalizationApprovalSnapshotJson = null;
+        asset.CapitalizationApprovalSnapshotHash = null;
+        asset.CapitalizationApprovalExchangeRateId = null;
+        asset.CapitalizationApprovalWorkflowInstanceId = null;
+        asset.CapitalizationApprovalSubmittedByUserId = null;
+        asset.CapitalizationApprovalSubmittedAt = null;
+        asset.CapitalizationApprovalApprovedByUserId = null;
+        asset.CapitalizationApprovalApprovedAt = null;
+        asset.CapitalizationApprovalInvalidatedAt = null;
+        asset.CapitalizationApprovalInvalidationReason = null;
+    }
+
+    private static FixedAssetCapitalizationApprovalSnapshotDto ReadVerifiedCapitalizationApprovalSnapshot(FixedAsset asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            throw new InvalidOperationException("Direct fixed asset capitalization is missing its immutable approval snapshot.");
+
+        var currentHash = HashCapitalizationEvidence(asset.CapitalizationApprovalSnapshotJson);
+        if (!FixedTimeHashEquals(currentHash, asset.CapitalizationApprovalSnapshotHash))
+            throw new InvalidOperationException("Direct fixed asset capitalization approval evidence failed its integrity check.");
+
+        var snapshot = JsonSerializer.Deserialize<FixedAssetCapitalizationApprovalSnapshotDto>(
+            asset.CapitalizationApprovalSnapshotJson,
+            CapitalizationSnapshotJsonOptions)
+            ?? throw new InvalidOperationException("Direct fixed asset capitalization approval evidence is invalid.");
+        if (snapshot.Version != 1 || snapshot.FixedAssetId != asset.Id)
+            throw new InvalidOperationException("Direct fixed asset capitalization approval evidence does not match this asset.");
+        return snapshot;
+    }
+
+    private static string BuildAssetCapitalizationEvidenceHash(FixedAsset asset)
+        => HashCapitalizationEvidence(JsonSerializer.Serialize(new
+        {
+            asset.Id,
+            asset.AssetCode,
+            asset.FixedAssetCategoryId,
+            PurchaseDate = asset.PurchaseDate.Date,
+            PurchasePrice = RoundMoney(asset.PurchasePrice),
+            InstallationCost = RoundMoney(asset.InstallationCost),
+            TaxAmount = RoundMoney(asset.TaxAmount),
+            AcquisitionCost = RoundMoney(asset.AcquisitionCost),
+            asset.TransactionCurrencyCode,
+            asset.ExchangeRate,
+            asset.ExchangeRateId,
+            ExchangeRateDate = asset.ExchangeRateDate?.Date,
+            asset.SourceDocumentType,
+            asset.SourceDocumentId,
+            asset.SourceDocumentLineId
+        }, CapitalizationSnapshotJsonOptions));
+
+    private async Task InvalidateCapitalizationApprovalAsync(
+        FixedAsset asset,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        asset.Status = FixedAssetStatus.Draft;
+        asset.CapitalizationApprovalInvalidatedAt = DateTime.UtcNow;
+        asset.CapitalizationApprovalInvalidationReason = reason;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FinancePostingBlockedPendingApproval,
+            asset,
+            afterValues: new
+            {
+                asset.Status,
+                asset.CapitalizationApprovalSnapshotHash,
+                asset.CapitalizationApprovalInvalidatedAt
+            },
+            reason: reason,
+            comment: "The stale capitalization approval was retired; submit current evidence for a new decision.");
+        throw new InvalidOperationException($"{reason} The stale approval was retired; submit the current capitalization evidence again.");
+    }
+
+    private static string HashCapitalizationEvidence(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool FixedTimeHashEquals(string left, string right)
+    {
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left), Convert.FromHexString(right));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     private static bool HasOpeningImportBasis(FixedAsset asset)

@@ -98,12 +98,24 @@ export interface FixedAsset {
   disposalDate?: string;
   functionalCurrencyCode: string;
   transactionCurrencyCode?: string;
+  exchangeRate?: number;
+  exchangeRateId?: string;
+  exchangeRateDate?: string;
   sourceDocumentType?: string;
   sourceDocumentId?: string;
   sourceDocumentLineId?: string;
   journalEntryId?: string;
   postingEventId?: string;
   capitalizedAt?: string;
+  capitalizationApprovalSnapshot?: FixedAssetCapitalizationApprovalSnapshot;
+  capitalizationApprovalSnapshotHash?: string;
+  capitalizationApprovalWorkflowInstanceId?: string;
+  capitalizationApprovalSubmittedByUserId?: string;
+  capitalizationApprovalSubmittedAt?: string;
+  capitalizationApprovalApprovedByUserId?: string;
+  capitalizationApprovalApprovedAt?: string;
+  capitalizationApprovalInvalidatedAt?: string;
+  capitalizationApprovalInvalidationReason?: string;
   capitalizationReversalJournalEntryId?: string;
   capitalizationReversalPostingEventId?: string;
   capitalizationReversedAt?: string;
@@ -115,6 +127,47 @@ export interface FixedAsset {
   updatedAt?: string;
   updatedBy?: string;
   bookValues: FixedAssetBookValue[];
+}
+
+export interface FixedAssetCapitalizationApprovalSnapshot {
+  version: number;
+  fixedAssetId: string;
+  assetCode: string;
+  fixedAssetCategoryId: string;
+  debitAccountId: string;
+  creditAccountId: string;
+  usesCategoryAucAccount: boolean;
+  capitalizationDate: string;
+  transactionAmount: number;
+  functionalCurrencyCode: string;
+  transactionCurrencyCode: string;
+  exchangeRate: number;
+  exchangeRateId?: string;
+  exchangeRateDate: string;
+  reference: string;
+  reason: string;
+  sourceDocumentType: string;
+  sourceDocumentId: string;
+  sourceDocumentLineId?: string;
+  assetEvidenceHash: string;
+}
+
+export interface SubmitFixedAssetCapitalizationDto {
+  capitalizationDate: string;
+  creditAccountId?: string;
+  reference?: string;
+  reason: string;
+  comments?: string;
+  amount?: number;
+  transactionCurrencyCode?: string;
+  exchangeRate?: number;
+  exchangeRateId?: string;
+  exchangeRateDate?: string;
+}
+
+export interface FixedAssetApprovalActionDto {
+  reason?: string;
+  comments?: string;
 }
 
 export interface FixedAssetBookValue {

@@ -119,6 +119,15 @@ public class FixedAssetDto
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public DateTime? CapitalizedAt { get; set; }
+    public FixedAssetCapitalizationApprovalSnapshotDto? CapitalizationApprovalSnapshot { get; set; }
+    public string? CapitalizationApprovalSnapshotHash { get; set; }
+    public Guid? CapitalizationApprovalWorkflowInstanceId { get; set; }
+    public Guid? CapitalizationApprovalSubmittedByUserId { get; set; }
+    public DateTime? CapitalizationApprovalSubmittedAt { get; set; }
+    public Guid? CapitalizationApprovalApprovedByUserId { get; set; }
+    public DateTime? CapitalizationApprovalApprovedAt { get; set; }
+    public DateTime? CapitalizationApprovalInvalidatedAt { get; set; }
+    public string? CapitalizationApprovalInvalidationReason { get; set; }
     public Guid? CapitalizationReversalJournalEntryId { get; set; }
     public Guid? CapitalizationReversalPostingEventId { get; set; }
     public DateTime? CapitalizationReversedAt { get; set; }
@@ -281,6 +290,51 @@ public class CapitalizeFixedAssetDto
     public decimal? ExchangeRate { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public DateTime? ExchangeRateDate { get; set; }
+}
+
+/// <summary>
+/// Exact direct-capitalization journal proposal submitted for independent approval. Posting does
+/// not accept replacement accounting values; it consumes the immutable snapshot created here.
+/// </summary>
+public sealed class SubmitFixedAssetCapitalizationDto
+{
+    public DateTime CapitalizationDate { get; set; } = DateTime.UtcNow.Date;
+    public Guid? CreditAccountId { get; set; }
+    public string? Reference { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string? Comments { get; set; }
+    public decimal? Amount { get; set; }
+    public string? TransactionCurrencyCode { get; set; }
+    public decimal? ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public DateTime? ExchangeRateDate { get; set; }
+}
+
+/// <summary>
+/// Canonical evidence shown to the checker and later consumed by the posting service.
+/// </summary>
+public sealed class FixedAssetCapitalizationApprovalSnapshotDto
+{
+    public int Version { get; set; } = 1;
+    public Guid FixedAssetId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public Guid FixedAssetCategoryId { get; set; }
+    public Guid DebitAccountId { get; set; }
+    public Guid CreditAccountId { get; set; }
+    public bool UsesCategoryAucAccount { get; set; }
+    public DateTime CapitalizationDate { get; set; }
+    public decimal TransactionAmount { get; set; }
+    public string FunctionalCurrencyCode { get; set; } = string.Empty;
+    public string TransactionCurrencyCode { get; set; } = string.Empty;
+    public decimal ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public DateTime ExchangeRateDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string SourceDocumentType { get; set; } = "FixedAsset";
+    public Guid SourceDocumentId { get; set; }
+    public Guid? SourceDocumentLineId { get; set; }
+    public string AssetEvidenceHash { get; set; } = string.Empty;
 }
 
 public sealed class RequestFixedAssetCapitalizationReversalDto

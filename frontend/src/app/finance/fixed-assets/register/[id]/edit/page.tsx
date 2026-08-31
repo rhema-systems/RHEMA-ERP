@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { FixedAssetCapitalizationReversalPanel } from '@/components/finance/FixedAssetCapitalizationReversalPanel';
+import { FixedAssetCapitalizationApprovalPanel } from '@/components/finance/FixedAssetCapitalizationApprovalPanel';
 import type {
   DepreciationConvention,
   DepreciationMethod,
@@ -192,7 +193,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             <p className="text-muted-foreground">Update asset details and depreciation settings.</p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving}>
+        <Button onClick={handleSave} disabled={saving || asset?.status === 'PendingApproval' || (!!asset?.capitalizationApprovalApprovedAt && !asset?.capitalizationApprovalInvalidatedAt)}>
           <Save className="mr-2 h-4 w-4" />
           Save Changes
         </Button>
@@ -465,6 +466,14 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       </Card>
 
       {asset && (
+        <FixedAssetCapitalizationApprovalPanel
+          asset={asset}
+          category={categories.find(category => category.id === asset.fixedAssetCategoryId)}
+          onChanged={refreshAccountingState}
+        />
+      )}
+
+      {asset && (
         <FixedAssetCapitalizationReversalPanel
           asset={asset}
           onChanged={refreshAccountingState}
@@ -478,7 +487,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           <CardDescription>Current status: <Badge variant="outline">{formData.status}</Badge></CardDescription>
         </CardHeader>
         <CardContent className="flex gap-3">
-          {formData.status === 'Draft' && (
+          {formData.status === 'Capitalized' && (
             <Button onClick={handleActivate} className="bg-emerald-600 hover:bg-emerald-700">
               <Play className="h-4 w-4 mr-2" />Activate Asset
             </Button>
@@ -493,7 +502,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               <RotateCcw className="h-4 w-4 mr-2" />Resume Asset
             </Button>
           )}
-          {(formData.status !== 'Draft' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'OnHold' && formData.status !== 'Active' && (
+          {(formData.status !== 'Capitalized' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'OnHold' && formData.status !== 'Active' && (
             <p className="text-sm text-muted-foreground">No lifecycle actions available for the current status.</p>
           )}
         </CardContent>

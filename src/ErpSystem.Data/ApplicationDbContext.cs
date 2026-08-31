@@ -3499,6 +3499,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.TransactionCurrencyCode).HasMaxLength(3);
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)");
             entity.Property(e => e.SourceDocumentType).HasMaxLength(50);
+            entity.Property(e => e.CapitalizationApprovalSnapshotHash).HasMaxLength(64);
+            entity.Property(e => e.CapitalizationApprovalInvalidationReason).HasMaxLength(1000);
             entity.HasOne(e => e.CurrentCustodian)
                 .WithMany()
                 .HasForeignKey(e => e.CurrentCustodianId)
@@ -3518,6 +3520,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<ExchangeRate>()
                 .WithMany()
                 .HasForeignKey(e => e.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ExchangeRate>()
+                .WithMany()
+                .HasForeignKey(e => e.CapitalizationApprovalExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

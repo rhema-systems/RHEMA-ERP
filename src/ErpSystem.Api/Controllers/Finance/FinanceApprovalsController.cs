@@ -420,6 +420,35 @@ public class FinanceApprovalsController : ControllerBase
             }
         }
 
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("FixedAsset"))
+        {
+            var evidenceError = await ValidateFixedAssetCapitalizationEvidenceForApprovalAsync(
+                tenantId,
+                instance,
+                cancellationToken);
+            if (evidenceError != null)
+            {
+                await RecordFinanceWorkflowAuditAsync(
+                    tenantId,
+                    "FA",
+                    entityType,
+                    instance.EntityId,
+                    FinanceAuditEvents.FinanceWorkflowApprovalFailed,
+                    new { approvalId, currentUserId, reason = evidenceError },
+                    comments,
+                    cancellationToken);
+                return BadRequest(new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = instance.CurrentStepId,
+                    Message = evidenceError
+                });
+            }
+        }
+
         // Batch approval is a domain operation rather than a generic workflow-only transition:
         // the service freezes allocations and rechecks the same payment controls transactionally.
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
@@ -637,6 +666,72 @@ public class FinanceApprovalsController : ControllerBase
             // FixedTimeEquals also requires equal length. Returning a deliberately different
             // length turns malformed stored hashes into a safe integrity failure.
             return Array.Empty<byte>();
+        }
+    }
+
+    private async Task<string?> ValidateFixedAssetCapitalizationEvidenceForApprovalAsync(
+        Guid tenantId,
+        WorkflowInstance instance,
+        CancellationToken cancellationToken)
+    {
+        var asset = await _db.FixedAssets.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == instance.EntityId && !item.IsDeleted,
+            cancellationToken);
+        if (asset == null)
+            return "The fixed asset no longer exists for this tenant.";
+        if (asset.Status != FixedAssetStatus.PendingApproval)
+            return $"The fixed asset is in '{asset.Status}' status rather than Pending Approval.";
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            return "The fixed asset has no immutable capitalization journal snapshot. Return it to Draft and resubmit the exact posting proposal.";
+
+        var calculatedHash = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(asset.CapitalizationApprovalSnapshotJson)));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(calculatedHash),
+                TryDecodeHex(asset.CapitalizationApprovalSnapshotHash)))
+            return "The fixed-asset capitalization snapshot integrity check failed. Controlled resubmission is required.";
+
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize<FixedAssetCapitalizationApprovalSnapshotDto>(
+                asset.CapitalizationApprovalSnapshotJson,
+                PaymentControlJsonOptions);
+            if (snapshot == null || snapshot.Version != 1 || snapshot.FixedAssetId != asset.Id ||
+                snapshot.TransactionAmount <= 0m || snapshot.DebitAccountId == Guid.Empty ||
+                snapshot.CreditAccountId == Guid.Empty)
+                return "The fixed-asset capitalization snapshot is incomplete or does not match this asset.";
+        }
+        catch (JsonException)
+        {
+            return "The fixed-asset capitalization snapshot is invalid and requires controlled resubmission.";
+        }
+
+        return null;
+    }
+
+    private static FixedAssetCapitalizationApprovalSnapshotDto? TryReadFixedAssetCapitalizationSnapshot(FixedAsset asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            return null;
+
+        var calculatedHash = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(asset.CapitalizationApprovalSnapshotJson)));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(calculatedHash),
+                TryDecodeHex(asset.CapitalizationApprovalSnapshotHash)))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<FixedAssetCapitalizationApprovalSnapshotDto>(
+                asset.CapitalizationApprovalSnapshotJson,
+                PaymentControlJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -991,7 +1086,29 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("FixedAsset"))
         {
             var item = await _db.FixedAssets.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            return item == null ? FinanceApprovalFacts.Empty : new(item.AssetCode, item.Name, item.Status.ToString(), item.PurchaseDate, item.AcquisitionCost, null);
+            if (item == null)
+                return FinanceApprovalFacts.Empty;
+
+            var snapshot = TryReadFixedAssetCapitalizationSnapshot(item);
+            return new FinanceApprovalFacts(
+                item.AssetCode,
+                item.Name,
+                item.Status.ToString(),
+                snapshot?.CapitalizationDate ?? item.PurchaseDate,
+                snapshot?.TransactionAmount ?? item.AcquisitionCost,
+                snapshot?.TransactionCurrencyCode ?? item.FunctionalCurrencyCode)
+            {
+                Metadata = snapshot == null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string>
+                    {
+                        ["debitAccountId"] = snapshot.DebitAccountId.ToString(),
+                        ["creditAccountId"] = snapshot.CreditAccountId.ToString(),
+                        ["reference"] = snapshot.Reference,
+                        ["reason"] = snapshot.Reason,
+                        ["snapshotHash"] = item.CapitalizationApprovalSnapshotHash ?? string.Empty
+                    }
+            };
         }
 
         if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
@@ -1533,6 +1650,10 @@ public class FinanceApprovalsController : ControllerBase
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
                     item.Status = FixedAssetStatus.Acquired;
+                    item.CapitalizationApprovalApprovedByUserId = userId;
+                    item.CapitalizationApprovalApprovedAt = now;
+                    item.CapitalizationApprovalInvalidatedAt = null;
+                    item.CapitalizationApprovalInvalidationReason = null;
                     item.UpdatedAt = now;
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
@@ -1543,7 +1664,13 @@ public class FinanceApprovalsController : ControllerBase
                 "FixedAsset",
                 entityId,
                 FinanceAuditEvents.FinanceWorkflowApproved,
-                new { Status = FixedAssetStatus.Acquired },
+                new
+                {
+                    Status = FixedAssetStatus.Acquired,
+                    ApprovedByUserId = userId,
+                    ApprovedAt = now,
+                    Evidence = "Immutable direct-capitalization journal snapshot"
+                },
                 comments,
                 cancellationToken);
             return;
@@ -2048,6 +2175,8 @@ public class FinanceApprovalsController : ControllerBase
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
                     item.Status = FixedAssetStatus.Rejected;
+                    item.CapitalizationApprovalApprovedByUserId = null;
+                    item.CapitalizationApprovalApprovedAt = null;
                     item.UpdatedAt = now;
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }

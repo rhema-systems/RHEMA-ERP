@@ -15,7 +15,7 @@ public interface IFixedAssetService
     Task<byte[]> GenerateImportTemplateAsync();
 
     // Lifecycle Management
-    Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
+    Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, SubmitFixedAssetCapitalizationDto dto, CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CapitalizeAsync(Guid id, CapitalizeFixedAssetDto dto);
     Task<FixedAssetDto> CapitalizeFromProcurementAsync(
         Guid id,

@@ -189,11 +189,17 @@ public class FixedAssetsController : ControllerBase
     }
 
     [HttpPost("{id}/capitalize")]
-    public async Task<ActionResult<FixedAssetDto>> Capitalize(Guid id, CapitalizeFixedAssetDto dto)
+    [Authorize(Policy = FinancePermissions.ManageFixedAssets)]
+    public async Task<ActionResult<FixedAssetDto>> Capitalize(Guid id, [FromBody] FixedAssetApprovalActionRequest? request)
     {
         try
         {
-            var result = await _fixedAssetService.CapitalizeAsync(id, dto);
+            // Accounting values are intentionally absent here. The service reconstructs the
+            // posting instruction from the immutable snapshot approved for this asset.
+            var result = await _fixedAssetService.CapitalizeAsync(id, new CapitalizeFixedAssetDto
+            {
+                Reason = request?.Comments ?? request?.Reason ?? "Post approved direct capitalization"
+            });
             return Ok(result);
         }
         catch (KeyNotFoundException)
@@ -207,11 +213,15 @@ public class FixedAssetsController : ControllerBase
     }
 
     [HttpPost("{id}/capitalization/submit")]
-    public async Task<ActionResult<FixedAssetDto>> SubmitCapitalizationForApproval(Guid id, [FromBody] FixedAssetApprovalActionRequest? request)
+    [Authorize(Policy = FinancePermissions.ManageFixedAssets)]
+    public async Task<ActionResult<FixedAssetDto>> SubmitCapitalizationForApproval(
+        Guid id,
+        [FromBody] SubmitFixedAssetCapitalizationDto request,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var result = await _fixedAssetService.SubmitCapitalizationForApprovalAsync(id, request?.Comments);
+            var result = await _fixedAssetService.SubmitCapitalizationForApprovalAsync(id, request, cancellationToken);
             return Ok(result);
         }
         catch (KeyNotFoundException)

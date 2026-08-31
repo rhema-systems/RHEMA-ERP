@@ -16926,6 +16926,38 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("CapitalizationDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("CapitalizationApprovalApprovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CapitalizationApprovalApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CapitalizationApprovalExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CapitalizationApprovalInvalidatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CapitalizationApprovalInvalidationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CapitalizationApprovalSnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CapitalizationApprovalSnapshotJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("CapitalizationApprovalSubmittedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CapitalizationApprovalSubmittedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CapitalizationApprovalWorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("CapitalizationReversalJournalEntryId")
                         .HasColumnType("uniqueidentifier");
 
@@ -17086,6 +17118,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("CurrentCustodianId");
 
                     b.HasIndex("CurrentSegmentLookupValueId");
+
+                    b.HasIndex("CapitalizationApprovalExchangeRateId");
 
                     b.HasIndex("ExchangeRateId");
 
@@ -160193,6 +160227,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
                         .WithMany()
                         .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("CapitalizationApprovalExchangeRateId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetCategory", "Category")

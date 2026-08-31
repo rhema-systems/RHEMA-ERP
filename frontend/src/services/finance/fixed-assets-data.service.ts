@@ -32,6 +32,8 @@ import type {
   FixedAssetCapitalizationReversal,
   RequestFixedAssetCapitalizationReversalDto,
   ReviewFixedAssetCapitalizationReversalDto,
+  SubmitFixedAssetCapitalizationDto,
+  FixedAssetApprovalActionDto,
   FixedAssetDepreciationReversal,
   RequestFixedAssetDepreciationReversalDto,
   ReviewFixedAssetDepreciationReversalDto,
@@ -80,6 +82,20 @@ class FixedAssetsDataService {
 
   async deleteAsset(id: string): Promise<void> {
     return apiService.delete(`/finance/fixed-assets/${id}`);
+  }
+
+  async submitCapitalizationForApproval(
+    id: string,
+    dto: SubmitFixedAssetCapitalizationDto
+  ): Promise<FixedAsset> {
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/capitalization/submit`, dto);
+  }
+
+  async postApprovedCapitalization(
+    id: string,
+    dto: FixedAssetApprovalActionDto = {}
+  ): Promise<FixedAsset> {
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/capitalize`, dto);
   }
 
   // ===== CAPITALIZATION CORRECTIONS =====
