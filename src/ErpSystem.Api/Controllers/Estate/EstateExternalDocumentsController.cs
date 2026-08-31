@@ -424,6 +424,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase)
             : (await _db.CentralDocumentRecords
                 .AsNoTracking()
+                .AsSplitQuery()
                 .Include(record => record.Versions.Where(version => !version.IsDeleted))
                 .Where(record => record.TenantId == tenantId
                     && !record.IsDeleted
@@ -466,34 +467,55 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 BalanceAmount = invoice.TotalAmount - invoice.PaidAmount - invoice.CreditedAmount,
                 invoice.CurrencyCode,
                 invoice.Status,
-                invoice.Reference,
-                Description = invoice.LineItems
-                    .Where(line => !line.IsDeleted)
-                    .OrderBy(line => line.CreatedAt)
-                    .Select(line => line.Description)
-                    .FirstOrDefault(),
-                Receipts = invoice.PaymentAllocations
-                    .Where(allocation => !allocation.IsDeleted
-                        && !allocation.IsReversal
-                        && !allocation.CustomerPayment.IsDeleted
-                        && allocation.CustomerPayment.Status != "Cancelled")
-                    .OrderByDescending(allocation => allocation.AllocationDate)
-                    .Select(allocation => new
-                    {
+                invoice.Reference
+            })
+            .ToListAsync(cancellationToken);
+        var invoiceIds = invoices.Select(invoice => invoice.Id).ToList();
+        var invoiceDescriptions = invoiceIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await _db.Set<InvoiceLineItem>()
+                .AsNoTracking()
+                .Where(line => !line.IsDeleted && invoiceIds.Contains(line.InvoiceId))
+                .GroupBy(line => line.InvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Description = group
+                        .OrderBy(line => line.CreatedAt)
+                        .Select(line => line.Description)
+                        .FirstOrDefault()
+                })
+                .ToDictionaryAsync(item => item.InvoiceId, item => item.Description, cancellationToken);
+        var invoiceReceipts = invoiceIds.Count == 0
+            ? new Dictionary<Guid, List<ExternalInvoiceReceiptDto>>()
+            : (await _db.Set<PaymentAllocation>()
+                .AsNoTracking()
+                .Where(allocation => !allocation.IsDeleted
+                    && !allocation.IsReversal
+                    && invoiceIds.Contains(allocation.InvoiceId)
+                    && !allocation.CustomerPayment.IsDeleted
+                    && allocation.CustomerPayment.Status != "Cancelled")
+                .OrderByDescending(allocation => allocation.AllocationDate)
+                .Select(allocation => new
+                {
+                    allocation.InvoiceId,
+                    Receipt = new ExternalInvoiceReceiptDto(
                         allocation.CustomerPaymentId,
                         allocation.CustomerPayment.PaymentNumber,
                         allocation.CustomerPayment.PaymentDate,
-                        Amount = allocation.PaymentCurrencyAmount > 0
+                        allocation.PaymentCurrencyAmount > 0
                             ? allocation.PaymentCurrencyAmount
                             : allocation.AllocatedAmount,
                         allocation.PaymentCurrencyCode,
                         allocation.CustomerPayment.PaymentMethod,
                         allocation.CustomerPayment.TransactionReference,
-                        allocation.CustomerPayment.Status
-                    })
-                    .ToList()
-            })
-            .ToListAsync(cancellationToken);
+                        allocation.CustomerPayment.Status)
+                })
+                .ToListAsync(cancellationToken))
+                .GroupBy(item => item.InvoiceId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(item => item.Receipt).ToList());
 
         var ownedListingCaseIds = await _db.ProcedureCases
             .AsNoTracking()
@@ -510,6 +532,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             legalTransfers = await _db.ProcedureCases
                 .AsNoTracking()
+                .AsSplitQuery()
                 .Include(item => item.Fields.Where(field => !field.IsDeleted))
                 .Include(item => item.Documents.Where(document => !document.IsDeleted))
                 .Where(item => item.TenantId == tenantId
@@ -559,7 +582,27 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     asset.RentPenaltyCapAmount,
                     asset.CustomerBusinessPartnerId
                 }),
-                Invoices = invoices,
+                Invoices = invoices.Select(invoice =>
+                {
+                    invoiceDescriptions.TryGetValue(invoice.Id, out var description);
+                    invoiceReceipts.TryGetValue(invoice.Id, out var receipts);
+                    return new
+                    {
+                        invoice.Id,
+                        invoice.InvoiceNumber,
+                        invoice.BusinessPartnerId,
+                        invoice.InvoiceDate,
+                        invoice.DueDate,
+                        invoice.TotalAmount,
+                        invoice.PaidAmount,
+                        invoice.BalanceAmount,
+                        invoice.CurrencyCode,
+                        invoice.Status,
+                        invoice.Reference,
+                        Description = description,
+                        Receipts = receipts ?? new List<ExternalInvoiceReceiptDto>()
+                    };
+                }),
                 LegalTransfers = legalTransfers.Select(ToExternalLegalTransferDto).ToList()
             }
         });
@@ -2136,6 +2179,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             document.IsMandatory,
             document.FileName
         };
+
+    private sealed record ExternalInvoiceReceiptDto(
+        Guid CustomerPaymentId,
+        string PaymentNumber,
+        DateTime PaymentDate,
+        decimal Amount,
+        string PaymentCurrencyCode,
+        string PaymentMethod,
+        string? TransactionReference,
+        string Status);
 
     private static object ToExternalLegalTransferDto(ProcedureCase legalCase)
     {
