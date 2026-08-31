@@ -155,6 +155,56 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "PostingEngine")]
+    [Trait("Category", "FiscalPeriod")]
+    public async Task PostAsync_ShouldRejectFutureDatedPosting_WhenPeriodPolicyIsDisabled()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        period.AllowFutureDating = false;
+        var debitAccount = SeedAccount(db, tenantId, "6101", AccountType.Expense);
+        var creditAccount = SeedAccount(db, tenantId, "2101", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.PostingDate = DateTime.UtcNow.Date.AddDays(1);
+        request.FiscalPeriodId = period.Id;
+
+        var action = () => CreateService(db, tenantId).PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Future-dated posting is not allowed*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "PostingEngine")]
+    [Trait("Category", "FiscalPeriod")]
+    public async Task PostAsync_ShouldAllowFutureDatedPosting_WhenPeriodPolicyIsEnabled()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedOpenPeriod(db, tenantId);
+        period.AllowFutureDating = true;
+        var debitAccount = SeedAccount(db, tenantId, "6102", AccountType.Expense);
+        var creditAccount = SeedAccount(db, tenantId, "2102", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.PostingDate = DateTime.UtcNow.Date.AddDays(1);
+        request.FiscalPeriodId = period.Id;
+
+        var result = await CreateService(db, tenantId).PostAsync(request);
+
+        result.PostingStatus.Should().Be("Posted");
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-4")]
     [Trait("Category", "PostingEngine")]
     public async Task PostAsync_ShouldApplyAccountBalanceMovementUsingNormalBalanceDirection()

@@ -987,6 +987,22 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Posting date does not fall inside the fiscal period.");
         }
 
+        // Period status answers whether the ledger accepts postings at all. This independent
+        // policy answers whether Finance may recognize a transaction after today's business date.
+        // Drafting and workflow approval remain possible; only the irreversible posting boundary
+        // is blocked unless an administrator has explicitly enabled and audited future dating.
+        if (postingDate > DateTime.UtcNow.Date && !fiscalPeriod.AllowFutureDating)
+        {
+            await RecordFutureDatedPostingBlockedAuditAsync(
+                tenantId,
+                request,
+                fiscalPeriod,
+                postingDate,
+                cancellationToken);
+            throw new InvalidOperationException(
+                $"Future-dated posting is not allowed for fiscal period '{fiscalPeriod.PeriodCode}'.");
+        }
+
         var requestedLines = request.Lines?.ToList() ?? new List<FinancePostingLineDto>();
         if (requestedLines.Count == 0)
         {
@@ -1862,6 +1878,39 @@ WHERE [Id] = {delta.AccountId}
                 fiscalPeriod.IsLocked
             },
             Comment = "Posting blocked because the accounting period is closed, locked, or not open.",
+            Resource = "Finance.FiscalPeriod",
+            ResourceId = fiscalPeriod.Id.ToString()
+        }, cancellationToken);
+    }
+
+    private async Task RecordFutureDatedPostingBlockedAuditAsync(
+        Guid tenantId,
+        FinancePostingRequestDto request,
+        FiscalPeriod fiscalPeriod,
+        DateTime postingDate,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+            return;
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.PostingBlockedFutureDated,
+            TenantId = tenantId,
+            SourceModule = request.SourceModule,
+            SourceDocumentType = request.SourceDocumentType,
+            SourceDocumentId = request.SourceDocumentId == Guid.Empty ? null : request.SourceDocumentId,
+            AfterValues = new
+            {
+                request.PostingAction,
+                request.SourceDocumentReference,
+                PostingDate = postingDate,
+                CurrentUtcDate = DateTime.UtcNow.Date,
+                FiscalPeriodId = fiscalPeriod.Id,
+                fiscalPeriod.PeriodCode,
+                fiscalPeriod.AllowFutureDating
+            },
+            Comment = "Posting blocked because the period does not permit future-dated Finance postings.",
             Resource = "Finance.FiscalPeriod",
             ResourceId = fiscalPeriod.Id.ToString()
         }, cancellationToken);

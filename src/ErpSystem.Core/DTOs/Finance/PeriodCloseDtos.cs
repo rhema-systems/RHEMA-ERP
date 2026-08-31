@@ -24,6 +24,20 @@ namespace ErpSystem.Core.DTOs.Finance
     }
 
     /// <summary>
+    /// Audited administrator decision controlling whether this period accepts posting dates
+    /// after the current UTC business date. This does not open, close, lock, or reopen the period.
+    /// </summary>
+    public class PeriodPostingDatePolicyRequestDto
+    {
+        public bool AllowFutureDating { get; set; }
+
+        [Required]
+        [MinLength(10)]
+        [MaxLength(500)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Request DTO for closing a fiscal period
     /// </summary>
     public class PeriodCloseRequestDto

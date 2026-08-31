@@ -154,6 +154,7 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(FinanceApprovalsController), "Approve", FinancePermissions.WorkflowApprove)]
     [InlineData(typeof(FinanceApprovalsController), "Reject", FinancePermissions.WorkflowReject)]
     [InlineData(typeof(FiscalPeriodController), "OpenPeriod", FinancePermissions.OpenAccountingPeriods)]
+    [InlineData(typeof(FiscalPeriodController), "UpdatePostingDatePolicy", FinancePermissions.AdministerFinance)]
     [InlineData(typeof(FiscalPeriodController), "RequestPeriodReopen", FinancePermissions.ReopenAccountingPeriods)]
     [InlineData(typeof(FiscalPeriodController), "ReviewPeriodReopen", FinancePermissions.ApproveAccountingPeriodReopens)]
     [InlineData(typeof(BudgetController), "GetReturns", FinancePermissions.AssignBudgetReturns)]

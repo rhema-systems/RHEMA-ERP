@@ -186,6 +186,8 @@ public static class FinanceAuditEvents
     public const string BankDepositConfirmed = "Finance.BankDeposit.Confirmed";
 
     public const string AccountingPeriodOpened = "Finance.AccountingPeriod.Opened";
+    public const string AccountingPeriodPostingDatePolicyUpdated = "Finance.AccountingPeriod.PostingDatePolicyUpdated";
+    public const string PostingBlockedFutureDated = "Finance.Posting.BlockedFutureDated";
     public const string AccountingPeriodCloseRequested = "Finance.AccountingPeriod.CloseRequested";
     public const string AccountingPeriodCloseCycleEvaluated = "Finance.AccountingPeriod.CloseCycleEvaluated";
     public const string AccountingPeriodClosePrepared = "Finance.AccountingPeriod.ClosePrepared";

@@ -331,6 +331,17 @@ class FinanceDataService {
         return apiService.post<FiscalPeriod>(`/finance/periods/${id}/open`, { reason });
     }
 
+    async updateFiscalPeriodPostingDatePolicy(
+        id: string,
+        allowFutureDating: boolean,
+        reason: string
+    ): Promise<FiscalPeriod> {
+        return apiService.put<FiscalPeriod>(`/finance/periods/${id}/posting-date-policy`, {
+            allowFutureDating,
+            reason,
+        });
+    }
+
     async evaluateFiscalPeriodClose(id: string): Promise<FinanceCloseWorkspace> {
         return apiService.post<FinanceCloseWorkspace>(`/finance/periods/${id}/close-workspace/evaluate`, {});
     }
