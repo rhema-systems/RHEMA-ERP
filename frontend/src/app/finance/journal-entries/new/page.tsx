@@ -8,12 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText, Loader2, ChevronsUpDown, Check } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { cn } from '@/lib/utils';
+import { ManualJournalAccountCombobox } from '@/components/finance/journal-entries/manual-journal-account-combobox';
 import { ManualJournalDimensionCell, ManualJournalDimensionDefaults } from '@/components/finance/journal-entries/manual-journal-dimension-editor';
 import type { Account, AccountCurrencyLink, Currency, FinanceDimensionAccountRule, FinanceDimensionDefinition, FinanceSettings, JournalType } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
@@ -92,7 +90,6 @@ export default function NewJournalEntryPage() {
     const [journalNumber, setJournalNumber] = useState('');
     const journalSequence = useDocumentSequence('Finance', FinanceDocumentTypes.JournalEntry);
     const [saving, setSaving] = useState(false);
-    const [openAccountPopover, setOpenAccountPopover] = useState<string | null>(null);
     const [migrationClearingConfigured, setMigrationClearingConfigured] = useState(true);
     const [openingBalanceAutoRoutingEnabled, setOpeningBalanceAutoRoutingEnabled] = useState(true);
 
@@ -398,6 +395,23 @@ export default function NewJournalEntryPage() {
                 rateError: message,
             } : line));
         }
+    };
+
+    const clearAccount = (lineId: string) => {
+        setLines(current => current.map(line => line.id === lineId ? {
+            ...line,
+            accountId: '',
+            currencyCode: functionalCurrency,
+            exchangeRate: 1,
+            foreignDebit: undefined,
+            foreignCredit: undefined,
+            dimensions: { ...defaultDimensions },
+            rateStatus: 'ready',
+            rateError: undefined,
+            rateSource: undefined,
+            rateDate: undefined,
+            rateRequestKey: undefined,
+        } : line));
     };
 
     const handleCurrencyChange = async (lineId: string, currencyCode: string) => {
@@ -778,70 +792,16 @@ export default function NewJournalEntryPage() {
                                         return (
                                             <tr key={line.id} className="border-b last:border-0">
                                                 <td className="p-3">
-                                                    <Popover
-                                                        open={openAccountPopover === line.id}
-                                                        onOpenChange={(open) => setOpenAccountPopover(open ? line.id : null)}
-                                                    >
-                                                        <PopoverTrigger asChild>
-                                                            <Button
-                                                                variant="outline"
-                                                                role="combobox"
-                                                                aria-expanded={openAccountPopover === line.id}
-                                                                className="w-full justify-between font-normal text-left h-10 truncate"
-                                                            >
-                                                                <span className="truncate">
-                                                                    {line.accountId
-                                                                        ? (() => {
-                                                                            const acc = accounts.find(a => a.id === line.accountId);
-                                                                            return acc ? `${acc.accountNumber} - ${acc.accountName}` : 'Select Account';
-                                                                        })()
-                                                                        : 'Select Account'}
-                                                                </span>
-                                                                <ChevronsUpDown className="ml-1 h-4 w-4 shrink-0 opacity-50" />
-                                                            </Button>
-                                                        </PopoverTrigger>
-                                                        <PopoverContent className="w-[350px] p-0" align="start">
-                                                            <Command>
-                                                                <CommandInput placeholder="Search accounts..." />
-                                                                <CommandList>
-                                                                    <CommandEmpty>No account found.</CommandEmpty>
-                                                                    <CommandGroup>
-                                                                        {accounts.map((acc) => {
-                                                                            const eligible = targetAccountingBooks.length > 0
-                                                                                ? targetAccountingBooks.every(book => isAccountEligibleForBook(acc, book.code))
-                                                                                : isAccountEligibleForBook(acc, header.bookClassification);
-                                                                            return (
-                                                                            <CommandItem
-                                                                                key={acc.id}
-                                                                                value={`${acc.accountNumber} ${acc.accountName}`}
-                                                                                disabled={!eligible}
-                                                                                onSelect={() => {
-                                                                                    if (!eligible) return;
-                                                                                    void handleAccountChange(line.id, acc.id);
-                                                                                    setOpenAccountPopover(null);
-                                                                                }}
-                                                                                className={!eligible ? 'opacity-50 cursor-not-allowed' : undefined}
-                                                                                title={!eligible ? `Not classified for ${targetBookLabel}` : undefined}
-                                                                            >
-                                                                                <Check
-                                                                                    className={cn(
-                                                                                        "mr-2 h-4 w-4",
-                                                                                        line.accountId === acc.id ? "opacity-100" : "opacity-0"
-                                                                                    )}
-                                                                                />
-                                                                                <span className="truncate">{acc.accountNumber} - {acc.accountName}</span>
-                                                                                {!eligible && (
-                                                                                    <span className="ml-2 rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                                                                                        Not classified for {targetBookLabel}
-                                                                                    </span>
-                                                                                )}
-                                                                            </CommandItem>
-                                                                        )})}
-                                                                    </CommandGroup>
-                                                                </CommandList>
-                                                            </Command>
-                                                        </PopoverContent>
-                                                    </Popover>
+                                                    <ManualJournalAccountCombobox
+                                                        accounts={accounts}
+                                                        selectedAccountId={line.accountId}
+                                                        lineNumber={lineIndex + 1}
+                                                        targetAccountingBooks={targetAccountingBooks}
+                                                        fallbackBookCode={header.bookClassification}
+                                                        targetBookLabel={targetBookLabel}
+                                                        onSelect={(accountId) => handleAccountChange(line.id, accountId)}
+                                                        onClear={() => clearAccount(line.id)}
+                                                    />
                                                     {line.accountId && (() => {
                                                         const selected = accounts.find(a => a.id === line.accountId);
                                                         const eligible = selected && targetAccountingBooks.length > 0
