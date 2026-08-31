@@ -333,6 +333,9 @@ public class TenderPaymentDto
     public DateTime PaymentDate { get; set; }
     public DateTime? VerifiedDate { get; set; }
     public string? VerifiedByName { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public DateTime? PostedAtUtc { get; set; }
     public string? TransactionId { get; set; }
     public string? PaymentProof { get; set; }
 }

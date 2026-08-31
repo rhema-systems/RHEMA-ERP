@@ -733,6 +733,18 @@ public class TenderFee : TenantEntity
     [MaxLength(50)]
     public string PaymentMethod { get; set; } = "Online"; // Online, BankTransfer, Cash, Cheque
 
+    /// <summary>
+    /// Controlled Finance asset account debited when this tender fee is verified.
+    /// The mapping is captured on the fee so published tender terms retain their
+    /// accounting lineage even if tenant defaults change later.
+    /// </summary>
+    public Guid? ReceivingAccountId { get; set; }
+
+    /// <summary>
+    /// Controlled Finance revenue account credited when this tender fee is verified.
+    /// </summary>
+    public Guid? RevenueAccountId { get; set; }
+
     public bool IsMandatory { get; set; } = true;
 
     public DateTime? DueDate { get; set; }
@@ -782,6 +794,15 @@ public class TenderPayment : TenantEntity
     public DateTime? VerifiedDate { get; set; }
 
     public Guid? VerifiedById { get; set; }
+
+    /// <summary>
+    /// Immutable central Finance posting lineage created by payment verification.
+    /// </summary>
+    public Guid? PostingEventId { get; set; }
+
+    public Guid? JournalEntryId { get; set; }
+
+    public DateTime? PostedAtUtc { get; set; }
 
     [MaxLength(500)]
     public string? TransactionId { get; set; }

@@ -281,6 +281,8 @@ export interface TenderFeeDto {
   amount: number;
   currency: string;
   paymentMethod: string;
+  receivingAccountId?: string;
+  revenueAccountId?: string;
   isMandatory: boolean;
   dueDate?: string;
   description?: string;
@@ -379,6 +381,8 @@ export interface CreateTenderFeeDto {
   amount: number;
   currency?: string;
   paymentMethod: string;
+  receivingAccountId?: string;
+  revenueAccountId?: string;
   isMandatory?: boolean;
   dueDate?: string;
   description?: string;

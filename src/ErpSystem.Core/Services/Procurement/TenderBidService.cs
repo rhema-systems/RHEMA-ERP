@@ -1,11 +1,15 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -33,6 +37,7 @@ public class TenderBidService : ITenderBidService
     private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
     private readonly IQuantitySurveyTenderBoqSubmissionService _quantitySurveyTenderBoqSubmissions;
+    private readonly IFinancePostingEngine? _financePostingEngine;
 
     public TenderBidService(
         ITenderBidRepository bidRepository,
@@ -55,7 +60,8 @@ public class TenderBidService : ITenderBidService
         IProcurementTenderDocumentControlService tenderDocumentControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         IQuantitySurveyTenderBoqSubmissionService quantitySurveyTenderBoqSubmissions,
-        ILogger<TenderBidService> logger)
+        ILogger<TenderBidService> logger,
+        IFinancePostingEngine? financePostingEngine = null)
     {
         _bidRepository = bidRepository;
         _tenderRepository = tenderRepository;
@@ -78,6 +84,7 @@ public class TenderBidService : ITenderBidService
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _quantitySurveyTenderBoqSubmissions = quantitySurveyTenderBoqSubmissions;
         _logger = logger;
+        _financePostingEngine = financePostingEngine;
     }
 
     public async Task<TenderBidDetailDto?> GetBidByIdAsync(Guid id)
@@ -1427,74 +1434,172 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var bid = await _bidRepository.GetByIdAsync(bidId)
-                ?? throw new TenderBidInitiationValidationException(
-                    "TENDER_BID_PAYMENT_BID_NOT_FOUND", "The tender bid was not found.");
-            var payment = await _paymentRepository.GetByIdAsync(paymentId)
-                ?? throw new TenderBidInitiationValidationException(
-                    "TENDER_BID_PAYMENT_NOT_FOUND", "The tender fee payment was not found.");
-            var fee = await _feeRepository.GetByIdAsync(payment.TenderFeeId)
-                ?? throw new TenderBidInitiationValidationException(
-                    "TENDER_BID_PAYMENT_FEE_NOT_FOUND", "The tender fee was not found.");
+            TenderBid? committedBid = null;
+            TenderFee? committedFee = null;
+            TenderPayment? committedPayment = null;
+            var publishDecisionAudit = false;
 
-            if (bid.TenantId != _currentUserProvider.TenantId ||
-                payment.TenantId != _currentUserProvider.TenantId ||
-                fee.TenantId != _currentUserProvider.TenantId ||
-                payment.BusinessPartnerId != bid.BusinessPartnerId ||
-                fee.TenderId != bid.TenderId)
-                throw new TenderBidInitiationValidationException(
-                    "TENDER_BID_PAYMENT_ROUTE_MISMATCH",
-                    "The payment does not belong to this bid, supplier, tender, and tenant.");
-
-            var targetStatus = dto.IsApproved ? "Verified" : "Rejected";
-            if (string.Equals(payment.Status, targetStatus, StringComparison.OrdinalIgnoreCase))
-                return MapPaymentToDto(payment);
-            if (!string.Equals(payment.Status, "Pending", StringComparison.OrdinalIgnoreCase))
-                throw new TenderBidInitiationValidationException(
-                    "TENDER_BID_PAYMENT_DECISION_FINAL",
-                    $"A {payment.Status} payment decision cannot be changed through verification.");
-
-            payment.Status = targetStatus;
-            payment.VerifiedDate = DateTime.UtcNow;
-            payment.VerifiedById = _currentUserProvider.UserId;
-            payment.Notes = string.Join(Environment.NewLine,
-                new[] { payment.Notes, dto.Notes }.Where(value => !string.IsNullOrWhiteSpace(value)));
-            payment.UpdatedAt = DateTime.UtcNow;
-
-            await _paymentRepository.UpdateAsync(payment);
-            await _unitOfWork.SaveChangesAsync();
-
-            _logger.LogInformation("Verified payment {PaymentId}", paymentId);
-
-            try
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                await _appEventBus.PublishAsync(new EntityActivityEvent
+                await _unitOfWork.BeginTransactionAsync();
+                try
                 {
-                    TenantId = bid.TenantId,
-                    EntityType = "Bid",
-                    Activity = dto.IsApproved ? "PaymentVerified" : "PaymentRejected",
-                    Audience = "Internal",
-                    EntityId = bid.Id,
-                    TriggeredByUserId = _currentUserProvider.UserId,
-                    Data = new Dictionary<string, object>
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"procurement:tender-fee-payment:{paymentId:N}");
+
+                    var bid = await _bidRepository.GetByIdAsync(bidId)
+                        ?? throw new TenderBidInitiationValidationException(
+                            "TENDER_BID_PAYMENT_BID_NOT_FOUND", "The tender bid was not found.");
+                    var payment = await _paymentRepository.GetByIdAsync(paymentId)
+                        ?? throw new TenderBidInitiationValidationException(
+                            "TENDER_BID_PAYMENT_NOT_FOUND", "The tender fee payment was not found.");
+                    var fee = await _feeRepository.GetByIdAsync(payment.TenderFeeId)
+                        ?? throw new TenderBidInitiationValidationException(
+                            "TENDER_BID_PAYMENT_FEE_NOT_FOUND", "The tender fee was not found.");
+
+                    if (bid.TenantId != _currentUserProvider.TenantId ||
+                        payment.TenantId != _currentUserProvider.TenantId ||
+                        fee.TenantId != _currentUserProvider.TenantId ||
+                        payment.BusinessPartnerId != bid.BusinessPartnerId ||
+                        fee.TenderId != bid.TenderId)
+                        throw new TenderBidInitiationValidationException(
+                            "TENDER_BID_PAYMENT_ROUTE_MISMATCH",
+                            "The payment does not belong to this bid, supplier, tender, and tenant.");
+
+                    var targetStatus = dto.IsApproved ? "Verified" : "Rejected";
+                    var alreadyAtTarget = string.Equals(
+                        payment.Status,
+                        targetStatus,
+                        StringComparison.OrdinalIgnoreCase);
+                    var hasCompletePostingLineage =
+                        payment.PostingEventId.HasValue &&
+                        payment.JournalEntryId.HasValue &&
+                        payment.PostedAtUtc.HasValue;
+
+                    if (alreadyAtTarget && (!dto.IsApproved || hasCompletePostingLineage))
                     {
-                        ["BidId"] = bid.Id,
-                        ["TenderId"] = bid.TenderId,
-                        ["BusinessPartnerId"] = bid.BusinessPartnerId,
-                        ["TenderFeeId"] = fee.Id,
-                        ["PaymentId"] = payment.Id,
-                        ["PaymentStatus"] = payment.Status,
-                        ["DecisionNotes"] = dto.Notes ?? string.Empty
+                        committedBid = bid;
+                        committedFee = fee;
+                        committedPayment = payment;
+                        await _unitOfWork.CommitAsync();
+                        return;
                     }
-                });
-            }
-            catch (Exception ex)
+
+                    // A Verified legacy row without Finance lineage is deliberately repairable:
+                    // the stable payment id makes this backfill idempotent. Every other terminal
+                    // decision remains immutable.
+                    if (!alreadyAtTarget &&
+                        !string.Equals(payment.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+                        throw new TenderBidInitiationValidationException(
+                            "TENDER_BID_PAYMENT_DECISION_FINAL",
+                            $"A {payment.Status} payment decision cannot be changed through verification.");
+
+                    if (!dto.IsApproved &&
+                        (payment.PostingEventId.HasValue || payment.JournalEntryId.HasValue))
+                        throw new TenderBidInitiationValidationException(
+                            "TENDER_BID_PAYMENT_ALREADY_POSTED",
+                            "A Finance-posted tender fee payment cannot be rejected; use a controlled Finance reversal.");
+
+                    var decidedAtUtc = DateTime.UtcNow;
+                    if (dto.IsApproved)
+                    {
+                        if (_financePostingEngine is null)
+                            throw new TenderBidInitiationValidationException(
+                                "TENDER_BID_PAYMENT_FINANCE_UNAVAILABLE",
+                                "Central Finance posting is not configured for tender fee verification.");
+
+                        var postingAccounts = await ValidateTenderFeePostingConfigurationAsync(
+                            bid,
+                            fee,
+                            payment);
+                        var posting = await _financePostingEngine.PostAsync(
+                            BuildTenderFeePostingRequest(
+                                bid,
+                                fee,
+                                payment,
+                                postingAccounts,
+                                decidedAtUtc));
+
+                        // These fields are changed only after Finance has completed successfully.
+                        // Both Finance and the payment decision share this transaction, so neither
+                        // side can commit without the other.
+                        payment.PostingEventId = posting.PostingEventId;
+                        payment.JournalEntryId = posting.JournalEntryId;
+                        payment.PostedAtUtc = decidedAtUtc;
+                    }
+
+                    payment.Status = targetStatus;
+                    payment.VerifiedDate = decidedAtUtc;
+                    payment.VerifiedById = _currentUserProvider.UserId;
+                    payment.Notes = string.Join(Environment.NewLine,
+                        new[] { payment.Notes, dto.Notes }
+                            .Where(value => !string.IsNullOrWhiteSpace(value)));
+                    payment.UpdatedAt = decidedAtUtc;
+
+                    await _paymentRepository.UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync();
+                    await _unitOfWork.CommitAsync();
+
+                    committedBid = bid;
+                    committedFee = fee;
+                    committedPayment = payment;
+                    publishDecisionAudit = true;
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync();
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            });
+
+            var savedBid = committedBid
+                ?? throw new InvalidOperationException("Tender payment verification did not load its bid.");
+            var savedFee = committedFee
+                ?? throw new InvalidOperationException("Tender payment verification did not load its fee.");
+            var savedPayment = committedPayment
+                ?? throw new InvalidOperationException("Tender payment verification did not produce a payment result.");
+
+            _logger.LogInformation(
+                "Tender payment {PaymentId} decision {PaymentStatus}; Finance posting {PostingEventId}",
+                paymentId,
+                savedPayment.Status,
+                savedPayment.PostingEventId);
+
+            if (publishDecisionAudit)
             {
-                _logger.LogWarning(ex,
-                    "Failed to publish tender payment decision audit for payment {PaymentId}", paymentId);
+                try
+                {
+                    await _appEventBus.PublishAsync(new EntityActivityEvent
+                    {
+                        TenantId = savedBid.TenantId,
+                        EntityType = "Bid",
+                        Activity = dto.IsApproved ? "PaymentVerified" : "PaymentRejected",
+                        Audience = "Internal",
+                        EntityId = savedBid.Id,
+                        TriggeredByUserId = _currentUserProvider.UserId,
+                        Data = new Dictionary<string, object>
+                        {
+                            ["BidId"] = savedBid.Id,
+                            ["TenderId"] = savedBid.TenderId,
+                            ["BusinessPartnerId"] = savedBid.BusinessPartnerId,
+                            ["TenderFeeId"] = savedFee.Id,
+                            ["PaymentId"] = savedPayment.Id,
+                            ["PaymentStatus"] = savedPayment.Status,
+                            ["PostingEventId"] = savedPayment.PostingEventId?.ToString() ?? string.Empty,
+                            ["JournalEntryId"] = savedPayment.JournalEntryId?.ToString() ?? string.Empty,
+                            ["DecisionNotes"] = dto.Notes ?? string.Empty
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to publish tender payment decision audit for payment {PaymentId}", paymentId);
+                }
             }
 
-            return MapPaymentToDto(payment);
+            return MapPaymentToDto(savedPayment);
         }
         catch (Exception ex)
         {
@@ -1882,6 +1987,145 @@ public class TenderBidService : ITenderBidService
         };
     }
 
+    private async Task<TenderFeePostingAccounts> ValidateTenderFeePostingConfigurationAsync(
+        TenderBid bid,
+        TenderFee fee,
+        TenderPayment payment)
+    {
+        if (!fee.ReceivingAccountId.HasValue || fee.ReceivingAccountId == Guid.Empty)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_RECEIVING_ACCOUNT_REQUIRED",
+                "The tender fee has no configured receiving GL account.");
+        if (!fee.RevenueAccountId.HasValue || fee.RevenueAccountId == Guid.Empty)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_REVENUE_ACCOUNT_REQUIRED",
+                "The tender fee has no configured revenue GL account.");
+        if (fee.ReceivingAccountId == fee.RevenueAccountId)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_POSTING_ACCOUNTS_INVALID",
+                "Tender fee receiving and revenue accounts must be different.");
+        if (payment.Amount <= 0 || payment.Amount != fee.Amount)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_PAYMENT_AMOUNT_MISMATCH",
+                "The payment amount does not match the tender fee amount.");
+
+        var paymentCurrency = payment.Currency?.Trim().ToUpperInvariant();
+        var feeCurrency = fee.Currency?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(paymentCurrency) ||
+            paymentCurrency.Length != 3 ||
+            !string.Equals(paymentCurrency, feeCurrency, StringComparison.Ordinal))
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_PAYMENT_CURRENCY_MISMATCH",
+                "The payment currency does not match the tender fee currency.");
+
+        var accountIds = new[]
+        {
+            fee.ReceivingAccountId.Value,
+            fee.RevenueAccountId.Value
+        };
+        var accounts = await _unitOfWork.Repository<Account>()
+            .GetQueryable(account =>
+                account.TenantId == bid.TenantId &&
+                accountIds.Contains(account.Id) &&
+                !account.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync();
+        if (accounts.Count != accountIds.Length)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_POSTING_ACCOUNT_TENANT_MISMATCH",
+                "One or more tender fee posting accounts do not belong to this tenant.");
+
+        var receivingAccount = accounts.Single(account => account.Id == fee.ReceivingAccountId);
+        if (receivingAccount.Status != AccountStatus.Active ||
+            receivingAccount.AccountType != AccountType.Asset ||
+            !receivingAccount.AllowDirectPosting ||
+            receivingAccount.IsControlAccount)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_RECEIVING_ACCOUNT_INVALID",
+                "The tender fee receiving account must be an active, direct-posting, non-control asset account.");
+
+        var revenueAccount = accounts.Single(account => account.Id == fee.RevenueAccountId);
+        if (revenueAccount.Status != AccountStatus.Active ||
+            revenueAccount.AccountType != AccountType.Revenue ||
+            !revenueAccount.AllowDirectPosting ||
+            revenueAccount.IsControlAccount)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_REVENUE_ACCOUNT_INVALID",
+                "The tender fee revenue account must be an active, direct-posting, non-control revenue account.");
+
+        var settings = await _unitOfWork.Repository<FinanceSettings>()
+            .GetQueryable(item => item.TenantId == bid.TenantId && !item.IsDeleted)
+            .AsNoTracking()
+            .FirstOrDefaultAsync();
+        var functionalCurrency = settings?.BaseCurrency?.Trim().ToUpperInvariant() ?? "GHS";
+        if (!string.Equals(paymentCurrency, functionalCurrency, StringComparison.Ordinal))
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_FOREIGN_CURRENCY_NOT_SUPPORTED",
+                "Tender fee payments must use the tenant functional currency until a controlled exchange-rate snapshot is provided.");
+
+        return new TenderFeePostingAccounts(
+            receivingAccount.Id,
+            revenueAccount.Id,
+            functionalCurrency);
+    }
+
+    private static FinancePostingRequestDto BuildTenderFeePostingRequest(
+        TenderBid bid,
+        TenderFee fee,
+        TenderPayment payment,
+        TenderFeePostingAccounts accounts,
+        DateTime verifiedAtUtc)
+    {
+        var reference = payment.PaymentReference.Trim();
+        var description = $"Tender fee {fee.FeeType} for bid {bid.BidNumber}";
+        return new FinancePostingRequestDto
+        {
+            SourceModule = "Procurement",
+            OriginModuleCode = "PROC",
+            SourceDocumentType = "TenderFeePayment",
+            SourceDocumentId = payment.Id,
+            SourceDocumentTenantId = bid.TenantId,
+            SourceDocumentReference = reference,
+            PostingAction = "Post",
+            PostingDate = verifiedAtUtc.Date,
+            Description = description,
+            JournalType = "System Generated",
+            FunctionalCurrencyCode = accounts.FunctionalCurrencyCode,
+            IdempotencyKey = $"PROCUREMENT|TENDER-FEE|{payment.Id:N}|POST",
+            ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto
+                {
+                    AccountId = accounts.ReceivingAccountId,
+                    Description = $"Tender fee receipt {payment.PaymentReference}",
+                    DebitAmount = payment.Amount,
+                    CreditAmount = 0,
+                    TransactionCurrency = payment.Currency,
+                    SourceReferenceNumber = reference,
+                    LineNumber = 1,
+                    TransactionTag = "TenderFeeReceipt"
+                },
+                new FinancePostingLineDto
+                {
+                    AccountId = accounts.RevenueAccountId,
+                    Description = description,
+                    DebitAmount = 0,
+                    CreditAmount = payment.Amount,
+                    TransactionCurrency = payment.Currency,
+                    SourceReferenceNumber = reference,
+                    LineNumber = 2,
+                    TransactionTag = "TenderFeeRevenue"
+                }
+            ]
+        };
+    }
+
+    private sealed record TenderFeePostingAccounts(
+        Guid ReceivingAccountId,
+        Guid RevenueAccountId,
+        string FunctionalCurrencyCode);
+
     private static TenderPaymentDto MapPaymentToDto(TenderPayment payment)
     {
         return new TenderPaymentDto
@@ -1898,6 +2142,9 @@ public class TenderBidService : ITenderBidService
             PaymentDate = payment.PaymentDate,
             VerifiedDate = payment.VerifiedDate,
             VerifiedByName = string.Empty, // Would need to fetch from User entity
+            PostingEventId = payment.PostingEventId,
+            JournalEntryId = payment.JournalEntryId,
+            PostedAtUtc = payment.PostedAtUtc,
             TransactionId = payment.TransactionId,
             PaymentProof = payment.PaymentProof
         };

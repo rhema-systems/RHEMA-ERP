@@ -129168,6 +129168,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("ReceivingAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("RevenueAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -129181,6 +129187,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ReceivingAccountId");
+
+                    b.HasIndex("RevenueAccountId");
 
                     b.HasIndex("TenantId");
 
@@ -129766,6 +129776,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -129787,6 +129800,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("PostedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PostingEventId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -129818,6 +129837,14 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BusinessPartnerId");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique()
+                        .HasFilter("[JournalEntryId] IS NOT NULL");
+
+                    b.HasIndex("PostingEventId")
+                        .IsUnique()
+                        .HasFilter("[PostingEventId] IS NOT NULL");
 
                     b.HasIndex("TenantId");
 
@@ -201179,6 +201206,16 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.TenderFee", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ReceivingAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("RevenueAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -201404,6 +201441,16 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("BusinessPartnerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("PostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()

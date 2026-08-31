@@ -197,6 +197,8 @@ export default function EditTenderPage() {
           dueDate: fee.dueDate ? new Date(fee.dueDate).toISOString().slice(0, 16) : '',
           description: fee.description || '',
           bankAccountDetails: fee.bankAccountDetails || '',
+          receivingAccountId: fee.receivingAccountId,
+          revenueAccountId: fee.revenueAccountId,
         })),
         invitations: (data.invitations || []).map(inv => ({
           id: inv.id,
