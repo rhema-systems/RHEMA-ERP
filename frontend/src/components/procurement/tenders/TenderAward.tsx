@@ -21,6 +21,7 @@ import { procurementAwardReadinessService } from '@/services/procurement-award-r
 import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import { useAuth } from '@/hooks/use-auth';
+import { isFinalTenderAward } from '@/lib/tender-award-lifecycle';
 
 interface TenderAwardProps {
   tenderId: string;
@@ -31,7 +32,7 @@ interface TenderAwardProps {
 
 export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreated }: TenderAwardProps) {
   const { hasPermission } = useAuth();
-  const canApproveAward = hasPermission('procurement.tender.approve');
+  const canSubmitAwardRecommendation = hasPermission('procurement.tender.administer');
   const [loading, setLoading] = useState(true);
   const [recommendation, setRecommendation] = useState<tenderAwardService.AwardRecommendationDto | null>(null);
   const [existingAward, setExistingAward] = useState<tenderAwardService.TenderAwardDto | null>(null);
@@ -58,9 +59,10 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
 
       // Check if award already exists
       const award = await tenderAwardService.getAwardByTenderId(tenderId);
-      if (award) {
+      if (award && award.status !== 'Rejected') {
         setExistingAward(award);
       } else {
+        setExistingAward(award);
         // Generate recommendation
         const rec = await tenderAwardService.generateAwardRecommendation(tenderId);
         setRecommendation(rec);
@@ -96,19 +98,19 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   const handleCreateAward = async () => {
     if (!selectedBidId) {
       toast.error('Please select a bid to award');
-      return;
+      return false;
     }
 
     if (!awardAmount || parseFloat(awardAmount) <= 0) {
       toast.error('Please enter a valid award amount');
-      return;
+      return false;
     }
 
     if (!readinessAllowsBid(selectedBidId)) {
       toast.error(
         'A current server-derived Ready decision for this recommended bid is required.'
       );
-      return;
+      return false;
     }
 
     try {
@@ -123,13 +125,14 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
       };
 
       await tenderAwardService.createAward(dto);
-      toast.success('Tender awarded successfully!');
+      toast.success('Award recommendation submitted for independent approval');
       setShowAwardDialog(false);
       loadAwardData();
       onAwardCreated?.();
     } catch (error: any) {
       console.error('Error creating award:', error);
-      toast.error(error.message || 'Failed to create award');
+      toast.error(error.message || 'Failed to submit award recommendation');
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -214,7 +217,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
           readinessDecision.allowedActions,
           'RecordAward'
         ) &&
-        canApproveAward &&
+        canSubmitAwardRecommendation &&
         readinessDecision.recommendation.subjectIds.includes(bidId)
     );
 
@@ -230,8 +233,54 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
     );
   }
 
+  if (existingAward &&
+      !isFinalTenderAward(existingAward.status) &&
+      existingAward.status !== 'Rejected') {
+    const isPendingApproval = existingAward.status === 'PendingApproval';
+    return (
+      <Card className={isPendingApproval ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'}>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>
+                {isPendingApproval
+                  ? 'Award recommendation awaiting approval'
+                  : 'Award cancelled'}
+              </CardTitle>
+              <CardDescription>
+                {isPendingApproval
+                  ? 'An independent user with tender approval permission must approve or reject this recommendation.'
+                  : 'This award is no longer active.'}
+              </CardDescription>
+            </div>
+            <Badge variant={isPendingApproval ? 'outline' : 'destructive'}>
+              {existingAward.status}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <Label className="text-muted-foreground">Recommended supplier</Label>
+              <p className="font-medium">{existingAward.businessPartnerName}</p>
+            </div>
+            <div>
+              <Label className="text-muted-foreground">Recommended amount</Label>
+              <p className="font-medium">
+                {existingAward.currency || 'GHS'} {existingAward.awardedAmount.toLocaleString()}
+              </p>
+            </div>
+          </div>
+          <Button asChild variant="outline">
+            <Link href={`/procurement/awards/${existingAward.id}`}>View recommendation details</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   // Show existing award - Fancy celebration display
-  if (existingAward) {
+  if (existingAward && isFinalTenderAward(existingAward.status)) {
     return (
       <div className="space-y-6">
         {/* Hero Award Banner */}
@@ -286,7 +335,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
             <div className="mb-6 rounded-xl bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 border-2 border-amber-200 p-6 text-center">
               <p className="text-sm font-medium text-amber-700 uppercase tracking-wider mb-1">Award Amount</p>
               <p className="text-4xl font-bold text-amber-900">
-                {existingAward.currency || 'USD'} {existingAward.awardedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {existingAward.currency || 'GHS'} {existingAward.awardedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
 
@@ -370,6 +419,22 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   return (
     <>
       <div className="space-y-6">
+        {existingAward?.status === 'Rejected' && (
+          <Card className="border-red-200 bg-red-50">
+            <CardHeader>
+              <CardTitle>Award recommendation rejected</CardTitle>
+              <CardDescription>
+                Review the recorded decision, then submit a corrected recommendation for independent approval.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline">
+                <Link href={`/procurement/awards/${existingAward.id}`}>View rejection details</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         <Card
           className={
             readinessDecision?.isReady && readinessDecision.isCurrent
@@ -540,15 +605,19 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="sm"
-                          onClick={() => handleSelectBid(bid.bidId, bid.totalBidAmount)}
-                          variant={bid.bidId === recommendation.recommendedBidId ? 'default' : 'outline'}
-                          disabled={!readinessAllowsBid(bid.bidId)}
-                        >
-                          <Award className="h-4 w-4 mr-2" />
-                          Award
-                        </Button>
+                        {canSubmitAwardRecommendation ? (
+                          <Button
+                            size="sm"
+                            onClick={() => handleSelectBid(bid.bidId, bid.totalBidAmount)}
+                            variant={bid.bidId === recommendation.recommendedBidId ? 'default' : 'outline'}
+                            disabled={!readinessAllowsBid(bid.bidId)}
+                          >
+                            <Award className="h-4 w-4 mr-2" />
+                            Recommend
+                          </Button>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">View only</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -562,10 +631,10 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
       <ConfirmationDialog
         open={showAwardDialog}
         onOpenChange={setShowAwardDialog}
-        title="Award Tender"
-        description="Confirm the tender award details"
+        title="Submit Award Recommendation"
+        description="Confirm the recommendation details for independent approval."
         onConfirm={handleCreateAward}
-        confirmText={submitting ? 'Awarding...' : 'Confirm Award'}
+        confirmText={submitting ? 'Submitting...' : 'Submit Recommendation'}
         confirmDisabled={submitting || !readinessAllowsBid(selectedBidId)}
         maxWidth="600px"
       >
@@ -608,7 +677,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
               <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
               <div className="text-sm text-yellow-800">
                 <p className="font-semibold">Important:</p>
-                <p>Once awarded, the tender status will be updated and notifications will be sent to all bidders.</p>
+                <p>This submits a recommendation only. The tender and bids are updated after an independent approver accepts it.</p>
               </div>
             </div>
           </div>

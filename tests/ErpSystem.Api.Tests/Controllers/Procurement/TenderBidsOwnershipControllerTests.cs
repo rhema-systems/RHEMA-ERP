@@ -15,6 +15,26 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class TenderBidsOwnershipControllerTests
 {
     [Fact]
+    public async Task GetBidsForwardsExactTenderFilter()
+    {
+        var fixture = new Fixture();
+        var tenderId = Guid.NewGuid();
+        var expected = new ErpSystem.Core.DTOs.Common.PagedResult<TenderBidSummaryDto>
+        {
+            Items = [], TotalCount = 0, Page = 1, PageSize = 10
+        };
+        fixture.Bids.Setup(service => service.GetBidsAsync(
+                1, 10, null, "Evaluated", tenderId))
+            .ReturnsAsync(expected);
+
+        var response = await fixture.Controller.GetBids(1, 10, "Evaluated", tenderId);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Same(expected, ok.Value);
+        fixture.Bids.VerifyAll();
+    }
+
+    [Fact]
     public async Task GetBidDoesNotExposeAnotherSuppliersBidThroughTenderAssignment()
     {
         var fixture = new Fixture();

@@ -243,6 +243,7 @@ public class TendersController : ControllerBase
     /// Approve the current tender workflow step
     /// </summary>
     [HttpPost("{id}/approve")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public async Task<IActionResult> ApproveTender(Guid id, [FromBody] ApproveTenderRequest? request)
     {
         try
@@ -270,6 +271,7 @@ public class TendersController : ControllerBase
     /// Reject the current tender workflow step
     /// </summary>
     [HttpPost("{id}/reject")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public async Task<IActionResult> RejectTender(Guid id, [FromBody] RejectTenderRequest request)
     {
         try
@@ -342,12 +344,12 @@ public class TendersController : ControllerBase
     {
         try
         {
-            // TODO: Service interface doesn't have CloseTenderAsync method
-            // Commenting out until the method is implemented
-            // var tender = await _tenderService.CloseTenderAsync(id);
-            // return Ok(tender);
-            await Task.CompletedTask;
-            return StatusCode(501, "Close tender functionality not yet implemented");
+            var tender = await _tenderService.CloseTenderAsync(id);
+            return Ok(tender);
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -357,6 +359,57 @@ public class TendersController : ControllerBase
         {
             _logger.LogError(ex, "Error closing tender {TenderId}", id);
             return StatusCode(500, "An error occurred while closing the tender");
+        }
+    }
+
+    /// <summary>
+    /// Get the immutable amendment/addendum history for a tender.
+    /// </summary>
+    [HttpGet("{id}/revisions")]
+    [Authorize(Policy = "procurement.records.read")]
+    public async Task<ActionResult<IEnumerable<TenderRevisionDto>>> GetRevisions(Guid id)
+    {
+        try
+        {
+            return Ok(await _tenderService.GetTenderRevisionsAsync(id));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting revisions for tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while retrieving tender revisions");
+        }
+    }
+
+    /// <summary>
+    /// Issue an amendment, addendum, corrigendum, or deadline extension.
+    /// </summary>
+    [HttpPost("{id}/revisions")]
+    [Authorize(Policy = "procurement.tender.administer")]
+    public async Task<ActionResult<TenderRevisionDto>> CreateRevision(
+        Guid id,
+        [FromBody] CreateRevisionDto dto)
+    {
+        try
+        {
+            var revision = await _tenderService.CreateRevisionAsync(id, dto);
+            return CreatedAtAction(nameof(GetRevisions), new { id }, revision);
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
+        catch (ProcurementExceptionalSourcingConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating revision for tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while creating the tender revision");
         }
     }
 

@@ -482,7 +482,7 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
             .ToListAsync();
     }
 
-    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<TenderBid>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null)
+    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<TenderBid>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null, Guid? tenderId = null)
     {
         var query = _dbSet.Where(b => !b.IsDeleted);
 
@@ -500,6 +500,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(b => b.Status == status);
+        }
+
+        if (tenderId.HasValue)
+        {
+            query = query.Where(b => b.TenderId == tenderId.Value);
         }
 
         var totalCount = await query.CountAsync();

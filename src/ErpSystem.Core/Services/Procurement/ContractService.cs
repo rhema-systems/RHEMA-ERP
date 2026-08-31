@@ -167,6 +167,11 @@ public class ContractService : IContractService
         {
             var award = await _awardRepository.GetByIdAsync(dto.TenderAwardId)
                 ?? throw new InvalidOperationException($"Award with ID {dto.TenderAwardId} not found");
+            if (award.TenantId != _currentUserProvider.TenantId)
+                throw new InvalidOperationException($"Award with ID {dto.TenderAwardId} not found");
+            if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"A contract can be created only from a finalized award (current status: '{award.Status}').");
 
             // Check if contract already exists for this award
             var existingContract = await _contractRepository.GetByAwardIdAsync(dto.TenderAwardId);
@@ -177,6 +182,9 @@ public class ContractService : IContractService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            if (tender.TenantId != award.TenantId)
+                throw new InvalidOperationException(
+                    "The award and tender tenant lineage does not match.");
             EnsureExactAwardCommercials(
                 dto.ContractValue, dto.Currency, award.AwardedAmount, award.Currency);
 
@@ -685,6 +693,29 @@ public class ContractService : IContractService
             {
                 throw new InvalidOperationException("Amendments can only be created for active contracts");
             }
+            var requestedAmendmentType = dto.AmendmentType?.Trim();
+            var amendmentType = string.Equals(
+                requestedAmendmentType,
+                "TimeExtension",
+                StringComparison.OrdinalIgnoreCase)
+                ? "TimelineExtension"
+                : requestedAmendmentType;
+            if (amendmentType is not ("ValueChange" or "TimelineExtension" or "ScopeChange"))
+                throw new InvalidOperationException(
+                    "Amendment type must be ValueChange, TimeExtension (or TimelineExtension), or ScopeChange.");
+            if (amendmentType == "ValueChange" &&
+                (!dto.NewValue.HasValue || dto.NewValue.Value <= 0m ||
+                 dto.NewValue.Value == contract.ContractValue))
+                throw new InvalidOperationException(
+                    "A value-change amendment requires a positive new value different from the current contract value.");
+            if (amendmentType == "TimelineExtension" &&
+                (!dto.NewEndDate.HasValue ||
+                 (contract.EndDate.HasValue && dto.NewEndDate.Value <= contract.EndDate.Value)))
+                throw new InvalidOperationException(
+                    "A timeline extension requires a new end date after the current end date.");
+            if (amendmentType == "ScopeChange" && string.IsNullOrWhiteSpace(dto.ScopeChanges))
+                throw new InvalidOperationException(
+                    "A scope-change amendment requires the changed scope.");
 
             var existingAmendments = await _amendmentRepository.GetByContractIdAsync(contractId);
             var nextSequence = existingAmendments.Any() ? existingAmendments.Max(a => a.SequenceNumber) + 1 : 1;
@@ -694,7 +725,7 @@ public class ContractService : IContractService
                 ContractId = contractId,
                 AmendmentNumber = await _amendmentRepository.GenerateAmendmentNumberAsync(contractId),
                 SequenceNumber = nextSequence,
-                AmendmentType = dto.AmendmentType,
+                AmendmentType = amendmentType,
                 Reason = dto.Reason,
                 Description = dto.Description,
                 Status = "PendingApproval",
@@ -705,7 +736,7 @@ public class ContractService : IContractService
             };
 
             // Set change-specific fields
-            switch (dto.AmendmentType)
+            switch (amendmentType)
             {
                 case "ValueChange":
                     amendment.PreviousValue = contract.ContractValue;
@@ -750,6 +781,9 @@ public class ContractService : IContractService
             {
                 throw new InvalidOperationException($"Amendment is already {amendment.Status}");
             }
+            if (dto.Approved && amendment.RequestedById == _currentUserProvider.UserId)
+                throw new UnauthorizedAccessException(
+                    "The amendment requester cannot approve the same amendment.");
 
             amendment.ApprovedById = _currentUserProvider.UserId;
             amendment.ApprovedDate = DateTime.UtcNow;
@@ -762,6 +796,9 @@ public class ContractService : IContractService
                 // Apply the amendment to the contract
                 var contract = await _contractRepository.GetByIdAsync(amendment.ContractId)
                     ?? throw new InvalidOperationException("Contract not found");
+                if (!string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        "The contract must remain active when an amendment is approved.");
 
                 if (string.Equals(
                         amendment.AmendmentType,

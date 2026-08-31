@@ -124,11 +124,11 @@ public class TenderBidService : ITenderBidService
         }
     }
 
-    public async Task<PagedResult<TenderBidSummaryDto>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null)
+    public async Task<PagedResult<TenderBidSummaryDto>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null, Guid? tenderId = null)
     {
         try
         {
-            var pagedBids = await _bidRepository.GetBidsAsync(page, pageSize, search, status);
+            var pagedBids = await _bidRepository.GetBidsAsync(page, pageSize, search, status, tenderId);
             var items = new List<TenderBidSummaryDto>();
 
             foreach (var bid in pagedBids.Items)
@@ -136,8 +136,7 @@ public class TenderBidService : ITenderBidService
                 var tender = await _tenderRepository.GetByIdAsync(bid.TenderId);
 
                 // Get payment information
-                var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
-                var completedPayment = payments.FirstOrDefault(p => p.Status == "Completed");
+                var completedPayment = await GetSatisfiedPaymentForBidAsync(bid);
 
                 items.Add(await ProtectFinancialProposalAsync(MapToSummaryDto(bid, tender, completedPayment)));
             }
@@ -168,8 +167,7 @@ public class TenderBidService : ITenderBidService
             foreach (var bid in bids)
             {
                 // Get payment information
-                var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
-                var completedPayment = payments.FirstOrDefault(p => p.Status == "Completed");
+                var completedPayment = await GetSatisfiedPaymentForBidAsync(bid);
 
                 summaries.Add(await ProtectFinancialProposalAsync(MapToSummaryDto(bid, tender, completedPayment)));
             }
@@ -198,8 +196,7 @@ public class TenderBidService : ITenderBidService
                 var tender = await _tenderRepository.GetByIdAsync(bid.TenderId);
 
                 // Get payment information
-                var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
-                var completedPayment = payments.FirstOrDefault(p => p.Status == "Completed");
+                var completedPayment = await GetSatisfiedPaymentForBidAsync(bid);
 
                 summaries.Add(await ProtectFinancialProposalAsync(MapToSummaryDto(bid, tender, completedPayment)));
             }
@@ -907,6 +904,9 @@ public class TenderBidService : ITenderBidService
                 throw new ProcurementTenderControlConflictException(
                     "TENDER_STATUTORY_OPENING_REQUIRED",
                     "NCT, ICT, QBS, and QCBS bids can be opened only through the signed public-opening control.");
+            var tender = bid.Tender ?? await _tenderRepository.GetByIdAsync(bid.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
+            EnsureLegacyOpeningReady(tender, DateTime.UtcNow);
 
             if (bid.Status != "Submitted")
             {
@@ -944,6 +944,9 @@ public class TenderBidService : ITenderBidService
                 throw new ProcurementTenderControlConflictException(
                     "TENDER_STATUTORY_OPENING_REQUIRED",
                     "NCT, ICT, QBS, and QCBS bids can be opened only through the signed public-opening control.");
+            var tender = await _tenderRepository.GetByIdAsync(tenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            EnsureLegacyOpeningReady(tender, DateTime.UtcNow);
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var submittedBids = bids.Where(b => b.Status == "Submitted").ToList();
 
@@ -1317,14 +1320,41 @@ public class TenderBidService : ITenderBidService
         }
     }
 
-    public async Task<TenderPaymentDto> VerifyPaymentAsync(Guid paymentId, VerifyPaymentDto dto)
+    public async Task<TenderPaymentDto> VerifyPaymentAsync(
+        Guid bidId,
+        Guid paymentId,
+        VerifyPaymentDto dto)
     {
         try
         {
+            var bid = await _bidRepository.GetByIdAsync(bidId)
+                ?? throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_BID_NOT_FOUND", "The tender bid was not found.");
             var payment = await _paymentRepository.GetByIdAsync(paymentId)
-                ?? throw new InvalidOperationException($"Payment with ID {paymentId} not found");
+                ?? throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_NOT_FOUND", "The tender fee payment was not found.");
+            var fee = await _feeRepository.GetByIdAsync(payment.TenderFeeId)
+                ?? throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_FEE_NOT_FOUND", "The tender fee was not found.");
 
-            payment.Status = dto.IsApproved ? "Verified" : "Rejected";
+            if (bid.TenantId != _currentUserProvider.TenantId ||
+                payment.TenantId != _currentUserProvider.TenantId ||
+                fee.TenantId != _currentUserProvider.TenantId ||
+                payment.BusinessPartnerId != bid.BusinessPartnerId ||
+                fee.TenderId != bid.TenderId)
+                throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_ROUTE_MISMATCH",
+                    "The payment does not belong to this bid, supplier, tender, and tenant.");
+
+            var targetStatus = dto.IsApproved ? "Verified" : "Rejected";
+            if (string.Equals(payment.Status, targetStatus, StringComparison.OrdinalIgnoreCase))
+                return MapPaymentToDto(payment);
+            if (!string.Equals(payment.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+                throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_DECISION_FINAL",
+                    $"A {payment.Status} payment decision cannot be changed through verification.");
+
+            payment.Status = targetStatus;
             payment.VerifiedDate = DateTime.UtcNow;
             payment.VerifiedById = _currentUserProvider.UserId;
             payment.Notes = $"{payment.Notes}\n{dto.Notes}";
@@ -1350,9 +1380,24 @@ public class TenderBidService : ITenderBidService
         {
             var bid = await _bidRepository.GetByIdAsync(bidId);
             if (bid == null) return Enumerable.Empty<TenderPaymentDto>();
+            if (bid.TenantId != _currentUserProvider.TenantId)
+                return Enumerable.Empty<TenderPaymentDto>();
+            if (_currentUserProvider.IsExternalUser)
+            {
+                var currentPartner = await GetCurrentBusinessPartnerAsync();
+                if (currentPartner?.Id != bid.BusinessPartnerId)
+                    throw new UnauthorizedAccessException(
+                        "A supplier can view tender-fee payments only for its own bid.");
+            }
 
+            var feeIds = (await _feeRepository.GetByTenderIdAsync(bid.TenderId))
+                .Where(item => !item.IsDeleted && item.TenantId == bid.TenantId)
+                .Select(item => item.Id)
+                .ToHashSet();
             var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
-            return payments.Select(MapPaymentToDto);
+            return payments
+                .Where(item => item.TenantId == bid.TenantId && feeIds.Contains(item.TenderFeeId))
+                .Select(MapPaymentToDto);
         }
         catch (Exception ex)
         {
@@ -1511,6 +1556,25 @@ public class TenderBidService : ITenderBidService
                marker.Contains("qualification", StringComparison.OrdinalIgnoreCase);
     }
 
+    private async Task<TenderPayment?> GetSatisfiedPaymentForBidAsync(TenderBid bid)
+    {
+        var tenderFeeIds = (await _feeRepository.GetByTenderIdAsync(bid.TenderId))
+            .Where(fee => !fee.IsDeleted && fee.TenantId == bid.TenantId)
+            .Select(fee => fee.Id)
+            .ToHashSet();
+        if (tenderFeeIds.Count == 0) return null;
+
+        return (await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId))
+            .Where(payment =>
+                !payment.IsDeleted &&
+                payment.TenantId == bid.TenantId &&
+                payment.BusinessPartnerId == bid.BusinessPartnerId &&
+                tenderFeeIds.Contains(payment.TenderFeeId) &&
+                IsPaymentSatisfied(payment))
+            .OrderByDescending(payment => payment.VerifiedDate ?? payment.PaymentDate)
+            .FirstOrDefault();
+    }
+
     // Mapping methods
     private static TenderBidSummaryDto MapToSummaryDto(TenderBid bid, Tender? tender, TenderPayment? payment)
     {
@@ -1529,7 +1593,7 @@ public class TenderBidService : ITenderBidService
             Status = bid.Status,
             TotalScore = bid.TotalScore,
             Rank = bid.Rank,
-            HasPaidFees = payment != null && payment.Status == "Completed",
+            HasPaidFees = payment != null && IsPaymentSatisfied(payment),
             PaymentStatus = payment?.Status,
             // QCBS Scores
             TechnicalScore = bid.TechnicalScore,
@@ -1753,6 +1817,19 @@ public class TenderBidService : ITenderBidService
     private static bool IsPaymentSatisfied(TenderPayment payment) =>
         string.Equals(payment.Status, "Verified", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(payment.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+
+    internal static void EnsureLegacyOpeningReady(Tender tender, DateTime nowUtc)
+    {
+        if (!string.Equals(tender.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Bids can be opened only after the tender is closed (current status: '{tender.Status}').");
+        if (!tender.SubmissionDeadline.HasValue || nowUtc < tender.SubmissionDeadline.Value)
+            throw new InvalidOperationException(
+                "Bids cannot be opened before the tender submission deadline.");
+        if (tender.OpeningDate.HasValue && nowUtc < tender.OpeningDate.Value)
+            throw new InvalidOperationException(
+                "Bids cannot be opened before the scheduled opening time.");
+    }
 
     private async Task<BusinessPartner?> GetCurrentBusinessPartnerAsync()
     {

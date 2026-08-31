@@ -4,6 +4,7 @@
  */
 
 import type { ProcurementMethodType } from '@/types/procurement-policy';
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -334,9 +335,19 @@ export interface TenderRevisionDto {
   revisedByName?: string;
   revisionType: string;
   description: string;
+  changes?: string;
   newSubmissionDeadline?: string;
   requiresRebid: boolean;
   notificationSent: boolean;
+}
+
+export interface CreateTenderRevisionDto {
+  revisionType: 'Amendment' | 'Addendum' | 'Corrigendum' | 'DeadlineExtension';
+  description: string;
+  changes?: string;
+  newSubmissionDeadline?: string;
+  requiresRebid: boolean;
+  sendNotifications: boolean;
 }
 
 export interface TenderBidSummaryDto {
@@ -1230,6 +1241,54 @@ class TenderService {
     return response.json();
   }
 
+  /**
+   * Get the immutable amendment/addendum history for a tender.
+   */
+  async getTenderRevisions(tenderId: string): Promise<TenderRevisionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/revisions`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      await throwProcurementResponseError(
+        response,
+        'Failed to get tender revisions'
+      );
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Issue a governed tender amendment, addendum, corrigendum, or extension.
+   */
+  async createTenderRevision(
+    tenderId: string,
+    data: CreateTenderRevisionDto
+  ): Promise<TenderRevisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/revisions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
+
+    if (!response.ok) {
+      await throwProcurementResponseError(
+        response,
+        'Failed to issue tender amendment'
+      );
+    }
+
+    return response.json();
+  }
+
   // ============================================================================
   // QCBS EVALUATION METHODS
   // ============================================================================
@@ -1396,6 +1455,12 @@ export const answerClarification = (
   clarificationId: string,
   data: AnswerClarificationDto
 ) => tenderService.answerClarification(tenderId, clarificationId, data);
+export const getTenderRevisions = (tenderId: string) =>
+  tenderService.getTenderRevisions(tenderId);
+export const createTenderRevision = (
+  tenderId: string,
+  data: CreateTenderRevisionDto
+) => tenderService.createTenderRevision(tenderId, data);
 // QCBS Evaluation functions
 export const configureQCBS = (tenderId: string, data: ConfigureQCBSDto) =>
   tenderService.configureQCBS(tenderId, data);

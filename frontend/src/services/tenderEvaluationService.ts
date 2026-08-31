@@ -1,5 +1,7 @@
 // Tender Evaluation Service - API calls for tender evaluation management
 
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
+
 // ==================== INTERFACES ====================
 
 export interface TenderEvaluationDto {
@@ -207,7 +209,7 @@ export async function getEvaluationById(id: string): Promise<TenderEvaluationDto
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch evaluation');
+    await throwProcurementResponseError(response, 'Failed to fetch evaluation');
   }
 
   return response.json();
@@ -220,7 +222,7 @@ export async function getEvaluationsByBidId(bidId: string): Promise<TenderEvalua
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch bid evaluations');
+    await throwProcurementResponseError(response, 'Failed to fetch bid evaluations');
   }
 
   return response.json();
@@ -238,7 +240,7 @@ export async function getMyEvaluations(): Promise<TenderEvaluationDto[]> {
 
   if (!response.ok) {
     console.error('❌ getMyEvaluations failed:', response.status, response.statusText);
-    throw new Error(`Failed to fetch my evaluations: ${response.status} ${response.statusText}`);
+    await throwProcurementResponseError(response, 'Failed to fetch my evaluations');
   }
 
   return response.json();
@@ -253,7 +255,7 @@ export async function createEvaluation(data: CreateEvaluationDto): Promise<Tende
   });
 
   if (!response.ok) {
-    throw new Error('Failed to create evaluation');
+    await throwProcurementResponseError(response, 'Failed to create evaluation');
   }
 
   return response.json();
@@ -268,7 +270,7 @@ export async function updateEvaluation(id: string, data: UpdateEvaluationDto): P
   });
 
   if (!response.ok) {
-    throw new Error('Failed to update evaluation');
+    await throwProcurementResponseError(response, 'Failed to update evaluation');
   }
 
   return response.json();
@@ -283,7 +285,7 @@ export async function submitEvaluation(id: string, data: SubmitEvaluationDto): P
   });
 
   if (!response.ok) {
-    throw new Error('Failed to submit evaluation');
+    await throwProcurementResponseError(response, 'Failed to submit evaluation');
   }
 
   return response.json();
@@ -297,18 +299,18 @@ export async function deleteEvaluation(id: string): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to delete evaluation');
+    await throwProcurementResponseError(response, 'Failed to delete evaluation');
   }
 }
 
 // Get bid scorecard
 export async function getBidScorecard(bidId: string): Promise<EvaluationScorecardDto> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/scorecard/${bidId}`, {
+  const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/scorecard/bid/${bidId}`, {
     headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch bid scorecard');
+    await throwProcurementResponseError(response, 'Failed to fetch bid scorecard');
   }
 
   return response.json();
@@ -321,7 +323,7 @@ export async function getConsolidatedEvaluations(tenderId: string): Promise<Cons
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch consolidated evaluations');
+    await throwProcurementResponseError(response, 'Failed to fetch consolidated evaluations');
   }
 
   return response.json();
@@ -334,7 +336,7 @@ export async function getEvaluationReport(tenderId: string): Promise<EvaluationR
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch evaluation report');
+    await throwProcurementResponseError(response, 'Failed to fetch evaluation report');
   }
 
   return response.json();

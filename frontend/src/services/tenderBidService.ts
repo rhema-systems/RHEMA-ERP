@@ -37,6 +37,7 @@ export interface TenderBidDetailDto {
   warrantyTerms?: string;
   technicalProposal?: string;
   commercialProposal?: string;
+  associationType?: 'AllUsers' | 'Self' | 'SelectedUsers';
   acceptedDeclaration?: boolean;
   declarationAcceptedAt?: string;
   isCompliant: boolean;
@@ -152,6 +153,11 @@ export interface TenderPaymentDto {
   verifiedByName?: string;
   transactionId?: string;
   paymentProof?: string;
+}
+
+export interface VerifyTenderPaymentDto {
+  isApproved: boolean;
+  notes?: string;
 }
 
 export interface CreateTenderBidDto {
@@ -639,6 +645,59 @@ export async function recordBidPayment(
     const problem = await response.json().catch(() => null);
     throw new Error(problem?.detail || 'Failed to record tender fee payment');
   }
+  return response.json();
+}
+
+async function readTenderPaymentError(
+  response: Response,
+  fallback: string
+): Promise<string> {
+  const body = await response.text();
+  if (!body) return fallback;
+
+  try {
+    const problem = JSON.parse(body) as
+      | string
+      | {
+          detail?: string;
+          message?: string;
+          code?: string;
+          extensions?: { code?: string };
+        };
+
+    if (typeof problem === 'string') return problem || fallback;
+
+    const detail = problem.detail || problem.message || fallback;
+    const code = problem.code || problem.extensions?.code;
+    return code && !detail.includes(code) ? `${detail} (${code})` : detail;
+  } catch {
+    return body;
+  }
+}
+
+export async function verifyBidPayment(
+  bidId: string,
+  paymentId: string,
+  input: VerifyTenderPaymentDto
+): Promise<TenderPaymentDto> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/payments/${paymentId}/verify`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(input),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readTenderPaymentError(
+        response,
+        'Failed to update the tender fee payment'
+      )
+    );
+  }
+
   return response.json();
 }
 

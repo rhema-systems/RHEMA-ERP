@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Card,
   CardContent,
@@ -47,8 +48,11 @@ import {
 } from '@/services/tenderBidService';
 import { format } from 'date-fns';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
 import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 // Interface for criteria scores stored in evaluationCriteriaJson
 interface CriteriaScore {
@@ -59,6 +63,319 @@ interface CriteriaScore {
   weight: number;
   maxScore: number;
   weightedScore: number;
+}
+
+export const TENDER_PAYMENT_VERIFY_PERMISSION =
+  'procurement.tender.payment.verify';
+
+type PaymentDecision = {
+  payment: TenderPaymentDto;
+  isApproved: boolean;
+};
+
+interface TenderPaymentVerificationPanelProps {
+  bidId: string;
+  payments: TenderPaymentDto[];
+  canVerifyPayment: boolean;
+  onRefresh: (updatedPayment: TenderPaymentDto) => Promise<void>;
+}
+
+const paymentStatusPresentation = (status: string) => {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'pending') {
+    return {
+      label: 'Pending verification',
+      className: 'border-amber-200 bg-amber-100 text-amber-800',
+    };
+  }
+  if (normalized === 'verified') {
+    return {
+      label: 'Verified',
+      className: 'border-green-200 bg-green-100 text-green-800',
+    };
+  }
+  if (normalized === 'rejected') {
+    return {
+      label: 'Rejected',
+      className: 'border-red-200 bg-red-100 text-red-800',
+    };
+  }
+  return {
+    label: status || 'Unknown',
+    className: 'border-gray-200 bg-gray-100 text-gray-800',
+  };
+};
+
+const formatPaymentDate = (dateString?: string) => {
+  if (!dateString) return 'Not recorded';
+  try {
+    return format(new Date(dateString), 'PPP p');
+  } catch {
+    return dateString;
+  }
+};
+
+const formatPaymentAmount = (amount: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency || 'GHS',
+      currencyDisplay: 'code',
+    }).format(amount);
+  } catch {
+    return `${currency || 'GHS'} ${amount.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+};
+
+export function TenderPaymentVerificationPanel({
+  bidId,
+  payments,
+  canVerifyPayment,
+  onRefresh,
+}: TenderPaymentVerificationPanelProps) {
+  const [decision, setDecision] = useState<PaymentDecision | null>(null);
+  const [notes, setNotes] = useState('');
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  const openDecision = (payment: TenderPaymentDto, isApproved: boolean) => {
+    setDecision({ payment, isApproved });
+    setNotes('');
+    setDecisionError(null);
+  };
+
+  const closeDecision = () => {
+    if (verifying) return;
+    setDecision(null);
+    setNotes('');
+    setDecisionError(null);
+  };
+
+  const confirmDecision = async () => {
+    if (!decision) return false;
+
+    const trimmedNotes = notes.trim();
+    if (!decision.isApproved && !trimmedNotes) {
+      setDecisionError('A rejection reason is required.');
+      return false;
+    }
+
+    try {
+      setVerifying(true);
+      setDecisionError(null);
+      const updatedPayment = await tenderBidService.verifyBidPayment(
+        bidId,
+        decision.payment.id,
+        {
+          isApproved: decision.isApproved,
+          notes: trimmedNotes || undefined,
+        }
+      );
+
+      let refreshFailed = false;
+      try {
+        await onRefresh(updatedPayment);
+      } catch (refreshError) {
+        refreshFailed = true;
+        console.error('Error refreshing tender fee payments:', refreshError);
+      }
+
+      const action = decision.isApproved ? 'approved' : 'rejected';
+      toast.success(`Tender fee payment ${action}.`);
+      if (refreshFailed) {
+        toast.error(
+          'The decision was saved, but the payment list could not be refreshed. Reload this page to confirm the latest status.'
+        );
+      }
+      setDecision(null);
+      setNotes('');
+      setDecisionError(null);
+      return true;
+    } catch (error) {
+      console.error('Error verifying tender fee payment:', error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Failed to update the tender fee payment.';
+      setDecisionError(message);
+      toast.error(message);
+      return false;
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Tender Fee Payments</CardTitle>
+          <CardDescription>
+            Review the supplier&apos;s recorded tender fee payments and their
+            verification status.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {payments.length === 0 ? (
+            <div className="rounded-lg border border-dashed py-10 text-center text-sm text-gray-500">
+              No tender fee payments have been recorded for this bid.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Payment reference</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Payment date</TableHead>
+                    <TableHead>Status</TableHead>
+                    {canVerifyPayment && (
+                      <TableHead className="text-right">Actions</TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payments.map((payment) => {
+                    const status = paymentStatusPresentation(payment.status);
+                    const isPending =
+                      payment.status.trim().toLowerCase() === 'pending';
+                    return (
+                      <TableRow key={payment.id}>
+                        <TableCell>
+                          <p className="font-medium">
+                            {payment.paymentReference || 'Not provided'}
+                          </p>
+                          {payment.transactionId && (
+                            <p className="text-xs text-gray-500">
+                              Transaction: {payment.transactionId}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {formatPaymentAmount(
+                            payment.amount,
+                            payment.currency
+                          )}
+                        </TableCell>
+                        <TableCell>{payment.paymentMethod || '—'}</TableCell>
+                        <TableCell>
+                          {formatPaymentDate(payment.paymentDate)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={status.className}>
+                            {status.label}
+                          </Badge>
+                          {payment.verifiedDate && (
+                            <p className="mt-1 text-xs text-gray-500">
+                              {payment.verifiedByName
+                                ? `By ${payment.verifiedByName} · `
+                                : ''}
+                              {formatPaymentDate(payment.verifiedDate)}
+                            </p>
+                          )}
+                        </TableCell>
+                        {canVerifyPayment && (
+                          <TableCell className="text-right">
+                            {isPending ? (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => openDecision(payment, true)}
+                                  aria-label={`Approve payment ${payment.paymentReference}`}
+                                >
+                                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => openDecision(payment, false)}
+                                  aria-label={`Reject payment ${payment.paymentReference}`}
+                                >
+                                  <XCircle className="mr-2 h-4 w-4" />
+                                  Reject
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-gray-500">
+                                Decision complete
+                              </span>
+                            )}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <ConfirmationDialog
+        open={Boolean(decision)}
+        onOpenChange={(open) => {
+          if (!open) closeDecision();
+        }}
+        title={
+          decision?.isApproved
+            ? 'Approve tender fee payment'
+            : 'Reject tender fee payment'
+        }
+        description={
+          decision
+            ? `${decision.isApproved ? 'Approve' : 'Reject'} payment ${decision.payment.paymentReference || 'without a reference'} for ${formatPaymentAmount(decision.payment.amount, decision.payment.currency)}.`
+            : undefined
+        }
+        confirmText={
+          decision?.isApproved ? 'Approve payment' : 'Reject payment'
+        }
+        cancelText="Cancel"
+        variant={decision?.isApproved ? 'default' : 'destructive'}
+        onConfirm={confirmDecision}
+        isLoading={verifying}
+      >
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="payment-decision-notes">
+              Decision notes{decision?.isApproved ? ' (optional)' : ''}
+            </Label>
+            <Textarea
+              id="payment-decision-notes"
+              value={notes}
+              onChange={(event) => {
+                setNotes(event.target.value);
+                if (decisionError) setDecisionError(null);
+              }}
+              placeholder={
+                decision?.isApproved
+                  ? 'Add verification notes for the audit record'
+                  : 'Enter the reason this payment is being rejected'
+              }
+              disabled={verifying}
+            />
+            {!decision?.isApproved && (
+              <p className="text-xs text-gray-500">
+                Required when rejecting a payment.
+              </p>
+            )}
+          </div>
+          {decisionError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Payment decision not completed</AlertTitle>
+              <AlertDescription>{decisionError}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      </ConfirmationDialog>
+    </>
+  );
 }
 
 export default function BidDetailPage() {
@@ -75,6 +392,20 @@ export default function BidDetailPage() {
   const [showOpenDialog, setShowOpenDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const canVetTenderBoq = hasPermission('quantity-survey.transactions.approve');
+  const canVerifyTenderPayment = hasPermission(
+    TENDER_PAYMENT_VERIFY_PERMISSION
+  );
+  const canAdministerTender = hasPermission('procurement.tender.administer');
+
+  const refreshPayments = async (updatedPayment: TenderPaymentDto) => {
+    setPayments((current) =>
+      current.map((payment) =>
+        payment.id === updatedPayment.id ? updatedPayment : payment
+      )
+    );
+    const paymentsData = await tenderBidService.getBidPayments(bidId);
+    setPayments(paymentsData);
+  };
 
   useEffect(() => {
     if (bidId) {
@@ -112,11 +443,19 @@ export default function BidDetailPage() {
   };
 
   const handleOpenBid = () => {
+    if (!canAdministerTender) {
+      toast.error('Tender administration permission is required to open bids.');
+      return;
+    }
     setShowOpenDialog(true);
   };
 
   const confirmOpenBid = async () => {
     if (!bid) return;
+    if (!canAdministerTender) {
+      toast.error('Tender administration permission is required to open bids.');
+      return false;
+    }
 
     try {
       setOpening(true);
@@ -126,7 +465,8 @@ export default function BidDetailPage() {
       toast.success('Bid marked as opened');
     } catch (error) {
       console.error('Error opening bid:', error);
-      toast.error('Failed to open bid');
+      toast.error(getProcurementProblemMessage(error, 'Failed to open bid'));
+      return false;
     } finally {
       setOpening(false);
     }
@@ -232,7 +572,7 @@ export default function BidDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {bid.status === 'Submitted' && (
+          {bid.status === 'Submitted' && canAdministerTender && (
             <Button onClick={handleOpenBid} disabled={opening}>
               <CheckCircle className="h-4 w-4 mr-2" />
               {opening ? 'Opening...' : 'Mark as Opened'}
@@ -315,7 +655,7 @@ export default function BidDetailPage() {
         className="space-y-4"
       >
         <TabsList
-          className={`grid w-full ${canVetTenderBoq ? 'grid-cols-7' : 'grid-cols-6'}`}
+          className={`grid w-full ${canVetTenderBoq ? 'grid-cols-8' : 'grid-cols-7'}`}
         >
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
@@ -341,6 +681,10 @@ export default function BidDetailPage() {
                 doc.documentType !== 'CommercialProposal'
             ).length || 0}
             )
+          </TabsTrigger>
+          <TabsTrigger value="payments">
+            <DollarSign className="h-4 w-4 mr-2" />
+            Payments ({payments.length})
           </TabsTrigger>
           {canVetTenderBoq && (
             <TabsTrigger value="qs-boq">
@@ -1078,6 +1422,16 @@ export default function BidDetailPage() {
           </Card>
         </TabsContent>
 
+        {/* Tender Fee Payments Tab */}
+        <TabsContent value="payments" className="space-y-4">
+          <TenderPaymentVerificationPanel
+            bidId={bidId}
+            payments={payments}
+            canVerifyPayment={canVerifyTenderPayment}
+            onRefresh={refreshPayments}
+          />
+        </TabsContent>
+
         {/* Evaluation Tab */}
         <TabsContent value="evaluation" className="space-y-4">
           <Card>
@@ -1362,7 +1716,7 @@ export default function BidDetailPage() {
 
       {/* Open Bid Confirmation Dialog */}
       <ConfirmationDialog
-        open={showOpenDialog}
+        open={showOpenDialog && canAdministerTender}
         onOpenChange={setShowOpenDialog}
         title="Mark Bid as Opened"
         description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."

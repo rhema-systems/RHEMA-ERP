@@ -625,7 +625,7 @@ public class TenderAward : TenantEntity
     public string? AwardJustification { get; set; }
 
     [MaxLength(50)]
-    public string Status { get; set; } = "Awarded"; // Awarded, ContractSigned, Cancelled
+    public string Status { get; set; } = "PendingApproval"; // PendingApproval, Awarded, Rejected, ContractSigned, Cancelled
 
     public Guid? PurchaseOrderId { get; set; } // Link to generated PO
 
@@ -1364,7 +1364,7 @@ public class TenderNegotiation : TenantEntity
     public decimal? NegotiatedAmount { get; set; }
 
     [MaxLength(3)]
-    public string? Currency { get; set; } = "USD";
+    public string? Currency { get; set; } = "GHS";
 
     public string? Notes { get; set; }
 

@@ -61,6 +61,7 @@ export function getProcurementProblemMessage(
   error: unknown,
   fallback = 'The request could not be completed.'
 ): string {
+  if (typeof error === 'string' && error.trim()) return error;
   if (!error || typeof error !== 'object') return fallback;
 
   const candidate = error as ProblemShape & {
