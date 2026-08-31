@@ -37,10 +37,42 @@ public sealed class FinanceIntegrationContractFoundationTests
         var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-001");
 
         contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
-        contract.Version.Should().Be("1.1");
-        contract.Notes.Should().Contain("Structured dimensions are optional");
+        contract.Version.Should().Be("1.2");
+        contract.EntryPoint.Should().Contain(nameof(FinancePostingProducerContext));
+        contract.Notes.Should().Contain("Structured dimensions remain additive");
+        contract.Notes.Should().Contain("compiled FinancePostingProducerContext");
         typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.Dimensions)).Should().NotBeNull();
         typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.FinanceDimensionSetId)).Should().NotBeNull();
+        typeof(FinanceSourceLineDimensionInputDto)
+            .GetProperty(nameof(FinanceSourceLineDimensionInputDto.SourceLineId)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void DimensionRouteCatalogueShouldKeepTrustedIdentityAndOwnershipBoundariesCodeOwned()
+    {
+        var routes = FinanceDimensionRouteCatalog.Routes;
+
+        routes.Select(route => route.Id).Should().OnlyHaveUniqueItems();
+        routes.Select(route => new
+            {
+                route.ProducerModule, route.SourceRoute, route.DocumentType, route.ContractVersion
+            })
+            .Should().OnlyHaveUniqueItems();
+
+        routes.Where(route => route.Owner.StartsWith("Finance", StringComparison.Ordinal))
+            .Select(route => route.Id).Should().Contain([
+                FinanceDimensionRouteId.ManualJournalEntry,
+                FinanceDimensionRouteId.FinanceApVendorInvoice,
+                FinanceDimensionRouteId.FinanceApSupplierDebitNote,
+                FinanceDimensionRouteId.FinanceArCustomerInvoice
+            ]);
+
+        var sales = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.SalesCreditNote);
+        sales.ProducerModule.Should().Be("Sales");
+        sales.PostingSourceModule.Should().Be("AR");
+        sales.DefaultState.Should().Be(FinanceDimensionCertificationState.CaptureOptional);
+        sales.Notes.Should().Contain("contract only");
+        routes.Should().NotContain(route => route.DocumentType == "CustomerPayment");
     }
 
     [Fact]

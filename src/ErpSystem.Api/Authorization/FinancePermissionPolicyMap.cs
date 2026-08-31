@@ -114,6 +114,9 @@ public static class FinancePermissionPolicyMap
             "SupplierDebitNotes" => SupplierDebitNotesPolicy(action),
             "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
             "FinanceDimensions" => ReadOrManage(action, methods, FinancePermissions.ManageCodingDimensions),
+            "FinanceDimensionCertifications" => action is "GetRoutes"
+                ? One(FinancePermissions.ViewFinance)
+                : One(FinancePermissions.ManageDimensionCertification),
             "PaymentBatch" => PaymentBatchPolicy(action),
             "ApReports" => ReportPolicy(action),
             "Invoice" => ArInvoicePolicy(action),

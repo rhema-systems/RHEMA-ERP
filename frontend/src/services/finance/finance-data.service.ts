@@ -75,6 +75,10 @@ import type {
     UpsertFinanceDimensionDefinition,
     UpsertFinanceDimensionValue,
     UpsertFinanceDimensionAccountRule,
+    FinanceDimensionRouteId,
+    FinanceDimensionRouteCertification,
+    FinanceDimensionReadinessAssessment,
+    FinanceDimensionCertificationState,
 } from '@/types/finance';
 import type {
     CreateOpeningStockAdjustmentDto,
@@ -200,6 +204,50 @@ class FinanceDataService {
         dto: UpsertFinanceDimensionAccountRule,
     ): Promise<FinanceDimensionAccountRule> {
         return apiService.put<FinanceDimensionAccountRule>(`/finance/dimensions/rules/${id}`, dto);
+    }
+
+    async getFinanceDimensionCertificationRoutes(): Promise<FinanceDimensionRouteCertification[]> {
+        return apiService.get<FinanceDimensionRouteCertification[]>('/finance/dimensions/certifications');
+    }
+
+    async assessFinanceDimensionRoute(
+        routeId: FinanceDimensionRouteId,
+        targetState: FinanceDimensionCertificationState = 'Enforced',
+    ): Promise<FinanceDimensionReadinessAssessment> {
+        return apiService.post<FinanceDimensionReadinessAssessment>(
+            `/finance/dimensions/certifications/${routeId}/readiness`,
+            { targetState },
+        );
+    }
+
+    async getFinanceDimensionReadinessAssessment(assessmentId: string): Promise<FinanceDimensionReadinessAssessment> {
+        return apiService.get<FinanceDimensionReadinessAssessment>(
+            `/finance/dimensions/certifications/readiness/${assessmentId}`,
+        );
+    }
+
+    async promoteFinanceDimensionRoute(
+        route: FinanceDimensionRouteCertification,
+        assessmentId: string,
+        reason: string,
+        targetState: FinanceDimensionCertificationState = 'Enforced',
+    ): Promise<FinanceDimensionRouteCertification> {
+        return apiService.post<FinanceDimensionRouteCertification>(
+            `/finance/dimensions/certifications/${route.routeId}/promote`,
+            {
+                readinessAssessmentId: assessmentId,
+                targetState,
+                reason,
+                effectiveDate: new Date().toISOString(),
+                rowVersion: route.rowVersion,
+            },
+        );
+    }
+
+    async downloadFinanceDimensionReadinessCsv(assessmentId: string): Promise<Blob> {
+        return apiService.downloadBlob(
+            `/finance/dimensions/certifications/readiness/${assessmentId}/csv`,
+        );
     }
 
     async createAccount(dto: CreateAccountDto): Promise<Account> {

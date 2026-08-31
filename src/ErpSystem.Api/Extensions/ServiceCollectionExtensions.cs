@@ -816,6 +816,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceDimensionAdministrationService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceDimensionReportingFilterService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionCertificationService, ErpSystem.Api.Services.Finance.GL.FinanceDimensionCertificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceDimensionAssignmentStore, ErpSystem.Api.Services.Finance.GL.FinanceSourceDimensionAssignmentStore>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchSpreadsheetService, ErpSystem.Api.Services.Finance.GL.JournalBatchSpreadsheetService>();
             // Recurring journals extend the existing GL posting pipeline. The

@@ -140,6 +140,9 @@
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionAdministrationServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionCertificationServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionSourceInfrastructureMigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceDimensionAssignmentStoreTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionReportingFilterTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceAccessScopeServiceTests.cs" />
