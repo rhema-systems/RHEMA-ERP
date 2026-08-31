@@ -1431,7 +1431,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 .AddPolicy(FinancePermissions.ConfigureFixedAssetCategoriesPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.AdministerFinance,
-                        FinancePermissions.ManageFixedAssets)));
+                        FinancePermissions.ManageFixedAssets)))
+                .AddPolicy(FinancePermissions.WithdrawJournalApprovalPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.SubmitJournalEntries,
+                        FinancePermissions.WorkflowCancel)));
 
             foreach (var permission in FinancePermissions.All)
             {

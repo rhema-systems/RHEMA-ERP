@@ -440,7 +440,9 @@ public static class FinancePermissionPolicyMap
             "PostJournalEntry" => One(FinancePermissions.PostJournalEntries),
             "ReverseJournalEntry" => One(FinancePermissions.ReverseJournalEntries),
             "RequestApproval" => One(FinancePermissions.SubmitJournalEntries),
-            "WithdrawApproval" => One(FinancePermissions.WorkflowCancel),
+            // Submitters may recall their own request; WorkflowCancel grants the controlled
+            // administrative override. The action performs the resource-level ownership check.
+            "WithdrawApproval" => One(FinancePermissions.WithdrawJournalApprovalPolicy),
             "ApproveJournalEntry" => One(FinancePermissions.ApproveJournalEntries),
             "RejectJournalEntry" => One(FinancePermissions.ApproveJournalEntries),
             "GetPendingApprovals" => One(FinancePermissions.ApproveJournalEntries),

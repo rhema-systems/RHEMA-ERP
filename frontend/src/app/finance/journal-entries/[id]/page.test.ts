@@ -40,4 +40,17 @@ describe('Journal entry action visibility', () => {
     );
     expect(pageSource).toContain("'Posted before entry'");
   });
+
+  it('only offers withdrawal to a submit-authorised requester or workflow canceller', () => {
+    expect(pageSource).toContain("hasPermission('Finance.JournalEntries.SubmitForApproval')");
+    expect(pageSource).toContain("hasPermission('Finance.Workflow.Cancel')");
+    expect(pageSource).toContain('(canSubmitForApproval && workflowSummary?.canCurrentUserRecall === true) || canCancelAnyWorkflow');
+    expect(pageSource).not.toContain('(isCreator || canSubmitForApproval || canEdit || canDelete)');
+  });
+
+  it('requires the user to provide the withdrawal reason sent to the API', () => {
+    expect(pageSource).toContain('placeholder="Enter withdrawal reason (required)..."');
+    expect(pageSource).toContain('withdrawJournalEntryApproval(entry.id, withdrawalReason.trim())');
+    expect(pageSource).not.toContain("withdrawJournalEntryApproval(entry.id, 'Approval request withdrawn by user.')");
+  });
 });

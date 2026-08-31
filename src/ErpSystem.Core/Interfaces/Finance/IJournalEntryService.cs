@@ -113,6 +113,16 @@ namespace ErpSystem.Core.Interfaces.Finance
             string? rejectionReason = null,
             CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Returns a pending journal approval to Draft while retaining distinct withdrawal metadata.
+        /// The caller coordinates cancellation of the active workflow in the same database transaction.
+        /// </summary>
+        Task WithdrawApprovalAsync(
+            Guid id,
+            Guid withdrawnByUserId,
+            string reason,
+            CancellationToken cancellationToken = default);
+
         Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
         Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
