@@ -1317,15 +1317,10 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         }
 
         var now = DateTime.UtcNow;
-        if (IsGovernedFinanceOpeningBatch(batch) && _workflowService == null)
-        {
-            throw new InvalidOperationException(
-                "Governed bank and residual opening sources require the Finance approval workflow; approval cannot be inferred when workflow integration is unavailable.");
-        }
         if (_workflowService == null)
         {
-            batch.Status = StatusApproved;
-            batch.ApprovedAt = now;
+            throw new InvalidOperationException(
+                "Controlled opening balances require the Finance approval workflow; approval cannot be inferred when workflow integration is unavailable.");
         }
         else
         {
@@ -1348,34 +1343,26 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             }
 
             batch.WorkflowInstanceId = workflowResult.WorkflowInstanceId;
-            if (IsGovernedFinanceOpeningBatch(batch))
+            var isActiveWorkflow = workflowResult.WorkflowInstanceId.HasValue &&
+                workflowResult.WorkflowInstanceId.Value != Guid.Empty &&
+                workflowResult.Status is WorkflowInstanceStatus.Created or
+                    WorkflowInstanceStatus.InProgress or
+                    WorkflowInstanceStatus.Waiting or
+                    WorkflowInstanceStatus.Suspended;
+            if (!isActiveWorkflow)
             {
-                var isActiveWorkflow = workflowResult.WorkflowInstanceId.HasValue &&
-                    workflowResult.WorkflowInstanceId.Value != Guid.Empty &&
-                    workflowResult.Status is WorkflowInstanceStatus.Created or
-                        WorkflowInstanceStatus.InProgress or
-                        WorkflowInstanceStatus.Waiting or
-                        WorkflowInstanceStatus.Suspended;
-                if (!isActiveWorkflow)
-                {
-                    batch.Status = StatusFailed;
-                    batch.FailedAt = now;
-                    batch.FailureReason =
-                        "Governed opening approval must start as a real pending workflow; completed-at-start or missing workflow evidence cannot auto-approve the source.";
-                    await _db.SaveChangesAsync(cancellationToken);
-                    await RecordAuditAsync(
-                        FinanceAuditEvents.FinanceWorkflowApprovalFailed,
-                        batch,
-                        afterValues: new { workflowResult.Status, workflowResult.WorkflowInstanceId },
-                        reason: batch.FailureReason,
-                        cancellationToken: cancellationToken);
-                    throw new InvalidOperationException(batch.FailureReason);
-                }
-            }
-            else if (workflowResult.Status == WorkflowInstanceStatus.Completed)
-            {
-                batch.Status = StatusApproved;
-                batch.ApprovedAt = now;
+                batch.Status = StatusFailed;
+                batch.FailedAt = now;
+                batch.FailureReason =
+                    "Opening-balance approval must start as a real pending workflow; completed-at-start or missing workflow evidence cannot auto-approve the source.";
+                await _db.SaveChangesAsync(cancellationToken);
+                await RecordAuditAsync(
+                    FinanceAuditEvents.FinanceWorkflowApprovalFailed,
+                    batch,
+                    afterValues: new { workflowResult.Status, workflowResult.WorkflowInstanceId },
+                    reason: batch.FailureReason,
+                    cancellationToken: cancellationToken);
+                throw new InvalidOperationException(batch.FailureReason);
             }
         }
 

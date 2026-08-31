@@ -905,7 +905,7 @@ public sealed class ControlledOpeningBalancePostingTests
         };
         db.BankAccounts.Add(bank);
         await db.SaveChangesAsync();
-        var service = CreateService(db, tenantId);
+        var service = CreateService(db, tenantId, withoutWorkflow: true);
         var created = await service.CreateBankAccountOpeningBatchAsync(new CreateBankAccountOpeningBalanceDto
         {
             SourceReference = "BANK-MAPPING-SNAPSHOT",
@@ -929,7 +929,7 @@ public sealed class ControlledOpeningBalancePostingTests
         await db.SaveChangesAsync();
         await FluentActions.Awaiting(() => service.SubmitForApprovalAsync(created.Id))
             .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Governed bank and residual opening sources require the Finance approval workflow*");
+            .WithMessage("Controlled opening balances require the Finance approval workflow*");
     }
 
     [Fact]
@@ -1100,8 +1100,10 @@ public sealed class ControlledOpeningBalancePostingTests
         });
 
         await service.SubmitForApprovalAsync(supplierBatch.Id);
+        await ApproveBatchAsync(db, supplierBatch.Id);
         await service.PostAsync(supplierBatch.Id);
         await service.SubmitForApprovalAsync(customerBatch.Id);
+        await ApproveBatchAsync(db, customerBatch.Id);
         await service.PostAsync(customerBatch.Id);
 
         var supplierAdvance = await db.Set<VendorPayment>().SingleAsync(payment => payment.OpeningBalanceBatchId == supplierBatch.Id);
@@ -1186,6 +1188,7 @@ public sealed class ControlledOpeningBalancePostingTests
         payment.ExchangeRateId.Should().Be(rate.Id);
 
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var posted = await service.PostAsync(batch.Id);
         posted.Status.Should().Be("Posted");
         var postedLine = await db.AccountTransactions.SingleAsync(transaction =>
@@ -1235,8 +1238,10 @@ public sealed class ControlledOpeningBalancePostingTests
         });
 
         await service.SubmitForApprovalAsync(apBatch.Id);
+        await ApproveBatchAsync(db, apBatch.Id);
         await service.PostAsync(apBatch.Id);
         await service.SubmitForApprovalAsync(arBatch.Id);
+        await ApproveBatchAsync(db, arBatch.Id);
         await service.PostAsync(arBatch.Id);
 
         var compliance = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
@@ -1318,6 +1323,7 @@ public sealed class ControlledOpeningBalancePostingTests
             line.CreditAmount == 800m);
 
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var posted = await service.PostAsync(batch.Id);
 
         posted.Status.Should().Be("Posted");
@@ -1478,6 +1484,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var posted = await service.PostAsync(batch.Id);
 
         posted.Status.Should().Be("Posted");
@@ -1700,6 +1707,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var act = () => service.PostAsync(batch.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -1763,6 +1771,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var first = await service.PostAsync(batch.Id);
         var second = await service.PostAsync(batch.Id);
 
@@ -1799,6 +1808,26 @@ public sealed class ControlledOpeningBalancePostingTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Opening balance batch must be approved before posting.");
         workflow.Verify(x => x.StartApprovalWorkflowAsync("OpeningBalanceBatch", batch.Id), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Workflow")]
+    public async Task StandardOpening_ShouldFailClosedWhenWorkflowIsUnavailable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId, withoutWorkflow: true);
+        var batch = await service.CreateBatchAsync(
+            CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+
+        await FluentActions.Awaiting(() => service.SubmitForApprovalAsync(batch.Id))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Controlled opening balances require the Finance approval workflow*");
+
+        (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Draft");
     }
 
     [Fact]
@@ -2770,6 +2799,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var service = CreateService(db, tenantId);
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         await service.PostAsync(batch.Id);
         return fixture;
     }
@@ -2780,7 +2810,8 @@ public sealed class ControlledOpeningBalancePostingTests
         bool withAudit = false,
         IWorkflowService? workflow = null,
         IFinanceAuditService? auditOverride = null,
-        ILogger<OpeningBalanceService>? logger = null)
+        ILogger<OpeningBalanceService>? logger = null,
+        bool withoutWorkflow = false)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var audit = auditOverride ?? (withAudit
@@ -2797,7 +2828,7 @@ public sealed class ControlledOpeningBalancePostingTests
             currentUser.Object,
             postingEngine,
             audit,
-            workflow,
+            withoutWorkflow ? null : workflow ?? CreatePendingOpeningWorkflow(),
             logger);
     }
 
