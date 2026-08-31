@@ -17,6 +17,7 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260815005453_AddCivilEngineeringReconnaissance")] partial class AddCivilEngineeringReconnaissance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260815031044_AddCivilEngineeringDesignInputRequests")] partial class AddCivilEngineeringDesignInputRequests { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260815135156_AddCivilEngineeringDocumentRegister")] partial class AddCivilEngineeringDocumentRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260820120000_AddDmsGenerationTemplateWordSource")] partial class AddDmsGenerationTemplateWordSource { }
 
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage")] partial class AllowReceiptDocumentDefaultsWithAuditLineage { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster")] partial class AlignRfqCommercialIdentityWithReceiptItemMaster { }
