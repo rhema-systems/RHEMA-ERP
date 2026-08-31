@@ -4,9 +4,9 @@
     "next-env.d.ts",
     "src/types/hr/**/*.ts",
     "src/services/hr/**/*.ts",
-    "src/app/hr/movements/**/*.tsx",
-    "src/components/hr/medical/**/*.tsx",
-    "src/components/hr/movements/**/*.tsx",
+    "src/app/hr/**/*.tsx",
+    "src/app/administration/hr/**/*.tsx",
+    "src/components/hr/**/*.tsx",
     "src/components/layout/sidebar.tsx"
   ]
 }

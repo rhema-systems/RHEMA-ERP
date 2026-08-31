@@ -40,11 +40,24 @@ DISPOSITIONS = {
     "TalentPoolController.cs":
         ("DONE", "Built 2026-08-30 (recruitment closure, slice 1). The pool CRM lives at /hr/recruitment/talent-pool with pool/engagement tabs on candidate detail and stage-owner/pool-match tabs on vacancy detail; all 12 writes left the queue on their own. Verified by hr-recruitment/slice-e, 102 assertions ×2. Ten backend defects cleared first — the 21-of-40-field pool read, the tenantless paging query, the dead SegmentIds, the never-populated BySegment, the bulk false successes, and the missing [RecruitmentBusinessRules] among them."),
     "EmployeeBanksController.cs":
-        ("BUILD", "Banks and branches reference data has no maintenance screen."),
+        ("DONE", "Built 2026-08-31 (lane 2). /administration/hr/banks and banks/[id] cover all TEN "
+                 "writes — bank add/edit/retire/restore/delete and the same five for branches "
+                 "— with a nav entry. The queue counted 4 because only those agreed across both "
+                 "instruments; the family had no screen of any kind. One backend defect cleared "
+                 "first: BranchCount was hardcoded ToDto(0) on four of the five reads, so a list "
+                 "would have shown every bank with zero branches."),
     "LocationContactController.cs":
-        ("BUILD", "No screen."),
+        ("DONE", "Built 2026-08-31 (lane 2). A contacts panel on the location edit screen. "
+                 "⚠ The create had NEVER ONCE SUCCEEDED: the service did not stamp TenantId, so "
+                 "every insert died on FK_LocationContacts_Tenants_TenantId and the controller "
+                 "returned a bare 500. Found by the payload probe running it for the first time — "
+                 "a dead path cannot fail visibly."),
     "EmployeeCareerPathController.cs":
-        ("BUILD", "Decided 2026-08-28: career paths are NOT server-write-only and should have a UI."),
+        ("DONE", "Built 2026-08-31 (lane 2). The timeline on /hr/movements/career-paths/[employeeId] "
+                 "can be annotated, corrected and added to. The edit offers only the four fields the "
+                 "server takes — end date, current flag, achievements, key projects — because the "
+                 "position, unit and salary are what the movement engine wrote and are corrected by "
+                 "correcting the movement."),
     "SalaryNotchesController.cs":
         ("INTENTIONAL", "Decided 2026-08-28: read-only by intent — payroll owns the grade master."),
     "SalaryLevelsController.cs":
@@ -78,7 +91,12 @@ DISPOSITIONS = {
                   "alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and "
                   "the two review-meeting writes duplicate api/PipMeeting. See D2."),
     "JobAnalysisController.cs":
-        ("BUILD", "The reference case. Eleven child collections with full CRUD and a read-only UI."),
+        ("DONE", "The child collections were built 2026-08-29 (slice 13) and the manpower budget "
+                 "edit/delete plus line edit/delete on 2026-08-31 (lane 2). ⚠ The budget update is "
+                 "a REPLACE — the DTO names every figure — so the dialog seeds from the budget and "
+                 "sends the whole set; omitting one writes a zero over it. Edits are Write-tier and "
+                 "both deletes are HR.ManpowerBudget.Admin, established by a 403 rather than "
+                 "assumed."),
     "StaffDisciplineSupportController.cs":
         ("BUILD", "Action steps and legal reviews are displayed but can never be recorded."),
     "StaffDisciplineSubEntityController.cs":
@@ -115,11 +133,24 @@ DISPOSITIONS = {
     "TalentPoolsController.cs":
         ("DONE", "Built 2026-08-30 (slice 19). A pool member's documents open from the members table on /hr/succession/pools/{id}, on the shared succession-document panel. The remaining flags are the metadata-only POST and the development-activity duplicate."),
     "TrainingServiceBondsController.cs":
-        ("BUILD", "Classified 2026-08-29: all 3 real. Bonds are minted server-side on nomination submit, so a bond with the wrong amount copied off its program has no correction path - and it is money."),
+        ("DONE", "Built 2026-08-31 (lane 2). Raise, correct and delete on /hr/service-bonds. The "
+                 "correction is the one that mattered: amount and duration are copied from the "
+                 "programme when the server mints the bond, so a programme priced wrongly mints "
+                 "every bond wrongly — and the only remedy was to delete and re-raise, throwing "
+                 "away the acceptance the employee had already signed. The delete is offered only "
+                 "before acceptance; an accepted bond is waived instead."),
     "PositionVacanciesController.cs":
-        ("BUILD", "Classified 2026-08-29: all 3 real. The establishment screen wires reconcile and raise-requisition only; a vacancy cannot be closed by hand, annotated, or have its status set."),
+        ("DONE", "Built 2026-08-31 (lane 2). Close, annotate and set-status on the establishment "
+                 "screen, each dialog saying what it is FOR, because reconcile normally owns all "
+                 "three: closing is for a post the organisation has decided not to fill, which "
+                 "reconcile cannot see, so it sat open for ever. ⚠ The notes dialog fetches the "
+                 "BY-ID read — PositionVacancySummaryDto has no `notes`, so seeding from the row "
+                 "would open empty and save a blank over whatever was written."),
     "CheckInsController.cs":
-        ("BUILD", "Classified 2026-08-29: both real. Goals and review events wire an attachment panel; check-ins do not."),
+        ("DONE", "Built 2026-08-31 (lane 2). An attachments card on the check-in detail, sharing "
+                 "one panel with the appraisal family — the two are the same four routes with a "
+                 "different prefix. No backend change: the endpoint was already IFormFile through "
+                 "the controlled gate, so the FilePath DTO beside it is a leftover."),
     "NHISClaimsController.cs":
         ("DONE", "Built 2026-08-30 (slice 19). The claims list gained a Documents dialog at every status - the scheme's rejection letter arrives after the decision and the attendance record before it - driving the gated upload, the download and the Admin-tier delete. No backend change was needed: D-14 had already built and harness-verified the whole transport in the medical slice-5 run, and it had simply never had a caller. The one remaining flag is the metadata-only POST."),
     "StaffDemotionsController.cs":
@@ -153,7 +184,9 @@ DISPOSITIONS = {
     "JobInterviewController.cs":
         ("DONE", "Built 2026-08-30 (recruitment closure, slice 1): one edit dialog on the interview panel serves internal and external rows — the internal updatePanelist had a client method and no caller, so both were dark. The service also gained the UpdatedAt/UpdatedBy stamps it silently lacked."),
     "LeaveTypesController.cs":
-        ("BUILD", "Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either."),
+        ("DONE", "Built 2026-08-31 (lane 2). A retire action on the leave-types list, with a "
+                 "confirmation that says plainly there is no delete — 405 by design, because a "
+                 "leave type is referenced by every request ever made against it."),
     "StaffActingAppointmentsController.cs":
         ("DONE", "Built 2026-08-30 (slice 22). The edit is on /hr/movements/acting, offered on anything not yet Completed because the API refuses it after that. It carries allowanceCalculation, which section E listed as settable by no form — the TypeScript type had only the resolved NAME, so a control had nothing to bind to."),
     "StaffPromotionsController.cs":
@@ -165,9 +198,20 @@ DISPOSITIONS = {
     "StaffTravelComplianceController.cs":
         ("DONE", "Built 2026-08-30 (slice 21). The destination-alert feed is authorable at /administration/hr/travel/alerts, alerts are sent to a named traveller from the trip's compliance tab, and the traveller reads and acknowledges them on /me/travel. Three defects cleared first - D-31, D-32 and the notification create response, which resolved none of its three names."),
     "TrainingCompletionsController.cs":
-        ("BUILD", "Classified 2026-08-29: real, and already in section F - bulk completion has no UI."),
+        ("DONE", "Built 2026-08-31 (lane 2). A Completion tab on the schedule: tick who finished, "
+                 "set the date and outcome, record in one pass. ⚠ The server checks only for a "
+                 "completion that already exists — not that the nomination belongs to this "
+                 "schedule, nor that anyone was ever confirmed (the probe recorded a completion "
+                 "against a DRAFT nomination without complaint) — so the screen is the constraint, "
+                 "and it shows every skipped row with its reason rather than reporting success for "
+                 "work it did not do."),
     "TrainingNominationsController.cs":
-        ("BUILD", "Classified 2026-08-29: real, and already in section F - the availability check is never shown."),
+        ("DONE", "Built 2026-08-31 (lane 2). A 'Check availability' button in the nominate dialog, "
+                 "showing leave, travel and other live nominations over the schedule's dates. "
+                 "Advisory rather than a gate — leave gets cancelled, travel moves — but it "
+                 "distinguishes 'checked and clear' from 'not checked', which is the whole value. "
+                 "⚠ Proven both ways: a DRAFT nomination elsewhere is correctly not a clash, the "
+                 "same one live is. An empty list would otherwise have been a vacuous green."),
     "CalibrationSessionsController.cs":
         ("FALSE", "hrDocumentService.upload artefact."),
     "UnitGoalsController.cs":
@@ -241,6 +285,80 @@ ENDPOINT_DISPOSITIONS = {}
 def _d(file, rows):
     for verb, route, verdict in rows:
         ENDPOINT_DISPOSITIONS[(file, verb, route)] = verdict
+
+
+# ── Awards — 15 flagged, classified 2026-08-31 (lane 2 triage) ───────────────
+# The last controller-level `REVIEW` row in the queue, and the note beside it guessed wrong: it
+# supposed "most of these are probably helper artefacts", and only ONE is. Eleven are real.
+_d("AwardsController.cs", [
+    ("POST", "api/Awards/types/{}/long-service/sweep",
+     ("FALSE", "Wired as `runLongServiceSweep`, which appends `?asOf=` — the interpolated "
+               "query-string artefact: instrument 01 folds the `${query}` into the path segment "
+               "instead of dropping it. The preview beside it is a GET, which 01 skips outright.")),
+
+    # The desk's own nomination routes. Area 14 decided the nominator acts from their own surface,
+    # where entitlement is read off the record rather than asserted by a caller.
+    ("POST", "api/Awards/nominations",
+     ("INTENTIONAL", "Nominating is the nominator's act, not the desk's: the frontend calls "
+                     "`POST api/awards/me/nominations`, which takes no employee id and so cannot "
+                     "nominate in someone else's name. Same shape as the employee-portal principle "
+                     "recorded for Assets.")),
+    ("PUT", "api/Awards/nominations/{}",
+     ("INTENTIONAL", "Served by `PUT api/awards/me/nominations/{}` for the same reason.")),
+    ("POST", "api/Awards/nominations/{}/submit",
+     ("INTENTIONAL", "Served by `POST api/awards/me/nominations/{}/submit` for the same reason.")),
+
+    # The missing edit, four times — the queue's dominant real shape. Create and delete are wired
+    # in every one of these; only the correction is absent, so a mistake must be deleted and redone,
+    # which changes what the record says happened.
+    ("PUT", "api/Awards/targets/{}",
+     ("DONE", "Built 2026-08-31 (lane 2). The scope dialog now edits as well as adds, on BOTH tables — the electorate table had no actions column at all, so a rule about who may vote could be added and then neither corrected nor removed. ⚠ The edit has teeth: flipping isExclusion made the probe's own nominee ineligible and the nomination was refused quoting the reason text back. ORIGINAL: A cycle target can be created (`POST targets`) and deleted (`DELETE targets/{}`) "
+               "and not corrected.")),
+    ("PUT", "api/Awards/team-nominees/{}",
+     ("DONE", "Built 2026-08-31 (lane 2). A team member's role, contribution summary and share are correctable. The share decides what each member is PAID. ORIGINAL: A team member's role, contribution summary and reward percentage cannot be "
+               "corrected once named; create and delete are both wired.")),
+    ("PUT", "api/Awards/contributions/{}",
+     ("DONE", "Built 2026-08-31 (lane 2). Reworded in place on the nomination screen rather than deleted and retyped, which would lose who recorded it and when. ORIGINAL: A contribution can be added and removed, never reworded.")),
+    ("PUT", "api/Awards/committee-members/{}",
+     ("DONE", "Built 2026-08-31 (lane 2). Correcting a member is not deactivating them: deactivation ends their entitlement to score and keeps their scores attributable; this fixes what the record says. ORIGINAL: A committee member can be added, deactivated and deleted, but their role on the "
+               "committee cannot be corrected.")),
+
+    ("POST", "api/Awards/long-service",
+     ("DONE", "Built 2026-08-31 (lane 2). By hand, for the award the sweep cannot see — a missing service date, or one agreed separately. The sweep remains the normal path. ORIGINAL: A long-service award can only come into being through the sweep. One granted with "
+               "the wrong value has no manual counterpart to correct it against — and it is money, "
+               "the same shape as TrainingServiceBonds.")),
+    ("PUT", "api/Awards/long-service/{}",
+     ("DONE", "Built 2026-08-31 (lane 2). ⚠ Seeded from the BY-ID read, never the row: the summary carries five fields and the update takes eight, so a row-seeded form would blank the description, leave bonus and benefits on save. isProcessed/presentationDate/presentationNotes are carried through unchanged, or a correction would un-present an award somebody had already presented. ORIGINAL: The correction itself. `DELETE long-service/{}` and `POST long-service/{}/process` "
+               "are wired; the edit is not.")),
+
+    # The attachment family: five routes, no upload surface anywhere in the area, AND a backend
+    # blocker in front of them. See D-39.
+    ("POST", "api/Awards/{}/attachments",
+     ("DONE", "Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39: the DTO takes `FileName` and `FilePath` as JSON, so a screen over "
+               "it would ship the caller-supplied path sink area 16 replaced.")),
+    ("DELETE", "api/Awards/attachments/{}",
+     ("DONE", "Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39, with the POST it belongs to.")),
+    ("POST", "api/Awards/nominations/{}/attachments",
+     ("DONE", "Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39. `grep -ri attachment` over the awards screens and service returns "
+               "nothing at all: the evidence a nomination is supposed to carry has never been "
+               "uploadable.")),
+    ("PUT", "api/Awards/nomination-attachments/{}",
+     ("BUILD", "Still open, and deliberately: D-39 gave the family an upload, a list, a download "
+               "and a delete, but the panel offers no way to change an attachment's TYPE or "
+               "description after the fact. Re-upload and delete is the workaround; a small edit "
+               "dialog would close it.")),
+    ("DELETE", "api/Awards/nomination-attachments/{}",
+     ("DONE", "Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39.")),
+])
+
+# ── Candidate — 3 flagged, classified 2026-08-31: all wired ──────────────────
+_d("CandidateController.cs", [
+    ("POST", "api/candidate/profile/photo", _HELPER),
+    ("POST", "api/candidate/documents", _HELPER),
+])
+_d("JobCandidatesController.cs", [
+    ("POST", "api/job-candidates/{}/documents", _HELPER),
+])
 
 
 # ── Assets — 12 flagged: 2 artefacts, 2 portal duplicates, 8 real ────────────
@@ -1435,6 +1553,38 @@ BLOCKERS = [
      "timer is a policy decision for TDC, not a defect to fix.",
      "Cleared. Two engines that had never run now do, and a third is scheduled for the first "
      "time"),
+    ("D-39", "The awards attachment family is on a caller-supplied file path", "DONE 2026-08-31",
+     "Found by the lane-2 triage of the `Awards` queue rows, 2026-08-31. `CreateAwardAttachmentDto` "
+     "and `CreateAwardNominationAttachmentDto` take **`FileName` and `FilePath` as JSON** and store "
+     "them: the sixth instance of the path sink, and the exact shape area 16 replaced — where "
+     "the \"attachment\" is a string somebody typed and the list renders it beautifully.\n\n"
+     "  ⚠ It is untouched rather than in use: `grep -ri attachment` over the awards screens "
+     "and the awards service returns **nothing at all**. So five endpoints have no caller because "
+     "the area has no upload surface, and building one over the DTO as it stands would ship the "
+     "sink rather than close it. The evidence a nomination is meant to carry — the citation, "
+     "the supporting letter — has never been attachable.\n\n"
+     "  The fix is the established one and is mechanical: `HrAttachmentUpload.ExecuteAsync` on the "
+     "way in, `HrDocumentDownload.ServeAsync` on the way out, a category constant registered in "
+     "`SystemCleanScanRequired` (a declared category is not a registered one — D-11), then "
+     "`DocumentUploadField` and `hrDocumentService` on the screens.\n\n"
+     "  **Done 2026-08-31.** Migration `20260831135847_AddAwardAttachmentDmsColumns` (eight "
+     "nullable columns, guarded on `COL_LENGTH` like its three siblings, because `rebuild-db` "
+     "builds from the model and a bare AddColumn fails on a database that already has them). "
+     "`FileName` and `FilePath` are GONE from both create DTOs: the file arrives as multipart "
+     "through `HrAttachmentUpload`, and the gate's facts reach the service as PARAMETERS rather "
+     "than DTO fields, so a caller may describe what a file is and may not say where it lives. "
+     "Both families gained a token-bearing download through `HrDocumentDownload`. Category "
+     "`hr-award-attachments` declared AND registered in `SystemCleanScanRequired` in the same "
+     "commit, so the D-11 half-job cannot recur.\n\n"
+     "  ⚠ **Proven by `hr-awards/probe-d39-attachments.mjs`, 16 assertions — the first "
+     "time an award attachment has ever existed.** Upload, then: the stored name is the FILE's "
+     "and the size is what the gate measured (not what a caller claimed); the download returns "
+     "the same bytes, which a caller-supplied path could never promise; a JSON body naming "
+     "`C:\\Windows\\System32\\config\\SAM` is refused with 415; and the delete is "
+     "Admin-tier while the desk gets 403.\n\n"
+     "  Two rules refused shortcuts on the way and named themselves: a CommitteeScore award "
+     "cannot be conferred directly (AWD-07) and a draft nomination cannot be conferred at all.",
+     "Cleared. Four of the five endpoints are wired; the attachment EDIT is still open (see D2)"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "

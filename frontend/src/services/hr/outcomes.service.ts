@@ -211,6 +211,48 @@ class TrainingServiceBondService {
     return apiService.get<TrainingServiceBond[]>(this.baseUrl, status ? { status } : undefined);
   }
 
+  /**
+   * Raise a bond by hand.
+   *
+   * ⚠ Bonds are normally MINTED SERVER-SIDE when a sponsored nomination is submitted, which is
+   * why this had no caller. It is the exception: a sponsorship agreed outside the nomination flow,
+   * or one the programme's own terms did not produce.
+   */
+  create(payload: {
+    nominationId: string;
+    bondDurationMonths: number;
+    bondAmount: number;
+    currency: string;
+    termsText?: string | null;
+    notes?: string | null;
+  }): Promise<TrainingServiceBond> {
+    return apiService.post<TrainingServiceBond>(this.baseUrl, payload);
+  }
+
+  /**
+   * Correct one.
+   *
+   * ⚠ **This is money.** The amount and the duration are copied from the programme when the bond
+   * is minted, so a programme priced wrongly mints every bond wrongly — and until this existed the
+   * only correction was to delete the bond and raise another, which loses the acceptance the
+   * employee has already given. The edit keeps the row and its signature.
+   */
+  update(id: string, payload: {
+    id: string;
+    bondDurationMonths: number;
+    bondAmount: number;
+    currency: string;
+    termsText?: string | null;
+    notes?: string | null;
+  }): Promise<TrainingServiceBond> {
+    return apiService.put<TrainingServiceBond>(`${this.baseUrl}/${id}`, payload);
+  }
+
+  /** For one raised in error. A bond that was accepted should be waived, not deleted. */
+  remove(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
   getActive(): Promise<TrainingServiceBond[]> {
     return apiService.get<TrainingServiceBond[]>(`${this.baseUrl}/active`);
   }

@@ -653,3 +653,31 @@ export interface RejectTrainingRequestRequest {
   requestId: string;
   rejectionReason: string;
 }
+
+/**
+ * A commitment that overlaps a schedule's dates.
+ *
+ * ⚠ `source` is one of `Leave`, `Travel` or `Training`; the check reports each separately rather
+ * than collapsing them, because "on leave" and "already booked on another course" need different
+ * answers from the person nominating.
+ */
+export interface NomineeConflict {
+  employeeId: string;
+  source: 'Leave' | 'Travel' | 'Training' | string;
+  description: string;
+  fromDate: string;
+  toDate: string;
+}
+
+/**
+ * What a bulk completion pass did.
+ *
+ * ⚠ `skipped` is the important half: the endpoint drops rows rather than failing, so a screen that
+ * ignores this reports success for work it did not do. The only skip reason the service produces
+ * today is "Completion already recorded."
+ */
+export interface BulkCompletionResult {
+  requestedCount: number;
+  createdCount: number;
+  skipped: { nominationId: string; reason: string }[];
+}

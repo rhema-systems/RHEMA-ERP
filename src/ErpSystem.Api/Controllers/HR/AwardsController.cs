@@ -2,10 +2,15 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Entities.HR.Awards;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Api.Services.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -91,7 +96,12 @@ public class AwardsController : HrControllerBase
         IAwardCandidateGenerationService generationService,
         ILongServiceMilestoneService milestoneService,
         ILongServiceSweepService sweepService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ILogger<AwardsController> logger)
         : base(currentUser)
     {
         _awardTypeService = awardTypeService;
@@ -115,7 +125,19 @@ public class AwardsController : HrControllerBase
         _generationService = generationService;
         _milestoneService = milestoneService;
         _sweepService = sweepService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
+
+    // The controlled-upload gate and the streamed download (ledger D-39).
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<AwardsController> _logger;
 
     #region Award Types
 
@@ -588,18 +610,72 @@ public class AwardsController : HrControllerBase
         return result == null ? NotFound() : Ok(result);
     }
 
+    /// <summary>
+    /// Attach a file to an award, through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Replaces a JSON endpoint that took a caller-supplied <c>filePath</c> (ledger D-39).</b>
+    /// The old shape stored whatever string arrived, so an "attachment" was text somebody typed and
+    /// the list rendered it beautifully. Nothing ever called it, which is why the defect survived
+    /// the port: a dead path cannot fail visibly.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.AwardsWritePolicy)]
     [HttpPost("{awardId:guid}/attachments")]
-    public async Task<ActionResult<AwardAttachmentDto>> AddAwardAttachment(
+    [ProducesResponseType(typeof(AwardAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> AddAwardAttachment(
         Guid awardId,
-        [FromBody] CreateAwardAttachmentDto dto)
+        IFormFile file,
+        [FromForm] AwardAttachmentType attachmentType,
+        [FromForm] string? description,
+        CancellationToken cancellationToken = default)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
         if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
-        dto.AwardId = awardId;
-        var created = await _awardAttachmentService.CreateAsync(tenantId, awardId, userId, dto);
-        return CreatedAtAction(nameof(GetAwardAttachment), new { id = created.Id }, created);
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: "EmployeeAward",
+            sourceRecordId: awardId,
+            sourceLabel: "Award attachment",
+            documentType: attachmentType.ToString(),
+            description: description,
+            persist: (uploadedById, document) => _awardAttachmentService.CreateAsync(
+                tenantId, awardId, uploadedById, userId,
+                new CreateAwardAttachmentDto
+                {
+                    AwardId = awardId,
+                    AttachmentType = attachmentType,
+                    Description = description,
+                },
+                document.OriginalFileName, document.FilePath, document.FileSize,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken,
+            category: ControlledFileUploadCategories.HrAwardAttachments);
+    }
+
+    /// <summary>Streams an award attachment — the file lives outside the web root.</summary>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("attachments/{id:guid}/download")]
+    public async Task<IActionResult> DownloadAwardAttachment(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // ⚠ The entitlement check is the CALLING endpoint's, always: neither the download helper nor
+        // the DMS performs one. The row is read here rather than through the DTO because the gate's
+        // three record ids are the server's business and have no place on the API surface.
+        var attachment = await _db.Set<AwardAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted, cancellationToken);
+
+        if (attachment is null) return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId, attachment.FileUploadRecordId,
+            attachment.FilePath, attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
     }
 
     [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
@@ -846,17 +922,67 @@ public class AwardsController : HrControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Attach a file to a nomination, through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Same replacement as the award attachment above (ledger D-39). This is the one that
+    /// mattered most: a nomination attachment is the CASE for giving somebody an award — the
+    /// citation, the letter of support — and it could not be attached at all.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.AwardsWritePolicy)]
     [HttpPost("nominations/{nominationId:guid}/attachments")]
-    public async Task<ActionResult<AwardNominationAttachmentDto>> AddNominationAttachment(
+    [ProducesResponseType(typeof(AwardNominationAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> AddNominationAttachment(
         Guid nominationId,
-        [FromBody] CreateAwardNominationAttachmentDto dto)
+        IFormFile file,
+        [FromForm] AwardAttachmentType attachmentType,
+        [FromForm] string? description,
+        CancellationToken cancellationToken = default)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out _, out var userId, out var uploadedById, "Attaching a document to a nomination") is { } error) return error;
+        if (TryGetEmployeeWriteContext(out _, out var userId, out _, "Attaching a document to a nomination") is { } error) return error;
 
-        var created = await _nominationAttachmentService.AddAsync(nominationId, uploadedById, userId, dto);
-        return Ok(created);
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: "AwardNomination",
+            sourceRecordId: nominationId,
+            sourceLabel: "Nomination attachment",
+            documentType: attachmentType.ToString(),
+            description: description,
+            persist: (uploadedById, document) => _nominationAttachmentService.AddAsync(
+                nominationId, uploadedById, userId,
+                new CreateAwardNominationAttachmentDto
+                {
+                    AttachmentType = attachmentType,
+                    Description = description,
+                },
+                document.OriginalFileName, document.FilePath, document.FileSize,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken,
+            category: ControlledFileUploadCategories.HrAwardAttachments);
+    }
+
+    /// <summary>Streams a nomination attachment.</summary>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("nomination-attachments/{id:guid}/download")]
+    public async Task<IActionResult> DownloadNominationAttachment(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AwardNominationAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted, cancellationToken);
+
+        if (attachment is null) return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId, attachment.FileUploadRecordId,
+            attachment.FilePath, attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
     }
 
     [Authorize(Policy = HrPermissions.AwardsWritePolicy)]

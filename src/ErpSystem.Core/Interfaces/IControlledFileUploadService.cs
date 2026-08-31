@@ -70,6 +70,12 @@ public static class ControlledFileUploadCategories
     public const string HrMedicalClaimDocuments = "hr-medical-claim-documents";
     public const string HrMedicalInsuranceProviderDocuments = "hr-medical-insurance-provider-documents";
     public const string HrAppraisalAttachments = "hr-appraisal-attachments";
+
+    /// <summary>
+    /// Files on an award or on a nomination for one — the citation, the supporting letter, the
+    /// photograph taken at the presentation.
+    /// </summary>
+    public const string HrAwardAttachments = "hr-award-attachments";
     public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
 
     /// <summary>
@@ -239,6 +245,12 @@ public static class ControlledFileUploadCategories
                 // that gives them an upload route, so the D-11 half-job cannot recur.
                 HrSuccessionDocuments,
                 HrAppraisalAttachments,
+                // A nomination attachment is the CASE for giving somebody an award: a citation, a
+                // letter of support, a photograph of the work. It is circulated to a committee and
+                // read by people who did not write it, which is exactly when an unscanned file
+                // matters. Registered in the same commit that gives the family an upload route, so
+                // the D-11 half-job — a category declared but not registered — cannot recur here.
+                HrAwardAttachments,
                 // A travel attachment is a passport scan, a visa letter or an invitation carrying
                 // a name, a number and an address. A tenant policy should not be able to permit
                 // one of those unscanned.

@@ -3,12 +3,29 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, FilePlus2, Loader2, RefreshCw } from 'lucide-react';
+import { Building2, FilePlus2, Loader2, MessageSquare, RefreshCw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -38,6 +55,16 @@ export default function EstablishmentPage() {
   const [includeClosed, setIncludeClosed] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [raiseFor, setRaiseFor] = useState<string | null>(null);
+  /**
+   * ⚠ Three writes the screen never had. Reconcile OPENS gaps and closes the ones the
+   * establishment no longer implies; none of it covers the gap somebody decides not to fill, the
+   * one that needs a note, or the one whose status is simply wrong. Until now a vacancy could only
+   * be raised into a requisition or left alone for ever.
+   */
+  const [closing, setClosing] = useState<{ id: string; title: string } | null>(null);
+  const [closeReason, setCloseReason] = useState('');
+  const [noting, setNoting] = useState<{ id: string; title: string; notes: string } | null>(null);
+  const [statusing, setStatusing] = useState<{ id: string; title: string; status: string } | null>(null);
 
   const stats = useQuery({
     queryKey: ['hr', 'position-vacancy-stats'],
@@ -93,6 +120,49 @@ export default function EstablishmentPage() {
       setRaiseFor(null);
     }
   };
+
+  const closeVacancy = useMutation({
+    mutationFn: () => {
+      if (!closing) throw new Error('Nothing to close.');
+      return positionVacancyService.close(closing.id, closeReason.trim());
+    },
+    onSuccess: async () => {
+      await refresh();
+      toast({ title: 'Vacancy closed', description: 'It leaves the open list with the reason on record.' });
+      setClosing(null);
+      setCloseReason('');
+    },
+    onError: (e: any) =>
+      toast({ title: 'Refused', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
+  });
+
+  const saveNotes = useMutation({
+    mutationFn: () => {
+      if (!noting) throw new Error('Nothing to annotate.');
+      return positionVacancyService.setNotes(noting.id, noting.notes.trim() || null);
+    },
+    onSuccess: async () => {
+      await refresh();
+      toast({ title: 'Note saved' });
+      setNoting(null);
+    },
+    onError: (e: any) =>
+      toast({ title: 'Refused', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: () => {
+      if (!statusing) throw new Error('Nothing to set.');
+      return positionVacancyService.setStatus(statusing.id, { newStatus: statusing.status });
+    },
+    onSuccess: async () => {
+      await refresh();
+      toast({ title: 'Status set' });
+      setStatusing(null);
+    },
+    onError: (e: any) =>
+      toast({ title: 'Refused', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
+  });
 
   const s = stats.data;
 
@@ -211,6 +281,53 @@ export default function EstablishmentPage() {
                                 <FilePlus2 className="mr-2 h-4 w-4" /> Raise
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Annotate this gap"
+                              onClick={async () => {
+                                // ⚠ The list read has no notes on it; only the by-id read does.
+                                // Seeding from the row would open empty and save a blank over
+                                // whatever was written.
+                                try {
+                                  const detail = await positionVacancyService.getVacancy(pv.id);
+                                  setNoting({
+                                    id: pv.id,
+                                    title: pv.positionTitle,
+                                    notes: detail.notes ?? '',
+                                  });
+                                } catch (e: any) {
+                                  toast({
+                                    title: 'Could not open the notes',
+                                    description: e?.body?.message ?? e?.message,
+                                    variant: 'destructive',
+                                  });
+                                }
+                              }}
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Set the status by hand"
+                              onClick={() =>
+                                setStatusing({ id: pv.id, title: pv.positionTitle, status: pv.status })
+                              }
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Close this gap"
+                              onClick={() => {
+                                setCloseReason('');
+                                setClosing({ id: pv.id, title: pv.positionTitle });
+                              }}
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         )}
                       </TableRow>
@@ -293,6 +410,102 @@ export default function EstablishmentPage() {
         confirmText={reconciling ? 'Raising…' : 'Raise'}
         onConfirm={raise}
       />
+
+      {/* Close a gap by hand. Reconcile cannot see a post the organisation has decided to leave
+          unfilled, so without this it stays open for ever. */}
+      <Dialog open={closing !== null} onOpenChange={(o) => !o && setClosing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close the gap for {closing?.title}</DialogTitle>
+            <DialogDescription>
+              For a post that will not be filled — a restructure, or a decision to leave it open. The
+              reason is kept on the record, and reconcile will not reopen it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="closeReason">Reason</Label>
+            <Textarea
+              id="closeReason"
+              rows={3}
+              value={closeReason}
+              onChange={(e) => setCloseReason(e.target.value)}
+              placeholder="Why this gap is being closed rather than filled"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClosing(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={!closeReason.trim() || closeVacancy.isPending}
+              onClick={() => closeVacancy.mutate()}
+            >
+              {closeVacancy.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Close the gap
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={noting !== null} onOpenChange={(o) => !o && setNoting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Notes on {noting?.title}</DialogTitle>
+            <DialogDescription>
+              What anyone looking at this gap next should know.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="vacancyNotes">Notes</Label>
+            <Textarea
+              id="vacancyNotes"
+              rows={4}
+              value={noting?.notes ?? ''}
+              onChange={(e) => noting && setNoting({ ...noting, notes: e.target.value })}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNoting(null)}>Cancel</Button>
+            <Button disabled={saveNotes.isPending} onClick={() => saveNotes.mutate()}>
+              {saveNotes.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ⚠ The status is normally reconcile's to set. This is the override for when it is wrong:
+          a gap filled outside the system, or one raised in error. */}
+      <Dialog open={statusing !== null} onOpenChange={(o) => !o && setStatusing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set the status of {statusing?.title}</DialogTitle>
+            <DialogDescription>
+              Reconcile normally decides this. Setting it by hand is for when it is wrong.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <Select
+              value={statusing?.status ?? ''}
+              onValueChange={(v) => statusing && setStatusing({ ...statusing, status: v })}
+            >
+              <SelectTrigger><SelectValue placeholder="Choose a status" /></SelectTrigger>
+              <SelectContent>
+                {['Anticipated', 'Open', 'UnderReview', 'RequisitionRaised', 'Filled', 'Closed'].map((v) => (
+                  <SelectItem key={v} value={v}>{humanizeEnum(v)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusing(null)}>Cancel</Button>
+            <Button disabled={setStatus.isPending} onClick={() => setStatus.mutate()}>
+              {setStatus.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Set
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

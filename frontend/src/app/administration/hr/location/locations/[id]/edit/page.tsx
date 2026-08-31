@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { LocationContactsPanel } from '@/components/hr/location/LocationContactsPanel';
 import { LocationForm, type LocationFormValues } from '@/components/hr/location/LocationForm';
 import { locationService } from '@/services/hr/location.service';
 import { locationLevelService } from '@/services/hr/location-level.service';
@@ -134,6 +135,9 @@ export default function EditLocationPage() {
           onCancel={() => router.push('/administration/hr/location/locations')}
         />
       )}
+
+      {/* Who to ring here. Four endpoints that nothing in the product has ever called. */}
+      {!isLoading && location && <LocationContactsPanel locationId={id} />}
     </div>
   );
 }

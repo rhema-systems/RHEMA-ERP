@@ -10,6 +10,8 @@ import {
   Info,
   ListChecks,
   Loader2,
+  Paperclip,
+  Pencil,
   Plus,
   Trophy,
   Users,
@@ -47,6 +49,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { awardsService } from '@/services/hr/awards.service';
+import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -76,8 +79,11 @@ export default function DeskNominationPage() {
   const [levelId, setLevelId] = useState('');
   const [citation, setCitation] = useState('');
   const [contribution, setContribution] = useState('');
+  // Editing an existing contribution reuses the same box: it is one sentence, and a dialog for one
+  // sentence is ceremony.
+  const [editingContribution, setEditingContribution] = useState<null | { id: string; description: string }>(null);
   const [teamMember, setTeamMember] = useState<null | {
-    employeeId: string; role: string; contributionSummary: string; rewardPercentage: string;
+    id?: string; employeeId: string; role: string; contributionSummary: string; rewardPercentage: string;
   }>(null);
 
   const { data: nomination, isLoading } = useQuery({
@@ -140,19 +146,46 @@ export default function DeskNominationPage() {
     onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The contribution was refused.'),
   });
 
+  /**
+   * ⚠ A contribution could be added and removed and never reworded, so fixing a typo meant
+   * deleting the line and writing it again — which loses who recorded it and when, on evidence a
+   * committee is about to weigh.
+   */
+  const saveContribution = useMutation({
+    mutationFn: () => {
+      if (!editingContribution) throw new Error('No contribution to save.');
+      return awardsService.updateContribution(editingContribution.id, {
+        id: editingContribution.id,
+        description: editingContribution.description.trim(),
+      });
+    },
+    onSuccess: () => {
+      toast.success('Reworded.');
+      setEditingContribution(null);
+      queryClient.invalidateQueries({ queryKey: ['nomination-contributions', id] });
+    },
+    onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The rewording was refused.'),
+  });
+
+  /**
+   * ⚠ `rewardPercentage` decides what each member of a team award is PAID, and until this edit
+   * existed a share typed wrongly could only be fixed by removing the member and naming them again.
+   */
   const addTeamMember = useMutation({
     mutationFn: () => {
       if (!teamMember) throw new Error('No member to add.');
-      return awardsService.addTeamNominee(id, {
-        employeeId: teamMember.employeeId,
+      const body = {
         role: teamMember.role.trim() || null,
         contributionSummary: teamMember.contributionSummary.trim() || null,
         rewardPercentage:
           teamMember.rewardPercentage === '' ? null : Number(teamMember.rewardPercentage),
-      });
+      };
+      return teamMember.id
+        ? awardsService.updateTeamNominee(teamMember.id, { ...body, id: teamMember.id })
+        : awardsService.addTeamNominee(id, { ...body, employeeId: teamMember.employeeId });
     },
     onSuccess: () => {
-      toast.success('Added to the team.');
+      toast.success(teamMember?.id ? 'Saved.' : 'Added to the team.');
       setTeamMember(null);
       queryClient.invalidateQueries({ queryKey: ['nomination-team', id] });
     },
@@ -356,6 +389,7 @@ export default function DeskNominationPage() {
                     <TableHead>Role</TableHead>
                     <TableHead>Contribution</TableHead>
                     <TableHead className="text-right">Share</TableHead>
+                    <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -367,6 +401,26 @@ export default function DeskNominationPage() {
                       <TableCell className="text-right">
                         {m.rewardPercentage === null ? '—' : `${m.rewardPercentage}%`}
                       </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setTeamMember({
+                              id: m.id,
+                              employeeId: m.employeeId,
+                              role: m.role ?? '',
+                              contributionSummary: m.contributionSummary ?? '',
+                              rewardPercentage:
+                                m.rewardPercentage === null || m.rewardPercentage === undefined
+                                  ? ''
+                                  : String(m.rewardPercentage),
+                            })
+                          }
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -375,6 +429,30 @@ export default function DeskNominationPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* ⚠ Ledger D-39, and this is the one that mattered: a nomination attachment is the CASE for
+          giving somebody an award — the citation, the letter of support, a photograph of the work —
+          and `grep -ri attachment` over these screens returned nothing at all. The committee scored
+          nominations on the justification text alone because the evidence could not be attached. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Paperclip className="h-4 w-4" />
+            Supporting documents
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PerformanceAttachmentsPanel
+            basePath="/Awards"
+            ownerId={id}
+            listPath={`/Awards/nominations/${id}/attachments`}
+            downloadPath={(attachmentId) => `/Awards/nomination-attachments/${attachmentId}/download`}
+            deletePath={(attachmentId) => `/Awards/nomination-attachments/${attachmentId}`}
+            uploadFields={{ attachmentType: 'Citation' }}
+            helpText="The citation, a letter of support, evidence of the work. Scanned on upload; max 10 MB."
+          />
+        </CardContent>
+      </Card>
 
       {/* ── what they actually did ──────────────────────────────────────────── */}
       <Card>
@@ -394,7 +472,41 @@ export default function DeskNominationPage() {
             <ul className="space-y-2">
               {(contributions ?? []).map((c) => (
                 <li key={c.id} className="rounded-md border p-3 text-sm">
-                  {c.description}
+                  {editingContribution?.id === c.id ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        rows={2}
+                        value={editingContribution.description}
+                        onChange={(e) =>
+                          setEditingContribution({ ...editingContribution, description: e.target.value })
+                        }
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setEditingContribution(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={!editingContribution.description.trim() || saveContribution.isPending}
+                          onClick={() => saveContribution.mutate()}
+                        >
+                          {saveContribution.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-3">
+                      <span>{c.description}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setEditingContribution({ id: c.id, description: c.description })}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -541,8 +653,12 @@ export default function DeskNominationPage() {
       <Dialog open={Boolean(teamMember)} onOpenChange={(o) => !o && setTeamMember(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add a team member</DialogTitle>
-            <DialogDescription>Who was in the team, and what they did.</DialogDescription>
+            <DialogTitle>{teamMember?.id ? 'Edit team member' : 'Add a team member'}</DialogTitle>
+            <DialogDescription>
+              {teamMember?.id
+                ? "Correct the role, what they did, or their share. To change WHO, remove them and name the right person."
+                : 'Who was in the team, and what they did.'}
+            </DialogDescription>
           </DialogHeader>
           {teamMember && (
             <div className="space-y-4">
@@ -551,6 +667,7 @@ export default function DeskNominationPage() {
                 <EmployeePicker
                   value={teamMember.employeeId || null}
                   onChange={(v) => setTeamMember({ ...teamMember, employeeId: v ?? '' })}
+                  disabled={Boolean(teamMember.id)}
                 />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { Plus, MoreHorizontal, Eye, Send, Users, UserX } from 'lucide-react';
+import { Plus, MoreHorizontal, Eye, Send, Users, UserX, CalendarSearch, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -40,6 +40,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import { SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
 import { trainingNominationService } from '@/services/hr/training-nomination.service';
+import type { NomineeConflict } from '@/types/hr/training-delivery';
 import { NOMINATION_TYPE_OPTIONS, NOMINATION_STATUS_OPTIONS } from '@/types/hr/training-delivery';
 import type { NominationType, TrainingNominationSummary, BulkNominationResult } from '@/types/hr/training-delivery';
 
@@ -61,6 +62,16 @@ export function NomineesPanel({ scheduleId, readOnly }: Props) {
   const [withdrawTarget, setWithdrawTarget] = useState<TrainingNominationSummary | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkNominationResult | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * ⚠ The availability check was built and shown to nobody, so a nominee could be booked onto a
+   * course while already on leave, travelling, or booked on another one over the same dates — a
+   * clash the server would have reported if anyone had asked it. TDC raised this in the demo
+   * feedback as well.
+   *
+   * `null` means not checked; an empty array means checked and clear. The screen says which.
+   */
+  const [conflicts, setConflicts] = useState<NomineeConflict[] | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const queryKey = ['hr', 'training', 'schedules', scheduleId, 'nominees'];
   const { data, isLoading } = useQuery({
@@ -79,6 +90,23 @@ export function NomineesPanel({ scheduleId, readOnly }: Props) {
       queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'schedules', scheduleId] }),
     ]);
 
+  const checkAvailability = async (employeeId: string) => {
+    if (!employeeId) return;
+    setChecking(true);
+    try {
+      setConflicts(await trainingNominationService.checkAvailability(scheduleId, [employeeId]));
+    } catch (error: any) {
+      toast({
+        title: 'The check could not run',
+        description: error?.body?.message ?? error?.message,
+        variant: 'destructive',
+      });
+      setConflicts(null);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const handleAdd = form.handleSubmit(async (values) => {
     if (!values.employeeId) return;
     setBusy(true);
@@ -93,6 +121,7 @@ export function NomineesPanel({ scheduleId, readOnly }: Props) {
       await refresh();
       toast({ title: 'Nominated' });
       form.reset({ employeeId: '', type: 'HR', justification: '' });
+      setConflicts(null);
       setAddOpen(false);
     } catch (error: any) {
       toast({
@@ -272,11 +301,68 @@ export function NomineesPanel({ scheduleId, readOnly }: Props) {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <EmployeePickerField form={form} name="employeeId" label="Employee" required />
+
+            {/* ⚠ Advisory, not a gate. Someone may legitimately be nominated over a clash — leave
+                gets cancelled, travel moves — so this informs the decision rather than blocking it.
+                What it must never do is stay silent. */}
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!form.watch('employeeId') || checking}
+                onClick={() => checkAvailability(form.watch('employeeId'))}
+              >
+                {checking ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CalendarSearch className="mr-2 h-4 w-4" />
+                )}
+                Check availability
+              </Button>
+              {conflicts !== null && conflicts.length === 0 && (
+                <span className="text-sm text-emerald-700 dark:text-emerald-400">
+                  Nothing in their diary over these dates.
+                </span>
+              )}
+            </div>
+
+            {conflicts !== null && conflicts.length > 0 && (
+              <Alert>
+                <AlertTitle>
+                  {conflicts.length} clash{conflicts.length === 1 ? '' : 'es'} over these dates
+                </AlertTitle>
+                <AlertDescription>
+                  <ul className="mt-1 space-y-1 text-sm">
+                    {conflicts.map((c, i) => (
+                      <li key={`${c.source}-${i}`}>
+                        <span className="font-medium">{c.source}:</span> {c.description}{' '}
+                        <span className="text-muted-foreground">
+                          ({new Date(c.fromDate).toLocaleDateString()} –{' '}
+                          {new Date(c.toDate).toLocaleDateString()})
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    You can still nominate them — this is a warning, not a rule.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+
             <SelectField form={form} name="type" label="Nomination type" required options={NOMINATION_TYPE_OPTIONS} />
             <TextareaField form={form} name="justification" label="Justification" rows={3} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={busy}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConflicts(null);
+                setAddOpen(false);
+              }}
+              disabled={busy}
+            >
               Cancel
             </Button>
             <Button onClick={handleAdd} disabled={busy}>

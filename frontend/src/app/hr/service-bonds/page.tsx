@@ -6,8 +6,10 @@ import {
   BadgeCheck,
   Clock,
   HandCoins,
+  Pencil,
   Scale,
   ShieldCheck,
+  Trash2,
   TriangleAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -26,6 +28,15 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { trainingNominationService } from '@/services/hr/training-nomination.service';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
@@ -53,6 +64,28 @@ type BondAction = 'accept' | 'exit' | 'waive' | 'settle';
 export default function ServiceBondsPage() {
   const [filter, setFilter] = useState<Filter>('pending');
   const [action, setAction] = useState<{ bond: TrainingServiceBond; kind: BondAction } | null>(null);
+  /**
+   * ⚠ **The correction, and it is money.** A bond's amount and duration are copied from the
+   * programme when the server mints it on nomination submit, so a programme priced wrongly mints
+   * every bond wrongly. Until this dialog existed the only remedy was to delete the bond and raise
+   * another — which throws away the acceptance the employee has already signed.
+   */
+  const [editing, setEditing] = useState<null | {
+    id: string; employeeName: string;
+    bondDurationMonths: string; bondAmount: string; currency: string;
+    termsText: string; notes: string;
+  }>(null);
+  const [deleting, setDeleting] = useState<TrainingServiceBond | null>(null);
+  /**
+   * ⚠ Raising one by hand is the exception. The server mints a bond when a sponsored nomination
+   * is submitted, so the case for this is the approved nomination that never got one — sponsorship
+   * agreed after the fact, or a programme whose terms were set later. The nomination is required by
+   * the API, so a bond cannot be raised against nothing.
+   */
+  const [raising, setRaising] = useState<null | {
+    nominationId: string; bondDurationMonths: string; bondAmount: string;
+    currency: string; termsText: string; notes: string;
+  }>(null);
   const [notes, setNotes] = useState('');
   const [actionDate, setActionDate] = useState(today());
   const queryClient = useQueryClient();
@@ -64,6 +97,77 @@ export default function ServiceBondsPage() {
   });
 
   const rows = useMemo(() => data ?? [], [data]);
+
+  const { data: approvedNominations = [] } = useQuery({
+    queryKey: ['hr', 'training-nominations', 'Approved'],
+    queryFn: () => trainingNominationService.getByStatus('Approved'),
+    enabled: raising !== null,
+  });
+
+  const raiseBond = useMutation({
+    mutationFn: () => {
+      if (!raising) throw new Error('Nothing to raise.');
+      return trainingServiceBondService.create({
+        nominationId: raising.nominationId,
+        bondDurationMonths: Number(raising.bondDurationMonths || 0),
+        bondAmount: Number(raising.bondAmount || 0),
+        currency: raising.currency.trim(),
+        termsText: raising.termsText.trim() || null,
+        notes: raising.notes.trim() || null,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'service-bonds'] });
+      toast({ title: 'Bond raised', description: 'It is pending the employee\'s acceptance.' });
+      setRaising(null);
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'The bond was refused',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
+  });
+
+  const saveEdit = useMutation({
+    mutationFn: () => {
+      if (!editing) throw new Error('Nothing to save.');
+      return trainingServiceBondService.update(editing.id, {
+        id: editing.id,
+        bondDurationMonths: Number(editing.bondDurationMonths || 0),
+        bondAmount: Number(editing.bondAmount || 0),
+        currency: editing.currency.trim(),
+        termsText: editing.termsText.trim() || null,
+        notes: editing.notes.trim() || null,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'service-bonds'] });
+      toast({ title: 'Bond corrected' });
+      setEditing(null);
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'The correction was refused',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
+  });
+
+  const removeBond = useMutation({
+    mutationFn: (id: string) => trainingServiceBondService.remove(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'service-bonds'] });
+      toast({ title: 'Bond deleted' });
+      setDeleting(null);
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'It could not be deleted',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
+  });
 
   const stats = useMemo(
     () => ({
@@ -133,6 +237,19 @@ export default function ServiceBondsPage() {
         title="Training service bonds"
         description="Service obligations attached to sponsored training — who owes time, who owes money, and what has been settled."
         backHref="/hr"
+        actions={
+          <Button
+            variant="outline"
+            onClick={() =>
+              setRaising({
+                nominationId: '', bondDurationMonths: '', bondAmount: '',
+                currency: 'GHS', termsText: '', notes: '',
+              })
+            }
+          >
+            Raise a bond
+          </Button>
+        }
       />
 
       <MetricTiles
@@ -286,6 +403,34 @@ export default function ServiceBondsPage() {
                               </Button>
                             </>
                           )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Correct the terms"
+                            onClick={() =>
+                              setEditing({
+                                id: bond.id,
+                                employeeName: bond.employeeName ?? 'this bond',
+                                bondDurationMonths: String(bond.bondDurationMonths ?? ''),
+                                bondAmount: String(bond.bondAmount ?? ''),
+                                currency: bond.currency ?? 'GHS',
+                                termsText: bond.termsText ?? '',
+                                notes: bond.notes ?? '',
+                              })
+                            }
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          {bond.status === 'PendingAcceptance' && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Delete a bond raised in error"
+                              onClick={() => setDeleting(bond)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -346,6 +491,137 @@ export default function ServiceBondsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={raising !== null} onOpenChange={(o) => !o && setRaising(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Raise a service bond</DialogTitle>
+            <DialogDescription>
+              For an approved nomination that never got one — sponsorship agreed after the fact. The
+              usual path is the server minting it when the nomination is submitted.
+            </DialogDescription>
+          </DialogHeader>
+          {raising && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Nomination</Label>
+                <Select
+                  value={raising.nominationId}
+                  onValueChange={(v) => setRaising({ ...raising, nominationId: v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="Choose an approved nomination" /></SelectTrigger>
+                  <SelectContent>
+                    {approvedNominations.map((n: any) => (
+                      <SelectItem key={n.id} value={n.id}>
+                        {[n.employeeName, n.programName, n.nominationNumber].filter(Boolean).join(' · ')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {approvedNominations.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No approved nominations without a bond.
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="newBondMonths">Months</Label>
+                  <Input id="newBondMonths" type="number" min={1} value={raising.bondDurationMonths}
+                    onChange={(e) => setRaising({ ...raising, bondDurationMonths: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newBondAmount">Amount</Label>
+                  <Input id="newBondAmount" type="number" min={0} value={raising.bondAmount}
+                    onChange={(e) => setRaising({ ...raising, bondAmount: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newBondCurrency">Currency</Label>
+                  <Input id="newBondCurrency" maxLength={3} value={raising.currency}
+                    onChange={(e) => setRaising({ ...raising, currency: e.target.value.toUpperCase() })} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="newBondTerms">Terms</Label>
+                <Textarea id="newBondTerms" rows={3} value={raising.termsText}
+                  onChange={(e) => setRaising({ ...raising, termsText: e.target.value })} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRaising(null)}>Cancel</Button>
+            <Button
+              disabled={
+                raiseBond.isPending || !raising?.nominationId ||
+                !raising?.bondDurationMonths || !raising?.bondAmount
+              }
+              onClick={() => raiseBond.mutate()}
+            >
+              {raiseBond.isPending ? 'Raising…' : 'Raise'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Correct the bond for {editing?.employeeName}</DialogTitle>
+            <DialogDescription>
+              The terms were copied from the programme when the bond was raised. Correcting them here
+              keeps the bond and any acceptance already given — deleting and re-raising would not.
+            </DialogDescription>
+          </DialogHeader>
+          {editing && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bondMonths">Months</Label>
+                  <Input id="bondMonths" type="number" min={1} value={editing.bondDurationMonths}
+                    onChange={(e) => setEditing({ ...editing, bondDurationMonths: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bondAmount">Amount</Label>
+                  <Input id="bondAmount" type="number" min={0} value={editing.bondAmount}
+                    onChange={(e) => setEditing({ ...editing, bondAmount: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bondCurrency">Currency</Label>
+                  <Input id="bondCurrency" maxLength={3} value={editing.currency}
+                    onChange={(e) => setEditing({ ...editing, currency: e.target.value.toUpperCase() })} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bondTerms">Terms</Label>
+                <Textarea id="bondTerms" rows={3} value={editing.termsText}
+                  onChange={(e) => setEditing({ ...editing, termsText: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bondNotes">Notes</Label>
+                <Textarea id="bondNotes" rows={2} value={editing.notes}
+                  onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button disabled={saveEdit.isPending} onClick={() => saveEdit.mutate()}>
+              {saveEdit.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmationDialog
+        open={deleting !== null}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title={`Delete the bond for ${deleting?.employeeName ?? 'this employee'}?`}
+        description="Only for one raised in error, and only before it is accepted. A bond the employee has signed should be waived instead, which keeps the record of what was agreed."
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={() => { if (deleting) removeBond.mutate(deleting.id); }}
+        isLoading={removeBond.isPending}
+      />
     </div>
   );
 }

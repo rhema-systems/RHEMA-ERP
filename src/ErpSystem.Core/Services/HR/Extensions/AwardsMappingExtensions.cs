@@ -315,9 +315,14 @@ public static class AwardsMappingExtensions
             AwardId = entity.AwardId,
             FileName = entity.FileName,
             FilePath = entity.FilePath,
+            FileSizeBytes = entity.FileSizeBytes,
             AttachmentType = entity.AttachmentType,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            UploadedById = entity.UploadedById,
+            UploadedByName = entity.UploadedBy == null
+                ? null
+                : $"{entity.UploadedBy.FirstName} {entity.UploadedBy.LastName}".Trim(),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -325,17 +330,41 @@ public static class AwardsMappingExtensions
         };
     }
 
-    public static AwardAttachment ToEntity(this CreateAwardAttachmentDto dto, Guid tenantId, Guid awardId, Guid userId)
+    /// <summary>
+    /// Builds the row from the metadata the caller sent AND the file the gate stored.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The file's own facts — name, path, size and the three gate ids — come from
+    /// <c>HrControlledDocument</c>, never from the DTO. That separation is the fix for D-39: a
+    /// caller can describe what a file IS, and cannot say where it lives.
+    /// </remarks>
+    public static AwardAttachment ToEntity(
+        this CreateAwardAttachmentDto dto,
+        Guid tenantId,
+        Guid awardId,
+        Guid uploadedById,
+        Guid userId,
+        string fileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AwardAttachment
         {
             TenantId = tenantId,
             AwardId = awardId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = fileName,
+            FilePath = filePath,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             AttachmentType = dto.AttachmentType,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
             CreatedBy = userId.ToString()
         };
     }
@@ -524,10 +553,14 @@ public static class AwardsMappingExtensions
             AwardNominationId = entity.AwardNominationId,
             FileName = entity.FileName,
             FilePath = entity.FilePath,
+            FileSizeBytes = entity.FileSizeBytes,
             AttachmentType = entity.AttachmentType,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
             UploadedById = entity.UploadedById,
+            UploadedByName = entity.UploadedBy == null
+                ? null
+                : $"{entity.UploadedBy.FirstName} {entity.UploadedBy.LastName}".Trim(),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -535,14 +568,30 @@ public static class AwardsMappingExtensions
         };
     }
 
-    public static AwardNominationAttachment ToEntity(this CreateAwardNominationAttachmentDto dto, Guid tenantId, Guid nominationId, Guid uploadedById, Guid userId)
+    /// <summary>The caller describes the file; the GATE says where it is. See D-39.</summary>
+    public static AwardNominationAttachment ToEntity(
+        this CreateAwardNominationAttachmentDto dto,
+        Guid tenantId,
+        Guid nominationId,
+        Guid uploadedById,
+        Guid userId,
+        string fileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AwardNominationAttachment
         {
             TenantId = tenantId,
             AwardNominationId = nominationId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = fileName,
+            FilePath = filePath,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             AttachmentType = dto.AttachmentType,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,

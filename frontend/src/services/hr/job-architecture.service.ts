@@ -701,6 +701,41 @@ class JobArchitectureService {
     return apiService.post<ManpowerBudget>(`${this.jobs}/budgets`, payload);
   }
 
+  /**
+   * Correct a budget.
+   *
+   * ⚠ The update is a REPLACE: every figure the DTO names is written, so a form that omits one
+   * writes a zero over it. The dialog sends the whole set, seeded from the budget it is editing.
+   *
+   * ⚠ `HR.ManpowerBudget.Write` — but the DELETE below is Admin. Established by a 403, not
+   * assumed (`hr-tierb-tail/probe-lane2-groupB.mjs`).
+   */
+  updateBudget(id: string, payload: Partial<ManpowerBudget> & {
+    id: string; periodStartDate: string; periodEndDate: string;
+  }) {
+    return apiService.put<ManpowerBudget>(`${this.jobs}/budgets/${id}`, payload);
+  }
+
+  /** ⚠ `HR.ManpowerBudget.Admin`, a rung above the edit. */
+  deleteBudget(id: string) {
+    return apiService.delete<void>(`${this.jobs}/budgets/${id}`);
+  }
+
+  /**
+   * Correct a line.
+   *
+   * ⚠ Note the route: a line is CREATED under its budget and then addressed at
+   * `JobAnalysis/lines/{id}` — the same asymmetry the bank branches have.
+   */
+  updateBudgetLine(lineId: string, payload: Partial<ManpowerBudgetLine> & { id: string }) {
+    return apiService.put<ManpowerBudgetLine>(`${this.jobs}/lines/${lineId}`, payload);
+  }
+
+  /** ⚠ `HR.ManpowerBudget.Admin`, like the budget delete. */
+  deleteBudgetLine(lineId: string) {
+    return apiService.delete<void>(`${this.jobs}/lines/${lineId}`);
+  }
+
   addBudgetLine(budgetId: string, payload: Partial<ManpowerBudgetLine> & { positionId: string }) {
     return apiService.post<ManpowerBudgetLine>(`${this.jobs}/budgets/${budgetId}/lines`, {
       manpowerBudgetId: budgetId,

@@ -92,7 +92,14 @@ public interface IAwardAttachmentService
     Task<AwardAttachmentDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<AwardAttachmentDto>> GetByAwardIdAsync(Guid awardId);
     Task<IEnumerable<AwardAttachmentDto>> GetByTypeAsync(Guid awardId, AwardAttachmentType type);
-    Task<AwardAttachmentDto> CreateAsync(Guid tenantId, Guid awardId, Guid userId, CreateAwardAttachmentDto dto);
+    /// <summary>
+    /// ⚠ The file's own facts are parameters, not DTO fields: a caller may describe what a file is
+    /// and may not say where it lives (ledger D-39).
+    /// </summary>
+    Task<AwardAttachmentDto> CreateAsync(
+        Guid tenantId, Guid awardId, Guid uploadedById, Guid userId, CreateAwardAttachmentDto dto,
+        string fileName, string filePath, long? fileSizeBytes,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId);
     Task DeleteAsync(Guid id);
 }
 
@@ -156,7 +163,11 @@ public interface IAwardNomineeContributionService
 public interface IAwardNominationAttachmentService
 {
     Task<IEnumerable<AwardNominationAttachmentDto>> GetByNominationIdAsync(Guid nominationId);
-    Task<AwardNominationAttachmentDto> AddAsync(Guid nominationId, Guid uploadedById, Guid userId, CreateAwardNominationAttachmentDto dto);
+    /// <summary>⚠ Same shape and same reason as the award attachment above.</summary>
+    Task<AwardNominationAttachmentDto> AddAsync(
+        Guid nominationId, Guid uploadedById, Guid userId, CreateAwardNominationAttachmentDto dto,
+        string fileName, string filePath, long? fileSizeBytes,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId);
     Task UpdateAsync(Guid id, Guid userId, UpdateAwardNominationAttachmentDto dto);
     Task RemoveAsync(Guid id);
 }

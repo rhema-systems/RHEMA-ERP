@@ -39,6 +39,7 @@ import { PeerFeedbackPanel } from '@/components/hr/performance/PeerFeedbackPanel
 import { ConversationsPanel } from '@/components/hr/performance/ConversationsPanel';
 import { PeerNominationPanel } from '@/components/hr/performance/PeerNominationPanel';
 import { useToast } from '@/hooks/use-toast';
+import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import {
   appraisalWorkflowService,
@@ -320,7 +321,19 @@ export default function ManagerEvaluationPage() {
           {requiresManagerNomination && <TabsTrigger value="nominations">Nominations</TabsTrigger>}
           <TabsTrigger value="history">History</TabsTrigger>
           <TabsTrigger value="conversations">Conversations</TabsTrigger>
+          <TabsTrigger value="evidence">Evidence</TabsTrigger>
         </TabsList>
+
+        {/* ⚠ The upload behind this tab was purpose-built for the controlled gate and had never
+            been called by anything: an appraisal's evidence could not be attached at all. */}
+        <TabsContent value="evidence" className="mt-4">
+          <PerformanceAttachmentsPanel
+            basePath="/PerformanceAppraisals"
+            ownerId={appraisalId}
+            canUpload={!readOnly}
+            helpText="Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."
+          />
+        </TabsContent>
 
         <TabsContent value="evaluation" className="mt-4">
           <EvaluationScoreForm

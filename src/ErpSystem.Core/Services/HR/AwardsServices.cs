@@ -1067,10 +1067,33 @@ public class AwardAttachmentService : IAwardAttachmentService
         return attachments.Where(a => a.TenantId == tenantId).ToDtoList();
     }
 
-    public async Task<AwardAttachmentDto> CreateAsync(Guid tenantId, Guid awardId, Guid userId, CreateAwardAttachmentDto dto)
+    /// <summary>
+    /// Records an attachment against an award, from a file the controlled gate has already stored.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ledger D-39. The file's name, path, size and the gate's three record ids are PARAMETERS,
+    /// not DTO fields, precisely so a caller cannot assert them — the shape the succession document
+    /// family adopted for the same reason (D-14/D-15).
+    /// </remarks>
+    public async Task<AwardAttachmentDto> CreateAsync(
+        Guid tenantId,
+        Guid awardId,
+        Guid uploadedById,
+        Guid userId,
+        CreateAwardAttachmentDto dto,
+        string fileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var entity = dto.ToEntity(tenantId, awardId, userId);
+        var entity = dto.ToEntity(
+            tenantId, awardId, uploadedById, userId,
+            fileName, filePath, fileSizeBytes,
+            fileUploadRecordId, documentRecordId, documentVersionId);
+
         await _attachmentRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return entity.ToDto();
@@ -1681,14 +1704,35 @@ public class AwardNominationAttachmentService : IAwardNominationAttachmentServic
         return attachments.Where(a => a.TenantId == tenantId).ToDtoList();
     }
 
-    public async Task<AwardNominationAttachmentDto> AddAsync(Guid nominationId, Guid uploadedById, Guid userId, CreateAwardNominationAttachmentDto dto)
+    /// <summary>
+    /// Records an attachment against an award, from a file the controlled gate has already stored.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ledger D-39. The file's name, path, size and the gate's three record ids are PARAMETERS,
+    /// not DTO fields, precisely so a caller cannot assert them — the shape the succession document
+    /// family adopted for the same reason (D-14/D-15).
+    /// </remarks>
+    public async Task<AwardNominationAttachmentDto> AddAsync(
+        Guid nominationId,
+        Guid uploadedById,
+        Guid userId,
+        CreateAwardNominationAttachmentDto dto,
+        string fileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         var tenantId = GetTenantId();
         var nomination = await _nominationRepo.GetByIdAsync(nominationId);
         if (nomination == null || nomination.TenantId != tenantId)
             throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
 
-        var entity = dto.ToEntity(tenantId, nominationId, uploadedById, userId);
+        var entity = dto.ToEntity(
+            tenantId, nominationId, uploadedById, userId,
+            fileName, filePath, fileSizeBytes,
+            fileUploadRecordId, documentRecordId, documentVersionId);
         await _attachmentRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return entity.ToDto();

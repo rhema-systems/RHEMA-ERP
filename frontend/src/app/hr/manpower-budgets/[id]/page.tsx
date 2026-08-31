@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Banknote, CheckCircle2, Loader2, Plus, Send, XCircle } from 'lucide-react';
+import { AlertTriangle, Banknote, CheckCircle2, Loader2, Pencil, Plus, Send, Trash2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -54,10 +55,37 @@ const STATUS_TONE: Record<string, string> = {
 
 export default function ManpowerBudgetDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [addingLine, setAddingLine] = useState(false);
   const [line, setLine] = useState({ positionId: '', plannedCount: 1, plannedAverageSalary: 0, isCritical: false });
+  /**
+   * ⚠ The budget and its lines could be created, submitted and approved — and never corrected.
+   * A figure typed wrongly could only be fixed by deleting the line and adding it again, and the
+   * budget's own totals not at all. Both edits are Write-tier; both DELETES are
+   * `HR.ManpowerBudget.Admin`, established by a 403 rather than assumed.
+   *
+   * ⚠ The budget update is a REPLACE: the DTO names every figure, so the dialog seeds from the
+   * budget and sends the whole set. Omitting a field writes a zero over it.
+   */
+  const [editingBudget, setEditingBudget] = useState<null | {
+    periodStartDate: string; periodEndDate: string;
+    currentHeadcount: string; currentSalaryCost: string;
+    plannedHeadcount: string; plannedSalaryCost: string;
+    plannedNewHires: string; plannedTerminations: string;
+    salaryBudget: string; benefitsBudget: string; recruitmentBudget: string; trainingBudget: string;
+    businessJustification: string;
+  }>(null);
+  const [editingLine, setEditingLine] = useState<null | {
+    id: string; positionTitle: string;
+    currentCount: string; currentFilled: string; currentVacant: string;
+    currentAverageSalary: string; currentTotalCost: string;
+    plannedCount: string; plannedNewPositions: string; plannedEliminations: string;
+    plannedAverageSalary: string; priority: string; isCritical: boolean; notes: string;
+  }>(null);
+  const [removingLine, setRemovingLine] = useState<{ id: string; title: string } | null>(null);
+  const [removingBudget, setRemovingBudget] = useState(false);
 
   const { data: budget, isLoading } = useQuery({
     queryKey: ['manpower-budget', id],
@@ -128,6 +156,38 @@ export default function ManpowerBudgetDetailPage() {
         backHref="/hr/manpower-budgets"
         actions={
           <div className="flex flex-wrap gap-2">
+            {isDraft && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setEditingBudget({
+                    periodStartDate: budget.periodStartDate?.slice(0, 10) ?? '',
+                    periodEndDate: budget.periodEndDate?.slice(0, 10) ?? '',
+                    currentHeadcount: String(budget.currentHeadcount ?? 0),
+                    currentSalaryCost: String(budget.currentSalaryCost ?? 0),
+                    plannedHeadcount: String(budget.plannedHeadcount ?? 0),
+                    plannedSalaryCost: String(budget.plannedSalaryCost ?? 0),
+                    plannedNewHires: String(budget.plannedNewHires ?? 0),
+                    plannedTerminations: String(budget.plannedTerminations ?? 0),
+                    salaryBudget: String(budget.salaryBudget ?? 0),
+                    benefitsBudget: String(budget.benefitsBudget ?? 0),
+                    recruitmentBudget: String(budget.recruitmentBudget ?? 0),
+                    trainingBudget: String(budget.trainingBudget ?? 0),
+                    businessJustification: budget.businessJustification ?? '',
+                  })
+                }
+                disabled={busy !== null}
+              >
+                <Pencil className="mr-2 h-4 w-4" />
+                Correct
+              </Button>
+            )}
+            {isDraft && (
+              <Button variant="outline" disabled={busy !== null} onClick={() => setRemovingBudget(true)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+            )}
             {isDraft && (
               <Button
                 onClick={() => run('submit', () => jobArchitectureService.submitBudget(id), 'Submitted for approval')}
@@ -230,6 +290,7 @@ export default function ManpowerBudgetDetailPage() {
                   <TableHead className="text-right">Average salary</TableHead>
                   <TableHead className="text-right">Total cost</TableHead>
                   <TableHead>Priority</TableHead>
+                  {isDraft && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -248,6 +309,43 @@ export default function ManpowerBudgetDetailPage() {
                     <TableCell>
                       <Badge variant="outline">{l.priority}</Badge>
                     </TableCell>
+                    {isDraft && (
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Correct this line"
+                          onClick={() =>
+                            setEditingLine({
+                              id: l.id,
+                              positionTitle: l.positionTitle ?? 'this line',
+                              currentCount: String(l.currentCount ?? 0),
+                              currentFilled: String(l.currentFilled ?? 0),
+                              currentVacant: String(l.currentVacant ?? 0),
+                              currentAverageSalary: String(l.currentAverageSalary ?? 0),
+                              currentTotalCost: String(l.currentTotalCost ?? 0),
+                              plannedCount: String(l.plannedCount ?? 0),
+                              plannedNewPositions: String(l.plannedNewPositions ?? 0),
+                              plannedEliminations: String(l.plannedEliminations ?? 0),
+                              plannedAverageSalary: String(l.plannedAverageSalary ?? 0),
+                              priority: l.priority ?? 'Medium',
+                              isCritical: Boolean(l.isCritical),
+                              notes: l.notes ?? '',
+                            })
+                          }
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Remove this line (Admin)"
+                          onClick={() => setRemovingLine({ id: l.id, title: l.positionTitle ?? 'this line' })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -345,6 +443,210 @@ export default function ManpowerBudgetDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ⚠ A REPLACE, not a patch: the DTO names every figure, so the dialog seeds from the budget
+          and sends the whole set back. Leaving one out writes a zero over it. */}
+      <Dialog open={editingBudget !== null} onOpenChange={(o) => !o && setEditingBudget(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Correct the budget</DialogTitle>
+          </DialogHeader>
+          {editingBudget && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="mbFrom">Period from</Label>
+                <Input id="mbFrom" type="date" value={editingBudget.periodStartDate}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, periodStartDate: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbTo">Period to</Label>
+                <Input id="mbTo" type="date" value={editingBudget.periodEndDate}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, periodEndDate: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbCurHead">Headcount today</Label>
+                <Input id="mbCurHead" type="number" min={0} value={editingBudget.currentHeadcount}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, currentHeadcount: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbPlanHead">Headcount planned</Label>
+                <Input id="mbPlanHead" type="number" min={0} value={editingBudget.plannedHeadcount}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedHeadcount: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbCurCost">Salary cost today</Label>
+                <Input id="mbCurCost" type="number" min={0} value={editingBudget.currentSalaryCost}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, currentSalaryCost: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbPlanCost">Salary cost planned</Label>
+                <Input id="mbPlanCost" type="number" min={0} value={editingBudget.plannedSalaryCost}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedSalaryCost: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbHires">New hires planned</Label>
+                <Input id="mbHires" type="number" min={0} value={editingBudget.plannedNewHires}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedNewHires: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbTerms">Terminations planned</Label>
+                <Input id="mbTerms" type="number" min={0} value={editingBudget.plannedTerminations}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedTerminations: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbSalary">Salary budget</Label>
+                <Input id="mbSalary" type="number" min={0} value={editingBudget.salaryBudget}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, salaryBudget: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbBenefits">Benefits budget</Label>
+                <Input id="mbBenefits" type="number" min={0} value={editingBudget.benefitsBudget}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, benefitsBudget: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbRecruit">Recruitment budget</Label>
+                <Input id="mbRecruit" type="number" min={0} value={editingBudget.recruitmentBudget}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, recruitmentBudget: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mbTraining">Training budget</Label>
+                <Input id="mbTraining" type="number" min={0} value={editingBudget.trainingBudget}
+                  onChange={(e) => setEditingBudget({ ...editingBudget, trainingBudget: e.target.value })} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingBudget(null)}>Cancel</Button>
+            <Button
+              disabled={busy !== null}
+              onClick={async () => {
+                if (!editingBudget) return;
+                await run(
+                  'correct the budget',
+                  () =>
+                    jobArchitectureService.updateBudget(id, {
+                      id,
+                      periodStartDate: new Date(editingBudget.periodStartDate).toISOString(),
+                      periodEndDate: new Date(editingBudget.periodEndDate).toISOString(),
+                      currentHeadcount: Number(editingBudget.currentHeadcount || 0),
+                      currentSalaryCost: Number(editingBudget.currentSalaryCost || 0),
+                      plannedHeadcount: Number(editingBudget.plannedHeadcount || 0),
+                      plannedSalaryCost: Number(editingBudget.plannedSalaryCost || 0),
+                      plannedNewHires: Number(editingBudget.plannedNewHires || 0),
+                      plannedTerminations: Number(editingBudget.plannedTerminations || 0),
+                      salaryBudget: Number(editingBudget.salaryBudget || 0),
+                      benefitsBudget: Number(editingBudget.benefitsBudget || 0),
+                      recruitmentBudget: Number(editingBudget.recruitmentBudget || 0),
+                      trainingBudget: Number(editingBudget.trainingBudget || 0),
+                      businessJustification: editingBudget.businessJustification || null,
+                    }),
+                  'Budget corrected',
+                );
+                setEditingBudget(null);
+              }}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editingLine !== null} onOpenChange={(o) => !o && setEditingLine(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Correct the line for {editingLine?.positionTitle}</DialogTitle>
+          </DialogHeader>
+          {editingLine && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="mlPlanned">Posts planned</Label>
+                <Input id="mlPlanned" type="number" min={0} value={editingLine.plannedCount}
+                  onChange={(e) => setEditingLine({ ...editingLine, plannedCount: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mlNew">New posts</Label>
+                <Input id="mlNew" type="number" min={0} value={editingLine.plannedNewPositions}
+                  onChange={(e) => setEditingLine({ ...editingLine, plannedNewPositions: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mlFilled">Filled today</Label>
+                <Input id="mlFilled" type="number" min={0} value={editingLine.currentFilled}
+                  onChange={(e) => setEditingLine({ ...editingLine, currentFilled: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mlAvg">Average salary</Label>
+                <Input id="mlAvg" type="number" min={0} value={editingLine.plannedAverageSalary}
+                  onChange={(e) => setEditingLine({ ...editingLine, plannedAverageSalary: e.target.value })} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingLine(null)}>Cancel</Button>
+            <Button
+              disabled={busy !== null}
+              onClick={async () => {
+                if (!editingLine) return;
+                const plannedCount = Number(editingLine.plannedCount || 0);
+                const plannedAverageSalary = Number(editingLine.plannedAverageSalary || 0);
+                await run(
+                  'correct the line',
+                  () =>
+                    jobArchitectureService.updateBudgetLine(editingLine.id, {
+                      id: editingLine.id,
+                      currentCount: Number(editingLine.currentCount || 0),
+                      currentFilled: Number(editingLine.currentFilled || 0),
+                      currentVacant: Number(editingLine.currentVacant || 0),
+                      currentAverageSalary: Number(editingLine.currentAverageSalary || 0),
+                      currentTotalCost: Number(editingLine.currentTotalCost || 0),
+                      plannedCount,
+                      plannedNewPositions: Number(editingLine.plannedNewPositions || 0),
+                      plannedEliminations: Number(editingLine.plannedEliminations || 0),
+                      plannedAverageSalary,
+                      // Kept consistent with the figures above rather than left stale.
+                      plannedTotalCost: plannedAverageSalary * plannedCount,
+                      priority: editingLine.priority as any,
+                      isCritical: editingLine.isCritical,
+                      notes: editingLine.notes || null,
+                    }),
+                  'Line corrected',
+                );
+                qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+                setEditingLine(null);
+              }}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmationDialog
+        open={removingLine !== null}
+        onOpenChange={(o) => !o && setRemovingLine(null)}
+        title={`Remove the line for ${removingLine?.title ?? 'this position'}?`}
+        description="The posts it authorises leave the budget with it. Admin-tier: the correction above is the usual remedy."
+        confirmText="Remove"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!removingLine) return;
+          await run('remove the line', () => jobArchitectureService.deleteBudgetLine(removingLine.id), 'Line removed');
+          qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+          setRemovingLine(null);
+        }}
+      />
+
+      <ConfirmationDialog
+        open={removingBudget}
+        onOpenChange={setRemovingBudget}
+        title="Delete this budget?"
+        description="Every line goes with it. Only a draft can be deleted, and only by an administrator — a budget that has been submitted is part of the approval record."
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          await run('delete the budget', () => jobArchitectureService.deleteBudget(id), 'Budget deleted');
+          router.push('/hr/manpower-budgets');
+        }}
+      />
     </div>
   );
 }

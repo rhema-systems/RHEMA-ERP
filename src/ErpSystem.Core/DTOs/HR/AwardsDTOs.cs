@@ -913,28 +913,35 @@ public class AwardAttachmentDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AwardId { get; set; }
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ⚠ <b>Never a link.</b> The file lives outside the web root and the download needs the
+    /// bearer token, so this is for the server's own use; a screen must call the download route.
+    /// </summary>
     public string FilePath { get; set; } = string.Empty;
+
+    public long? FileSizeBytes { get; set; }
     public AwardAttachmentType AttachmentType { get; set; }
     public string AttachmentTypeName => AttachmentType.ToString();
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
+    public Guid UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
 }
 
 /// <summary>
 /// DTO for creating an award attachment
 /// </summary>
+/// <summary>
+/// The metadata beside an uploaded award file.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>`FileName` and `FilePath` are gone deliberately (ledger D-39)</b> — see
+/// <see cref="CreateAwardNominationAttachmentDto"/>. The award id comes from the route.
+/// </remarks>
 public class CreateAwardAttachmentDto : CreateDtoBase
 {
-    [Required]
     public Guid AwardId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
 
     [Required]
     public AwardAttachmentType AttachmentType { get; set; }
@@ -1256,7 +1263,11 @@ public class AwardNominationAttachmentDto : BaseDto
     public Guid AwardNominationId { get; set; }
 
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>⚠ Never a link — see AwardAttachmentDto.FilePath.</summary>
     public string FilePath { get; set; } = string.Empty;
+
+    public long? FileSizeBytes { get; set; }
 
     public AwardAttachmentType AttachmentType { get; set; }
     public string AttachmentTypeName => AttachmentType.ToString();
@@ -1264,21 +1275,22 @@ public class AwardNominationAttachmentDto : BaseDto
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
     public Guid UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
 }
 
 /// <summary>
 /// DTO for creating a nomination attachment
 /// </summary>
+/// <summary>
+/// The metadata beside an uploaded nomination file.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>`FileName` and `FilePath` are gone deliberately (ledger D-39).</b> They were taken from the
+/// caller as JSON and stored, so an "attachment" was a string somebody typed and the list rendered
+/// it beautifully. The file now arrives as multipart through the controlled gate, which sets both.
+/// </remarks>
 public class CreateAwardNominationAttachmentDto : CreateDtoBase
 {
-    [Required]
-    [MaxLength(255)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
     [Required]
     public AwardAttachmentType AttachmentType { get; set; }
 

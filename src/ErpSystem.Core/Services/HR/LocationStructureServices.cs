@@ -779,18 +779,32 @@ public class LocationContactService : ILocationContactService
     private readonly ILocationContactRepository _repository;
     private readonly ILocationRepository _locationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationContactService> _logger;
 
     public LocationContactService(
         ILocationContactRepository repository,
         ILocationRepository locationRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<LocationContactService> logger)
     {
         _repository = repository;
         _locationRepository = locationRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Every sibling service in this file scopes explicitly; this one
+    // did not, which is why its create had never worked. See CreateAsync.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<LocationContactDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -871,6 +885,13 @@ public class LocationContactService : ILocationContactService
         }
 
         var entity = createDto.ToEntity();
+
+        // ⚠ **This endpoint had never once succeeded.** The entity went in with no TenantId, so the
+        // insert died on FK_LocationContacts_Tenants_TenantId (error 547) and the controller turned
+        // that into a bare 500 naming nothing. Nothing in the frontend has ever called it, which is
+        // exactly why the defect survived the port — a dead path cannot fail visibly. Found by the
+        // lane-2 payload probe running it for the first time.
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -488,6 +488,22 @@ public class AwardNominationAttachment : TenantEntity
 
     public AwardAttachmentType AttachmentType { get; set; }
     
+    /// <summary>Size as the gate measured it, so a list can show it without opening the file.</summary>
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>The controlled-upload gate's own records (ledger D-39).</summary>
+    /// <remarks>
+    /// ⚠ <c>FilePath</c> above is written by the gate and is NOT a URL: the file lives outside the
+    /// web root and the download needs the bearer token. Until 2026-08-31 it was a string the CALLER
+    /// supplied and nothing verified — the sixth instance of that sink, and the reason this family
+    /// had no upload surface at all.
+    /// </remarks>
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+
+    public Guid? DocumentVersionId { get; set; }
+
     public DateTime UploadDate { get; set; }
 
     public Guid UploadedById { get; set; }
@@ -748,6 +764,22 @@ public class AwardAttachment : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
     
+    /// <summary>Size as the gate measured it, so a list can show it without opening the file.</summary>
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>The controlled-upload gate's own records (ledger D-39).</summary>
+    /// <remarks>
+    /// ⚠ <c>FilePath</c> above is written by the gate and is NOT a URL: the file lives outside the
+    /// web root and the download needs the bearer token. Until 2026-08-31 it was a string the CALLER
+    /// supplied and nothing verified — the sixth instance of that sink, and the reason this family
+    /// had no upload surface at all.
+    /// </remarks>
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+
+    public Guid? DocumentVersionId { get; set; }
+
     public DateTime UploadDate { get; set; }
 
     public Guid UploadedById { get; set; }

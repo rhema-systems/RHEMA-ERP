@@ -16,6 +16,7 @@ import type {
   JobVacancySummary,
   PositionEstablishment,
   PositionVacancyStats,
+  PositionVacancyDetail,
   PositionVacancySummary,
   RaiseRequisitionResult,
   RequisitionAttachment,
@@ -516,6 +517,11 @@ class PositionVacancyService {
     return apiService.get<PositionVacancySummary[]>(this.baseUrl, params);
   }
 
+  /** The vacancy in full, including the notes the list read omits. */
+  getVacancy(id: string): Promise<PositionVacancyDetail> {
+    return apiService.get<PositionVacancyDetail>(`${this.baseUrl}/${id}`);
+  }
+
   getStats(): Promise<PositionVacancyStats> {
     return apiService.get<PositionVacancyStats>(`${this.baseUrl}/stats`);
   }
@@ -528,6 +534,38 @@ class PositionVacancyService {
     businessJustification?: string | null;
   }): Promise<RaiseRequisitionResult> {
     return apiService.post<RaiseRequisitionResult>(`${this.baseUrl}/${vacancyId}/raise-requisition`, payload);
+  }
+
+  /**
+   * Move a vacancy along by hand.
+   *
+   * ⚠ The id goes in the BODY as well as the route and the controller refuses a mismatch with a
+   * bare "ID mismatch." — established by `probe-lane2-groupB.mjs`, not by reading.
+   */
+  setStatus(vacancyId: string, payload: { newStatus: string; notes?: string | null }) {
+    return apiService.patch<PositionVacancySummary>(`${this.baseUrl}/${vacancyId}/status`, {
+      vacancyId,
+      ...payload,
+    });
+  }
+
+  /** Annotate one. The whole body is `{ notes }`; there is no DTO behind it. */
+  setNotes(vacancyId: string, notes: string | null) {
+    return apiService.put<PositionVacancySummary>(`${this.baseUrl}/${vacancyId}/notes`, { notes });
+  }
+
+  /**
+   * Close a gap by hand, with a reason.
+   *
+   * ⚠ Reconcile OPENS vacancies and closes the ones the establishment no longer implies; this is
+   * for the one it cannot see — a post being left unfilled deliberately, a restructure. Until it was
+   * wired, a vacancy the organisation had decided not to fill sat open for good.
+   */
+  close(vacancyId: string, reason: string) {
+    return apiService.post<PositionVacancySummary>(`${this.baseUrl}/${vacancyId}/close`, {
+      vacancyId,
+      reason,
+    });
   }
 
   reconcile(): Promise<{ opened: number; closed: number; scanned: number }> {

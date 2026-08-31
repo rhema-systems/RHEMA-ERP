@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Loader2, Plus, Trash2, UserMinus, UserPlus, Users } from 'lucide-react';
+import { AlertTriangle, Loader2, Pencil, Plus, Trash2, UserMinus, UserPlus, Users } from 'lucide-react';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -61,7 +61,11 @@ export default function AwardCommitteesPage() {
     name: '', description: '', quorumRequired: 1, reviewDeadlineDays: 7,
     effectiveFrom: today(), isActive: true,
   });
-  const [member, setMember] = useState({ employeeId: '', role: '', startDate: today() });
+  // `id` present = editing that member; absent = adding one. One dialog either way, because the
+  // fields are identical and a second dialog would drift from the first.
+  const [member, setMember] = useState<{
+    id?: string; employeeId: string; role: string; startDate: string; endDate: string; isActive: boolean;
+  }>({ employeeId: '', role: '', startDate: today(), endDate: '', isActive: true });
 
   const { data: committees, isLoading } = useQuery({
     queryKey: ['award-committees'],
@@ -109,18 +113,31 @@ export default function AwardCommitteesPage() {
     onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The committee was refused.'),
   });
 
+  /**
+   * ⚠ The edit is NOT the deactivation. Deactivating ends the entitlement to score and keeps the
+   * scores already given attributable; this corrects what the record SAYS — a role typed wrongly,
+   * a start date a day out. Until it existed the only correction was to deactivate the member and
+   * add them again, which changes the committee's history to fix a typo.
+   */
   const addMember = useMutation({
-    mutationFn: () =>
-      awardsService.addCommitteeMember(selectedId, {
+    mutationFn: () => {
+      const body = {
         employeeId: member.employeeId,
         role: member.role.trim() || null,
         startDate: new Date(member.startDate).toISOString().slice(0, 19),
-        isActive: true,
-      }),
+        endDate: member.endDate ? new Date(member.endDate).toISOString().slice(0, 19) : null,
+        isActive: member.isActive,
+      };
+      return member.id
+        ? awardsService.updateCommitteeMember(member.id, { ...body, id: member.id })
+        : awardsService.addCommitteeMember(selectedId, body);
+    },
     onSuccess: () => {
-      toast.success('Added. They can now score nominations in front of this committee.');
+      toast.success(member.id
+        ? 'Saved.'
+        : 'Added. They can now score nominations in front of this committee.');
       setAddingMember(false);
-      setMember({ employeeId: '', role: '', startDate: today() });
+      setMember({ employeeId: '', role: '', startDate: today(), endDate: '', isActive: true });
       invalidate();
     },
     onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The member was refused.'),
@@ -306,6 +323,23 @@ export default function AwardCommitteesPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setMember({
+                                  id: m.id,
+                                  employeeId: m.employeeId,
+                                  role: m.role ?? '',
+                                  startDate: m.startDate ? m.startDate.slice(0, 10) : today(),
+                                  endDate: m.endDate ? m.endDate.slice(0, 10) : '',
+                                  isActive: m.isActive,
+                                });
+                                setAddingMember(true);
+                              }}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             {m.isActive && (
                               <Button
                                 size="sm"
@@ -405,9 +439,13 @@ export default function AwardCommitteesPage() {
       <Dialog open={addingMember} onOpenChange={setAddingMember}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add a member to {detail?.name}</DialogTitle>
+            <DialogTitle>
+              {member.id ? 'Edit member' : 'Add a member to ' + (detail?.name ?? 'this committee')}
+            </DialogTitle>
             <DialogDescription>
-              This is what lets them score nominations in front of this committee.
+              {member.id
+                ? 'Correct what the record says. To end their entitlement to score, deactivate them instead.'
+                : 'This is what lets them score nominations in front of this committee.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -416,7 +454,13 @@ export default function AwardCommitteesPage() {
               <EmployeePicker
                 value={member.employeeId || null}
                 onChange={(id) => setMember({ ...member, employeeId: id ?? '' })}
+                disabled={Boolean(member.id)}
               />
+              {member.id && (
+                <p className="text-xs text-muted-foreground">
+                  The person cannot be changed here — remove this member and add the right one.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
@@ -425,16 +469,23 @@ export default function AwardCommitteesPage() {
                 placeholder="Chair, Secretary, Member…" />
               <p className="text-xs text-muted-foreground">Free text — whatever the committee calls it.</p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="mfrom">From</Label>
-              <Input id="mfrom" type="date" value={member.startDate}
-                onChange={(e) => setMember({ ...member, startDate: e.target.value })} />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="mfrom">From</Label>
+                <Input id="mfrom" type="date" value={member.startDate}
+                  onChange={(e) => setMember({ ...member, startDate: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mto">To</Label>
+                <Input id="mto" type="date" value={member.endDate}
+                  onChange={(e) => setMember({ ...member, endDate: e.target.value })} />
+              </div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setAddingMember(false)}>Cancel</Button>
               <Button disabled={!member.employeeId || addMember.isPending} onClick={() => addMember.mutate()}>
                 {addMember.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Add
+                {member.id ? 'Save' : 'Add'}
               </Button>
             </div>
           </div>

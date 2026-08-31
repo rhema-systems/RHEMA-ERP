@@ -125,3 +125,33 @@ export interface CreateLocationRequest {
 export interface UpdateLocationRequest extends CreateLocationRequest {
   id: string;
 }
+
+/**
+ * Who to ring at a location.
+ *
+ * ⚠ Four write endpoints with no caller anywhere, and the create had **never once succeeded**:
+ * the service did not stamp TenantId, so every insert died on the tenant foreign key and the
+ * controller returned a bare 500. Fixed 2026-08-31; a dead path cannot fail visibly, which is why
+ * it survived the port.
+ */
+export interface LocationContact {
+  id: string;
+  tenantId: string;
+  locationId: string;
+  locationName?: string | null;
+  employeeId?: string | null;
+  employeeName?: string | null;
+  contactName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  isPrimary: boolean;
+}
+
+export interface UpsertLocationContact {
+  locationId: string;
+  employeeId?: string | null;
+  contactName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  isPrimary: boolean;
+}

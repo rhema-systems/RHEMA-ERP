@@ -34,6 +34,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { CheckInObjectivesPanel } from '@/components/hr/performance/CheckInObjectivesPanel';
 import { useToast } from '@/hooks/use-toast';
+import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { checkInService } from '@/services/hr/appraisal-run.service';
 import { employeeGoalService } from '@/services/hr/goals.service';
@@ -502,6 +503,20 @@ export default function CheckInDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ⚠ Goals and review events have had an attachment panel since the area shipped; check-ins
+          did not, so anything agreed in a one-to-one could be described and never evidenced. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Attachments</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Anything referred to in this check-in — a plan, a report, a note.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <PerformanceAttachmentsPanel basePath="/CheckIns" ownerId={checkInId} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

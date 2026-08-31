@@ -35,11 +35,15 @@ import type {
   CastAwardVote,
   ConferDirectly,
   ConferFromNomination,
+  CreateLongServiceAward,
   EmployeeAward,
   RecordAwardPayment,
   RecordAwardPresentation,
   SubmitCommitteeReview,
   UpdateAwardNomination,
+  UpdateContribution,
+  UpdateLongServiceAward,
+  UpdateTeamNominee,
   UpsertAwardBudget,
   UpsertAwardCommittee,
   UpsertAwardCycle,
@@ -335,6 +339,19 @@ class AwardsService {
     return apiService.post<AwardTypeTarget>(`${this.base}/targets`, payload);
   }
 
+  /**
+   * Correct a target.
+   *
+   * ⚠ `HR.Awards.Admin`, like the rest of the catalogue — the desk's Write tier is refused here,
+   * established by a 403 rather than assumed (probe-lane2-edits.mjs).
+   *
+   * ⚠ An edit here has teeth: flipping `isExclusion` on an eligibility target makes the named
+   * employee ineligible, and the nomination refuses by name. The probe hit exactly that.
+   */
+  updateTarget(id: string, payload: UpsertAwardTarget & { id: string }) {
+    return apiService.put<AwardTypeTarget>(`${this.base}/targets/${id}`, payload);
+  }
+
   createBudget(payload: UpsertAwardBudget) {
     return apiService.post<AwardBudget>(`${this.base}/budgets`, payload);
   }
@@ -402,6 +419,16 @@ class AwardsService {
 
   addCommitteeMember(committeeId: string, payload: AddCommitteeMember) {
     return apiService.post<AwardCommitteeMember>(`${this.base}/committees/${committeeId}/members`, payload);
+  }
+
+  /**
+   * Correct a member's role or dates. `HR.Awards.Admin`.
+   *
+   * ⚠ Not the same act as deactivating: deactivation ends their entitlement to score and keeps
+   * the scores they gave, while this fixes what the record says about them.
+   */
+  updateCommitteeMember(memberId: string, payload: AddCommitteeMember & { id: string }) {
+    return apiService.put<AwardCommitteeMember>(`${this.base}/committee-members/${memberId}`, payload);
   }
 
   deactivateCommitteeMember(memberId: string) {
@@ -518,6 +545,36 @@ class AwardsService {
   }
 
   // ── long service, once granted ────────────────────────────────────────────
+
+  /**
+   * Correct a team member's share. `HR.Awards.Write`.
+   *
+   * The reward percentage decides what each member of a team award is paid, so a typo here is money.
+   */
+  updateTeamNominee(id: string, payload: UpdateTeamNominee & { id: string }) {
+    return apiService.put<void>(`${this.base}/team-nominees/${id}`, payload);
+  }
+
+  /** Reword a contribution. `HR.Awards.Write`. */
+  updateContribution(id: string, payload: UpdateContribution & { id: string }) {
+    return apiService.put<void>(`${this.base}/contributions/${id}`, payload);
+  }
+
+  /**
+   * Record a long-service award by hand.
+   *
+   * ⚠ Until this, a long-service award could only come into being through the sweep, so one
+   * granted with the wrong value had no counterpart to correct it against — and it is money. The
+   * sweep remains the normal path; this is the correction and the exception.
+   */
+  createLongServiceAward(payload: CreateLongServiceAward) {
+    return apiService.post<LongServiceAwardSummary>(`${this.base}/long-service`, payload);
+  }
+
+  /** Correct one. Same reasoning as the create. */
+  updateLongServiceAward(id: string, payload: UpdateLongServiceAward & { id: string }) {
+    return apiService.put<LongServiceAwardSummary>(`${this.base}/long-service/${id}`, payload);
+  }
 
   /** Mark a long-service award as processed, with the presentation details. */
   processLongServiceAward(id: string, payload: {

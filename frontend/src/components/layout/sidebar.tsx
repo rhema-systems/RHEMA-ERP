@@ -3107,6 +3107,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
           { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
+          // Ten write endpoints with no screen anywhere until 2026-08-31: a bank could not be
+          // added, renamed, retired or removed from the product at all.
+          { title: 'Banks', href: '/administration/hr/banks', icon: Landmark },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
           // Area 16. The categories the company-asset register is built on — nothing can be
           // added to that register until at least one exists, so it is setup, not casework.

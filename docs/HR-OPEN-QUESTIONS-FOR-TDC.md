@@ -68,16 +68,22 @@ which read the same calendar.
 
 ## 4. Will reporting lines and departmental heads be maintained? *(the most consequential item)*
 
-**Measured on the live database, 2026-08-17:**
+**Re-measured 2026-08-31:**
 
 | | |
 |---|---|
 | Organisation units with a named head | **0 of 41** |
-| Employees with a named line manager | **175 of 1,650** (10.6%) |
-| Employees placed in an organisation unit | **1,626 of 1,650** — this one *is* usable |
+| Employees with a named line manager | **3 of 562** (0.5%) |
+| Employees placed in an organisation unit | **538 of 562** (96%) — this one *is* usable |
 
-The manager figure has fallen since it was last measured on 16 August (175 of 1,486), because
-employees were added without one.
+⚠ **Read the ratios, not the totals.** The employee population has been 5,579, then 1,650, and is
+562 today, because the database is rebuilt from the EF model rather than migrated. What has not
+moved in three measurements across two weeks is the shape: **no unit has ever had a head**, and the
+share of employees with a line manager has gone 14% → 10.6% → 0.5%. Whatever the seed does, nobody
+is maintaining these two columns.
+
+*(Earlier readings, for the record: 0 of 41 heads and 175 of 1,650 managers on 2026-08-17; 175 of
+1,486 on 2026-08-16.)*
 
 **What this blocks — three separate requirements, one missing foundation:**
 

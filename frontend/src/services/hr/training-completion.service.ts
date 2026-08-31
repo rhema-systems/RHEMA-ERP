@@ -1,5 +1,6 @@
 import { apiService } from '../api.service';
 import type {
+  BulkCompletionResult,
   TrainingCompletion,
   RecordTrainingCompletionRequest,
   VerifyTrainingCompletionRequest,
@@ -39,6 +40,27 @@ class TrainingCompletionService {
 
   getPendingVerification(): Promise<TrainingCompletion[]> {
     return apiService.get<TrainingCompletion[]>(`${this.baseUrl}/pending-verification`);
+  }
+
+  /**
+   * Record completion for a whole schedule at once.
+   *
+   * ⚠ The server checks only for a completion that already exists — not that the nomination
+   * belongs to this schedule, nor that it was ever confirmed. The caller is the constraint; see
+   * `BulkCompletionPanel`.
+   */
+  bulkRecord(data: {
+    scheduleId: string;
+    items: {
+      nominationId: string;
+      employeeId: string;
+      completionDate: string;
+      status: string;
+      finalScore?: number | null;
+      isPassed: boolean;
+    }[];
+  }): Promise<BulkCompletionResult> {
+    return apiService.post<BulkCompletionResult>(`${this.baseUrl}/bulk`, data);
   }
 
   record(data: RecordTrainingCompletionRequest): Promise<TrainingCompletion> {

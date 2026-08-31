@@ -406,6 +406,22 @@ yet classified.
 
   _Cleared. Two engines that had never run now do, and a third is scheduled for the first time_
 
+- [x] **D-39 — The awards attachment family is on a caller-supplied file path** · `DONE 2026-08-31`
+
+  Found by the lane-2 triage of the `Awards` queue rows, 2026-08-31. `CreateAwardAttachmentDto` and `CreateAwardNominationAttachmentDto` take **`FileName` and `FilePath` as JSON** and store them: the sixth instance of the path sink, and the exact shape area 16 replaced — where the "attachment" is a string somebody typed and the list renders it beautifully.
+
+  ⚠ It is untouched rather than in use: `grep -ri attachment` over the awards screens and the awards service returns **nothing at all**. So five endpoints have no caller because the area has no upload surface, and building one over the DTO as it stands would ship the sink rather than close it. The evidence a nomination is meant to carry — the citation, the supporting letter — has never been attachable.
+
+  The fix is the established one and is mechanical: `HrAttachmentUpload.ExecuteAsync` on the way in, `HrDocumentDownload.ServeAsync` on the way out, a category constant registered in `SystemCleanScanRequired` (a declared category is not a registered one — D-11), then `DocumentUploadField` and `hrDocumentService` on the screens.
+
+  **Done 2026-08-31.** Migration `20260831135847_AddAwardAttachmentDmsColumns` (eight nullable columns, guarded on `COL_LENGTH` like its three siblings, because `rebuild-db` builds from the model and a bare AddColumn fails on a database that already has them). `FileName` and `FilePath` are GONE from both create DTOs: the file arrives as multipart through `HrAttachmentUpload`, and the gate's facts reach the service as PARAMETERS rather than DTO fields, so a caller may describe what a file is and may not say where it lives. Both families gained a token-bearing download through `HrDocumentDownload`. Category `hr-award-attachments` declared AND registered in `SystemCleanScanRequired` in the same commit, so the D-11 half-job cannot recur.
+
+  ⚠ **Proven by `hr-awards/probe-d39-attachments.mjs`, 16 assertions — the first time an award attachment has ever existed.** Upload, then: the stored name is the FILE's and the size is what the gate measured (not what a caller claimed); the download returns the same bytes, which a caller-supplied path could never promise; a JSON body naming `C:\Windows\System32\config\SAM` is refused with 415; and the delete is Admin-tier while the desk gets 403.
+
+  Two rules refused shortcuts on the way and named themselves: a CommitteeScore award cannot be conferred directly (AWD-07) and a draft nomination cannot be conferred at all.
+
+  _Cleared. Four of the five endpoints are wired; the attachment EDIT is still open (see D2)_
+
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
   events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write policy, so today it means 'HR records the response'. That is correct for the HR screens being built now. Before any /me surface offers 'accept this invitation', it needs a self-or-permission check against the participant's own employee id.
@@ -416,18 +432,18 @@ yet classified.
 
 Both instruments agree, and each was hand-verified in source. This is the trustworthy list.
 
-### EmployeeBanks — `BUILD`
+### EmployeeBanks — `DONE`
 
-Banks and branches reference data has no maintenance screen.
+Built 2026-08-31 (lane 2). /administration/hr/banks and banks/[id] cover all TEN writes — bank add/edit/retire/restore/delete and the same five for branches — with a nav entry. The queue counted 4 because only those agreed across both instruments; the family had no screen of any kind. One backend defect cleared first: BranchCount was hardcoded ToDto(0) on four of the five reads, so a list would have shown every bank with zero branches.
 
 - [ ] `POST   api/hr/banks`
 - [ ] `POST   api/hr/banks/{}/branches`
 - [ ] `PUT    api/hr/banks/{}`
 - [ ] `DELETE api/hr/banks/{}`
 
-### LocationContact — `BUILD`
+### LocationContact — `DONE`
 
-No screen.
+Built 2026-08-31 (lane 2). A contacts panel on the location edit screen. ⚠ The create had NEVER ONCE SUCCEEDED: the service did not stamp TenantId, so every insert died on FK_LocationContacts_Tenants_TenantId and the controller returned a bare 500. Found by the payload probe running it for the first time — a dead path cannot fail visibly.
 
 - [ ] `POST   api/LocationContact`
 - [ ] `PUT    api/LocationContact/{}`
@@ -917,23 +933,23 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
 | PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
 | PerformanceAppraisals | 15 | 29 | `BUILD` 5 · `INTENTIONAL` 10 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
-| Awards | 13 | 56 | `REVIEW` | ⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.** |
+| Awards | 13 | 56 | `INTENTIONAL` 3 · `FALSE` 1 · `DONE` 9 | ⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.** |
 | StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
 | MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
-| EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
+| EmployeeBanks | 6 | 10 | `DONE` | Built 2026-08-31 (lane 2). /administration/hr/banks and banks/[id] cover all TEN writes — bank add/edit/retire/restore/delete and the same five for branches — with a nav entry. The queue counted 4 because only those agreed across both instruments; the family had no screen of any kind. One backend defect cleared first: BranchCount was hardcoded ToDto(0) on four of the five reads, so a list would have shown every bank with zero branches. |
 | Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
-| JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
+| JobAnalysis | 4 | 59 | `DONE` | The child collections were built 2026-08-29 (slice 13) and the manpower budget edit/delete plus line edit/delete on 2026-08-31 (lane 2). ⚠ The budget update is a REPLACE — the DTO names every figure — so the dialog seeds from the budget and sends the whole set; omitting one writes a zero over it. Edits are Write-tier and both deletes are HR.ManpowerBudget.Admin, established by a 403 rather than assumed. |
 | SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SuccessionCandidates | 4 | 17 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A candidate's own files hang off a Documents dialog on the successors tab, sharing the one panel the plan and the talent-pool member use — one table and one DTO serve all three owners, so one component does. The remaining flags are the metadata-only POST and the development-activity trio that duplicates api/succession-development. |
 | AppraisalCycleTarget | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired. |
-| EmployeeCareerPath | 3 | 3 | `BUILD` | Decided 2026-08-28: career paths are NOT server-write-only and should have a UI. |
+| EmployeeCareerPath | 3 | 3 | `DONE` | Built 2026-08-31 (lane 2). The timeline on /hr/movements/career-paths/[employeeId] can be annotated, corrected and added to. The edit offers only the four fields the server takes — end date, current flag, achievements, key projects — because the position, unit and salary are what the movement engine wrote and are corrected by correcting the movement. |
 | InterviewQuestionPreset | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows. |
 | PositionCompetency | 3 | 4 | `INTENTIONAL` | Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set. |
-| PositionVacancies | 3 | 5 | `BUILD` | Classified 2026-08-29: all 3 real. The establishment screen wires reconcile and raise-requisition only; a vacancy cannot be closed by hand, annotated, or have its status set. |
-| TrainingServiceBonds | 3 | 8 | `BUILD` | Classified 2026-08-29: all 3 real. Bonds are minted server-side on nomination submit, so a bond with the wrong amount copied off its program has no correction path - and it is money. |
-| Candidate | 2 | 11 | `REVIEW` |  |
-| CheckIns | 2 | 9 | `BUILD` | Classified 2026-08-29: both real. Goals and review events wire an attachment panel; check-ins do not. |
+| PositionVacancies | 3 | 5 | `BUILD` | Built 2026-08-31 (lane 2). Close, annotate and set-status on the establishment screen, each dialog saying what it is FOR, because reconcile normally owns all three: closing is for a post the organisation has decided not to fill, which reconcile cannot see, so it sat open for ever. ⚠ The notes dialog fetches the BY-ID read — PositionVacancySummaryDto has no `notes`, so seeding from the row would open empty and save a blank over whatever was written. |
+| TrainingServiceBonds | 3 | 8 | `BUILD` | Built 2026-08-31 (lane 2). Raise, correct and delete on /hr/service-bonds. The correction is the one that mattered: amount and duration are copied from the programme when the server mints the bond, so a programme priced wrongly mints every bond wrongly — and the only remedy was to delete and re-raise, throwing away the acceptance the employee had already signed. The delete is offered only before acceptance; an accepted bond is waived instead. |
+| Candidate | 2 | 11 | `FALSE` |  |
+| CheckIns | 2 | 9 | `BUILD` | Built 2026-08-31 (lane 2). An attachments card on the check-in detail, sharing one panel with the appraisal family — the two are the same four routes with a different prefix. No backend change: the endpoint was already IFormFile through the controlled gate, so the FilePath DTO beside it is a leftover. |
 | ClientTimesheetConfirmation | 2 | 2 | `DONE` | Built 2026-08-31 (consultant-client closure). The page now exists at the exact path the confirmation emails have always carried, {PortalUrl}/client-timesheet/confirm/{token}: validate (stamps Viewed), review the entries, confirm or reject with notes; expired and already-responded links render read-only. Kept by decision alongside the logged-in portal — the door for the contact who has not completed an invite. Verified by dev-harness/hr-consulting (78 assertions ×2). |
 | ConsultantClients | 2 | 8 | `INTENTIONAL` | Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired. |
 | HrLegacyFileMigration | 2 | 2 | `INTENTIONAL` | One-off ops tool, invoked by script. |
@@ -960,8 +976,8 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | JobCandidate | 1 | 25 | `FALSE` | The interest edit was built 2026-08-30 (recruitment closure, slice 1 — the UI comment claiming 'no update endpoint' was false) and left the queue. The remaining flag is the documents POST, the hrDocumentService.upload artefact. |
 | JobPosting | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
 | JobVacancy | 1 | 17 | `FALSE` | Stage assignments were built 2026-08-30 (recruitment closure, slice 1 — the Stage owners tab on vacancy detail; the eighth soft-delete/unique-index face was fixed with revive-on-upsert first) and left the queue on their own. The one remaining flag is the attachments POST, wired through hrDocumentService.upload — the helper artefact instrument 01 cannot resolve. |
-| LeaveTypes | 1 | 14 | `BUILD` | Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either. |
-| LocationContact | 1 | 4 | `BUILD` | No screen. |
+| LeaveTypes | 1 | 14 | `BUILD` | Built 2026-08-31 (lane 2). A retire action on the leave-types list, with a confirmation that says plainly there is no delete — 405 by design, because a leave type is referenced by every request ever made against it. |
+| LocationContact | 1 | 4 | `DONE` | Built 2026-08-31 (lane 2). A contacts panel on the location edit screen. ⚠ The create had NEVER ONCE SUCCEEDED: the service did not stamp TenantId, so every insert died on FK_LocationContacts_Tenants_TenantId and the controller returned a bare 500. Found by the payload probe running it for the first time — a dead path cannot fail visibly. |
 | Location | 1 | 4 | `INTENTIONAL` | Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync. |
 | MedicalClinical | 1 | 17 | `INTENTIONAL` | Built 2026-08-29 (slice 6). All three clinical entities are now correctable and removable from the clinical screen; the one remaining flag is the free status set, which the screen deliberately does not call. D-16 was cleared first. |
 | MedicalExpenseClaims | 1 | 13 | `FALSE` | Built 2026-08-29 (slice 6). The claim, its lines and its documents are all correctable and removable; the one remaining flag is the upload artefact. The edit form also closes section E's AdmissionStart/AdmissionEnd pair. |
@@ -975,8 +991,8 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffRequisitions | 1 | 19 | `FALSE` | hrDocumentService.upload artefact. |
 | SuccessionDocuments | 1 | 1 | `DONE` | Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. It still reads as flagged because the client calls it through hrDocumentService.upload(endpoint, file, fields) - the helper-indirection artefact, the single largest false-positive source in this queue - and its download sibling is a GET, which instrument 01 skips outright. |
 | SuccessionPlan | 1 | 14 | `INTENTIONAL` | Built 2026-08-30 (slice 19). The plan's actions and competency requirements are authorable from the detail screen, and the documents tab drives the gated upload, the token-bearing download and the Admin-tier delete. Three backend defects had to clear first, all found by the standing checks and none by a probe failing: the per-plan actions read was a summary missing nine of the update payload's thirteen fields (D-19), the assigner was assertable by the request body (D-20), and removing a competency requirement made it permanently unrequirable (D-21). The one remaining flag is the metadata-only document POST, deliberately unwired. |
-| TrainingCompletions | 1 | 6 | `BUILD` | Classified 2026-08-29: real, and already in section F - bulk completion has no UI. |
-| TrainingNominations | 1 | 14 | `BUILD` | Classified 2026-08-29: real, and already in section F - the availability check is never shown. |
+| TrainingCompletions | 1 | 6 | `BUILD` | Built 2026-08-31 (lane 2). A Completion tab on the schedule: tick who finished, set the date and outcome, record in one pass. ⚠ The server checks only for a completion that already exists — not that the nomination belongs to this schedule, nor that anyone was ever confirmed (the probe recorded a completion against a DRAFT nomination without complaint) — so the screen is the constraint, and it shows every skipped row with its reason rather than reporting success for work it did not do. |
+| TrainingNominations | 1 | 14 | `BUILD` | Built 2026-08-31 (lane 2). A 'Check availability' button in the nominate dialog, showing leave, travel and other live nominations over the schedule's dates. Advisory rather than a gate — leave gets cancelled, travel moves — but it distinguishes 'checked and clear' from 'not checked', which is the whole value. ⚠ Proven both ways: a DRAFT nomination elsewhere is correctly not a clash, the same one live is. An empty list would otherwise have been a vacuous green. |
 | UnitGoals | 1 | 5 | `FALSE` | hrDocumentService.upload artefact. |
 
 ## D2. Hand-review dispositions, endpoint by endpoint
@@ -986,7 +1002,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**116 of the 275 queued endpoints are classified here — 27 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 159 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**131 of the 275 queued endpoints are classified here — 27 BUILD, 46 INTENTIONAL, 47 FALSE, 11 DONE.** The remaining 144 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -1067,6 +1083,35 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>Superseded by `POST {}/submit-appeal`, which is wired and enforces the at-least-one-appealed-item rule.
 - `PATCH  api/PerformanceAppraisals/{}/status` — **INTENTIONAL**
   <br>Raw status set. Status is moved by the named workflow transitions, each of which enforces its own preconditions.
+
+### Awards — 3 INTENTIONAL · 1 FALSE · 9 DONE
+
+- `DELETE api/Awards/attachments/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39, with the POST it belongs to.
+- `PUT    api/Awards/committee-members/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2). Correcting a member is not deactivating them: deactivation ends their entitlement to score and keeps their scores attributable; this fixes what the record says. ORIGINAL: A committee member can be added, deactivated and deleted, but their role on the committee cannot be corrected.
+- `PUT    api/Awards/contributions/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2). Reworded in place on the nomination screen rather than deleted and retyped, which would lose who recorded it and when. ORIGINAL: A contribution can be added and removed, never reworded.
+- `POST   api/Awards/long-service` — **DONE**
+  <br>Built 2026-08-31 (lane 2). By hand, for the award the sweep cannot see — a missing service date, or one agreed separately. The sweep remains the normal path. ORIGINAL: A long-service award can only come into being through the sweep. One granted with the wrong value has no manual counterpart to correct it against — and it is money, the same shape as TrainingServiceBonds.
+- `PUT    api/Awards/long-service/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2). ⚠ Seeded from the BY-ID read, never the row: the summary carries five fields and the update takes eight, so a row-seeded form would blank the description, leave bonus and benefits on save. isProcessed/presentationDate/presentationNotes are carried through unchanged, or a correction would un-present an award somebody had already presented. ORIGINAL: The correction itself. `DELETE long-service/{}` and `POST long-service/{}/process` are wired; the edit is not.
+- `POST   api/Awards/nominations/{}/attachments` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39. `grep -ri attachment` over the awards screens and service returns nothing at all: the evidence a nomination is supposed to carry has never been uploadable.
+- `PUT    api/Awards/targets/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2). The scope dialog now edits as well as adds, on BOTH tables — the electorate table had no actions column at all, so a rule about who may vote could be added and then neither corrected nor removed. ⚠ The edit has teeth: flipping isExclusion made the probe's own nominee ineligible and the nomination was refused quoting the reason text back. ORIGINAL: A cycle target can be created (`POST targets`) and deleted (`DELETE targets/{}`) and not corrected.
+- `PUT    api/Awards/team-nominees/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2). A team member's role, contribution summary and share are correctable. The share decides what each member is PAID. ORIGINAL: A team member's role, contribution summary and reward percentage cannot be corrected once named; create and delete are both wired.
+- `POST   api/Awards/{}/attachments` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39: the DTO takes `FileName` and `FilePath` as JSON, so a screen over it would ship the caller-supplied path sink area 16 replaced.
+- `POST   api/Awards/types/{}/long-service/sweep` — **FALSE**
+  <br>Wired as `runLongServiceSweep`, which appends `?asOf=` — the interpolated query-string artefact: instrument 01 folds the `${query}` into the path segment instead of dropping it. The preview beside it is a GET, which 01 skips outright.
+- `POST   api/Awards/nominations` — **INTENTIONAL**
+  <br>Nominating is the nominator's act, not the desk's: the frontend calls `POST api/awards/me/nominations`, which takes no employee id and so cannot nominate in someone else's name. Same shape as the employee-portal principle recorded for Assets.
+- `PUT    api/Awards/nominations/{}` — **INTENTIONAL**
+  <br>Served by `PUT api/awards/me/nominations/{}` for the same reason.
+- `POST   api/Awards/nominations/{}/submit` — **INTENTIONAL**
+  <br>Served by `POST api/awards/me/nominations/{}/submit` for the same reason.
 
 ### StaffDisciplineSubEntity — 10 BUILD
 
@@ -1157,6 +1202,13 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>Admin-tier removal of a bond minted in error. Nothing else removes one.
 - `PUT    api/training-service-bonds/{}` — **BUILD**
   <br>The duration, amount and currency are copied off the program at mint time. If the program's figures were wrong, the bond is wrong, and this is the only route that corrects it — a financial obligation with no correction path.
+
+### Candidate — 2 FALSE
+
+- `POST   api/candidate/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/candidate/profile/photo` — **FALSE**
+  <br>_As `POST api/candidate/documents`._
 
 ### CheckIns — 2 BUILD
 

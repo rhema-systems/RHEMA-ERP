@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Banknote, Info, Layers, Loader2, Plus, Target, Trash2 } from 'lucide-react';
+import { Banknote, Info, Layers, Loader2, Pencil, Plus, Target, Trash2 } from 'lucide-react';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -44,6 +44,7 @@ import { awardsService } from '@/services/hr/awards.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
+import type { AwardTypeTarget } from '@/types/hr/awards';
 
 const fmtMoney = (v?: number | null) =>
   v === null || v === undefined ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: 2 });
@@ -103,6 +104,7 @@ export default function AwardTypeDetailPage() {
     monetaryAmount: string; isActive: boolean;
   }>(null);
   const [targetForm, setTargetForm] = useState<null | {
+    id?: string;
     kind: TargetKind; targetId: string; isExclusion: boolean; purpose: number; reason: string;
   }>(null);
   const [budgetForm, setBudgetForm] = useState<null | {
@@ -177,19 +179,43 @@ export default function AwardTypeDetailPage() {
     onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The level was refused.'),
   });
 
+  /**
+   * ⚠ A scope could be added and deleted and never corrected, so fixing a mistyped reason — or an
+   * eligibility rule that should have been an exclusion — meant deleting the rule and raising
+   * another. The edit is not cosmetic: flipping `isExclusion` on an employee target makes that
+   * person ineligible immediately, and the nomination is refused naming this reason text back.
+   */
+  /** Seed the scope dialog from a row. The row's `targetType` is the number TARGET_TYPE maps to. */
+  const editTarget = (t: AwardTypeTarget) =>
+    setTargetForm({
+      id: t.id,
+      kind: (Object.keys(TARGET_TYPE) as TargetKind[]).find((k) => TARGET_TYPE[k] === t.targetType) ?? 'Employee',
+      targetId: t.targetId ?? '',
+      isExclusion: t.isExclusion,
+      purpose: t.purpose,
+      reason: t.reason ?? '',
+    });
+
   const addTarget = useMutation({
     mutationFn: () => {
       if (!targetForm) throw new Error('No scope to add.');
-      return awardsService.createTarget({
+      const body = {
         awardTypeId: id,
         targetType: TARGET_TYPE[targetForm.kind],
         targetId: targetForm.targetId,
         isExclusion: targetForm.isExclusion,
         purpose: targetForm.purpose,
         reason: targetForm.reason.trim() || null,
-      });
+      };
+      return targetForm.id
+        ? awardsService.updateTarget(targetForm.id, { ...body, id: targetForm.id })
+        : awardsService.createTarget(body);
     },
-    onSuccess: () => { toast.success('Scope added.'); setTargetForm(null); refresh('award-targets'); },
+    onSuccess: () => {
+      toast.success(targetForm?.id ? 'Scope saved.' : 'Scope added.');
+      setTargetForm(null);
+      refresh('award-targets');
+    },
     onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The scope was refused.'),
   });
 
@@ -399,6 +425,9 @@ export default function AwardTypeDetailPage() {
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">{t.reason ?? '—'}</TableCell>
                           <TableCell className="text-right">
+                            <Button size="sm" variant="ghost" onClick={() => editTarget(t)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             <Button
                               size="sm"
                               variant="ghost"
@@ -429,6 +458,7 @@ export default function AwardTypeDetailPage() {
                         <TableHead>Kind</TableHead>
                         <TableHead>Who</TableHead>
                         <TableHead>Effect</TableHead>
+                        <TableHead />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -437,6 +467,20 @@ export default function AwardTypeDetailPage() {
                           <TableCell>{t.targetTypeName}</TableCell>
                           <TableCell>{t.targetName ?? '—'}</TableCell>
                           <TableCell>{t.isExclusion ? 'Excluded' : 'Included'}</TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" variant="ghost" onClick={() => editTarget(t)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                setRemoving({ kind: 'target', id: t.id, label: t.targetName ?? 'this scope' })
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -589,7 +633,7 @@ export default function AwardTypeDetailPage() {
       <Dialog open={Boolean(targetForm)} onOpenChange={(o) => !o && setTargetForm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add scope</DialogTitle>
+            <DialogTitle>{targetForm?.id ? 'Edit scope' : 'Add scope'}</DialogTitle>
             <DialogDescription>Narrow who may win, or who may vote.</DialogDescription>
           </DialogHeader>
           {targetForm && (

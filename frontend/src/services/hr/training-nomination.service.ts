@@ -1,5 +1,6 @@
 import { apiService } from '../api.service';
 import type {
+  NomineeConflict,
   TrainingNomination,
   TrainingNominationSummary,
   TrainingNominationRequest,
@@ -67,6 +68,24 @@ class TrainingNominationService {
 
   getPendingHr(): Promise<TrainingNominationSummary[]> {
     return apiService.get<TrainingNominationSummary[]>(`${this.baseUrl}/pending-hr`);
+  }
+
+  /**
+   * Who among these people is already committed over the schedule's dates.
+   *
+   * ⚠ Looks at leave, travel and other LIVE nominations to overlapping schedules — Draft,
+   * Rejected and Withdrawn are excluded, so a colleague's abandoned draft is not a clash. Proven
+   * both ways by `hr-tierb-tail/probe-lane2-groupC.mjs`: a draft elsewhere reports nothing, and the
+   * same nomination live reports `Training` with the programme named.
+   *
+   * ⚠ An empty list means CHECKED AND CLEAR, and the screen must say so rather than showing
+   * nothing — the difference between "no clashes" and "not checked" is the whole feature.
+   */
+  checkAvailability(scheduleId: string, employeeIds: string[]): Promise<NomineeConflict[]> {
+    return apiService.post<NomineeConflict[]>(`${this.baseUrl}/availability-check`, {
+      scheduleId,
+      employeeIds,
+    });
   }
 
   create(data: TrainingNominationRequest): Promise<TrainingNomination> {

@@ -672,6 +672,15 @@ export interface UpsertAwardTarget {
   isExclusion: boolean;
   reason?: string | null;
   purpose?: number;
+  /**
+   * The age band and the dates the rule is in force. Present on `Create/UpdateAwardTypeTargetDto`
+   * since the port and settable by no form until the edit was built — the same class section E
+   * counts, found here by reading the DTO rather than the create form.
+   */
+  minAge?: number | null;
+  maxAge?: number | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
 }
 
 export interface AwardTypeTarget {
@@ -718,6 +727,48 @@ export interface UpsertAwardCommittee {
   effectiveFrom: string;
   effectiveTo?: string | null;
   isActive: boolean;
+}
+
+/** A team member's share of a team nomination. Every field is correctable. */
+export interface UpdateTeamNominee {
+  role?: string | null;
+  contributionSummary?: string | null;
+  rewardPercentage?: number | null;
+}
+
+/** A contribution is one sentence, and rewording it is the whole edit. */
+export interface UpdateContribution {
+  description: string;
+}
+
+/**
+ * A long-service award recorded by hand rather than by the sweep.
+ *
+ * ⚠ `employeeAwardId` links this to a conferred award and is null for one that stands alone.
+ * Section E listed it as settable by no form on both DTOs; these forms are what close that.
+ */
+export interface CreateLongServiceAward {
+  employeeId: string;
+  awardTypeId: string;
+  employeeAwardId?: string | null;
+  yearsOfService: number;
+  serviceStartDate: string;
+  milestoneDate: string;
+  awardDescription: string;
+  monetaryAmount?: number | null;
+  leaveDaysBonus?: number | null;
+  otherBenefits?: string | null;
+}
+
+export interface UpdateLongServiceAward {
+  employeeAwardId?: string | null;
+  awardDescription: string;
+  monetaryAmount?: number | null;
+  leaveDaysBonus?: number | null;
+  otherBenefits?: string | null;
+  isProcessed: boolean;
+  presentationDate?: string | null;
+  presentationNotes?: string | null;
 }
 
 export interface AddCommitteeMember {

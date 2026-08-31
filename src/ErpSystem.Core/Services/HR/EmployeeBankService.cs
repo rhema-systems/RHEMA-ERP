@@ -52,6 +52,29 @@ public class EmployeeBankService : IEmployeeBankService
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Live branch counts, keyed by bank.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>BranchCount</c> used to be hardcoded to zero on every read except
+    /// <c>GetWithBranchesAsync</c> — the list, the active list, by-id and by-code all answered
+    /// "0 branches" however many a bank had. A field that is always present and always wrong is
+    /// worse than an absent one; it survived because no screen has ever rendered a bank.
+    /// </remarks>
+    private async Task<Dictionary<Guid, int>> BranchCountsAsync(
+        Guid tenantId, IEnumerable<Guid> bankIds, CancellationToken cancellationToken)
+    {
+        var ids = bankIds.ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, int>();
+
+        return await _unitOfWork.Repository<EmployeeBankBranch>()
+            .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && ids.Contains(br.BankId))
+            .GroupBy(br => br.BankId)
+            .Select(g => new { BankId = g.Key, Count = g.Count() })
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.BankId, x => x.Count, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<EmployeeBankDto>> GetAllAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
@@ -62,7 +85,8 @@ public class EmployeeBankService : IEmployeeBankService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        return items.Select(b => b.ToDto(0)).ToList();
+        var counts = await BranchCountsAsync(tenantId, items.Select(b => b.Id), cancellationToken);
+        return items.Select(b => b.ToDto(counts.GetValueOrDefault(b.Id))).ToList();
     }
 
     public async Task<IReadOnlyList<EmployeeBankDto>> GetActiveAsync(Guid tenantId, CancellationToken cancellationToken = default)
@@ -75,14 +99,22 @@ public class EmployeeBankService : IEmployeeBankService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        return items.Select(b => b.ToDto(0)).ToList();
+        var counts = await BranchCountsAsync(tenantId, items.Select(b => b.Id), cancellationToken);
+        return items.Select(b => b.ToDto(counts.GetValueOrDefault(b.Id))).ToList();
     }
 
+    /// <summary>
+    /// ⚠ <c>BranchCount</c> was hardcoded to zero on every read but <c>GetWithBranchesAsync</c> —
+    /// the list, the active list, by-id and by-code all answered "0 branches" however many a bank
+    /// had. A field that is always present and always wrong is worse than an absent one, and it was
+    /// invisible because no screen has ever rendered a bank. Counted properly now.
+    /// </summary>
     public async Task<EmployeeBankDto> GetByIdAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
-        return entity.ToDto(0);
+        var counts = await BranchCountsAsync(tenantId, new[] { id }, cancellationToken);
+        return entity.ToDto(counts.GetValueOrDefault(id));
     }
 
     public async Task<EmployeeBankDto?> GetByCodeAsync(Guid tenantId, string code, CancellationToken cancellationToken = default)
@@ -95,7 +127,10 @@ public class EmployeeBankService : IEmployeeBankService
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
-        return entity?.ToDto(0);
+        if (entity is null) return null;
+
+        var counts = await BranchCountsAsync(tenantId, new[] { entity.Id }, cancellationToken);
+        return entity.ToDto(counts.GetValueOrDefault(entity.Id));
     }
 
     public async Task<EmployeeBankDto> GetWithBranchesAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
@@ -176,7 +211,8 @@ public class EmployeeBankService : IEmployeeBankService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Bank '{Code}' updated for tenant {TenantId}.", entity.Code, tenantId);
-        return entity.ToDto(0);
+        return entity.ToDto((await BranchCountsAsync(tenantId, new[] { entity.Id }, cancellationToken))
+            .GetValueOrDefault(entity.Id));
     }
 
     public async Task<EmployeeBankDto> ActivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
@@ -190,7 +226,8 @@ public class EmployeeBankService : IEmployeeBankService
             await _unitOfWork.Repository<EmployeeBank>().UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        return entity.ToDto(0);
+        return entity.ToDto((await BranchCountsAsync(tenantId, new[] { id }, cancellationToken))
+            .GetValueOrDefault(id));
     }
 
     public async Task<EmployeeBankDto> DeactivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
@@ -204,7 +241,8 @@ public class EmployeeBankService : IEmployeeBankService
             await _unitOfWork.Repository<EmployeeBank>().UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        return entity.ToDto(0);
+        return entity.ToDto((await BranchCountsAsync(tenantId, new[] { id }, cancellationToken))
+            .GetValueOrDefault(id));
     }
 
     public async Task<bool> DeleteAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)

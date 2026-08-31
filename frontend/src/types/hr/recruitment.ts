@@ -607,6 +607,20 @@ export interface PositionEstablishment {
   openVacancyId?: string | null;
 }
 
+/**
+ * The vacancy in full.
+ *
+ * ⚠ The LIST returns `PositionVacancySummaryDto`, which has no `notes` — so an annotation
+ * dialog seeded from a row would open empty and save a blank over whatever was there. The notes
+ * come from this by-id read. The same summary-shaped-read trap this codebase has met four times.
+ */
+export interface PositionVacancyDetail extends PositionVacancySummary {
+  positionCode?: string | null;
+  organizationUnitId?: string | null;
+  vacatedByEmployeeId?: string | null;
+  notes?: string | null;
+}
+
 export interface PositionVacancySummary {
   id: string;
   positionId: string;

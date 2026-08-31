@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { awardsService } from '@/services/hr/awards.service';
+import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtMoney = (v?: number | null) =>
@@ -257,6 +258,26 @@ export default function AwardDetailPage() {
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      {/* ⚠ Ledger D-39. The award's own files — the certificate, the photograph taken at the
+          presentation — had no upload surface at all, and the endpoint behind this took a
+          caller-supplied file path until 2026-08-31. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Attachments</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PerformanceAttachmentsPanel
+            basePath="/Awards"
+            ownerId={id}
+            listPath={`/Awards/${id}/attachments`}
+            downloadPath={(attachmentId) => `/Awards/attachments/${attachmentId}/download`}
+            deletePath={(attachmentId) => `/Awards/attachments/${attachmentId}`}
+            uploadFields={{ attachmentType: 'Certificate' }}
+            helpText="The certificate, the citation, a photograph from the presentation. Scanned on upload; max 10 MB."
+          />
         </CardContent>
       </Card>
     </div>

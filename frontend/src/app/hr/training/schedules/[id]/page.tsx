@@ -33,6 +33,7 @@ import {
   type TrainingScheduleFormValues,
 } from '@/components/hr/training/TrainingScheduleForm';
 import { NomineesPanel } from '@/components/hr/training/NomineesPanel';
+import { BulkCompletionPanel } from '@/components/hr/training/BulkCompletionPanel';
 import { WaitlistPanel } from '@/components/hr/training/WaitlistPanel';
 import { AttendanceRegister } from '@/components/hr/training/AttendanceRegister';
 import { FeedbackPanel } from '@/components/hr/training/FeedbackPanel';
@@ -224,6 +225,7 @@ export default function TrainingScheduleDetailPage() {
           <TabsTrigger value="nominees">Nominees</TabsTrigger>
           <TabsTrigger value="waitlist">Waitlist</TabsTrigger>
           <TabsTrigger value="attendance">Attendance</TabsTrigger>
+          <TabsTrigger value="completion">Completion</TabsTrigger>
           <TabsTrigger value="feedback">Feedback</TabsTrigger>
           <TabsTrigger value="follow-up">Follow-up</TabsTrigger>
         </TabsList>
@@ -355,6 +357,11 @@ export default function TrainingScheduleDetailPage() {
             defaultDate={schedule.startDate}
             readOnly={schedule.status === 'Cancelled'}
           />
+        </TabsContent>
+
+        {/* ⚠ TDC asked for bulk completion and the endpoint was built and never called. */}
+        <TabsContent value="completion" className="pt-4">
+          <BulkCompletionPanel scheduleId={id} readOnly={schedule.status === 'Cancelled'} />
         </TabsContent>
 
         <TabsContent value="feedback" className="pt-4">
