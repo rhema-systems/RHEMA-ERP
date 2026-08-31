@@ -152,28 +152,32 @@ public sealed class LegacyPostingPathLockdownTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "Architecture")]
-    public void SubledgerOpeningBalanceAdjustments_ShouldForceMigrationClearingContra()
+    public void LegacyOpeningBalanceEntryPoints_ShouldRemainRetired()
     {
         var root = FindRepositoryRoot();
-        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "SubledgerAdjustmentJournalService.cs"));
+        var subledgerService = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "SubledgerAdjustmentJournalService.cs"));
+        var journalService = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "GL", "JournalEntryService.cs"));
         var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "SubledgerAdjustmentJournal.cs"));
         var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "SubledgerAdjustmentJournalDtos.cs"));
-        var page = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "subledger-adjustments", "new", "page.tsx"));
+        var subledgerPage = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "subledger-adjustments", "new", "page.tsx"));
+        var journalPage = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "journal-entries", "new", "page.tsx"));
 
+        // Historical values remain readable and reversible, but no active creation surface accepts them.
         entity.Should().Contain("public static class SubledgerAdjustmentPurposes");
         entity.Should().Contain("public string Purpose");
         dto.Should().Contain("public string? Purpose");
         dto.Should().Contain("public string Purpose");
 
-        service.Should().Contain("NormalizePurpose(dto.Purpose)");
-        service.Should().Contain("ResolveContraAccountId(");
-        service.Should().Contain("settings.MigrationClearingAccountId");
-        service.Should().Contain("Opening-balance subledger adjustment journals must use the configured Migration Clearing Account");
-        service.Should().Contain("Purpose = original.Purpose");
+        subledgerService.Should().Contain("allowRetiredOpeningBalance: originalAdjustmentId.HasValue");
+        subledgerService.Should().Contain("Subledger opening-balance adjustments are retired");
+        subledgerService.Should().Contain("Purpose = original.Purpose");
+        journalService.Should().Contain("EnsureLegacyOpeningBalanceIsRetired(dto.JournalType)");
+        journalService.Should().Contain("Manual opening-balance journals are retired");
 
-        page.Should().Contain("OpeningBalance");
-        page.Should().Contain("financeDataService.getFinanceSettings()");
-        page.Should().Contain("migrationClearingAccountId");
+        subledgerPage.Should().NotContain("<SelectItem value=\"OpeningBalance\"");
+        subledgerPage.Should().NotContain("financeDataService.getFinanceSettings()");
+        journalPage.Should().NotContain("<SelectItem value=\"Opening Balance\"");
+        journalPage.Should().NotContain("ALL_ACTIVE_BOOKS_CODE");
     }
 
     private static string FindRepositoryRoot()

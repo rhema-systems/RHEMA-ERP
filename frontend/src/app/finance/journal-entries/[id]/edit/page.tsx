@@ -29,12 +29,10 @@ import { financeService } from '@/services/finance.service';
 import { useToast } from '@/hooks/use-toast';
 import { validateJournalEntryForm } from '@/lib/finance/journal-entry-mapper';
 import {
-    ALL_ACTIVE_BOOKS_CODE,
     DEFAULT_ACCOUNTING_BOOKS,
     getAccountingBookName,
     getPostingTargetBooks,
     isAccountEligibleForBook,
-    isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
 import {
     applyCanonicalJournalRate,
@@ -245,14 +243,13 @@ export default function EditJournalEntryPage() {
     const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
     const formatAmount = (amount: number) =>
         amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const isAllActiveBooks = isAllActiveBooksCode(header.bookClassification);
+    const isRetiredOpeningBalance = header.journalType === 'Opening Balance';
     const targetAccountingBooks = useMemo(
         () => getPostingTargetBooks(accountingBooks, header.bookClassification),
         [accountingBooks, header.bookClassification]
     );
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
-    const targetBookLabel = isAllActiveBooks ? 'all active books' : selectedBookName;
-    const targetBookListText = targetAccountingBooks.map(book => book.name).join(', ');
+    const targetBookLabel = selectedBookName;
     const invalidLines = useMemo(() => {
         return lines
             .map((line, index) => {
@@ -557,6 +554,14 @@ export default function EditJournalEntryPage() {
 
     const handleSaveDraft = async () => {
         if (!entry) return;
+        if (isRetiredOpeningBalance) {
+            toast({
+                title: 'Legacy opening balance is read-only',
+                description: 'Use the controlled Opening Balances workspace for cutover corrections.',
+                variant: 'destructive',
+            });
+            return;
+        }
 
         if (currencyReferenceError || !functionalCurrency) {
             toast({
@@ -598,9 +603,7 @@ export default function EditJournalEntryPage() {
             return;
         }
 
-        const validationErrors = validateJournalEntryForm(header, lines, entry.journalEntryNumber, {
-            openingBalanceAutoRoutingEnabled: false,
-        });
+        const validationErrors = validateJournalEntryForm(header, lines, entry.journalEntryNumber);
         if (validationErrors.length > 0) {
             toast({ title: 'Validation', description: validationErrors[0], variant: 'destructive' });
             return;
@@ -642,7 +645,7 @@ export default function EditJournalEntryPage() {
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Cancel
                     </Button>
-                    <Button onClick={handleSaveDraft} disabled={saving || !isBalanced || totalDebit === 0 || Boolean(currencyReferenceError) || Boolean(fxBlockingMessage)}>
+                    <Button onClick={handleSaveDraft} disabled={isRetiredOpeningBalance || saving || !isBalanced || totalDebit === 0 || Boolean(currencyReferenceError) || Boolean(fxBlockingMessage)}>
                         {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                         Save Draft
                     </Button>
@@ -696,13 +699,12 @@ export default function EditJournalEntryPage() {
                     </AlertDescription>
                 </Alert>
             )}
-            {header.journalType === 'Opening Balance' && isAllActiveBooks && (
-                <Alert>
+            {isRetiredOpeningBalance && (
+                <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>All Active Books Posting</AlertTitle>
+                    <AlertTitle>Legacy opening-balance journal is read-only</AlertTitle>
                     <AlertDescription>
-                        This draft will be duplicated when posted to: {targetBookListText || 'No active posting books configured'}.
-                        The active book list is resolved again at posting time.
+                        Manual opening balances are retired. Use the controlled Opening Balances workspace for corrections or new cutover processing.
                     </AlertDescription>
                 </Alert>
             )}
@@ -728,9 +730,6 @@ export default function EditJournalEntryPage() {
                             <Select value={header.bookClassification} onValueChange={(value) => setHeader({ ...header, bookClassification: value })}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {(header.journalType === 'Opening Balance' || isAllActiveBooks) && (
-                                        <SelectItem value={ALL_ACTIVE_BOOKS_CODE}>All Active Books</SelectItem>
-                                    )}
                                     {accountingBooks.map((book) => (
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}

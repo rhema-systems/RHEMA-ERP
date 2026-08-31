@@ -140,7 +140,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             throw new InvalidOperationException("Tenant context is required.");
 
         var module = NormalizeModule(dto.Module, allowNull: false)!;
-        var purpose = NormalizePurpose(dto.Purpose);
+        var purpose = NormalizePurpose(dto.Purpose, allowRetiredOpeningBalance: originalAdjustmentId.HasValue);
         var adjustmentType = NormalizeAdjustmentType(dto.AdjustmentType);
         if (dto.Amount <= 0)
             throw new InvalidOperationException("Adjustment amount must be greater than zero.");
@@ -501,7 +501,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         throw new InvalidOperationException("Adjustment type must be Debit or Credit.");
     }
 
-    private static string NormalizePurpose(string? purpose)
+    private static string NormalizePurpose(string? purpose, bool allowRetiredOpeningBalance)
     {
         if (string.IsNullOrWhiteSpace(purpose))
             return SubledgerAdjustmentPurposes.StandardAdjustment;
@@ -519,10 +519,14 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             string.Equals(normalized, "OpenBalance", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(normalized, "OB", StringComparison.OrdinalIgnoreCase))
         {
-            return SubledgerAdjustmentPurposes.OpeningBalance;
+            if (allowRetiredOpeningBalance)
+                return SubledgerAdjustmentPurposes.OpeningBalance;
+
+            throw new InvalidOperationException(
+                "Subledger opening-balance adjustments are retired. Use the controlled Opening Balances workspace and its source-specific processes.");
         }
 
-        throw new InvalidOperationException("Adjustment purpose must be StandardAdjustment or OpeningBalance.");
+        throw new InvalidOperationException("Adjustment purpose must be StandardAdjustment.");
     }
 
     private static Guid ResolveContraAccountId(

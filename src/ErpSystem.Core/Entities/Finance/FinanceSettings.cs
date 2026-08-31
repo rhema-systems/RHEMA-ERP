@@ -230,12 +230,6 @@ namespace ErpSystem.Core.Entities.Finance
         public Guid? MigrationClearingAccountId { get; set; }
         public virtual Account? MigrationClearingAccount { get; set; }
 
-        /// <summary>
-        /// When enabled, opening balance postings auto-route balancing/offset lines
-        /// to the Migration Clearing Account.
-        /// </summary>
-        public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
-
         // ── Lease Accounting (IFRS 16) GL Defaults ──────────────────────
 
         /// <summary>

@@ -252,7 +252,6 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.DiscountAllowedAccountId.HasValue) settings.DiscountAllowedAccountId = dto.DiscountAllowedAccountId;
             if (dto.DiscountReceivedAccountId.HasValue) settings.DiscountReceivedAccountId = dto.DiscountReceivedAccountId;
             if (dto.MigrationClearingAccountId.HasValue) settings.MigrationClearingAccountId = dto.MigrationClearingAccountId;
-            if (dto.OpeningBalanceAutoRoutingEnabled.HasValue) settings.OpeningBalanceAutoRoutingEnabled = dto.OpeningBalanceAutoRoutingEnabled.Value;
             if (dto.BankDepositPolicy.HasValue) settings.BankDepositPolicy = dto.BankDepositPolicy.Value;
             if (dto.RequireBankDepositPrimaryEvidence.HasValue)
                 settings.RequireBankDepositPrimaryEvidence = dto.RequireBankDepositPrimaryEvidence.Value;
@@ -616,7 +615,6 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 DiscountAllowedAccountId = settings.DiscountAllowedAccountId,
                 DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
                 MigrationClearingAccountId = settings.MigrationClearingAccountId,
-                OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
                 BankDepositPolicy = settings.BankDepositPolicy,
                 RequireBankDepositPrimaryEvidence = settings.RequireBankDepositPrimaryEvidence,
                 AutoPostBankDepositAfterApproval = settings.AutoPostBankDepositAfterApproval,

@@ -672,7 +672,6 @@ export interface FinanceSettings {
     discountAllowedAccountId?: string;
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
-    openingBalanceAutoRoutingEnabled?: boolean;
     bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
     requireBankDepositPrimaryEvidence?: boolean;
     autoPostBankDepositAfterApproval?: boolean;
@@ -717,7 +716,6 @@ export interface UpdateFinanceSettingsDto {
     discountAllowedAccountId?: string;
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
-    openingBalanceAutoRoutingEnabled?: boolean;
     bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
     requireBankDepositPrimaryEvidence?: boolean;
     autoPostBankDepositAfterApproval?: boolean;

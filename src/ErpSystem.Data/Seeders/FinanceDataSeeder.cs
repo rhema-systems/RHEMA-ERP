@@ -2856,7 +2856,6 @@ public class FinanceDataSeeder
             DiscountAllowedAccountId = Guid.Parse("00000005-4210-0000-0000-000000000001"),
             DiscountReceivedAccountId = Guid.Parse("00000005-4910-0000-0000-000000000001"),
             MigrationClearingAccountId = Guid.Parse("00000005-1990-0000-0000-000000000001"),
-            OpeningBalanceAutoRoutingEnabled = true,
             CreatedAt = baseDate,
             CreatedBy = "System"
         };

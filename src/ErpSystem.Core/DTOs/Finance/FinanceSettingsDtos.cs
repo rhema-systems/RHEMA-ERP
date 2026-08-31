@@ -49,7 +49,6 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public bool TransactionsExist { get; set; }
         public Guid? MigrationClearingAccountId { get; set; }
-        public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
         public DepositPolicy BankDepositPolicy { get; set; } = DepositPolicy.DepositIntact;
         public bool RequireBankDepositPrimaryEvidence { get; set; } = true;
         public bool AutoPostBankDepositAfterApproval { get; set; } = true;
@@ -101,7 +100,6 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? DiscountAllowedAccountId { get; set; }
         public Guid? DiscountReceivedAccountId { get; set; }
         public Guid? MigrationClearingAccountId { get; set; }
-        public bool? OpeningBalanceAutoRoutingEnabled { get; set; }
         
         // Subledger Settings
         public Guid? WriteOffExpenseAccountId { get; set; }

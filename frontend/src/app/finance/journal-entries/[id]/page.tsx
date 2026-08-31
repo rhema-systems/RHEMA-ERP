@@ -19,8 +19,6 @@ import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-outpu
 import {
     DEFAULT_ACCOUNTING_BOOKS,
     getAccountingBookName,
-    getPostingTargetBooks,
-    isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
 import { getJournalAuditActorLine } from '@/lib/finance/journal-entry-audit';
 
@@ -306,9 +304,7 @@ export default function JournalEntryDetailPage() {
             await financeDataService.postJournalEntry(entry.id);
             toast({
                 title: 'Posted',
-                description: isAllActiveBooksCode(entry.bookClassification)
-                    ? 'Opening balance journal posted to all active books.'
-                    : 'Journal entry posted to the General Ledger.',
+                description: 'Journal entry posted to the General Ledger.',
             });
             await fetchEntry();
         } catch (err: any) {
@@ -401,12 +397,13 @@ export default function JournalEntryDetailPage() {
     }
 
     const isBatchOwned = !!entry.journalBatchId;
-    const canEdit = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.Edit', 'Finance.JournalEntries.Write']);
+    const isRetiredOpeningBalance = entry.journalType === 'Opening Balance';
+    const canEdit = !isBatchOwned && !isRetiredOpeningBalance && hasAnyPermission(['Finance.JournalEntries.Edit', 'Finance.JournalEntries.Write']);
     const canDelete = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.Delete', 'Finance.JournalEntries.Write']);
-    const canPost = !isBatchOwned && hasPermission('Finance.JournalEntries.Post');
+    const canPost = !isBatchOwned && !isRetiredOpeningBalance && hasPermission('Finance.JournalEntries.Post');
     const canReverse = !isBatchOwned && hasPermission('Finance.JournalEntries.Reverse');
-    const canSubmitForApproval = !isBatchOwned && hasPermission('Finance.JournalEntries.SubmitForApproval');
-    const canApprovePermission = !isBatchOwned && hasPermission('Finance.JournalEntries.Approve');
+    const canSubmitForApproval = !isBatchOwned && !isRetiredOpeningBalance && hasPermission('Finance.JournalEntries.SubmitForApproval');
+    const canApprovePermission = !isBatchOwned && !isRetiredOpeningBalance && hasPermission('Finance.JournalEntries.Approve');
     const canAttach = canEdit;
     const isCreator = !!entry.createdById && !!user?.id && entry.createdById === user.id;
     const hasActiveWorkflowAssignment = workflowSummary?.hasActiveInstance === true;
@@ -417,10 +414,7 @@ export default function JournalEntryDetailPage() {
         && entry.postingStatus === 'Pending Approval'
         && ((canSubmitForApproval && workflowSummary?.canCurrentUserRecall === true) || canCancelAnyWorkflow);
     const pendingApproverText = workflowSummary ? formatPendingApprovers(workflowSummary.pendingApprovers || []) : '';
-    const isAllActiveBooks = isAllActiveBooksCode(entry.bookClassification);
     const selectedBookName = getAccountingBookName(accountingBooks, entry.bookClassification);
-    const targetAccountingBooks = getPostingTargetBooks(accountingBooks, entry.bookClassification);
-    const targetBookListText = targetAccountingBooks.map(book => book.name).join(', ');
 
     return (
         <div className="space-y-6">
@@ -705,25 +699,14 @@ export default function JournalEntryDetailPage() {
                         </CardContent>
                     </Card>
 
-                    {entry.journalType === 'Opening Balance' && isAllActiveBooks && entry.postingStatus !== 'Posted' && entry.postingStatus !== 'Reversed' && (
-                        <Card className="border-blue-500/40">
+                    {isRetiredOpeningBalance && entry.postingStatus !== 'Posted' && entry.postingStatus !== 'Reversed' && (
+                        <Card className="border-destructive/50">
                             <CardHeader>
-                                <CardTitle>All Active Books Posting</CardTitle>
+                                <CardTitle className="text-destructive">Legacy opening balance is read-only</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-3">
+                            <CardContent>
                                 <p className="text-sm text-muted-foreground">
-                                    Posting will duplicate this opening balance journal across the active posting books.
-                                </p>
-                                <div className="flex flex-wrap gap-2">
-                                    {(targetBookListText ? targetAccountingBooks : []).map((book) => (
-                                        <Badge key={book.code} variant="outline">{book.name}</Badge>
-                                    ))}
-                                    {!targetBookListText && (
-                                        <span className="text-sm text-destructive">No active posting books configured.</span>
-                                    )}
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                    The active book list is resolved again at posting time.
+                                    Manual opening-balance processing is retired. Use the controlled Opening Balances workspace for cutover corrections.
                                 </p>
                             </CardContent>
                         </Card>

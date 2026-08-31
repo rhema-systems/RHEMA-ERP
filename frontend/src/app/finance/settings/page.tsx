@@ -111,7 +111,6 @@ export default function FinanceSettingsPage() {
         discountAllowedAccountId: undefined,
         discountReceivedAccountId: undefined,
         migrationClearingAccountId: undefined,
-        openingBalanceAutoRoutingEnabled: true,
         bankDepositPolicy: 'DepositIntact',
         requireBankDepositPrimaryEvidence: true,
         autoPostBankDepositAfterApproval: true,
@@ -168,7 +167,6 @@ export default function FinanceSettingsPage() {
                 discountAllowedAccountId: data.discountAllowedAccountId,
                 discountReceivedAccountId: data.discountReceivedAccountId,
                 migrationClearingAccountId: data.migrationClearingAccountId,
-                openingBalanceAutoRoutingEnabled: data.openingBalanceAutoRoutingEnabled ?? true,
                 bankDepositPolicy: data.bankDepositPolicy ?? 'DepositIntact',
                 requireBankDepositPrimaryEvidence: data.requireBankDepositPrimaryEvidence ?? true,
                 autoPostBankDepositAfterApproval: data.autoPostBankDepositAfterApproval ?? true,
@@ -730,29 +728,6 @@ export default function FinanceSettingsPage() {
                             Used as the offset account for opening-balance migration postings.
                         </p>
                     </div>
-                    <div className="rounded-md border border-dashed bg-muted/20 p-3">
-                        <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                    Advanced / Legacy Manual GL Opening Balance
-                                </p>
-                                <Label htmlFor="openingBalanceAutoRouting">Manual GL Opening Balance Auto-Routing</Label>
-                                <p className="text-sm text-muted-foreground">
-                                    Applies only to manual GL journals with type Opening Balance. Controlled OpeningBalanceBatch,
-                                    AR opening invoices, AP opening bills, and subledger opening adjustments use explicit balanced
-                                    postings and do not read this toggle.
-                                </p>
-                            </div>
-                            <Switch
-                                id="openingBalanceAutoRouting"
-                                checked={formData.openingBalanceAutoRoutingEnabled ?? true}
-                                onCheckedChange={(checked) =>
-                                    setFormData({ ...formData, openingBalanceAutoRoutingEnabled: checked })
-                                }
-                            />
-                        </div>
-                    </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountAr">Accounts Receivable (AR) Control</Label>

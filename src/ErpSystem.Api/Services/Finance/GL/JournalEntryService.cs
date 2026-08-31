@@ -31,6 +31,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IDocumentNumberingService? _documentNumberingService;
         private readonly IFinanceBudgetControlService? _budgetControl;
         private readonly FinanceDimensionAdministrationService? _financeDimensions;
+        private const string RetiredOpeningBalanceJournalType = "Opening Balance";
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -177,6 +178,8 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             var tenantId = TenantId;
 
+            EnsureLegacyOpeningBalanceIsRetired(dto.JournalType);
+
             // Basic validation
             if (dto.Transactions == null || !dto.Transactions.Any())
                 throw new InvalidOperationException("Journal entry must have at least one transaction line.");
@@ -184,18 +187,10 @@ namespace ErpSystem.Api.Services.Finance.GL
             var fiscalPeriodId = dto.FiscalPeriodId ?? await GetOpenFiscalPeriodIdAsync(dto.TransactionDate, tenantId);
             await EnsureFiscalPeriodOpenAsync(fiscalPeriodId, tenantId, dto.TransactionDate, cancellationToken);
             var bookClassification = string.IsNullOrWhiteSpace(dto.BookClassification) ? "IFRS" : dto.BookClassification.Trim();
+            EnsureExplicitAccountingBook(bookClassification);
             Guid.TryParse(_currentUserService.UserId, out var currentUserId);
 
-            if (IsAllActiveBooks(bookClassification) && !IsOpeningBalanceJournalType(dto.JournalType))
-                throw new InvalidOperationException("All Active Books can only be used for Opening Balance journal entries.");
-
             var transactions = dto.Transactions.ToList();
-            await ApplyOpeningBalanceAutoRoutingAsync(
-                dto.JournalType,
-                transactions,
-                tenantId,
-                dto.Reference,
-                cancellationToken);
             await ValidateManualJournalExchangeRateEvidenceAsync(
                 transactions, tenantId, dto.TransactionDate, cancellationToken);
 
@@ -307,6 +302,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
             if (entry.PostingStatus != "Draft") throw new InvalidOperationException("Only Draft journal entries can be updated.");
+            EnsureLegacyOpeningBalanceIsRetired(entry.JournalType);
 
             var before = BuildJournalAuditSnapshot(entry);
 
@@ -324,9 +320,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (dto.Reference != null) entry.ReferenceNumber = dto.Reference;
             if (!string.IsNullOrWhiteSpace(dto.BookClassification))
             {
-                if (IsAllActiveBooks(dto.BookClassification) && !IsOpeningBalanceJournalType(entry.JournalType))
-                    throw new InvalidOperationException("All Active Books can only be used for Opening Balance journal entries.");
-
+                EnsureExplicitAccountingBook(dto.BookClassification);
                 entry.BookClassification = dto.BookClassification.Trim();
             }
 
@@ -336,12 +330,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                     throw new InvalidOperationException("Journal entry must have at least one transaction line.");
 
                 var transactionDtos = dto.Transactions.ToList();
-                await ApplyOpeningBalanceAutoRoutingAsync(
-                    entry.JournalType,
-                    transactionDtos,
-                    tenantId: entry.TenantId,
-                    referenceNumber: dto.Reference ?? entry.ReferenceNumber,
-                    cancellationToken);
                 await ValidateManualJournalExchangeRateEvidenceAsync(
                     transactionDtos, entry.TenantId, transactionDate, cancellationToken);
 
@@ -512,6 +500,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
             
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
+            EnsureLegacyOpeningBalanceIsRetired(entry.JournalType);
             if (entry.PostingStatus == "Posted")
             {
                 var existingPostedEntry = await LoadJournalEntryAsync(entry.Id, cancellationToken)
@@ -544,8 +533,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (entry.PostingStatus != "Approved")
                 throw new InvalidOperationException("Manual journal entries must be approved before posting.");
 
-            if (IsAllActiveBooks(entry.BookClassification))
-                throw new InvalidOperationException("All Active Books manual posting must be migrated to the posting engine before it can be used.");
+            EnsureExplicitAccountingBook(entry.BookClassification);
 
             var before = BuildJournalAuditSnapshot(entry);
             FinancePostingResultDto postingResult;
@@ -829,6 +817,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (entry.PostingStatus != "Draft")
                 throw new InvalidOperationException($"Only Draft journal entries can be submitted for approval. Current status: {entry.PostingStatus}.");
 
+            EnsureLegacyOpeningBalanceIsRetired(entry.JournalType);
+
             await ValidateManualJournalEntryAsync(entry, requireApproved: false, cancellationToken);
         }
 
@@ -1089,32 +1079,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             return string.IsNullOrWhiteSpace(tenantBaseCurrency) ? "GHS" : tenantBaseCurrency;
         }
 
-        private static (string? CurrencyCode, Guid? ExchangeRateId, decimal? ExchangeRate, decimal? ForeignAmount) ResolveAutoRoutingCurrencyMetadata(
-            IReadOnlyCollection<CreateAccountTransactionDto> transactions,
-            decimal baseAmount)
-        {
-            var foreignLines = transactions
-                .Select(t => new
-                {
-                    CurrencyCode = NormalizeCurrencyCode(t.CurrencyCode),
-                    t.ExchangeRateId,
-                    ExchangeRate = t.ExchangeRate.GetValueOrDefault()
-                })
-                .Where(t => !string.IsNullOrWhiteSpace(t.CurrencyCode) && t.ExchangeRate > 0m)
-                .Distinct()
-                .ToList();
-
-            if (foreignLines.Count != 1)
-                return (null, null, null, null);
-
-            var foreignLine = foreignLines[0];
-            return (
-                foreignLine.CurrencyCode,
-                foreignLine.ExchangeRateId,
-                foreignLine.ExchangeRate,
-                decimal.Round(baseAmount / foreignLine.ExchangeRate, 2, MidpointRounding.AwayFromZero));
-        }
-
         private static string? NormalizeCurrencyCode(string? currencyCode)
         {
             return string.IsNullOrWhiteSpace(currencyCode)
@@ -1122,442 +1086,27 @@ namespace ErpSystem.Api.Services.Finance.GL
                 : currencyCode.Trim().ToUpperInvariant();
         }
 
-        private async Task ApplyOpeningBalanceAutoRoutingAsync(
-            string? journalType,
-            List<CreateAccountTransactionDto> transactions,
-            Guid tenantId,
-            string? referenceNumber,
-            CancellationToken cancellationToken)
+        private static void EnsureLegacyOpeningBalanceIsRetired(string? journalType)
         {
-            if (!IsOpeningBalanceJournalType(journalType))
-                return;
-
-            var debitSum = transactions
-                .Where(t => string.Equals(t.TransactionType, "Debit", StringComparison.OrdinalIgnoreCase))
-                .Sum(t => t.Amount);
-            var creditSum = transactions
-                .Where(t => string.Equals(t.TransactionType, "Credit", StringComparison.OrdinalIgnoreCase))
-                .Sum(t => t.Amount);
-
-            var difference = debitSum - creditSum;
-            if (Math.Abs(difference) < 0.01m)
-                return;
-
-            var settings = await _context.FinanceSettings
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken);
-
-            if (settings?.OpeningBalanceAutoRoutingEnabled != true)
-                return;
-
-            if (!settings.MigrationClearingAccountId.HasValue)
-                throw new InvalidOperationException("Opening Balance auto-routing requires Migration Clearing Account in Finance Settings.");
-
-            var clearingAccount = await _context.Accounts
-                .AsNoTracking()
-                .FirstOrDefaultAsync(a =>
-                    a.Id == settings.MigrationClearingAccountId.Value
-                    && a.TenantId == tenantId
-                    && !a.IsDeleted,
-                    cancellationToken);
-
-            if (clearingAccount == null)
-                throw new InvalidOperationException("The configured Migration Clearing Account was not found.");
-
-            var autoRouteCurrency = ResolveAutoRoutingCurrencyMetadata(transactions, Math.Abs(difference));
-
-            transactions.Add(new CreateAccountTransactionDto
-            {
-                AccountId = clearingAccount.Id,
-                Amount = Math.Abs(difference),
-                TransactionType = difference > 0 ? "Credit" : "Debit",
-                Description = "Opening balance auto-balance to Migration Clearing Account",
-                Reference = string.IsNullOrWhiteSpace(referenceNumber) ? "Opening Balance" : referenceNumber.Trim(),
-                CurrencyCode = autoRouteCurrency.CurrencyCode,
-                ExchangeRateId = autoRouteCurrency.ExchangeRateId,
-                ExchangeRate = autoRouteCurrency.ExchangeRate,
-                ForeignAmount = autoRouteCurrency.ForeignAmount,
-                LineNumber = transactions.Count == 0 ? 1 : transactions.Max(t => t.LineNumber) + 1
-            });
-        }
-
-        private async Task<JournalEntryDto> PostOpeningBalanceToAllActiveBooksAsync(
-            JournalEntry entry,
-            object? before,
-            CancellationToken cancellationToken)
-        {
-            if (!IsOpeningBalanceJournalType(entry.JournalType))
-                throw new InvalidOperationException("All Active Books posting is only available for Opening Balance journal entries.");
-
-            var targetBooks = (await _accountingBookService.GetBooksAsync(includeInactive: false, cancellationToken))
-                .Where(book => book.IsActive && book.AllowsPosting)
-                .OrderBy(book => book.SortOrder)
-                .ThenBy(book => book.Name)
-                .ToList();
-
-            if (targetBooks.Count == 0)
-                throw new InvalidOperationException("No active accounting books are available for posting.");
-
-            await ValidateEntryAccountsForBooksAsync(entry, targetBooks, cancellationToken);
-
-            var baseJournalNumber = entry.JournalEntryNumber.Trim();
-            var proposedNumbers = targetBooks
-                .Select(book => BuildBookJournalNumber(baseJournalNumber, book))
-                .ToList();
-
-            if (proposedNumbers.Distinct(StringComparer.OrdinalIgnoreCase).Count() != proposedNumbers.Count)
-                throw new InvalidOperationException("Generated all-book journal numbers are not unique. Check active accounting book codes.");
-
-            var conflictingNumbers = await _context.JournalEntries
-                .Where(j =>
-                    j.TenantId == entry.TenantId
-                    && j.Id != entry.Id
-                    && proposedNumbers.Contains(j.JournalEntryNumber))
-                .Select(j => j.JournalEntryNumber)
-                .ToListAsync(cancellationToken);
-
-            if (conflictingNumbers.Count > 0)
+            if (string.Equals(journalType?.Trim(), RetiredOpeningBalanceJournalType, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    $"Cannot post to all active books because generated journal number(s) already exist: {string.Join(", ", conflictingNumbers)}.");
-            }
-
-            var postingDate = DateTime.UtcNow;
-            var postingUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId)
-                ? parsedUserId
-                : (Guid?)null;
-            var defaultBook = targetBooks.FirstOrDefault(book => book.IsDefault) ?? targetBooks[0];
-            var firstBook = targetBooks[0];
-            var sourceEntryId = entry.Id;
-            var sourceTransactions = entry.Transactions
-                .OrderBy(t => t.LineNumber)
-                .ToList();
-            var sourceAttachments = entry.Attachments.ToList();
-            var childEntries = new List<JournalEntry>();
-
-            entry.JournalEntryNumber = proposedNumbers[0];
-            entry.BookClassification = firstBook.Code;
-            entry.PostingStatus = "Posted";
-            entry.PostingDate = postingDate;
-            entry.PostedByUserId = postingUserId;
-            entry.SourceDocumentId ??= sourceEntryId;
-            entry.SourceDocumentType = "AllActiveBooksOpeningBalance";
-            entry.UpdatedAt = postingDate;
-            entry.UpdatedBy = _currentUserService.UserName;
-
-            foreach (var transaction in sourceTransactions)
-            {
-                var account = await _context.Accounts
-                    .FirstOrDefaultAsync(a => a.TenantId == entry.TenantId && a.Id == transaction.AccountId && !a.IsDeleted, cancellationToken);
-                if (account == null) throw new InvalidOperationException($"Account {transaction.AccountId} not found.");
-
-                ValidateControlAccountPosting(account, entry);
-                if (firstBook.Id == defaultBook.Id)
-                {
-                    ApplyAccountBalanceMovement(account, transaction);
-                }
-
-                transaction.BookClassification = firstBook.Code;
-                transaction.PostingStatus = "Posted";
-                transaction.PostedDate = postingDate;
-            }
-
-            for (var i = 1; i < targetBooks.Count; i++)
-            {
-                var book = targetBooks[i];
-                var childEntry = ClonePostedEntryForBook(
-                    entry,
-                    sourceEntryId,
-                    proposedNumbers[i],
-                    book.Code,
-                    postingDate,
-                    postingUserId);
-
-                var lineNumber = 1;
-                foreach (var sourceTransaction in sourceTransactions)
-                {
-                    var childTransaction = ClonePostedTransactionForBook(
-                        sourceTransaction,
-                        childEntry.Id,
-                        book.Code,
-                        lineNumber++,
-                        postingDate);
-
-                    var account = await _context.Accounts
-                        .FirstOrDefaultAsync(a => a.TenantId == childEntry.TenantId && a.Id == childTransaction.AccountId && !a.IsDeleted, cancellationToken);
-                    if (account == null) throw new InvalidOperationException($"Account {childTransaction.AccountId} not found.");
-
-                    ValidateControlAccountPosting(account, childEntry);
-                    if (book.Id == defaultBook.Id)
-                    {
-                        ApplyAccountBalanceMovement(account, childTransaction);
-                    }
-
-                    childEntry.Transactions.Add(childTransaction);
-                    _context.AccountTransactions.Add(childTransaction);
-                }
-
-                foreach (var attachment in sourceAttachments)
-                {
-                    childEntry.Attachments.Add(new JournalEntryAttachment
-                    {
-                        Id = Guid.NewGuid(),
-                        TenantId = childEntry.TenantId,
-                        JournalEntryId = childEntry.Id,
-                        FileUploadRecordId = attachment.FileUploadRecordId,
-                        CreatedAt = postingDate,
-                        CreatedBy = attachment.CreatedBy
-                    });
-                }
-
-                childEntries.Add(childEntry);
-                _context.JournalEntries.Add(childEntry);
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-
-            await LogJournalAuditAsync(
-                "Finance.JournalEntry.PostedAllBooks",
-                entry,
-                before,
-                BuildJournalAuditSnapshot(entry),
-                new
-                {
-                    targetBooks = targetBooks.Select(book => new { book.Code, book.Name }).ToList(),
-                    generatedJournalNumbers = proposedNumbers
-                });
-
-            foreach (var childEntry in childEntries)
-            {
-                await LogJournalAuditAsync(
-                    "Finance.JournalEntry.AllBooksChildPosted",
-                    childEntry,
-                    null,
-                    BuildJournalAuditSnapshot(childEntry),
-                    new { sourceEntryId, sourceJournalNumber = baseJournalNumber });
-            }
-
-            await NotifyJournalOwnerAsync(
-                entry,
-                "Opening balance posted to all active books",
-                $"{baseJournalNumber} has been posted to {targetBooks.Count} active accounting books.",
-                "FinanceJournalPosted");
-
-            return MapToDto(entry);
-        }
-
-        private async Task ValidateEntryAccountsForBooksAsync(
-            JournalEntry entry,
-            IReadOnlyCollection<AccountingBookDto> targetBooks,
-            CancellationToken cancellationToken)
-        {
-            var accountIds = entry.Transactions
-                .Select(t => t.AccountId)
-                .Distinct()
-                .ToList();
-
-            var accounts = await _context.Accounts
-                .Include(account => account.AccountingBooks)
-                    .ThenInclude(mapping => mapping.AccountingBook)
-                .Where(account =>
-                    account.TenantId == entry.TenantId
-                    && accountIds.Contains(account.Id)
-                    && !account.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            foreach (var accountId in accountIds)
-            {
-                var account = accounts.FirstOrDefault(candidate => candidate.Id == accountId);
-                if (account == null)
-                    throw new InvalidOperationException($"Account {accountId} was not found.");
-
-                foreach (var book in targetBooks)
-                {
-                    if (!IsAccountEligibleForBook(account, book.Code))
-                    {
-                        var accountLabel = string.IsNullOrWhiteSpace(account.AccountNumber)
-                            ? account.AccountName
-                            : $"{account.AccountNumber} - {account.AccountName}";
-                        throw new InvalidOperationException(
-                            $"Cannot post to all active books. Account '{accountLabel}' is not classified for {book.Name}.");
-                    }
-                }
+                    "Manual opening-balance journals are retired. Use the controlled Opening Balances workspace and its source-specific processes.");
             }
         }
 
-        private static JournalEntry ClonePostedEntryForBook(
-            JournalEntry source,
-            Guid sourceEntryId,
-            string journalNumber,
-            string bookCode,
-            DateTime postingDate,
-            Guid? postingUserId)
+        private static void EnsureExplicitAccountingBook(string? bookClassification)
         {
-            return new JournalEntry
+            if (IsAllActiveBooks(bookClassification))
             {
-                Id = Guid.NewGuid(),
-                JournalEntryNumber = journalNumber,
-                JournalType = source.JournalType,
-                EntryDate = source.EntryDate,
-                Description = source.Description,
-                ReferenceNumber = source.ReferenceNumber,
-                SourceModule = source.SourceModule,
-                SourceDocumentId = sourceEntryId,
-                SourceDocumentType = "AllActiveBooksOpeningBalance",
-                TotalDebitAmount = source.TotalDebitAmount,
-                TotalCreditAmount = source.TotalCreditAmount,
-                BalanceDifference = 0,
-                IsBalanced = source.IsBalanced,
-                IsMultiCurrency = source.IsMultiCurrency,
-                PrimaryCurrency = source.PrimaryCurrency,
-                BookClassification = bookCode,
-                FiscalPeriodId = source.FiscalPeriodId,
-                PostingDate = postingDate,
-                PostedByUserId = postingUserId,
-                PostingStatus = "Posted",
-                RequiresApproval = source.RequiresApproval,
-                ApprovalStatus = source.ApprovalStatus,
-                ApprovalWorkflowId = source.ApprovalWorkflowId,
-                ApprovedByUserId = source.ApprovedByUserId,
-                ApprovedDate = source.ApprovedDate,
-                TenantId = source.TenantId,
-                Notes = source.Notes,
-                CreatedAt = postingDate,
-                CreatedBy = source.CreatedBy,
-                CreatedById = source.CreatedById,
-                UpdatedAt = postingDate,
-                UpdatedBy = source.UpdatedBy
-            };
-        }
-
-        private static AccountTransaction ClonePostedTransactionForBook(
-            AccountTransaction source,
-            Guid journalEntryId,
-            string bookCode,
-            int lineNumber,
-            DateTime postingDate)
-        {
-            return new AccountTransaction
-            {
-                Id = Guid.NewGuid(),
-                JournalEntryId = journalEntryId,
-                AccountId = source.AccountId,
-                Description = source.Description,
-                SourceModule = source.SourceModule,
-                SourceDocumentId = source.SourceDocumentId,
-                SourceDocumentType = source.SourceDocumentType,
-                SourceReferenceNumber = source.SourceReferenceNumber,
-                DebitAmount = source.DebitAmount,
-                CreditAmount = source.CreditAmount,
-                TransactionDate = source.TransactionDate,
-                LineNumber = lineNumber,
-                TransactionCurrency = source.TransactionCurrency,
-                ExchangeRateId = source.ExchangeRateId,
-                ExchangeRate = source.ExchangeRate,
-                ForeignCurrencyAmount = source.ForeignCurrencyAmount,
-                TenantId = source.TenantId,
-                FiscalPeriodId = source.FiscalPeriodId,
-                FinanceDimensionSetId = source.FinanceDimensionSetId,
-                BookClassification = bookCode,
-                PostingStatus = "Posted",
-                PostedDate = postingDate
-            };
-        }
-
-        private static bool IsAccountEligibleForBook(Account account, string bookCode)
-        {
-            var normalized = NormalizeBookCode(bookCode);
-            var mapping = account.AccountingBooks?
-                .FirstOrDefault(candidate =>
-                    candidate.AccountingBook != null
-                    && NormalizeBookCode(candidate.AccountingBook.Code) == normalized
-                    && !candidate.IsDeleted);
-
-            if (mapping != null)
-                return mapping.IsEnabled;
-
-            return normalized switch
-            {
-                "IFRS" => account.IsIFRSClassified,
-                "LOCAL_STATUTORY" => account.IsBaseClassified,
-                "MANAGEMENT" => account.IsLocalClassified,
-                _ => true
-            };
-        }
-
-        private static void ValidateControlAccountPosting(Account account, JournalEntry entry)
-        {
-            if (!account.IsControlAccount)
-                return;
-
-            var allowedModules = new[] { "AP", "AR", "INVENTORY", "TAX", "BANK", "SYSTEM", "POS", "PAYROLL" };
-            var isSystemPosting = !string.IsNullOrEmpty(entry.SourceModule)
-                && allowedModules.Contains(entry.SourceModule.ToUpperInvariant());
-
-            if (!isSystemPosting)
-            {
-                throw new InvalidOperationException($"Direct manual posting to Control Account '{account.AccountName}' is not allowed.");
+                throw new InvalidOperationException(
+                    "Manual journals require one explicit accounting book. ALL_ACTIVE_BOOKS is retired with the legacy opening-balance process.");
             }
-        }
-
-        private static void ApplyAccountBalanceMovement(Account account, AccountTransaction transaction)
-        {
-            if (transaction.DebitAmount > 0)
-            {
-                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                    account.Balance += transaction.DebitAmount;
-                else
-                    account.Balance -= transaction.DebitAmount;
-            }
-            else
-            {
-                if (account.AccountType == AccountType.Liability || account.AccountType == AccountType.Equity || account.AccountType == AccountType.Revenue)
-                    account.Balance += transaction.CreditAmount;
-                else
-                    account.Balance -= transaction.CreditAmount;
-            }
-        }
-
-        private static string BuildBookJournalNumber(string baseJournalNumber, AccountingBookDto book)
-        {
-            var suffix = GetBookNumberSuffix(book);
-            var number = $"{baseJournalNumber}-{suffix}";
-            if (number.Length > 50)
-                throw new InvalidOperationException($"Generated journal number '{number}' exceeds the 50 character limit.");
-
-            return number;
-        }
-
-        private static string GetBookNumberSuffix(AccountingBookDto book)
-        {
-            var normalized = NormalizeBookCode(book.Code);
-            return normalized switch
-            {
-                "IFRS" => "IFRS",
-                "LOCAL_STATUTORY" => "LOCAL",
-                "MANAGEMENT" => "MGMT",
-                _ => new string(normalized.Where(char.IsLetterOrDigit).ToArray())
-            };
-        }
-
-        private static bool IsOpeningBalanceJournalType(string? journalType)
-        {
-            return string.Equals(journalType?.Trim(), "Opening Balance", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsAllActiveBooks(string? bookClassification)
         {
             return string.Equals(bookClassification?.Trim(), AllActiveBooksCode, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string NormalizeBookCode(string? bookCode)
-        {
-            var normalized = (bookCode ?? string.Empty).Trim().ToUpperInvariant();
-            return normalized switch
-            {
-                "BASE" or "LOCAL" => "LOCAL_STATUTORY",
-                _ => normalized
-            };
         }
 
         private Task<JournalEntry?> LoadJournalEntryAsync(Guid id, CancellationToken cancellationToken)
@@ -1698,6 +1247,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entry = await _context.JournalEntries
                 .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
+
+            if (!string.Equals(approvalStatus, "Rejected", StringComparison.OrdinalIgnoreCase))
+                EnsureLegacyOpeningBalanceIsRetired(entry.JournalType);
 
             var before = BuildJournalAuditSnapshot(entry);
 

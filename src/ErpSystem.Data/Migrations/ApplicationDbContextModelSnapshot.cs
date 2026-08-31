@@ -14407,9 +14407,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("MinimumReversalReasonLength")
                         .HasColumnType("int");
 
-                    b.Property<bool>("OpeningBalanceAutoRoutingEnabled")
-                        .HasColumnType("bit");
-
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
