@@ -1164,6 +1164,23 @@ export interface MedicalExpenseClaim {
   treatmentReceived?: string | null;
   isEmergency: boolean;
   requiredHospitalization: boolean;
+  /**
+   * The admission window, the pre-authorisation and referral the claim was raised under, and the
+   * sick leave it relates to.
+   *
+   * ⚠ Ledger D-22. `MedicalExpenseClaimDto` has always returned these five and
+   * `MedicalExpenseClaimUpdateRequest` has always sent them, and `ClaimEditDialogs` binds every one
+   * — they were simply absent from this interface, so the dialog worked at runtime and failed
+   * `tsc`. Five of the type errors the HR subtree was carrying.
+   */
+  admissionStart?: string | null;
+  admissionEnd?: string | null;
+  preAuthorizationId?: string | null;
+  preAuthorizationNumber?: string | null;
+  referralId?: string | null;
+  referralNumber?: string | null;
+  leaveRequestId?: string | null;
+  leaveRequestNumber?: string | null;
   totalAmount: number;
   amountRequested: number;
   amountApproved?: number | null;

@@ -188,6 +188,19 @@ public class StaffDemotionRepository : GenericRepository<StaffDemotion>, IStaffD
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<StaffDemotion>> GetWithFiledAppealsAsync()
+    {
+        return await _dbSet
+            .Include(d => d.Movement).ThenInclude(m => m.Employee)
+            .Include(d => d.Movement).ThenInclude(m => m.CurrentPosition)
+            .Include(d => d.Movement).ThenInclude(m => m.NewPosition)
+            .Where(d => !d.IsDeleted
+                     && d.RightToAppeal
+                     && d.EmployeeResponse != null)
+            .OrderByDescending(d => d.EmployeeResponseDate)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<StaffDemotion>> GetWithPendingAppealsAsync()
     {
         var today = DateTime.UtcNow;

@@ -1208,6 +1208,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft, permissions: ['HR.Movements.Read'] },
           // Standalone: most acting appointments never come from a movement at all.
           { title: 'Acting Appointments', href: '/hr/movements/acting', icon: UserCheck, permissions: ['HR.Movements.Read'] },
+          // Ledger D-37: answering a demotion notice removes it from the pending queue, so a filed
+          // appeal was visible on no list at all. Both queues live here.
+          { title: 'Demotion Appeals', href: '/hr/movements/appeals', icon: Gavel, permissions: ['HR.Movements.Read'] },
           // Area 25 slice 7: My Movements re-homed to the portal (/me/movements).
         ],
       },

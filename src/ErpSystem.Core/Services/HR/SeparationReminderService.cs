@@ -98,17 +98,28 @@ public class SeparationReminderService : ISeparationReminderService
     }
 
     /// <inheritdoc />
-    public async Task<SeparationReminderRunResultDto> RunSweepAsync(
+    public Task<SeparationReminderRunResultDto> RunSweepAsync(
         string trigger = "Manual", CancellationToken cancellationToken = default)
+        => RunSweepForTenantAsync(
+            GetTenantId(),
+            trigger,
+            _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<SeparationReminderRunResultDto> RunSweepForTenantAsync(
+        Guid tenantId, string trigger, Guid? triggeredByUserId,
+        CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant is required to run the separation sweep.", nameof(tenantId));
 
         var run = new SeparationReminderRun
         {
             TenantId = tenantId,
             StartedAt = DateTime.UtcNow,
             Trigger = string.IsNullOrWhiteSpace(trigger) ? "Manual" : trigger.Trim(),
-            TriggeredByUserId = _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
+            TriggeredByUserId = triggeredByUserId,
         };
 
         await _unitOfWork.Repository<SeparationReminderRun>().AddAsync(run);
@@ -182,7 +193,10 @@ public class SeparationReminderService : ISeparationReminderService
     private async Task<List<Candidate>> FindCandidatesAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var settings = await _policyProvider.GetAsync(cancellationToken);
+
+        // ⚠ Every read below is BY TENANT, not by current user. This finder is the nightly host's
+        // path as well as the run-now button's, and the host has no HTTP context behind it.
+        var settings = await _policyProvider.GetForTenantAsync(tenantId, cancellationToken);
         var found = new List<Candidate>();
 
         Candidate Make(string kind, Guid employeeId, string name, string? number,
@@ -209,8 +223,8 @@ public class SeparationReminderService : ISeparationReminderService
         }
 
         // ── FR-HR-111: retirement and contract expiry, where no exit has been raised ──
-        foreach (var r in await _separations.GetUpcomingRetirementsAsync(
-                     settings.RetirementCountdownLeadDays, includeOverdue: true, cancellationToken))
+        foreach (var r in await _separations.GetUpcomingRetirementsForTenantAsync(
+                     tenantId, settings.RetirementCountdownLeadDays, includeOverdue: true, cancellationToken))
         {
             if (r.ExistingSeparationId is not null) continue;
 
@@ -221,8 +235,8 @@ public class SeparationReminderService : ISeparationReminderService
                     : $"Reaches the retirement age of {r.RetirementAge} on {r.RetirementDate:yyyy-MM-dd}. No separation has been raised."));
         }
 
-        foreach (var c in await _separations.GetUpcomingContractExpiriesAsync(
-                     settings.ContractExpiryLeadDays, includeOverdue: true, cancellationToken))
+        foreach (var c in await _separations.GetUpcomingContractExpiriesForTenantAsync(
+                     tenantId, settings.ContractExpiryLeadDays, includeOverdue: true, cancellationToken))
         {
             if (c.ExistingSeparationId is not null) continue;
 

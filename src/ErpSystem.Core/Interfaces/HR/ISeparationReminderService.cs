@@ -25,4 +25,13 @@ public interface ISeparationReminderService
     /// </summary>
     Task<SeparationReminderRunResultDto> RunSweepAsync(
         string trigger = "Manual", CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same pass for a named tenant, for callers with no authenticated user — the nightly host,
+    /// which loops over every tenant. <see cref="RunSweepAsync"/> is this method with the caller's
+    /// own tenant and user filled in.
+    /// </summary>
+    Task<SeparationReminderRunResultDto> RunSweepForTenantAsync(
+        Guid tenantId, string trigger, Guid? triggeredByUserId,
+        CancellationToken cancellationToken = default);
 }

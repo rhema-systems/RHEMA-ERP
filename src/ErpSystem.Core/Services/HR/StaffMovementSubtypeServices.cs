@@ -630,6 +630,13 @@ public class StaffDemotionService : IStaffDemotionService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
+    public async Task<IEnumerable<StaffDemotionDto>> GetWithFiledAppealsAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _repo.GetWithFiledAppealsAsync();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+    }
+
     public async Task<StaffDemotionDto> CreateAsync(CreateStaffDemotionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);

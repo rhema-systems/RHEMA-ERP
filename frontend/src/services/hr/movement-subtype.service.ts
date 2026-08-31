@@ -115,8 +115,20 @@ class MovementSubtypeService {
     return apiService.post<{ message: string }>(`/staff-demotions/${id}/respond`, { response });
   }
 
+  /** Demotions still awaiting the employee's answer, inside the appeal window. */
   getPendingAppeals(): Promise<StaffDemotionDetail[]> {
     return apiService.get<StaffDemotionDetail[]>('/staff-demotions/pending-appeals');
+  }
+
+  /**
+   * Demotions the employee has answered.
+   *
+   * ⚠ The opposite of `getPendingAppeals`, not a filter of it: answering REMOVES a demotion from
+   * that list, so before this endpoint existed a filed appeal appeared in no list at all and HR
+   * found it only by opening the movement (ledger D-37).
+   */
+  getFiledAppeals(): Promise<StaffDemotionDetail[]> {
+    return apiService.get<StaffDemotionDetail[]>('/staff-demotions/filed-appeals');
   }
 
   // ── Secondment ─────────────────────────────────────────────────────────────

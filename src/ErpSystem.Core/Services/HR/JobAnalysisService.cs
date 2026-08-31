@@ -99,6 +99,59 @@ public class JobDescriptionService : IJobDescriptionService
         return entity;
     }
 
+    /// <summary>
+    /// The statuses in which a job description's content may still be written. An approved, in-force
+    /// description is a signed document: changing it needs a new version, not an edit.
+    /// </summary>
+    private static readonly JobDescriptionStatus[] AuthorableStatuses =
+    {
+        JobDescriptionStatus.Draft,
+        JobDescriptionStatus.UnderRevision,
+    };
+
+    /// <summary>
+    /// Ownership plus authorability, for the twelve child collections.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ledger D-03. Every child write used to stop at <see cref="GetOwnedJobDescriptionAsync"/>,
+    /// which checks the tenant and nothing else — so the duties, qualifications and PPE of an
+    /// APPROVED description could be rewritten with no new version and no trace. The detail screen
+    /// refuses it client-side (AUTHORABLE_JOB_DESCRIPTION_STATUSES) and that was the only thing
+    /// stopping it; a screen is not a rule. Deletes are gated too: removing a duty from an approved
+    /// description is the same act as rewriting one.
+    /// </remarks>
+    private async Task<JobDescription> RequireAuthorableJobDescriptionAsync(Guid id)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(id);
+
+        if (!AuthorableStatuses.Contains(entity.Status))
+            throw JobArchitectureException.InvalidState(
+                $"Job description '{entity.JobTitle}' is {entity.Status} and its content can no longer be " +
+                "changed. Raise a new version to revise it.");
+
+        return entity;
+    }
+
+    /// <summary>The same gate for a KPI, which reaches its job description through its responsibility.</summary>
+    private async Task<JobDescription> RequireAuthorableForResponsibilityAsync(Guid responsibilityId)
+    {
+        var responsibility = await _responsibilityRepository.GetByIdAsync(responsibilityId);
+        if (responsibility == null || responsibility.TenantId != GetTenantId())
+            throw JobArchitectureException.NotFound("Responsibility not found");
+
+        return await RequireAuthorableJobDescriptionAsync(responsibility.JobDescriptionId);
+    }
+
+    /// <summary>The same gate for equipment training, which hangs off an equipment tool.</summary>
+    private async Task<JobDescription> RequireAuthorableForEquipmentToolAsync(Guid equipmentToolId)
+    {
+        var tool = await _equipmentToolRepository.GetByIdAsync(equipmentToolId);
+        if (tool == null || tool.TenantId != GetTenantId())
+            throw JobArchitectureException.NotFound("Equipment tool not found");
+
+        return await RequireAuthorableJobDescriptionAsync(tool.JobDescriptionId);
+    }
+
     public async Task<JobDescriptionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -1042,7 +1095,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobResponsibilityDto> AddResponsibilityAsync(CreateJobResponsibilityDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -1069,6 +1122,8 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Responsibility not found");
 
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+
         updateDto.UpdateEntity(entity);
 
         await _responsibilityRepository.UpdateAsync(entity);
@@ -1086,6 +1141,8 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Responsibility not found");
 
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+
         await _responsibilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1100,7 +1157,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -1133,6 +1190,8 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Qualification not found");
 
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+
         updateDto.UpdateEntity(entity);
 
         await _qualificationRepository.UpdateAsync(entity);
@@ -1150,6 +1209,8 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Qualification not found");
 
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+
         await _qualificationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1164,7 +1225,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobCompetencyDto> AddCompetencyAsync(CreateJobCompetencyDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -1191,6 +1252,8 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Competency not found");
 
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+
         updateDto.UpdateEntity(entity);
 
         await _competencyRepository.UpdateAsync(entity);
@@ -1208,6 +1271,8 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Competency not found");
 
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+
         await _competencyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1222,7 +1287,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobPhysicalDemandDto> AddPhysicalDemandAsync(CreateJobPhysicalDemandDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _physicalDemandRepository.AddAsync(entity);
@@ -1243,6 +1308,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _physicalDemandRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Physical demand not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _physicalDemandRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1254,6 +1320,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _physicalDemandRepository.GetByIdAsync(demandId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Physical demand not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _physicalDemandRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Physical demand deleted: {Id}", demandId);
@@ -1266,7 +1333,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobWorkingConditionDto> AddWorkingConditionAsync(CreateJobWorkingConditionDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _workingConditionRepository.AddAsync(entity);
@@ -1287,6 +1354,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _workingConditionRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Working condition not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _workingConditionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1298,6 +1366,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _workingConditionRepository.GetByIdAsync(conditionId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Working condition not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _workingConditionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Working condition deleted: {Id}", conditionId);
@@ -1310,7 +1379,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobEquipmentToolDto> AddEquipmentToolAsync(CreateJobEquipmentToolDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _equipmentToolRepository.AddAsync(entity);
@@ -1331,6 +1400,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _equipmentToolRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment tool not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _equipmentToolRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1342,6 +1412,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _equipmentToolRepository.GetByIdAsync(toolId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment tool not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _equipmentToolRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Equipment tool deleted: {Id}", toolId);
@@ -1354,7 +1425,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobReportingRelationshipDto> AddReportingRelationshipAsync(CreateJobReportingRelationshipDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _reportingRelationshipRepository.AddAsync(entity);
@@ -1375,6 +1446,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _reportingRelationshipRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Reporting relationship not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _reportingRelationshipRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1386,6 +1458,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _reportingRelationshipRepository.GetByIdAsync(relationshipId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Reporting relationship not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _reportingRelationshipRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Reporting relationship deleted: {Id}", relationshipId);
@@ -1398,7 +1471,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobDutyItemDto> AddDutyItemAsync(CreateJobDutyItemDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         if (entity.SequenceNumber <= 0)
@@ -1421,6 +1494,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _dutyItemRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Duty item not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _dutyItemRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1432,6 +1506,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _dutyItemRepository.GetByIdAsync(dutyItemId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Duty item not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _dutyItemRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Duty item deleted: {Id}", dutyItemId);
@@ -1444,7 +1519,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobPpeRequirementDto> AddPpeRequirementAsync(CreateJobPpeRequirementDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _ppeRequirementRepository.AddAsync(entity);
@@ -1472,6 +1547,7 @@ public class JobDescriptionService : IJobDescriptionService
             .Include(p => p.PpeType)
             .FirstOrDefaultAsync(p => p.Id == updateDto.Id, cancellationToken);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("PPE requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _ppeRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1483,6 +1559,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _ppeRequirementRepository.GetByIdAsync(ppeRequirementId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("PPE requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _ppeRequirementRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("PPE requirement deleted: {Id}", ppeRequirementId);
@@ -1495,9 +1572,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobEquipmentTrainingDto> AddEquipmentTrainingAsync(CreateJobEquipmentTrainingDto createDto, CancellationToken cancellationToken = default)
     {
-        var tool = await _equipmentToolRepository.GetByIdAsync(createDto.JobEquipmentToolId);
-        if (tool == null || tool.TenantId != GetTenantId())
-            throw JobArchitectureException.NotFound("Equipment tool not found");
+        await RequireAuthorableForEquipmentToolAsync(createDto.JobEquipmentToolId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _equipmentTrainingRepository.AddAsync(entity);
@@ -1527,6 +1602,7 @@ public class JobDescriptionService : IJobDescriptionService
             .Include(t => t.TrainingProgram)
             .FirstOrDefaultAsync(t => t.Id == updateDto.Id, cancellationToken);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment training not found");
+        await RequireAuthorableForEquipmentToolAsync(entity.JobEquipmentToolId);
         updateDto.UpdateEntity(entity);
         await _equipmentTrainingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1538,6 +1614,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _equipmentTrainingRepository.GetByIdAsync(equipmentTrainingId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment training not found");
+        await RequireAuthorableForEquipmentToolAsync(entity.JobEquipmentToolId);
         await _equipmentTrainingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Equipment training deleted: {Id}", equipmentTrainingId);
@@ -1550,7 +1627,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobMedicalRequirementDto> AddMedicalRequirementAsync(CreateJobMedicalRequirementDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _medicalRequirementRepository.AddAsync(entity);
@@ -1571,6 +1648,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _medicalRequirementRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Medical requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _medicalRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1582,6 +1660,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _medicalRequirementRepository.GetByIdAsync(medicalRequirementId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Medical requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _medicalRequirementRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Medical requirement deleted: {Id}", medicalRequirementId);
@@ -1670,9 +1749,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default)
     {
-        var responsibility = await _responsibilityRepository.GetByIdAsync(createDto.JobResponsibilityId);
-        if (responsibility == null || responsibility.TenantId != GetTenantId())
-            throw JobArchitectureException.NotFound("Responsibility not found");
+        await RequireAuthorableForResponsibilityAsync(createDto.JobResponsibilityId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         if (entity.SequenceNumber <= 0)
@@ -1700,6 +1777,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _kpiRepository.GetByIdAsync(updateDto.Id);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("KPI not found");
+        await RequireAuthorableForResponsibilityAsync(entity.JobResponsibilityId);
         updateDto.UpdateEntity(entity);
         await _kpiRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1711,6 +1789,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _kpiRepository.GetByIdAsync(kpiId);
         if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("KPI not found");
+        await RequireAuthorableForResponsibilityAsync(entity.JobResponsibilityId);
         await _kpiRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("KPI deleted: {Id}", kpiId);

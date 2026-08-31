@@ -1079,11 +1079,19 @@ public class SeparationService : ISeparationService
     // ── Retirement (FR-HR-093) ────────────────────────────────────────────────
 
     /// <inheritdoc />
-    public async Task<IEnumerable<UpcomingRetirementDto>> GetUpcomingRetirementsAsync(
+    public Task<IEnumerable<UpcomingRetirementDto>> GetUpcomingRetirementsAsync(
         int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default)
+        => GetUpcomingRetirementsForTenantAsync(GetTenantId(), withinDays, includeOverdue, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<UpcomingRetirementDto>> GetUpcomingRetirementsForTenantAsync(
+        Guid tenantId, int? withinDays = null, bool includeOverdue = true,
+        CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var settings = await _policyProvider.GetAsync(cancellationToken);
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant is required to list upcoming retirements.", nameof(tenantId));
+
+        var settings = await _policyProvider.GetForTenantAsync(tenantId, cancellationToken);
         var horizon = withinDays ?? settings.RetirementCountdownLeadDays;
 
         if (horizon < 0)
@@ -1625,11 +1633,19 @@ public class SeparationService : ISeparationService
     // ── Contract expiry ───────────────────────────────────────────────────────
 
     /// <inheritdoc />
-    public async Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesAsync(
+    public Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesAsync(
         int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default)
+        => GetUpcomingContractExpiriesForTenantAsync(GetTenantId(), withinDays, includeOverdue, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesForTenantAsync(
+        Guid tenantId, int? withinDays = null, bool includeOverdue = true,
+        CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var settings = await _policyProvider.GetAsync(cancellationToken);
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant is required to list contract expiries.", nameof(tenantId));
+
+        var settings = await _policyProvider.GetForTenantAsync(tenantId, cancellationToken);
         var horizon = withinDays ?? settings.ContractExpiryLeadDays;
 
         if (horizon < 0)

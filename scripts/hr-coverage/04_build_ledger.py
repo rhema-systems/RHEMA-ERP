@@ -749,7 +749,7 @@ DEMO_FEEDBACK = [
     ("Training", "Menu order differs from TDC's suggestion", "DECIDE", "Setup/operations split may be deliberate"),
     ("Recruitment", "Menu still reads 'Manpower Budgets'", "BUILD", "Rename to Manpower Recruitment Budget"),
     ("Appraisal", "Check-in link to company objectives", "DECIDE", "Confirm with TDC that it matches intent"),
-    ("Platform", "No AddHostedService registration for HR", "BUILD", "Forfeiture, carry-over expiry, vacancy and retirement alerts, all reminder sweeps"),
+    ("Platform", "Scheduled HR sweeps: two failed nightly, two were never hosted", "DONE 2026-08-31", "⚠ This row read \"No AddHostedService registration for HR\", which had been false for weeks — six HR engines were hosted. What was true was worse and invisible: see D-38. Retirement and contract-expiry alerts (FR-HR-093) now run on a timer. Leave year-end is deliberately NOT scheduled: carry-over and forfeiture move balances rather than raise reminders, so automating them is a policy decision for TDC."),
 ]
 
 # Controllers we have committed to building. For these the ledger enumerates EVERY write
@@ -772,15 +772,25 @@ BLOCKERS = [
      "HrControllerBase.TryGetEmployeeWriteContext and no longer accept it from the client. "
      "Safe to change signatures because no caller existed. **Needs a backend rebuild.**",
      "Was blocking the Company Schedule build — cleared"),
-    ("D-03", "A child write on an approved job description is accepted by the API", "OPEN",
+    ("D-03", "A child write on an approved job description is accepted by the API", "DONE 2026-08-31",
      "None of the twelve child-collection writes checks status. `AddPhysicalDemandAsync` and its "
      "eleven siblings call `GetOwnedJobDescriptionAsync`, which verifies the tenant and stops — so "
      "the duties of an approved, in-force job description can be rewritten with no new version and "
      "no trace. Proven against the running API by slice 13, which records it as a passing "
      "assertion so the day it starts failing is the day the server grew a gate. The authoring "
      "panels refuse it client-side (`AUTHORABLE_JOB_DESCRIPTION_STATUSES`) and that is the only "
-     "thing stopping it. A server-side guard belongs on the service, not the screen.",
-     "Nothing — the UI compensates. Raised so the compensation is not mistaken for a rule."),
+     "thing stopping it. A server-side guard belongs on the service, not the screen.\n\n"
+     "  **Fixed 2026-08-31 (closure lane 1).** `RequireAuthorableJobDescriptionAsync` gates all "
+     "twelve collections — 36 write paths, since the updates and deletes never called "
+     "`GetOwnedJobDescriptionAsync` at all: they loaded the child by id, checked its tenant and "
+     "wrote. Two of the twelve reach their description through a parent (a KPI through its "
+     "responsibility, equipment training through its tool) and have their own helper. Deletes are "
+     "gated too: removing a duty from a signed document is the same act as rewriting one, and the "
+     "message names the way forward — raise a new version — rather than just "
+     "refusing. `run-slice7-closure-lane1.mjs` §2 proves the draft surface still works "
+     "first, then the refusals, then that the record is unchanged by them.",
+     "Cleared. The UI's client-side refusal now compensates for nothing, which is the "
+     "correct state for it"),
     ("D-04", "`JobEquipmentTool.LinkedQualificationId` points at a JobQualification, not the catalogue", "DONE 2026-08-29",
      "The field is called `LinkedQualificationId`, the DTO types it `Guid?`, and the obvious "
      "reading — the `Qualifications` reference catalogue — is wrong. The constraint is "
@@ -962,7 +972,7 @@ BLOCKERS = [
      "the line runs; changing with the caller proves it is the caller.",
      "Was blocking the MedicalClinical edit/delete build, and was already wrong on three shipped "
      "actions — cleared"),
-    ("D-17", "`POST api/talent-pools` 500s when ownerId is omitted", "OPEN",
+    ("D-17", "`POST api/talent-pools` 500s when ownerId is omitted", "DONE 2026-08-31",
      "`CreateTalentPoolDto.OwnerId` is `[Required]` but typed as a non-nullable `Guid`, and "
      "`[Required]` does not reject `Guid.Empty` — so an omitted owner passes model validation "
      "intact and dies at the database on `FK_TalentPools_Employees_OwnerId` with error 547, "
@@ -972,9 +982,34 @@ BLOCKERS = [
      "The fix is a validation guard that rejects `Guid.Empty` with a message naming the field; "
      "sending the id is the workaround, not the fix. Worth a sweep rather than a one-line patch — "
      "`[Required]` on a non-nullable `Guid` is inert everywhere it appears, and this DTO family "
-     "uses it heavily.",
-     "Blocks nothing built so far. Recorded because a 500 that names nothing costs someone an hour "
-     "the next time"),
+     "uses it heavily.\n\n"
+     "  **Fixed 2026-08-31 (closure lane 1), and the sweep it was supposed to be is NOT what "
+     "shipped.** `HrRequiredGuidActionFilter` rejects an empty `Guid` on a `[Required]` property "
+     "with a message naming the field, but only for a DTO carrying "
+     "`[CallerSuppliesIdentifiers]`. Opt-in, after the blanket version over the "
+     "`ErpSystem.Core.DTOs.HR` namespace was written and then withdrawn.\n\n"
+     "  ⚠ **Twice it refused correct requests, and neither case is visible from the "
+     "DTO.** An empty required Guid at validation time is often a field the CONTROLLER is about "
+     "to fill: from the route (`dto.JobDescriptionId = jobDescriptionId` on "
+     "`POST descriptions/{}/duty-items`) or from the token (`dto.ReportedById`, "
+     "`dto.EmployeeId`, `dto.InitiatedById`, deliberately, so a caller cannot assert who acted). "
+     "Matching the property against the route key does not rescue it either: "
+     "`POST responsibilities/{responsibilityId}/kpis` fills `JobResponsibilityId`, and the only "
+     "thing connecting those names is an assignment statement no reflection can see. Both were "
+     "found by `hr-jobarch/run-slice13` refusing its own correct payloads, one after the "
+     "other — not by reading the code.\n\n"
+     "  So breadth is now a per-DTO claim rather than a namespace rule: two DTOs carry the "
+     "attribute today (`CreateTalentPoolDto`, the reported instance, and "
+     "`CreateJobDescriptionDto`), each checked to confirm its controller fills nothing in. "
+     "**The remaining ~900 properties are unchanged and an omitted foreign key still 500s "
+     "there**; adding a DTO is one line plus that check. Recorded plainly because the entry above "
+     "asked for a sweep and this is narrower than it sounds.\n\n"
+     "  Worth knowing: it began as an `IValidationMetadataProvider`, the tidier hook, which did "
+     "not compile — the namespace resolves but `IValidationMetadataProvider` and "
+     "`ValidationMetadataProviderContext` do not, in a project whose controllers use "
+     "`Microsoft.AspNetCore.Mvc.Filters` happily. An action filter reaches the same result "
+     "through an API this solution already builds against.",
+     "Cleared for the endpoint that exposed it. The class is addressable now, not addressed"),
     ("D-18", "The sanctions' block stands, but not for the reason recorded", "OPEN",
      "The case screen has said since slice 1 that the sanctions must stay read-only \u2014 warning, "
      "suspension, fine, termination, separation \u2014 \"until the issuing-authority rule is in "
@@ -1066,7 +1101,7 @@ BLOCKERS = [
      "carries a code and its own `proficiencyScaleMax`), and the slice now deletes the catalogue "
      "rows it mints, because a competency is shared reference data rather than one run's fixture.",
      "Was going to make the competency panel's own delete/re-add path 500 — cleared"),
-    ("D-22", "`MedicalExpenseClaim`'s TypeScript type is five fields short of what the API returns", "OPEN",
+    ("D-22", "`MedicalExpenseClaim`'s TypeScript type is five fields short of what the API returns", "DONE 2026-08-31",
      "`ClaimEditDialogs.tsx` binds `claim.admissionStart`, `admissionEnd`, `preAuthorizationId`, "
      "`referralId` and `leaveRequestId`; the `MedicalExpenseClaim` interface declares none of "
      "them, though `MedicalExpenseClaimDto` returns all five and `MedicalExpenseClaimUpdateRequest` "
@@ -1079,8 +1114,17 @@ BLOCKERS = [
      "`resolveJsxOpeningLikeElement` — on the clean tree as well as a dirty one. So "
      "`npm run type-check` reports nothing at all and every type error in the repo is currently "
      "invisible. A scoped `tsconfig` over the HR subtree gets round it and is how this slice was "
-     "checked.",
-     "Blocks nothing. Recorded because the project-wide type-check is silently dead"),
+     "checked.\n\n"
+     "  **Fixed 2026-08-31 (closure lane 1).** All five are declared, plus the three display "
+     "companions the DTO returns beside them (`preAuthorizationNumber`, `referralNumber`, "
+     "`leaveRequestNumber`) so a panel can name what it links to rather than showing a Guid. "
+     "Checked with a scoped `tsconfig.hr-slice.json`: the touched files are clean and the 31 "
+     "errors that remain in that scope are all in `ClinicalRecordActions.tsx`, which this slice "
+     "did not touch and which does not reference the claim type.\n\n"
+     "  ⚠ The crash below is unchanged and still hides every other type error in the "
+     "repo. It belongs to shared reporting (cross-module #20), and the decision on 2026-08-31 was "
+     "to keep working around it rather than edit another team's file.",
+     "Cleared for this type. The project-wide type-check is still silently dead"),
     ("D-23", "A travel policy could be DELETED after approval, though it could not be edited", "DONE 2026-08-30",
      "`UpdatePolicyAsync` refuses to edit an approved policy, and says why: it would change what "
      "everyone may spend with nobody approving the change. `DeletePolicyAsync` did the same thing "
@@ -1201,7 +1245,7 @@ BLOCKERS = [
      "\"Meals / HardLimit / 50 per day\" compare against?",
      "Blocks nothing. It withholds 5 endpoints from the UI on purpose, and they will not re-read "
      "as gaps"),
-    ("D-30", "Authorising a booking above a travel cap records no reason", "OPEN",
+    ("D-30", "Authorising a booking above a travel cap records no reason", "FALSE — corrected 2026-08-31",
      "Found while deciding D-29, and it is the real version of the gap the exception flow was "
      "pretending to fill. A booking that breaches the policy's cap is refused unless the caller "
      "holds `HR.Travel.Admin` and sets the exception flag — which makes Travel.Admin a financial "
@@ -1210,8 +1254,20 @@ BLOCKERS = [
      "this module is the one with no audit reasoning, while the elaborate exception entity that "
      "does have `ExceptionReason` and now `DecisionNotes` governs a mechanism nobody runs.\n\n"
      "  A reason column on the breach flag would be a small change and worth more than the whole "
-     "rules subsystem in its current state.",
-     "Blocks nothing built. Every cap breach ever authorised is unexplained"),
+     "rules subsystem in its current state.\n\n"
+     "  ⚠ **This entry was wrong, and it was checked before it was acted on.** The "
+     "reason column exists and always has: `ClassExceptionReason` on `StaffTravelFlightBooking` "
+     "and `RateExceptionReason` on `StaffTravelHotelBooking`, both on the create and update DTOs, "
+     "both mapped in and out — and `StaffTravelBookingService` **refuses** an approved "
+     "exception without one (\"A booking above the policy cap must record why the exception "
+     "was granted\"), a guard that landed with the caps themselves in area 12 slice 8. "
+     "`TravelBookingsPanel.tsx` carries both fields in its form schema. So the audit reasoning "
+     "this entry called absent is recorded, enforced and enterable.\n\n"
+     "  The lesson is the entry itself: it was written while deciding D-29, from the shape of the "
+     "exception entity rather than from the booking service, and it read plausibly enough to be "
+     "scheduled as work. **A ledger entry is a claim, not a finding, until something has run.**",
+     "Nothing. Every cap breach ever authorised carries a reason — the entry was "
+     "mistaken"),
     ("D-31", "Every traveller has been shown a destination alert with no text", "DONE 2026-08-30",
      "`alerts/country/{id}/current` returned `StaffTravelAlertSummaryDto`, which has no `Body` — "
      "and **the body is the alert**. The travel request's compliance strip renders the title, the "
@@ -1321,7 +1377,7 @@ BLOCKERS = [
      "look like more of the same. It was checked against the service rather than adjusted to "
      "match observed behaviour, which is the only reason it was found.",
      "Was leaving the authoriser blank on every movement that needs accepting — cleared"),
-    ("D-37", "A filed demotion appeal appears in no list", "OPEN",
+    ("D-37", "A filed demotion appeal appears in no list", "DONE 2026-08-31",
      "`staff-demotions/pending-appeals` filters `EmployeeResponse == null` — it lists demotions "
      "still AWAITING an answer, not ones that have been appealed. So responding REMOVES a demotion "
      "from it, and the controller's other four reads are by id, by movement, disciplinary and "
@@ -1335,8 +1391,50 @@ BLOCKERS = [
      "matter, because appeals can now actually be filed.\n\n"
      "  A `filed-appeals` read would be a small addition. Not built here because it is a new "
      "endpoint rather than a caller for an existing one, and the appeal is visible on the record "
-     "meanwhile.",
-     "Blocks nothing. HR has no worklist for appeals now that employees can file them"),
+     "meanwhile.\n\n"
+     "  **Built 2026-08-31 (closure lane 1)** — repository, service, "
+     "`GET api/staff-demotions/filed-appeals`, a client method and a screen. ⚠ The "
+     "screen was not optional: `getPendingAppeals` **had no caller either**, so HR had no appeals "
+     "surface at all, and a second uncalled client method would have been one more of exactly "
+     "what the coverage instruments keep finding. `/hr/movements/appeals` carries both queues "
+     "side by side with their counts, because they are disjoint and neither alone is the "
+     "picture. `StaffDemotionDto` gained `EmployeeName` and `EmployeeNumber` at the same time "
+     "— a worklist keyed by movement number is not a worklist of people.",
+     "Cleared. Both queues are reachable, which neither was"),
+    ("D-38", "Two nightly HR sweeps failed every night, and two were never scheduled at all", "DONE 2026-08-31",
+     "Found while acting on the demo-feedback row above, which claimed HR had no hosted services "
+     "at all. It had six. **Two of them threw on every scheduled run.**\n\n"
+     "  `ProbationReminderService.BuildCandidatesAsync` and "
+     "`DisciplineReminderService.CollectPendingAsync` read the tenant's policy settings "
+     "through `ICompanyHrPolicyProvider.GetAsync()` and "
+     "`ICompanyHrPolicySettingsService.GetAsync()`, both of which resolve the tenant **from the "
+     "current user**. A background service has no current user, so the read threw "
+     "\"No tenant is associated with the current user\" and the sweep aborted — while "
+     "the run-now button worked perfectly, because a button always has a token behind it. **The "
+     "condition that triggers the bug is the absence of the thing an HTTP harness always "
+     "supplies**, which is why 274 movement assertions and 415 discipline ones never saw "
+     "it.\n\n"
+     "  ⚠ **Proven in the API's own log, not inferred.** From one uptime window on "
+     "2026-08-31: SHE swept at 03:04, movements at 03:06, travel at 03:12, assets at 03:14 — "
+     "and at 03:08 both `Probation reminder sweep failed for tenant` "
+     "(`ProbationReminderService.cs:152`) and `Discipline reminder sweep failed for tenant` "
+     "(`DisciplineReminderService.cs:238`): the exact two lines that read policy. So "
+     "FR-HR-032's confirmation reminders, FR-HR-140's expiry notices, the 48-hour "
+     "written query, the four-week investigation, both appeal windows and every grievance clock "
+     "had never once fired on the timer.\n\n"
+     "  **Fixed** by giving both providers a `GetForTenantAsync(tenantId)` and pointing the two "
+     "collectors at it — the tenant was already a parameter of both methods; only the "
+     "settings read reached round it. `SeparationReminderService` gained the "
+     "`RunSweepForTenantAsync(tenantId, trigger, userId)` the other five engines already had, "
+     "along with tenant-explicit retirement and contract-expiry reads, and "
+     "`SeparationReminderBackgroundService` hosts it at a 17-minute stagger. "
+     "`check-reminder-hosts.mjs` reads the log and asserts seven hosts, seven scheduled sweeps "
+     "and no failures.\n\n"
+     "  **`LeaveYearEndService` is deliberately NOT hosted.** Carry-over and forfeiture move "
+     "people's balances; the other seven engines only raise reminders. Putting them on a "
+     "timer is a policy decision for TDC, not a defect to fix.",
+     "Cleared. Two engines that had never run now do, and a third is scheduled for the first "
+     "time"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "

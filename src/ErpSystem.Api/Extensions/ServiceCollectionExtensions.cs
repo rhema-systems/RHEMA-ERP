@@ -1871,6 +1871,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 {
                     options.Conventions.Add(new FinancePermissionAuthorizationConvention());
                     options.Filters.AddService<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
+
+                    // Ledger D-17: [Required] on a non-nullable Guid accepts Guid.Empty, so an
+                    // omitted foreign key passed validation and died on the FK as a 500 naming
+                    // nothing. HR DTOs only — see HrRequiredGuidActionFilter.
+                    options.Filters.Add<ErpSystem.Api.Filters.HrRequiredGuidActionFilter>();
                 })
                 .AddJsonOptions(options =>
                 {
@@ -2294,6 +2299,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
+
+            // Separation reminder engine (area 9b slice 10, FR-HR-111): daily sweep — a retirement
+            // or a contract expiry approaching with no exit raised, a clearance with mandatory lines
+            // unanswered, a settlement sitting with Internal Audit, and a settlement approved and
+            // never completed. Sweep logic is scoped (ISeparationReminderService) so run-now shares
+            // it. ⚠ Until this registration the engine ran only when somebody pressed the button,
+            // which is what FR-HR-093's "advance alerts" actually depended on.
+            services.AddHostedService<ErpSystem.Api.Services.HR.SeparationReminderBackgroundService>();
 
             // Asset reminder engine (area 16 slice 9): daily sweep — maintenance due within
             // the horizon, maintenance already overdue on the escalation ladder, and assets

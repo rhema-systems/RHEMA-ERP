@@ -154,6 +154,14 @@ public interface ISeparationService
         int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The same list for a named tenant, for callers with no authenticated user behind them — the
+    /// nightly reminder sweep, which runs tenant by tenant.
+    /// </summary>
+    Task<IEnumerable<UpcomingRetirementDto>> GetUpcomingRetirementsForTenantAsync(
+        Guid tenantId, int? withinDays = null, bool includeOverdue = true,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Raises a compulsory-retirement separation for everyone due within the horizon who has not
     /// got one already. System-initiated: no actor is stamped, because a birthday arriving is
     /// nobody's act.
@@ -201,6 +209,13 @@ public interface ISeparationService
     /// </remarks>
     Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesAsync(
         int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same list for a named tenant, for the nightly reminder sweep.
+    /// </summary>
+    Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesForTenantAsync(
+        Guid tenantId, int? withinDays = null, bool includeOverdue = true,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Raises a contract-expiry separation for everyone due who has not got one.</summary>
     Task<ContractExpirySweepResultDto> RunContractExpirySweepAsync(

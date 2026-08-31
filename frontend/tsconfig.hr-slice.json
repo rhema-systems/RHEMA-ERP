@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/app/hr/movements/**/*.tsx",
+    "src/components/hr/medical/**/*.tsx",
+    "src/components/hr/movements/**/*.tsx",
+    "src/components/layout/sidebar.tsx"
+  ]
+}

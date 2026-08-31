@@ -286,6 +286,12 @@ public interface IStaffDemotionService
     Task<IEnumerable<StaffDemotionDto>> GetPerformanceRelatedDemotionsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDemotionDto>> GetWithPendingAppealsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Demotions the employee has answered — HR's worklist of appeals actually filed, which the
+    /// pending list cannot show because answering removes a demotion from it (ledger D-37).
+    /// </summary>
+    Task<IEnumerable<StaffDemotionDto>> GetWithFiledAppealsAsync(CancellationToken cancellationToken = default);
+
     Task<StaffDemotionDto> CreateAsync(CreateStaffDemotionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffDemotionDto> UpdateAsync(UpdateStaffDemotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 

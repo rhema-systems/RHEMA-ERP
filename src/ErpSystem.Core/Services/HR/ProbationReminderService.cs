@@ -149,7 +149,10 @@ public class ProbationReminderService : IProbationReminderService
     private async Task<List<ProbationReminderPreviewItemDto>> BuildCandidatesAsync(
         Guid tenantId, DateTime asOf, CancellationToken cancellationToken)
     {
-        var settings = await _policySettings.GetAsync(cancellationToken);
+        // ⚠ BY TENANT, not by current user: this builder is the nightly host's path as well as the
+        // run-now button's, and the host has no HTTP context. GetAsync() throws without one, so the
+        // scheduled sweep failed here before it examined a single probation.
+        var settings = await _policySettings.GetForTenantAsync(tenantId, cancellationToken);
         var leadDays = settings.ProbationEndLeadDays > 0 ? settings.ProbationEndLeadDays : 30;
         var today = DateOnly.FromDateTime(asOf);
         var items = new List<ProbationReminderPreviewItemDto>();

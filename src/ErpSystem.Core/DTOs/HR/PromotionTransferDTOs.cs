@@ -848,6 +848,16 @@ public class StaffDemotionDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid MovementId { get; set; }
     public string MovementNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Who was demoted. Read off the movement's employee, so — like <see cref="MovementNumber"/> —
+    /// it is populated by the list reads, which load the movement graph, and empty on the by-id read,
+    /// which loads the row alone. A worklist of appeals needs a name on it; a movement number is not
+    /// a person.
+    /// </summary>
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+
     public StaffDemotionReason Reason { get; set; }
     public string ReasonName => Reason.ToString();
 

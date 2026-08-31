@@ -198,8 +198,20 @@ If either is needed sooner than the current plan plots them, that changes the se
 ## Operational prerequisite — nobody holds the Internal Audit role (raised 2026-08-20)
 
 **FR-HR-185** requires Internal Audit to review a final settlement **before payment is released**,
-and Chapter 12 states the same chain. The role exists — `TDC_INTERNAL_AUDIT`, seeded by the
-procurement work — but measured on the DEFAULT tenant on 2026-08-20 it has **zero members**.
+and Chapter 12 states the same chain. Measured on 2026-08-20, the role existed —
+`TDC_INTERNAL_AUDIT`, seeded by the procurement work — with **zero members**.
+
+⚠ **Re-measured 2026-08-31, and it is worse than a missing grant: the role is not there at all.**
+`SELECT Name FROM AspNetRoles` returns 47 roles and **neither `TDC_INTERNAL_AUDIT` nor
+`TDC_MANAGING_DIRECTOR` is among them** — only the plain `Managing Director` spelling survives. So
+the administrative grant this section asks TDC for cannot be made today: **the role has to be created
+first**. The likely reason is this database being built from the EF model rather than from
+migrations, which skips whatever seeded it; that makes it an environment question as much as a TDC
+one, and it should be settled before anyone tries to action the answer below.
+
+Concretely, it blocks more than a queue: `hr-separation/run-slice8` and `run-slice10` cannot execute
+at all — every settlement-review call is a 403 — so the FR-HR-185 pipeline is currently unverifiable
+end to end, not merely unused.
 
 The HR separation module (area 9b) builds the review step as specified. Until somebody is granted
 that role, **no final settlement can be reviewed and therefore none can be paid** — the control

@@ -754,6 +754,10 @@ public static class PromotionTransferMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             MovementId = entity.MovementId,
             MovementNumber = entity.Movement?.MovementNumber ?? string.Empty,
+            EmployeeName = entity.Movement?.Employee is { } demotedEmployee
+                ? $"{demotedEmployee.FirstName} {demotedEmployee.LastName}".Trim()
+                : string.Empty,
+            EmployeeNumber = entity.Movement?.Employee?.EmployeeNumber,
             Reason = entity.Reason,
             GradeLevelDecrease = entity.GradeLevelDecrease,
             IsDisciplinaryAction = entity.IsDisciplinaryAction,

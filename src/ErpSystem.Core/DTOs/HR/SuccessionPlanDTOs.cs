@@ -1162,6 +1162,7 @@ public class TalentPoolSummaryDto
     public DateTime? ValidTo { get; set; }
 }
 
+[CallerSuppliesIdentifiers]
 public class CreateTalentPoolDto : CreateDtoBase
 {
     [Required]

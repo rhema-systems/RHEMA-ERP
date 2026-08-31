@@ -235,7 +235,13 @@ public class DisciplineReminderService : IDisciplineReminderService
         // Area 9c slice 7 — the employee-relations clocks. Settings read ONCE per sweep, not per
         // record: the provider hits the database, and four sweeps over a tenant's cases would
         // otherwise repeat that read for every row.
-        var policy = await _policyProvider.GetAsync(cancellationToken);
+        //
+        // ⚠ BY TENANT, not by current user. This collector is what the nightly host calls, and the
+        // host has no HTTP context — GetAsync() resolves the tenant from the caller's identity and
+        // threw "No tenant is associated with the current user" on every scheduled run, aborting the
+        // sweep after the seven disciplinary clocks and before all five grievance ones. The run-now
+        // button never showed it, because a button always has a user behind it.
+        var policy = await _policyProvider.GetForTenantAsync(tenantId, cancellationToken);
 
         await SweepGrievancesUnansweredAsync(tenantId, today, pending, policy.GrievanceRungChaseDays, cancellationToken);
         await SweepGrievanceInvestigationsAsync(tenantId, today, pending, cancellationToken);

@@ -59,10 +59,23 @@ public class StaffDemotionsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffDemotionDto>>> GetPerformanceRelated()
         => Ok(await _service.GetPerformanceRelatedDemotionsAsync());
 
+    /// <summary>Demotions still awaiting the employee's answer, within the appeal window.</summary>
     [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     [HttpGet("pending-appeals")]
     public async Task<ActionResult<IEnumerable<StaffDemotionDto>>> GetPendingAppeals()
         => Ok(await _service.GetWithPendingAppealsAsync());
+
+    /// <summary>
+    /// Demotions the employee has answered — the appeals and acceptances on record.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not a filter of the list above but its opposite: answering removes a demotion from
+    /// pending-appeals, so before this endpoint a filed appeal appeared in no list at all.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
+    [HttpGet("filed-appeals")]
+    public async Task<ActionResult<IEnumerable<StaffDemotionDto>>> GetFiledAppeals()
+        => Ok(await _service.GetWithFiledAppealsAsync());
 
     // =========================================================================
     // CRUD

@@ -267,6 +267,19 @@ public interface IStaffDemotionRepository : IGenericRepository<StaffDemotion>
     /// </summary>
     Task<IEnumerable<StaffDemotion>> GetWithPendingAppealsAsync();
 
+    /// <summary>
+    /// Returns demotions the employee has actually answered — the appeals and acceptances on record,
+    /// most recently answered first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ledger D-37. This is the counterpart of <see cref="GetWithPendingAppealsAsync"/>, not a
+    /// variant of it: that one lists demotions still AWAITING an answer, so responding REMOVES a
+    /// demotion from it. Until employees could file appeals themselves the distinction was academic;
+    /// now that they can, a filed appeal appeared in no list at all and HR saw it only by opening
+    /// that movement.
+    /// </remarks>
+    Task<IEnumerable<StaffDemotion>> GetWithFiledAppealsAsync();
+
     /// <summary>Returns demotions linked to a specific disciplinary action record.</summary>
     Task<IEnumerable<StaffDemotion>> GetByDisciplinaryActionAsync(Guid disciplinaryActionId);
 }

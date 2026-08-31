@@ -163,6 +163,7 @@ public class UpdateJobDutyItemDto : UpdateDtoBase
 /// <summary>
 /// DTO for creating a job description
 /// </summary>
+[CallerSuppliesIdentifiers]
 public class CreateJobDescriptionDto : CreateDtoBase
 {
     [Required]

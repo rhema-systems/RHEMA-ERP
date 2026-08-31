@@ -112,6 +112,13 @@ export interface StaffDemotionDetail {
   id: string;
   movementId: string;
   movementNumber: string;
+  /**
+   * Read off the movement's employee, so it is populated by the list reads (which load the movement
+   * graph) and empty on the by-id read (which loads the row alone) — the same behaviour
+   * `movementNumber` has always had.
+   */
+  employeeName: string;
+  employeeNumber?: string | null;
   reason: StaffDemotionReason;
   reasonName: string;
   /** Server-computed from the movement's salary grades — not editable. */
