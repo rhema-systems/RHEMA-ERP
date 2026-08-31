@@ -2388,8 +2388,8 @@ export const navigationItems: NavItem[] = [
                 permissions: ['Finance.AccessScopes.Manage'],
               },
               {
-                title: 'Chart of Accounts Setup',
-                href: '/administration/finance/accounts',
+                title: 'Chart of Accounts',
+                href: '/finance/accounts',
                 icon: CreditCard,
               },
               {

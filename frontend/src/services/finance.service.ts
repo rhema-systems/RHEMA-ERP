@@ -70,8 +70,13 @@ export interface FinanceSettings {
   discountAllowedAccountId?: string;
   discountReceivedAccountId?: string;
   directionalExchangeRatePolicyEnabled?: boolean;
+  defaultTransactionQuoteSide?: ExchangeRateQuoteSide;
   arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+  arSettlementQuoteSide?: ExchangeRateQuoteSide;
   apInvoiceQuoteSide?: ExchangeRateQuoteSide;
+  apSettlementQuoteSide?: ExchangeRateQuoteSide;
+  closingQuoteSide?: ExchangeRateQuoteSide;
+  requireExchangeRateOverrideApproval?: boolean;
 }
 
 // --- Currency ---

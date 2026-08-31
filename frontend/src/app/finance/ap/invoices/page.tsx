@@ -106,8 +106,10 @@ export default function VendorInvoicesPage() {
 
     const submitInvoiceMutation = useMutation({
         mutationFn: (id: string) => accountsPayableService.submitInvoiceForApproval(id),
-        onSuccess: () => {
+        onSuccess: (_, invoiceId) => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice', invoiceId] });
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice-workflow-summary', invoiceId] });
             toast({ title: 'Success', description: 'Invoice submitted for approval.' });
         },
         onError: (error: any) => {
@@ -268,7 +270,7 @@ export default function VendorInvoicesPage() {
                                                             <MoreHorizontal className="h-4 w-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
+                                                    <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
                                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                                         <DropdownMenuItem onClick={() => router.push(`/finance/ap/invoices/${invoice.id}`)}>
                                                             <FileText className="mr-2 h-4 w-4" /> View Details

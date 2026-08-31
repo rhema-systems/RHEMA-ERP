@@ -50,6 +50,7 @@ import {
     VendorPaymentReadinessBadge,
     VendorPaymentReadinessControl,
 } from '@/components/finance/VendorPaymentReadinessControl';
+import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
 
 const paymentSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
@@ -61,6 +62,7 @@ const paymentSchema = z.object({
     transactionReference: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
+    exchangeRateId: z.string().optional(),
     withholdingTaxId: z.string().optional(),
     withholdingTaxAccountId: z.string().optional(),
     withholdingTaxRate: z.coerce.number().min(0).max(100).optional().default(0),
@@ -166,6 +168,7 @@ export default function NewVendorPaymentPage() {
             transactionReference: preselectedReferenceNumber,
             currencyCode: 'GHS',
             exchangeRate: 1,
+            exchangeRateId: undefined,
             withholdingTaxId: undefined,
             withholdingTaxAccountId: undefined,
             withholdingTaxRate: 0,
@@ -230,6 +233,7 @@ export default function NewVendorPaymentPage() {
         form.setValue('totalAmount', remainingAdvance);
         form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
         form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('exchangeRateId', existingAdvancePayment.exchangeRateId);
         form.setValue('transactionReference', existingAdvancePayment.paymentNumber);
     }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
 
@@ -282,15 +286,38 @@ export default function NewVendorPaymentPage() {
         if (!account) return;
 
         form.setValue('currencyCode', account.currency);
-        if (account.currency === 'GHS') {
-            form.setValue('exchangeRate', 1);
-            return;
-        }
-
-        void financeService.getCurrentExchangeRate(account.currency)
-            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-            .catch(() => form.setValue('exchangeRate', 1));
     }, [selectedBankAccountId, bankAccounts, form, existingAdvancePaymentId, isLinkedInvoicePayment]);
+
+    const watchedPaymentDate = form.watch('paymentDate');
+    const [exchangeRateSource, setExchangeRateSource] = useState('Functional currency');
+
+    useEffect(() => {
+        if (existingAdvancePaymentId || !financeSettings || !watchedPaymentDate) return;
+        form.setValue('exchangeRateId', undefined);
+        setExchangeRateSource('Loading approved rate…');
+        let cancelled = false;
+        void loadApprovedSettlementRate(
+            {
+                module: 'AP',
+                transactionCurrency: currentCurrencyCode,
+                functionalCurrency: functionalCurrencyCode,
+                settlementDate: watchedPaymentDate,
+                settings: financeSettings,
+            },
+            (code, query) => financeService.getCurrentExchangeRate(code, query),
+        ).then(snapshot => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            setExchangeRateSource(`${snapshot.source} · ${snapshot.quoteSide}`);
+        }).catch(error => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', 0);
+            form.setValue('exchangeRateId', undefined);
+            setExchangeRateSource(error instanceof Error ? error.message : 'Approved rate unavailable');
+        });
+        return () => { cancelled = true; };
+    }, [currentCurrencyCode, existingAdvancePaymentId, financeSettings, form, functionalCurrencyCode, watchedPaymentDate]);
 
     useEffect(() => {
         if (!selectedWithholdingTax) {
@@ -509,6 +536,15 @@ export default function NewVendorPaymentPage() {
                 await accountsPayableService.allocatePayment(existingAdvancePaymentId, paymentAllocations);
                 toast({ title: 'Advance applied', description: 'The supplier advance and any realized FX were posted successfully.' });
                 router.push(`/finance/ap/payments/${existingAdvancePaymentId}`);
+                return;
+            }
+
+            if (data.currencyCode.toUpperCase() !== functionalCurrencyCode && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: exchangeRateSource,
+                    variant: 'destructive',
+                });
                 return;
             }
 
@@ -826,11 +862,14 @@ export default function NewVendorPaymentPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
+                                    readOnly
+                                    aria-readonly="true"
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
+                                <p className="text-xs text-muted-foreground">{exchangeRateSource}</p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
                                 )}

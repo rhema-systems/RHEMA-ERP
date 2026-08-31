@@ -47,6 +47,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { parseBankStatementImportFile } from '@/lib/finance/bank-statement-import';
+import { calendarDayDifference, isWithinStatementDateTolerance } from '@/lib/finance/banking-policy';
 import { cn, formatCurrency } from '@/lib/utils';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
@@ -488,6 +489,10 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
         queryKey: ['reconciliation-matches', reconciliation.id],
         queryFn: () => cashManagementDataService.getReconciliationMatches(reconciliation.id),
     });
+    const settingsQuery = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeDataService.getFinanceSettings(),
+    });
 
     const refresh = async () => {
         await Promise.all([
@@ -564,6 +569,15 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
     const selectedLine = summary?.unmatchedStatementLines.find((item) => item.id === selectedLineId);
     const amountsAgree = Boolean(selectedBook && selectedLine && Math.abs(selectedBook.amount - selectedLine.amount) < 0.005);
     const directionsAgree = Boolean(selectedBook && selectedLine && isDirectionCompatible(selectedBook, selectedLine));
+    const statementDateToleranceDays = settingsQuery.data?.bankStatementMatchDateToleranceDays ?? 3;
+    const selectedDateDifferenceDays = selectedBook && selectedLine
+        ? calendarDayDifference(selectedBook.transactionDate, selectedLine.transactionDate)
+        : null;
+    const selectedDatesWithinTolerance = Boolean(selectedBook && selectedLine && isWithinStatementDateTolerance(
+        selectedBook.transactionDate,
+        selectedLine.transactionDate,
+        statementDateToleranceDays,
+    ));
     const isRefreshing = summaryQuery.isFetching || matchesQuery.isFetching;
 
     if (summaryQuery.isLoading || matchesQuery.isLoading) {
@@ -596,6 +610,7 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
                     <Badge variant="secondary">{summary.totalMatches} matched</Badge>
                     <Badge variant="outline">{summary.unmatchedBookTransactions.length} unmatched book</Badge>
                     <Badge variant="outline">{summary.unmatchedStatementLines.length} unmatched statement</Badge>
+                    <Badge variant="outline">Auto-match date window: ±{statementDateToleranceDays} calendar days</Badge>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={() => refresh()} disabled={isRefreshing}>
@@ -618,7 +633,11 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
             )}
 
             {canEdit && (selectedBook || selectedLine) && (
-                <Card className={cn('border-dashed', selectedBook && selectedLine && !amountsAgree && 'border-destructive/60')}>
+                <Card className={cn(
+                    'border-dashed',
+                    selectedBook && selectedLine && (!amountsAgree || !directionsAgree) && 'border-destructive/60',
+                    selectedBook && selectedLine && amountsAgree && directionsAgree && !selectedDatesWithinTolerance && 'border-amber-500/70',
+                )}>
                     <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
                         <div>
                             <p className="font-medium">{selectedBook && selectedLine && amountsAgree && directionsAgree ? 'Ready to create a manual match' : selectedBook && selectedLine ? 'The selected rows cannot be matched' : 'Select one row from each table'}</p>
@@ -626,8 +645,10 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
                                 {selectedBook && selectedLine
                                     ? !amountsAgree
                                         ? `Amounts differ: ${formatCurrency(selectedBook.amount, currency)} vs ${formatCurrency(selectedLine.amount, currency)}`
+                                        : directionsAgree && !selectedDatesWithinTolerance
+                                        ? `Amounts and direction agree, but the dates are ${selectedDateDifferenceDays} calendar day(s) apart—outside the ±${statementDateToleranceDays}-day auto-match policy. Manual matching remains available for a reviewed exception.`
                                         : directionsAgree
-                                        ? `${formatCurrency(selectedBook.amount, currency)} on both sides`
+                                        ? `${formatCurrency(selectedBook.amount, currency)} on both sides; dates are within the ±${statementDateToleranceDays}-day policy window.`
                                         : 'The receipt/payment direction does not agree with the statement credit/debit.'
                                     : 'A match requires one posted book transaction and one statement line.'}
                             </p>

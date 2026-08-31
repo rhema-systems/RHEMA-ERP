@@ -586,6 +586,7 @@ export interface CreateCashReceiptDto {
     amount: number;
     currency: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentMethodId?: string;
     referenceNumber?: string;
     payerName?: string;
@@ -599,6 +600,7 @@ export interface CreateCashPaymentDto {
     amount: number;
     currency: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentMethodId?: string;
     referenceNumber?: string;
     payeeName?: string;

@@ -184,8 +184,17 @@ public class BankReconciliationService : IBankReconciliationService
 
         var unmatchedLines = await unmatchedLinesQuery.ToListAsync();
 
+        var dateToleranceDays = await _context.FinanceSettings
+            .AsNoTracking()
+            .Where(settings => settings.TenantId == tenantId)
+            .Select(settings => (int?)settings.BankStatementMatchDateToleranceDays)
+            .FirstOrDefaultAsync() ?? 3;
+
         // Run auto-matching algorithm
-        var matches = _reconciliationEngine.AutoMatch(unreconciledTransactions, unmatchedLines);
+        var matches = _reconciliationEngine.AutoMatch(
+            unreconciledTransactions,
+            unmatchedLines,
+            dateToleranceDays);
 
         // Save matches
         var matchDtos = new List<ReconciliationMatchDto>();

@@ -300,7 +300,11 @@ public class CashTransactionService : ICashTransactionService
         var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.CashReceipt, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
-        var exchangeRate = ResolveExchangeRate(transactionCurrency, baseCurrencyCode, dto.ExchangeRate);
+        var rateSnapshot = await ResolveDirectCashRateSnapshotAsync(
+            tenantId, baseCurrencyCode, transactionCurrency, dto.TransactionDate, dto.ExchangeRateId);
+        if (dto.ExchangeRate.HasValue && RoundRate(dto.ExchangeRate.Value) != RoundRate(rateSnapshot.Rate))
+            throw new InvalidOperationException("The cash receipt exchange-rate value does not match the approved rate record.");
+        var exchangeRate = rateSnapshot.Rate;
         var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
 
         var transaction = new CashTransaction
@@ -313,6 +317,10 @@ public class CashTransactionService : ICashTransactionService
             Amount = dto.Amount,
             Currency = transactionCurrency,
             ExchangeRate = exchangeRate,
+            ExchangeRateId = rateSnapshot.ExchangeRateId,
+            ExchangeRateSource = rateSnapshot.RateSource,
+            ExchangeRateDate = rateSnapshot.RateDate,
+            ExchangeRateQuoteSide = rateSnapshot.QuoteSide,
             BaseAmount = baseAmount,
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
@@ -363,7 +371,11 @@ public class CashTransactionService : ICashTransactionService
         var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.CashPayment, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
-        var exchangeRate = ResolveExchangeRate(transactionCurrency, baseCurrencyCode, dto.ExchangeRate);
+        var rateSnapshot = await ResolveDirectCashRateSnapshotAsync(
+            tenantId, baseCurrencyCode, transactionCurrency, dto.TransactionDate, dto.ExchangeRateId);
+        if (dto.ExchangeRate.HasValue && RoundRate(dto.ExchangeRate.Value) != RoundRate(rateSnapshot.Rate))
+            throw new InvalidOperationException("The cash payment exchange-rate value does not match the approved rate record.");
+        var exchangeRate = rateSnapshot.Rate;
         var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
 
         var transaction = new CashTransaction
@@ -376,6 +388,10 @@ public class CashTransactionService : ICashTransactionService
             Amount = dto.Amount,
             Currency = transactionCurrency,
             ExchangeRate = exchangeRate,
+            ExchangeRateId = rateSnapshot.ExchangeRateId,
+            ExchangeRateSource = rateSnapshot.RateSource,
+            ExchangeRateDate = rateSnapshot.RateDate,
+            ExchangeRateQuoteSide = rateSnapshot.QuoteSide,
             BaseAmount = baseAmount,
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
@@ -1990,6 +2006,9 @@ public class CashTransactionService : ICashTransactionService
     private static decimal RoundMoney(decimal amount)
         => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+    private static decimal RoundRate(decimal amount)
+        => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
+
     private static decimal RoundCrossRate(decimal rate)
         => decimal.Round(rate, 8, MidpointRounding.AwayFromZero);
 
@@ -2608,6 +2627,30 @@ public class CashTransactionService : ICashTransactionService
             : new BankTransferRatePolicy(
                 ParseBankTransferRateType(link.TransactionRateType),
                 link.TransactionQuoteSide);
+    }
+
+    private async Task<BankTransferRateSnapshot> ResolveDirectCashRateSnapshotAsync(
+        Guid tenantId,
+        string functionalCurrency,
+        string transactionCurrency,
+        DateTime transactionDate,
+        Guid? requestedRateId,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        var quoteSide = settings?.DirectionalExchangeRatePolicyEnabled == true
+            ? settings.DefaultTransactionQuoteSide
+            : ExchangeRateQuoteSide.Mid;
+        return await ResolveBankTransferRateSnapshotAsync(
+            tenantId,
+            functionalCurrency,
+            transactionCurrency,
+            transactionDate,
+            requestedRateId,
+            new BankTransferRatePolicy(ExchangeRateType.Daily, quoteSide),
+            cancellationToken);
     }
 
     private async Task<BankTransferRateSnapshot> ResolveBankTransferRateSnapshotAsync(

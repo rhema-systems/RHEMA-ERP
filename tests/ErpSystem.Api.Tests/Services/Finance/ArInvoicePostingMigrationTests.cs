@@ -179,10 +179,12 @@ public sealed class ArInvoicePostingMigrationTests
         (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
-    public async Task ForeignOpeningBalanceArInvoice_ShouldRejectCreateWithoutRateEvidence()
+    public async Task ForeignArInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -196,7 +198,7 @@ public sealed class ArInvoicePostingMigrationTests
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
             ExchangeRate = 15m,
-            IsOpeningBalance = true,
+            IsOpeningBalance = isOpeningBalance,
             LineItems = new List<InvoiceLineItemCreateDto>
             {
                 new()

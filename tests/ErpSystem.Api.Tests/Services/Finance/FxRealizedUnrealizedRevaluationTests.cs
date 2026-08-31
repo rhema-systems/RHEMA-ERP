@@ -706,6 +706,28 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
     [Trait("Category", "FX")]
+    public async Task RevaluationUsesConfiguredClosingQuoteSide()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
+        fixture.Settings.ClosingQuoteSide = ExchangeRateQuoteSide.Buying;
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd, ExchangeRateQuoteSide.Mid);
+        var buying = fixture.SeedExchangeRate(13m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd, ExchangeRateQuoteSide.Buying);
+        await fixture.Db.SaveChangesAsync();
+
+        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End"
+        });
+
+        batch.Lines.Should().OnlyContain(line => line.ClosingExchangeRateId == buying.Id);
+        batch.Lines.Should().OnlyContain(line => line.ClosingExchangeRate == 13m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
     public async Task NextPeriodRevaluationAfterUnreversedPriorBatchUsesPriorCarryingAdjustment()
     {
         await using var fixture = await FxFixture.CreateAsync();
@@ -901,7 +923,11 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             await Db.DisposeAsync();
         }
 
-        public ExchangeRate SeedExchangeRate(decimal rate, DateTime effectiveDate, ExchangeRateType rateType = ExchangeRateType.Daily)
+        public ExchangeRate SeedExchangeRate(
+            decimal rate,
+            DateTime effectiveDate,
+            ExchangeRateType rateType = ExchangeRateType.Daily,
+            ExchangeRateQuoteSide quoteSide = ExchangeRateQuoteSide.Mid)
         {
             var exchangeRate = new ExchangeRate
             {
@@ -913,6 +939,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 InverseRate = 1m / rate,
                 EffectiveDate = effectiveDate.Date,
                 RateType = rateType,
+                QuoteSide = quoteSide,
                 RateSource = "Bank of Ghana",
                 ApprovalStatus = RateApprovalStatus.Approved,
                 IsActive = true,

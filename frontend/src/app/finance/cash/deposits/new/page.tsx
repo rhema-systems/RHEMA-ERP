@@ -12,7 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { expectedChequeClearingDate } from '@/lib/finance/banking-policy';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
 import type {
     BankAccount,
     BankingSetupStatus,
@@ -26,6 +28,7 @@ export default function NewBankDepositPage() {
     const [entries, setEntries] = useState<LiquidityAccountEntry[]>([]);
     const [paymentCandidates, setPaymentCandidates] = useState<PostedLiquidityPaymentCandidate[]>([]);
     const [setup, setSetup] = useState<BankingSetupStatus | null>(null);
+    const [chequeClearingPeriodDays, setChequeClearingPeriodDays] = useState(3);
     const [selected, setSelected] = useState<Record<string, number>>({});
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
@@ -47,11 +50,13 @@ export default function NewBankDepositPage() {
             cashManagementDataService.getEligibleLiquidityEntries(),
             cashManagementDataService.getBankingSetup(),
             cashManagementDataService.getPostedPaymentCandidates(),
-        ]).then(([bankAccounts, openEntries, bankingSetup, postedPayments]) => {
+            financeDataService.getFinanceSettings(),
+        ]).then(([bankAccounts, openEntries, bankingSetup, postedPayments, financeSettings]) => {
             setBanks(bankAccounts);
             setEntries(openEntries);
             setSetup(bankingSetup);
             setPaymentCandidates(postedPayments);
+            setChequeClearingPeriodDays(financeSettings.chequeClearingPeriodDays ?? 3);
         }).catch(error => toast.error(error instanceof Error ? error.message : 'Could not load banking queue.'));
     }, []);
 
@@ -75,6 +80,20 @@ export default function NewBankDepositPage() {
         });
         return { receipts, deductions, net: receipts - deductions };
     }, [entries, selected]);
+
+    const chequeHoldingAccountIds = useMemo(
+        () => new Set(setup?.accounts
+            .filter(account => account.accountType === 'ChequesAwaitingDeposit')
+            .map(account => account.id) ?? []),
+        [setup?.accounts],
+    );
+    const includesChequeReceipt = entries.some(entry =>
+        selected[entry.id] !== undefined
+        && entry.entryType === 'CustomerReceipt'
+        && chequeHoldingAccountIds.has(entry.liquidityAccountId));
+    const expectedClearingDate = form.depositDate
+        ? expectedChequeClearingDate(form.depositDate, chequeClearingPeriodDays)
+        : null;
 
     const toggle = (entry: LiquidityAccountEntry, checked: boolean) => {
         setSelected(current => {
@@ -148,7 +167,7 @@ export default function NewBankDepositPage() {
                 <CardHeader><CardTitle>Deposit header</CardTitle><CardDescription>One deposit represents one expected bank-statement line.</CardDescription></CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2"><Label>Destination bank</Label><Select required value={form.bankAccountId} onValueChange={bankAccountId => setForm({ ...form, bankAccountId })}><SelectTrigger><SelectValue placeholder="Select bank account" /></SelectTrigger><SelectContent>{banks.map(bank => <SelectItem key={bank.id} value={bank.id}>{bank.bankName} — {bank.accountName} ({bank.currency})</SelectItem>)}</SelectContent></Select></div>
-                    <div className="space-y-2"><Label>Deposit date</Label><Input required type="date" value={form.depositDate} onChange={event => setForm({ ...form, depositDate: event.target.value })} /></div>
+                    <div className="space-y-2"><Label>Deposit date</Label><Input required type="date" value={form.depositDate} onChange={event => setForm({ ...form, depositDate: event.target.value })} />{includesChequeReceipt && expectedClearingDate && <p className="text-xs text-muted-foreground">Expected cheque clearing: {expectedClearingDate.toLocaleDateString()} ({chequeClearingPeriodDays} calendar day(s), advisory only).</p>}</div>
                     <div className="space-y-2"><Label>Deposit slip / bank reference</Label><Input required maxLength={100} value={form.depositReference} onChange={event => setForm({ ...form, depositReference: event.target.value })} /></div>
                     <div className="space-y-2"><Label>Policy</Label><Input disabled value={setup?.depositPolicy === 'ControlledNetBanking' ? 'Controlled net banking' : 'Deposit intact'} /></div>
                     <div className="space-y-2 md:col-span-2"><Label>Notes</Label><Textarea value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></div>
@@ -217,7 +236,7 @@ export default function NewBankDepositPage() {
                                         <td className="p-3"><div className="font-medium">{entry.entryNumber}</div><div className="text-xs text-muted-foreground">{new Date(entry.entryDate).toLocaleDateString()}</div></td>
                                         <td className="p-3"><div>{entry.counterpartyName ?? entry.description}</div><div className="text-xs text-muted-foreground">{entry.referenceNumber}</div></td>
                                         <td className="p-3">{entry.liquidityAccountName}</td>
-                                        <td className={`p-3 ${entry.direction === 'Decrease' ? 'text-red-600' : 'text-green-700'}`}>{entry.direction === 'Increase' ? 'Receipt' : 'Deduction'}</td>
+                                        <td className={`p-3 ${entry.direction === 'Decrease' ? 'text-red-600' : 'text-green-700'}`}><div>{chequeMustRemainIntact ? 'Cheque receipt' : entry.direction === 'Increase' ? 'Receipt' : 'Deduction'}</div>{chequeMustRemainIntact && expectedClearingDate && <div className="text-xs text-muted-foreground">Expected {expectedClearingDate.toLocaleDateString()}</div>}</td>
                                         <td className="p-3 text-right">{entry.currency} {entry.remainingAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                         <td className="p-3"><Input className="text-right" type="number" min={0.01} max={entry.remainingAmount} step="0.01" disabled={!checked || chequeMustRemainIntact} value={selected[entry.id] ?? ''} onChange={event => setSelected(current => ({ ...current, [entry.id]: Math.min(Number(event.target.value), entry.remainingAmount) }))} /></td>
                                     </tr>

@@ -51,7 +51,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { arService } from '@/services/ar-service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
+import { financeService } from '@/services/finance.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
@@ -237,65 +237,43 @@ export default function NewInvoicePage() {
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
         const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
-        const isOpeningBalance = form.getValues('isOpeningBalance');
-
-        if (isOpeningBalance) {
-            // Clear the prior date/currency evidence before the async lookup so Save cannot race
-            // with a stale approved-rate identity while the new historical rate is loading.
-            form.setValue('exchangeRateId', undefined);
-            if (!financeSettings) {
-                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
-            }
-            let snapshot;
-            try {
-                snapshot = await loadApprovedInvoiceRate(
-                    {
-                        module: 'AR',
-                        transactionCurrency: currencyCode,
-                        functionalCurrency,
-                        invoiceDate: form.getValues('invoiceDate'),
-                        settings: financeSettings,
-                    },
-                    (code, query) => financeService.getCurrentExchangeRate(code, query)
-                );
-            } catch (error) {
-                if (requestId !== exchangeRateRequestId.current) return;
-                throw error;
-            }
-            if (requestId !== exchangeRateRequestId.current) return;
-            form.setValue('exchangeRate', snapshot.rate);
-            form.setValue('exchangeRateId', snapshot.exchangeRateId);
-            form.setValue('exchangeRateSource', snapshot.source);
-            return;
-        }
-
+        // Clear prior evidence before lookup so Save cannot race with stale rate identity.
         form.setValue('exchangeRateId', undefined);
-        if (currencyCode === functionalCurrency) {
-            form.setValue('exchangeRate', 1);
-            form.setValue('exchangeRateSource', 'Daily');
-            return;
+        if (!financeSettings) {
+            throw new Error('Finance settings are still loading. Try again before saving this invoice.');
         }
-
-        let rateObj;
+        let snapshot;
         try {
-            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+            snapshot = await loadApprovedInvoiceRate(
+                {
+                    module: 'AR',
+                    transactionCurrency: currencyCode,
+                    functionalCurrency,
+                    invoiceDate: form.getValues('invoiceDate'),
+                    settings: financeSettings,
+                },
+                (code, query) => financeService.getCurrentExchangeRate(code, query)
+            );
         } catch (error) {
             if (requestId !== exchangeRateRequestId.current) return;
             throw error;
         }
         if (requestId !== exchangeRateRequestId.current) return;
-        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-        form.setValue('exchangeRateSource', 'Daily');
+        form.setValue('exchangeRate', snapshot.rate);
+        form.setValue('exchangeRateId', snapshot.exchangeRateId);
+        form.setValue('exchangeRateDate', form.getValues('invoiceDate'));
+        form.setValue('exchangeRateSource', snapshot.source);
     };
 
     useEffect(() => {
-        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        if (!financeSettings || !watchInvoiceDate) return;
         void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
-            console.error('Failed to resolve governed AR opening-invoice rate', error);
+            console.error('Failed to resolve governed AR invoice rate', error);
             form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRate', 0);
             form.setValue('exchangeRateSource', 'Unavailable');
         });
-    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate]);
 
     const getTaxBreakdown = () => {
         if (watchIsOpeningBalance) {
@@ -419,7 +397,7 @@ export default function NewInvoicePage() {
                 } catch (err) {
                     console.error("Failed to fetch exchange rate for customer currency", err);
                     form.setValue('exchangeRateId', undefined);
-                    form.setValue('exchangeRate', 1.0);
+                    form.setValue('exchangeRate', 0);
                     form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
@@ -442,10 +420,10 @@ export default function NewInvoicePage() {
         try {
             const isOpeningBalance = data.isOpeningBalance;
             const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
-            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+            if (data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
                 toast({
                     title: 'Approved exchange rate required',
-                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this invoice.',
                     variant: 'destructive',
                 });
                 return;
@@ -456,7 +434,7 @@ export default function NewInvoicePage() {
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
-                exchangeRateId: isOpeningBalance ? data.exchangeRateId : undefined,
+                exchangeRateId: data.exchangeRateId,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
                 isOpeningBalance,
@@ -687,7 +665,7 @@ export default function NewInvoicePage() {
                                             } catch (err) {
                                                 console.error("Failed to fetch exchange rate for currency", err);
                                                 form.setValue('exchangeRateId', undefined);
-                                                form.setValue('exchangeRate', 1.0);
+                                                form.setValue('exchangeRate', 0);
                                                 form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
@@ -713,17 +691,13 @@ export default function NewInvoicePage() {
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
-                                    readOnly={watchIsOpeningBalance}
-                                    aria-readonly={watchIsOpeningBalance}
-                                    {...form.register('exchangeRate', {
-                                        onChange: () => {
-                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
-                                        }
-                                    })} 
+                                    readOnly
+                                    aria-readonly="true"
+                                    {...form.register('exchangeRate')}
                                 />
                                 <span className="text-[11px] text-muted-foreground block mt-1">
                                     1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
-                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                    {' · approved rate locked to this invoice'}
                                 </span>
                             </div>
                         )}
@@ -797,7 +771,7 @@ export default function NewInvoicePage() {
                                             render={({ field }) => (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                        <Button variant="outline" disabled className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
                                                             <CalendarIcon className="mr-2 h-3 w-3" />
                                                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                                                         </Button>
@@ -815,22 +789,7 @@ export default function NewInvoicePage() {
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                watchIsOpeningBalance ? (
-                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
-                                                ) : (
-                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                        <SelectTrigger className="h-10 text-xs">
-                                                            <SelectValue placeholder="Select FX Source" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Daily">Daily</SelectItem>
-                                                            <SelectItem value="Spot">Spot</SelectItem>
-                                                            <SelectItem value="Official">Official</SelectItem>
-                                                            <SelectItem value="Market">Market</SelectItem>
-                                                            <SelectItem value="Custom">Custom</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                )
+                                                <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
                                             )}
                                         />
                                     </div>

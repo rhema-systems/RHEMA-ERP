@@ -26,6 +26,46 @@ public sealed class BankReconciliationPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
+    public async Task AutoMatch_ShouldReadTenantStatementDateTolerance()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedPostedCashTransactionAsync(db, tenantId, CashTransactionType.Receipt, 100m);
+        fixture.Transaction.ReferenceNumber = "BANK-REF-001";
+        fixture.Transaction.Description = "Customer cheque deposit";
+        var statementLine = SeedStatementLine(db, tenantId, fixture.BankAccount.Id, creditAmount: 100m);
+        statementLine.TransactionDate = fixture.Transaction.TransactionDate.AddDays(4);
+        statementLine.ReferenceNumber = fixture.Transaction.ReferenceNumber;
+        statementLine.Description = fixture.Transaction.Description;
+        var settings = new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankStatementMatchDateToleranceDays = 3
+        };
+        db.FinanceSettings.Add(settings);
+        await db.SaveChangesAsync();
+
+        var service = CreateReconciliationService(db, tenantId);
+        var reconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = fixture.BankAccount.Id,
+            ReconciliationDate = statementLine.TransactionDate,
+            StatementBalance = 100m,
+            StatementId = statementLine.BankStatementId
+        });
+
+        (await service.AutoMatchAsync(reconciliation.Id)).Should().BeEmpty();
+
+        settings.BankStatementMatchDateToleranceDays = 5;
+        await db.SaveChangesAsync();
+
+        (await service.AutoMatchAsync(reconciliation.Id)).Should().ContainSingle();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
     public async Task ManualMatch_ShouldOnlyAllowSameTenantPostedCashTransaction()
     {
         var tenantId = Guid.NewGuid();
@@ -1002,4 +1042,63 @@ public sealed class BankReconciliationPostingMigrationTests
         BankAccount BankAccount,
         Account BankGlAccount,
         Account OffsetAccount);
+}
+
+public sealed class BankReconciliationEngineDateToleranceTests
+{
+    [Fact]
+    public void AutoMatch_ExcludesOtherwiseStrongCandidateOutsideConfiguredDateWindow()
+    {
+        var transaction = CreateReceipt(new DateTime(2026, 8, 10));
+        var statementLine = CreateStatementCredit(new DateTime(2026, 8, 14));
+
+        var matches = new BankReconciliationEngine().AutoMatch([transaction], [statementLine], 3);
+
+        matches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AutoMatch_StillRequiresCorroboratingEvidenceInsideConfiguredDateWindow()
+    {
+        var transaction = CreateReceipt(new DateTime(2026, 8, 10));
+        var statementLine = CreateStatementCredit(new DateTime(2026, 8, 14));
+
+        var matches = new BankReconciliationEngine().AutoMatch([transaction], [statementLine], 5);
+
+        matches.Should().ContainSingle()
+            .Which.Confidence.Should().BeGreaterThanOrEqualTo(80);
+    }
+
+    [Fact]
+    public void AutoMatch_ZeroToleranceAllowsSameCalendarDateDespiteDifferentTimes()
+    {
+        var transaction = CreateReceipt(new DateTime(2026, 8, 10, 23, 30, 0));
+        var statementLine = CreateStatementCredit(new DateTime(2026, 8, 10, 1, 0, 0));
+
+        var matches = new BankReconciliationEngine().AutoMatch([transaction], [statementLine], 0);
+
+        matches.Should().ContainSingle();
+    }
+
+    private static CashTransaction CreateReceipt(DateTime transactionDate) => new()
+    {
+        Id = Guid.NewGuid(),
+        TransactionNumber = "RCT-TEST-001",
+        TransactionDate = transactionDate,
+        TransactionType = CashTransactionType.Receipt,
+        Amount = 100m,
+        Currency = "GHS",
+        ReferenceNumber = "BANK-REF-001",
+        Description = "Customer cheque deposit"
+    };
+
+    private static BankStatementLine CreateStatementCredit(DateTime transactionDate) => new()
+    {
+        Id = Guid.NewGuid(),
+        TransactionDate = transactionDate,
+        CreditAmount = 100m,
+        DebitAmount = 0m,
+        ReferenceNumber = "BANK-REF-001",
+        Description = "Customer cheque deposit"
+    };
 }

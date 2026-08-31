@@ -191,14 +191,12 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoiceNumber = await GenerateInvoiceNumberAsync(cancellationToken);
 
             var now = DateTime.UtcNow;
-            var openingExchangeRate = dto.IsOpeningBalance
-                ? await ResolveOpeningInvoiceExchangeRateAsync(
-                    dto.CurrencyCode,
-                    dto.InvoiceDate,
-                    dto.ExchangeRateId,
-                    dto.ExchangeRate,
-                    cancellationToken)
-                : null;
+            var openingExchangeRate = await ResolveOpeningInvoiceExchangeRateAsync(
+                dto.CurrencyCode,
+                dto.InvoiceDate,
+                dto.ExchangeRateId,
+                dto.ExchangeRate,
+                cancellationToken);
             var invoice = new Invoice
             {
                 Id = Guid.NewGuid(),
@@ -374,14 +372,12 @@ namespace ErpSystem.Api.Services.Finance.AR
             
             if (tenant == null) throw new InvalidOperationException("Tenant context not found.");
 
-            var openingExchangeRate = dto.IsOpeningBalance
-                ? await ResolveOpeningInvoiceExchangeRateAsync(
-                    dto.CurrencyCode,
-                    dto.InvoiceDate,
-                    dto.ExchangeRateId,
-                    dto.ExchangeRate,
-                    cancellationToken)
-                : null;
+            var openingExchangeRate = await ResolveOpeningInvoiceExchangeRateAsync(
+                dto.CurrencyCode,
+                dto.InvoiceDate,
+                dto.ExchangeRateId,
+                dto.ExchangeRate,
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.InvoiceDate = dto.InvoiceDate;
@@ -1717,14 +1713,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 if (exchangeRateId.HasValue)
-                    throw new InvalidOperationException("Functional-currency AR opening invoices cannot carry foreign exchange-rate evidence.");
+                    throw new InvalidOperationException("Functional-currency AR invoices cannot carry foreign exchange-rate evidence.");
                 if (RoundRate(suppliedRate) != 1m)
-                    throw new InvalidOperationException("Functional-currency AR opening invoices must use an exchange rate of 1.");
+                    throw new InvalidOperationException("Functional-currency AR invoices must use an exchange rate of 1.");
                 return new OpeningInvoiceExchangeRateSnapshot(null, 1m, transactionCurrency, functionalCurrency, "Functional currency");
             }
 
             if (!exchangeRateId.HasValue)
-                throw new InvalidOperationException("Foreign-currency AR opening invoices require an approved exchange-rate record.");
+                throw new InvalidOperationException("Foreign-currency AR invoices require an approved exchange-rate record.");
 
             var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
                 ? settings.ArInvoiceQuoteSide
@@ -1747,11 +1743,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 (rate.EndDate.HasValue && rate.EndDate.Value.Date < invoiceDate.Date))
             {
                 throw new InvalidOperationException(
-                    "The selected AR opening-invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
+                    "The selected AR invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
             }
 
             if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
-                throw new InvalidOperationException("The AR opening-invoice exchange-rate value does not match the approved rate record.");
+                throw new InvalidOperationException("The AR invoice exchange-rate value does not match the approved rate record.");
 
             return new OpeningInvoiceExchangeRateSnapshot(
                 rate.Id,

@@ -238,14 +238,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
                 cancellationToken);
-            var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
-                ? await ResolveOpeningInvoiceExchangeRateAsync(
-                    dto.CurrencyCode,
-                    dto.InvoiceDate,
-                    dto.ExchangeRateId,
-                    dto.ExchangeRate,
-                    cancellationToken)
-                : null;
+            var governedExchangeRate = await ResolveOpeningInvoiceExchangeRateAsync(
+                dto.CurrencyCode,
+                dto.InvoiceDate,
+                dto.ExchangeRateId,
+                dto.ExchangeRate,
+                cancellationToken);
 
             var invoice = new VendorInvoice
             {
@@ -390,14 +388,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
                 cancellationToken);
-            var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
-                ? await ResolveOpeningInvoiceExchangeRateAsync(
-                    dto.CurrencyCode,
-                    dto.InvoiceDate,
-                    dto.ExchangeRateId,
-                    dto.ExchangeRate,
-                    cancellationToken)
-                : null;
+            var governedExchangeRate = await ResolveOpeningInvoiceExchangeRateAsync(
+                dto.CurrencyCode,
+                dto.InvoiceDate,
+                dto.ExchangeRateId,
+                dto.ExchangeRate,
+                cancellationToken);
             var acceptedSupply = await ResolveAcceptedSupplyForUpdateAsync(
                 invoice, dto, supplier, cancellationToken);
 
@@ -972,6 +968,12 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
 
+            // A client may lose the successful response after the workflow has already reached
+            // its terminal state. Replaying the command must release any stranded budget
+            // reservation instead of rejecting the retry before AP outcome reconciliation.
+            if (invoice.Status == VendorInvoiceStatus.Rejected)
+                return await ApplyRejectedWorkflowOutcomeAsync(id, comments, cancellationToken);
+
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be rejected.");
 
@@ -995,12 +997,28 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return MapToDto(invoice);
             }
 
+            return await ApplyRejectedWorkflowOutcomeAsync(id, comments, cancellationToken);
+        }
+
+        public async Task<VendorInvoiceDto> ApplyRejectedWorkflowOutcomeAsync(
+            Guid id,
+            string? comments,
+            CancellationToken cancellationToken = default)
+        {
+            var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
+            if (invoice.Status is not (VendorInvoiceStatus.PendingApproval or VendorInvoiceStatus.Rejected))
+                throw new InvalidOperationException(
+                    "Only a pending or already rejected invoice can receive a rejected workflow outcome.");
+
             await ReleaseVendorInvoiceBudgetAsync(
                 invoice.Id,
                 reservations: null,
                 "Vendor invoice was rejected.",
                 "Rejected",
                 cancellationToken);
+
+            if (invoice.Status == VendorInvoiceStatus.Rejected)
+                return MapToDto(invoice);
 
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.Rejected;
@@ -3244,14 +3262,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 if (exchangeRateId.HasValue)
-                    throw new InvalidOperationException("Functional-currency AP opening invoices cannot carry foreign exchange-rate evidence.");
+                    throw new InvalidOperationException("Functional-currency AP invoices cannot carry foreign exchange-rate evidence.");
                 if (RoundRate(suppliedRate) != 1m)
-                    throw new InvalidOperationException("Functional-currency AP opening invoices must use an exchange rate of 1.");
+                    throw new InvalidOperationException("Functional-currency AP invoices must use an exchange rate of 1.");
                 return new OpeningInvoiceExchangeRateSnapshot(null, 1m, transactionCurrency, functionalCurrency, "Functional currency");
             }
 
             if (!exchangeRateId.HasValue)
-                throw new InvalidOperationException("Foreign-currency AP opening invoices require an approved exchange-rate record.");
+                throw new InvalidOperationException("Foreign-currency AP invoices require an approved exchange-rate record.");
 
             var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
                 ? settings.ApInvoiceQuoteSide
@@ -3274,11 +3292,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 (rate.EndDate.HasValue && rate.EndDate.Value.Date < invoiceDate.Date))
             {
                 throw new InvalidOperationException(
-                    "The selected AP opening-invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
+                    "The selected AP invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
             }
 
             if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
-                throw new InvalidOperationException("The AP opening-invoice exchange-rate value does not match the approved rate record.");
+                throw new InvalidOperationException("The AP invoice exchange-rate value does not match the approved rate record.");
 
             return new OpeningInvoiceExchangeRateSnapshot(
                 rate.Id,

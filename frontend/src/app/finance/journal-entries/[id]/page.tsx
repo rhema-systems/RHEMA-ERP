@@ -36,6 +36,8 @@ export default function JournalEntryDetailPage() {
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
     const [showRejectForm, setShowRejectForm] = useState(false);
+    const [withdrawalReason, setWithdrawalReason] = useState('');
+    const [showWithdrawForm, setShowWithdrawForm] = useState(false);
     
     // Attachments State
     const [isUploading, setIsUploading] = useState(false);
@@ -251,17 +253,14 @@ export default function JournalEntryDetailPage() {
     };
 
     const handleWithdrawApproval = async () => {
-        if (!entry) return;
-
-        const confirmed = window.confirm(
-            'Withdraw this approval request and return the journal entry to Draft? You can delete it after withdrawal.'
-        );
-        if (!confirmed) return;
+        if (!entry || !withdrawalReason.trim()) return;
 
         try {
             setActionLoading('withdraw-approval');
-            await financeDataService.withdrawJournalEntryApproval(entry.id, 'Approval request withdrawn by user.');
+            await financeDataService.withdrawJournalEntryApproval(entry.id, withdrawalReason.trim());
             toast({ title: 'Approval withdrawn', description: 'Journal entry returned to Draft. You can now delete it.' });
+            setWithdrawalReason('');
+            setShowWithdrawForm(false);
             await fetchEntry();
         } catch (err: any) {
             toast({ title: 'Error', description: err?.message || 'Failed to withdraw approval', variant: 'destructive' });
@@ -406,14 +405,17 @@ export default function JournalEntryDetailPage() {
     const canDelete = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.Delete', 'Finance.JournalEntries.Write']);
     const canPost = !isBatchOwned && hasPermission('Finance.JournalEntries.Post');
     const canReverse = !isBatchOwned && hasPermission('Finance.JournalEntries.Reverse');
-    const canSubmitForApproval = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.SubmitForApproval', 'Finance.JournalEntries.Approve']);
+    const canSubmitForApproval = !isBatchOwned && hasPermission('Finance.JournalEntries.SubmitForApproval');
     const canApprovePermission = !isBatchOwned && hasPermission('Finance.JournalEntries.Approve');
     const canAttach = canEdit;
     const isCreator = !!entry.createdById && !!user?.id && entry.createdById === user.id;
     const hasActiveWorkflowAssignment = workflowSummary?.hasActiveInstance === true;
     const canApproveWorkflow = !hasActiveWorkflowAssignment || workflowSummary?.canCurrentUserApprove === true;
     const canApproveNow = canApprovePermission && !isCreator && canApproveWorkflow;
-    const canWithdrawApproval = !isBatchOwned && entry.postingStatus === 'Pending Approval' && (isCreator || canSubmitForApproval || canEdit || canDelete);
+    const canCancelAnyWorkflow = hasPermission('Finance.Workflow.Cancel');
+    const canWithdrawApproval = !isBatchOwned
+        && entry.postingStatus === 'Pending Approval'
+        && ((canSubmitForApproval && workflowSummary?.canCurrentUserRecall === true) || canCancelAnyWorkflow);
     const pendingApproverText = workflowSummary ? formatPendingApprovers(workflowSummary.pendingApprovers || []) : '';
     const isAllActiveBooks = isAllActiveBooksCode(entry.bookClassification);
     const selectedBookName = getAccountingBookName(accountingBooks, entry.bookClassification);
@@ -786,7 +788,11 @@ export default function JournalEntryDetailPage() {
                                                     <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                                                         <span>Budget: {formatCurrency(line.budgetAmount, budgetControl.currencyCode)}</span>
                                                         <span>{budgetControl.isPostingSnapshot ? 'Posted before entry' : 'Posted'}: {formatCurrency(line.postedActualAmount, budgetControl.currencyCode)}</span>
-                                                        <span>Reserved: {formatCurrency(line.reservedAmount, budgetControl.currencyCode)}</span>
+                                                        {/* The evaluator excludes this journal's own reservation so
+                                                            revalidation remains hash-stable during approval. Label the
+                                                            value as other demand instead of implying that no reservation
+                                                            exists for the current journal. */}
+                                                        <span>Other reserved: {formatCurrency(line.reservedAmount, budgetControl.currencyCode)}</span>
                                                         <span>Available: {formatCurrency(line.availableAmount, budgetControl.currencyCode)}</span>
                                                         <span>Requested: {formatCurrency(line.requestedAmount, budgetControl.currencyCode)}</span>
                                                         <span>Shortfall: {formatCurrency(line.shortfallAmount, budgetControl.currencyCode)}</span>
@@ -1025,19 +1031,52 @@ export default function JournalEntryDetailPage() {
                                 )}
 
                                 {canWithdrawApproval && (
-                                    <Button
-                                        variant="outline"
-                                        className="w-full"
-                                        onClick={handleWithdrawApproval}
-                                        disabled={actionLoading === 'withdraw-approval'}
-                                    >
-                                        {actionLoading === 'withdraw-approval' ? (
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        ) : (
+                                    !showWithdrawForm ? (
+                                        <Button
+                                            variant="outline"
+                                            className="w-full"
+                                            onClick={() => setShowWithdrawForm(true)}
+                                        >
                                             <RotateCcw className="mr-2 h-4 w-4" />
-                                        )}
-                                        Withdraw Approval
-                                    </Button>
+                                            Withdraw Approval
+                                        </Button>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <textarea
+                                                className="w-full rounded-md border p-2 text-sm min-h-[80px] bg-background"
+                                                placeholder="Enter withdrawal reason (required)..."
+                                                value={withdrawalReason}
+                                                maxLength={1000}
+                                                onChange={(e) => setWithdrawalReason(e.target.value)}
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                This cancels the active approval task and returns the journal to Draft.
+                                            </p>
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    variant="outline"
+                                                    className="flex-1"
+                                                    onClick={handleWithdrawApproval}
+                                                    disabled={!withdrawalReason.trim() || actionLoading === 'withdraw-approval'}
+                                                >
+                                                    {actionLoading === 'withdraw-approval' ? (
+                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    ) : (
+                                                        <RotateCcw className="mr-2 h-4 w-4" />
+                                                    )}
+                                                    Confirm Withdrawal
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    className="flex-1"
+                                                    onClick={() => { setShowWithdrawForm(false); setWithdrawalReason(''); }}
+                                                    disabled={actionLoading === 'withdraw-approval'}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )
                                 )}
                             </CardContent>
                         </Card>

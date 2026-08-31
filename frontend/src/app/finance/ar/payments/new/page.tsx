@@ -45,6 +45,7 @@ import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
+import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
 
 const paymentSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
@@ -59,6 +60,7 @@ const paymentSchema = z.object({
     chequeDrawerBank: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
+    exchangeRateId: z.string().optional(),
     withholdingTaxId: z.string().optional(),
     withholdingTaxAccountId: z.string().optional(),
     withholdingTaxAmount: z.coerce.number().min(0).default(0),
@@ -200,6 +202,7 @@ export default function NewReceiptPage() {
             referenceNumber: preselectedReferenceNumber,
             currencyCode: 'GHS',
             exchangeRate: 1,
+            exchangeRateId: undefined,
             withholdingTaxId: undefined,
             withholdingTaxAccountId: undefined,
             withholdingTaxAmount: 0,
@@ -237,6 +240,7 @@ export default function NewReceiptPage() {
         form.setValue('totalAmount', remainingAdvance);
         form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
         form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('exchangeRateId', existingAdvancePayment.exchangeRateId);
         form.setValue('referenceNumber', existingAdvancePayment.paymentNumber);
     }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
 
@@ -290,14 +294,6 @@ export default function NewReceiptPage() {
         if (!account) return;
 
         form.setValue('currencyCode', account.currency);
-        if (account.currency === 'GHS') {
-            form.setValue('exchangeRate', 1);
-            return;
-        }
-
-        void financeService.getCurrentExchangeRate(account.currency)
-            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-            .catch(() => form.setValue('exchangeRate', 1));
     }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
 
     useEffect(() => {
@@ -308,15 +304,39 @@ export default function NewReceiptPage() {
         if (!account) return;
 
         form.setValue('currencyCode', account.currency);
-        if (account.currency === 'GHS') {
-            form.setValue('exchangeRate', 1);
-            return;
-        }
-
-        void financeService.getCurrentExchangeRate(account.currency)
-            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-            .catch(() => form.setValue('exchangeRate', 1));
     }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
+
+    const watchedPaymentDate = form.watch('paymentDate');
+    const watchedCurrencyCode = form.watch('currencyCode') || functionalCurrencyCode;
+    const [exchangeRateSource, setExchangeRateSource] = useState('Functional currency');
+
+    useEffect(() => {
+        if (existingAdvancePaymentId || !financeSettings || !watchedPaymentDate) return;
+        form.setValue('exchangeRateId', undefined);
+        setExchangeRateSource('Loading approved rate…');
+        let cancelled = false;
+        void loadApprovedSettlementRate(
+            {
+                module: 'AR',
+                transactionCurrency: watchedCurrencyCode,
+                functionalCurrency: functionalCurrencyCode,
+                settlementDate: watchedPaymentDate,
+                settings: financeSettings,
+            },
+            (code, query) => financeService.getCurrentExchangeRate(code, query),
+        ).then(snapshot => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            setExchangeRateSource(`${snapshot.source} · ${snapshot.quoteSide}`);
+        }).catch(error => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', 0);
+            form.setValue('exchangeRateId', undefined);
+            setExchangeRateSource(error instanceof Error ? error.message : 'Approved rate unavailable');
+        });
+        return () => { cancelled = true; };
+    }, [existingAdvancePaymentId, financeSettings, form, functionalCurrencyCode, watchedCurrencyCode, watchedPaymentDate]);
 
     useEffect(() => {
         if (existingAdvancePaymentId) return;
@@ -478,6 +498,15 @@ export default function NewReceiptPage() {
                 });
                 toast({ title: 'Advance applied', description: 'The customer advance and any realized FX were posted successfully.' });
                 router.push(`/finance/ar/payments/${existingAdvancePaymentId}`);
+                return;
+            }
+
+            if (data.currencyCode.toUpperCase() !== functionalCurrencyCode && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: exchangeRateSource,
+                    variant: 'destructive',
+                });
                 return;
             }
 
@@ -707,11 +736,14 @@ export default function NewReceiptPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
+                                    readOnly
+                                    aria-readonly="true"
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
+                                <p className="text-xs text-muted-foreground">{exchangeRateSource}</p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
                                 )}

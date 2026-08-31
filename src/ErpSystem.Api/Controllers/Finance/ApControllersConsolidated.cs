@@ -164,6 +164,112 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Returns AP invoice-entry options across the approved Business Partner and canonical
+        /// Supplier masters. The query is read-only: an unmatched Business Partner is resolved to
+        /// a Supplier only inside the purpose-authorized invoice command transaction.
+        /// </summary>
+        [HttpGet("entry-suppliers")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        [ProducesResponseType(typeof(IReadOnlyList<ApInvoiceSupplierEntryOptionDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierEntryOptionDto>>> GetEntrySuppliers(
+            CancellationToken cancellationToken)
+        {
+            Guid tenantId;
+            try
+            {
+                tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            }
+            catch (InvalidOperationException)
+            {
+                return Forbid();
+            }
+
+            var suppliers = await _dbContext.Suppliers
+                .AsNoTracking()
+                .Where(supplier =>
+                    supplier.TenantId == tenantId &&
+                    !supplier.IsDeleted &&
+                    supplier.IsActive &&
+                    supplier.Status == "Active")
+                .ToListAsync(cancellationToken);
+
+            var partners = await _dbContext.BusinessPartners
+                .AsNoTracking()
+                .Where(partner =>
+                    partner.TenantId == tenantId &&
+                    !partner.IsDeleted &&
+                    partner.IsActive &&
+                    !partner.IsBlacklisted &&
+                    partner.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+                    (partner.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+                     partner.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
+                    (partner.PartnerType == "Supplier" ||
+                     partner.PartnerType == "Contractor" ||
+                     partner.PartnerType == "Both"))
+                .ToListAsync(cancellationToken);
+
+            var links = await _dbContext.ApSupplierIdentityLinks
+                .AsNoTracking()
+                .Where(link => link.TenantId == tenantId && !link.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            var partnersById = partners.ToDictionary(partner => partner.Id);
+            var linkedPartnerBySupplierId = links
+                .Where(link => partnersById.ContainsKey(link.BusinessPartnerId))
+                .ToDictionary(link => link.SupplierId, link => partnersById[link.BusinessPartnerId]);
+            var matchedPartnerIds = new HashSet<Guid>();
+            var options = new List<ApInvoiceSupplierEntryOptionDto>();
+
+            foreach (var supplier in suppliers)
+            {
+                linkedPartnerBySupplierId.TryGetValue(supplier.Id, out var partner);
+                if (partner == null)
+                {
+                    var exactMatches = partners
+                        .Where(candidate =>
+                            candidate.Id == supplier.Id ||
+                            (!string.IsNullOrWhiteSpace(supplier.SupplierCode) &&
+                             string.Equals(candidate.PartnerCode, supplier.SupplierCode, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (exactMatches.Count == 1)
+                        partner = exactMatches[0];
+                }
+
+                if (partner != null)
+                    matchedPartnerIds.Add(partner.Id);
+
+                options.Add(new ApInvoiceSupplierEntryOptionDto
+                {
+                    Id = supplier.Id,
+                    SupplierId = supplier.Id,
+                    BusinessPartnerId = partner?.Id,
+                    Code = partner?.PartnerCode ?? supplier.SupplierCode,
+                    Name = partner?.PartnerName ?? supplier.Name,
+                    PaymentTermId = partner?.PaymentTermId ?? supplier.PaymentTermId,
+                    Currency = partner?.Currency
+                });
+            }
+
+            options.AddRange(partners
+                .Where(partner => !matchedPartnerIds.Contains(partner.Id))
+                .Select(partner => new ApInvoiceSupplierEntryOptionDto
+                {
+                    Id = partner.Id,
+                    BusinessPartnerId = partner.Id,
+                    Code = partner.PartnerCode,
+                    Name = partner.PartnerName,
+                    PaymentTermId = partner.PaymentTermId,
+                    Currency = partner.Currency
+                }));
+
+            return Ok(options
+                .OrderBy(option => option.Name)
+                .ThenBy(option => option.Code)
+                .ToList());
+        }
+
+        /// <summary>
         /// Returns adopted Finance budget cells for one AP expense account and invoice date.
         /// AP receives selectable evidence only; it never mutates budget setup through this route.
         /// </summary>

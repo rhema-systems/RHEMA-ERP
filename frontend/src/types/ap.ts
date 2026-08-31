@@ -22,6 +22,16 @@ export interface ApInvoiceSupplier {
     code: string;
     name: string;
     paymentTermId?: string | null;
+    currency?: string | null;
+}
+
+/**
+ * Supplier option for invoice entry. `id` may be a canonical Supplier id or an approved
+ * Business Partner id; the Finance invoice command resolves it to the persisted Supplier id.
+ */
+export interface ApInvoiceSupplierEntryOption extends ApInvoiceSupplier {
+    supplierId?: string | null;
+    businessPartnerId?: string | null;
 }
 
 export interface VendorInvoice {
@@ -46,11 +56,16 @@ export interface VendorInvoice {
     exchangeRateId?: string;
     baseCurrencyAmount: number;
     paymentTermsDays: number;
+    paymentTermId?: string;
     earlyPaymentDiscountPercentage: number;
     earlyPaymentDiscountDueDate?: string;
     earlyPaymentDiscountAmount: number;
     withholdingTaxRate: number;
     withholdingTaxAmount: number;
+    withholdingTaxId?: string;
+    withholdingTaxAccountId?: string;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     matchingType: InvoiceMatchingType;
     matchingStatus: InvoiceMatchingStatus;
     matchingNotes?: string;
@@ -295,6 +310,8 @@ export interface VendorInvoiceCreateRequest {
     withholdingTaxRate?: number;
     withholdingTaxId?: string | null;
     withholdingTaxAccountId?: string | null;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;

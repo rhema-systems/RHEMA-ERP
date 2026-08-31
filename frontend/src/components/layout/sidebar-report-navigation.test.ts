@@ -125,6 +125,7 @@ describe('navigation surfaces', () => {
     expect(containsHref(settingsNavigationItems, '/finance/exchange-rates')).toBe(false);
     expect(containsHref(settingsNavigationItems, '/administration/inventory/units-of-measure')).toBe(true);
     expect(containsHref(settingsNavigationItems, '/finance/accounts')).toBe(true);
+    expect(containsHref(settingsNavigationItems, '/administration/finance/accounts')).toBe(false);
     expect(containsHref(settingsNavigationItems, '/sales/journal-templates')).toBe(true);
     expect(containsHref(settingsNavigationItems, '/notifications#center')).toBe(true);
     expect(containsHref(settingsNavigationItems, '/administration/audit-logs')).toBe(true);

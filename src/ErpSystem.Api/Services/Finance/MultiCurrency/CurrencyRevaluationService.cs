@@ -352,6 +352,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 exposure.TransactionCurrency,
                 revaluationDate,
                 request.RevaluationType,
+                settings.ClosingQuoteSide,
                 cancellationToken);
 
             var revaluedFunctionalAmount = RoundMoney(exposure.ForeignCurrencyBalance * closingRate.Rate);
@@ -1276,6 +1277,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         string transactionCurrency,
         DateTime revaluationDate,
         string revaluationType,
+        ExchangeRateQuoteSide closingQuoteSide,
         CancellationToken cancellationToken)
     {
         var rateType = ResolveRevaluationRateType(revaluationType);
@@ -1285,6 +1287,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 && r.BaseCurrencyCode == functionalCurrency
                 && r.TargetCurrencyCode == transactionCurrency
                 && r.RateType == rateType
+                && r.QuoteSide == closingQuoteSide
                 && r.IsActive
                 && r.Rate > 0m
                 && (r.ApprovalStatus == RateApprovalStatus.Approved || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
@@ -1303,10 +1306,10 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 SourceModuleFx,
                 "ExchangeRate",
                 null,
-                reason: $"Missing {rateType} closing rate for {transactionCurrency}/{functionalCurrency} on {revaluationDate:yyyy-MM-dd}.",
-                afterValues: new { transactionCurrency, functionalCurrency, revaluationDate, rateType },
+                reason: $"Missing {closingQuoteSide} {rateType} closing rate for {transactionCurrency}/{functionalCurrency} on {revaluationDate:yyyy-MM-dd}.",
+                afterValues: new { transactionCurrency, functionalCurrency, revaluationDate, rateType, closingQuoteSide },
                 cancellationToken: cancellationToken);
-            throw new InvalidOperationException($"No approved {rateType} exchange rate exists for {transactionCurrency} to {functionalCurrency} on {revaluationDate:yyyy-MM-dd}.");
+            throw new InvalidOperationException($"No approved {closingQuoteSide} {rateType} exchange rate exists for {transactionCurrency} to {functionalCurrency} on {revaluationDate:yyyy-MM-dd}.");
         }
 
         return rate;

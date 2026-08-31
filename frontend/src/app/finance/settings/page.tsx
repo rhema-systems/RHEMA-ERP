@@ -418,7 +418,7 @@ export default function FinanceSettingsPage() {
                         <div>
                             <Label htmlFor="directionalRates">Enforce directional rates</Label>
                             <p className="text-sm text-muted-foreground">
-                                Enable after approved Buying and Selling rates have been loaded for every active currency.
+                                Saving is blocked until every active foreign currency has approved Daily rates for all configured transaction quote sides.
                             </p>
                         </div>
                         <Switch
@@ -578,6 +578,7 @@ export default function FinanceSettingsPage() {
                                     <SelectItem value="Split">Split at case capture</SelectItem>
                                 </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">Initial treatment on a new returned-cheque case. Users may change it at case capture.</p>
                         </div>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
@@ -597,8 +598,8 @@ export default function FinanceSettingsPage() {
                         </div>
                     )}
                     <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2"><Label>Statement date tolerance (days)</Label><Input type="number" min={0} max={30} value={formData.bankStatementMatchDateToleranceDays ?? 3} onChange={event => setFormData({ ...formData, bankStatementMatchDateToleranceDays: Number(event.target.value) })} /></div>
-                        <div className="space-y-2"><Label>Cheque clearing period (days)</Label><Input type="number" min={0} max={90} value={formData.chequeClearingPeriodDays ?? 3} onChange={event => setFormData({ ...formData, chequeClearingPeriodDays: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label>Statement date tolerance (calendar days)</Label><Input type="number" min={0} max={30} value={formData.bankStatementMatchDateToleranceDays ?? 3} onChange={event => setFormData({ ...formData, bankStatementMatchDateToleranceDays: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Limits auto-match candidates by book-to-statement date difference. Manual review can still match an exception.</p></div>
+                        <div className="space-y-2"><Label>Cheque clearing period (calendar days)</Label><Input type="number" min={0} max={90} value={formData.chequeClearingPeriodDays ?? 3} onChange={event => setFormData({ ...formData, chequeClearingPeriodDays: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Shows an advisory expected clearing date for cheque receipts; it does not post or settle them automatically.</p></div>
                         <div className="space-y-2"><Label>Returned-cheque bank charge GL</Label><AccountPicker id="returnedChequeBankCharge" value={formData.returnedChequeBankChargeAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(account => account.accountType === 'Expense')} onChange={value => setFormData({ ...formData, returnedChequeBankChargeAccountId: value })} /></div>
                     </div>
                     <Alert>

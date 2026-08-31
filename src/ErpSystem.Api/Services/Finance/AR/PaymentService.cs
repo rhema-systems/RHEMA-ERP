@@ -39,6 +39,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IFxAccountingService? _fxAccountingService;
         private readonly IFinanceControlledDocumentIssueService? _controlledDocumentIssueService;
         private readonly IExchangeRateService? _exchangeRateService;
+        private ExchangeRateQuoteSide? _settlementQuoteSide;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
@@ -3561,6 +3562,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 return new SettlementRateSnapshot(null, NormalizeExchangeRate(fallbackRate));
             }
 
+            var quoteSide = await GetSettlementQuoteSideAsync(cancellationToken);
             var rate = requestedRateId.HasValue
                 ? await _exchangeRateService.GetExchangeRateByIdAsync(requestedRateId.Value, cancellationToken)
                 : await _exchangeRateService.GetCurrentRateAsync(
@@ -3568,23 +3570,36 @@ namespace ErpSystem.Api.Services.Finance.AR
                     functionalCurrency,
                     settlementDate,
                     "Daily",
-                    "Mid",
+                    quoteSide.ToString(),
                     cancellationToken);
 
             if (rate == null || !rate.IsActive || rate.Rate <= 0m ||
                 !(rate.ApprovalStatus.Equals("Approved", StringComparison.OrdinalIgnoreCase) ||
                   rate.ApprovalStatus.Equals("AutoApproved", StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException($"No active approved daily mid-rate exists for {transactionCurrency} to {functionalCurrency} on {settlementDate:yyyy-MM-dd}.");
+                throw new InvalidOperationException($"No active approved daily {quoteSide} rate exists for {transactionCurrency} to {functionalCurrency} on {settlementDate:yyyy-MM-dd}.");
 
             if (!rate.BaseCurrencyCode.Equals(functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
                 !rate.TargetCurrencyCode.Equals(transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
                 !rate.RateType.Equals("Daily", StringComparison.OrdinalIgnoreCase) ||
-                !rate.QuoteSide.Equals("Mid", StringComparison.OrdinalIgnoreCase) ||
+                !rate.QuoteSide.Equals(quoteSide.ToString(), StringComparison.OrdinalIgnoreCase) ||
                 rate.EffectiveDate.Date > settlementDate.Date ||
                 (rate.ExpiryDate.HasValue && rate.ExpiryDate.Value.Date < settlementDate.Date))
-                throw new InvalidOperationException("The selected AR settlement rate does not match the required currency pair, date, daily rate type, or mid quote policy.");
+                throw new InvalidOperationException($"The selected AR settlement rate does not match the required currency pair, date, daily rate type, or {quoteSide} quote policy.");
 
             return new SettlementRateSnapshot(rate.Id, NormalizeExchangeRate(rate.Rate));
+        }
+
+        private async Task<ExchangeRateQuoteSide> GetSettlementQuoteSideAsync(CancellationToken cancellationToken)
+        {
+            if (_settlementQuoteSide.HasValue)
+                return _settlementQuoteSide.Value;
+
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .FirstOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted);
+            _settlementQuoteSide = settings?.DirectionalExchangeRatePolicyEnabled == true
+                ? settings.ArSettlementQuoteSide
+                : ExchangeRateQuoteSide.Mid;
+            return _settlementQuoteSide.Value;
         }
 
         private static string NormalizeCurrency(string? currencyCode, string defaultValue)

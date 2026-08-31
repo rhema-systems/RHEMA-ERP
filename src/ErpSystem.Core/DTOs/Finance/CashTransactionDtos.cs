@@ -77,6 +77,7 @@ public class CreateCashReceiptDto
     public decimal Amount { get; set; }
     public string Currency { get; set; } = string.Empty;
     public decimal? ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
     public Guid? PaymentMethodId { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? PayerName { get; set; }
@@ -91,6 +92,7 @@ public class CreateCashPaymentDto
     public decimal Amount { get; set; }
     public string Currency { get; set; } = string.Empty;
     public decimal? ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
     public Guid? PaymentMethodId { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? PayeeName { get; set; }

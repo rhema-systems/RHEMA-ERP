@@ -29,6 +29,7 @@ export interface SettingsLink {
   href: string;
   icon: NavItem['icon'];
   searchPath: string;
+  group?: string;
 }
 
 export interface SettingsCard {
@@ -63,6 +64,91 @@ const moduleOrder = [
   'Legal',
 ];
 
+const financeSettingsGroups = [
+  {
+    title: 'Core Accounting',
+    hrefs: [
+      '/administration/finance/settings',
+      '/administration/finance/access-scopes',
+      '/finance/accounts',
+      '/administration/finance/account-segments',
+      '/administration/finance/dimensions',
+      '/administration/finance/account-generator',
+    ],
+  },
+  {
+    title: 'Fiscal & Close',
+    hrefs: [
+      '/administration/finance/fiscal-calendar',
+      '/finance/fiscal-years',
+      '/finance/fiscal-periods',
+      '/administration/finance/close-templates',
+    ],
+  },
+  {
+    title: 'Banking',
+    hrefs: ['/finance/cash/accounts'],
+  },
+  {
+    title: 'Tax & Currency',
+    hrefs: [
+      '/administration/finance/tax',
+      '/administration/finance/currencies',
+    ],
+  },
+  {
+    title: 'Payments & Documents',
+    hrefs: [
+      '/administration/finance/payment-terms',
+      '/administration/finance/payment-methods',
+      '/administration/finance/document-numbering',
+    ],
+  },
+  {
+    title: 'Fixed Assets',
+    hrefs: ['/administration/finance/fixed-asset-categories'],
+  },
+  {
+    title: 'Unit Accounting',
+    hrefs: [
+      '/finance/unit-accounts',
+      '/administration/finance/unit-types',
+      '/administration/finance/ratio-definitions',
+    ],
+  },
+] as const;
+
+function organizeFinanceLinks(links: SettingsLink[]): SettingsLink[] {
+  const linksByHref = new Map(deduplicateLinks(links).map(link => [link.href, link]));
+  const groupedHrefs = new Set<string>(financeSettingsGroups.flatMap(group => [...group.hrefs]));
+
+  const grouped = financeSettingsGroups.flatMap(group =>
+    group.hrefs.flatMap(href => {
+      const link = linksByHref.get(href);
+      return link ? [{ ...link, group: group.title }] : [];
+    }),
+  );
+
+  const unclassified = Array.from(linksByHref.values())
+    .filter(link => !groupedHrefs.has(link.href))
+    .map(link => ({ ...link, group: 'Other Finance Settings' }));
+
+  return [...grouped, ...unclassified];
+}
+
+function groupCardLinks(links: SettingsLink[]) {
+  return links.reduce<Array<{ title: string; links: SettingsLink[] }>>((groups, link) => {
+    const title = link.group ?? '';
+    const existing = groups.find(group => group.title === title);
+    if (existing) {
+      existing.links.push(link);
+    } else {
+      groups.push({ title, links: [link] });
+    }
+    return groups;
+  }, []);
+}
+
 function flattenSettingsLinks(item: NavItem, trail: string[] = []): SettingsLink[] {
   const nextTrail = [...trail, item.title];
   if (item.children?.length) {
@@ -87,11 +173,13 @@ function addCardSource(cards: Map<string, SettingsCard>, item: NavItem, titleOve
   const existing = cards.get(key);
   const links = flattenSettingsLinks(item);
 
+  const mergedLinks = deduplicateLinks([...(existing?.links ?? []), ...links]);
+
   cards.set(key, {
     key,
     title,
     icon: existing?.icon ?? item.icon,
-    links: deduplicateLinks([...(existing?.links ?? []), ...links]),
+    links: title === 'Finance' ? organizeFinanceLinks(mergedLinks) : mergedLinks,
   });
 }
 
@@ -357,15 +445,24 @@ export function AllSettingsPage() {
                       <ChevronDown className={cn('h-4 w-4 transition-transform', isExpanded && 'rotate-180')} />
                     </button>
                     {isExpanded && (
-                      <nav id={contentId} aria-label={`${card.title} settings`} className="space-y-0.5 p-2">
-                        {card.links.map(link => (
-                          <Link
-                            key={link.href}
-                            href={link.href}
-                            className="block rounded-lg px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
-                          >
-                            {link.title}
-                          </Link>
+                      <nav id={contentId} aria-label={`${card.title} settings`} className="space-y-3 p-2">
+                        {groupCardLinks(card.links).map(group => (
+                          <div key={group.title || 'settings'} className="space-y-0.5">
+                            {group.title ? (
+                              <p className="px-3 pb-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-800 dark:text-slate-200">
+                                {group.title}
+                              </p>
+                            ) : null}
+                            {group.links.map(link => (
+                              <Link
+                                key={link.href}
+                                href={link.href}
+                                className="block rounded-lg px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
+                              >
+                                {link.title}
+                              </Link>
+                            ))}
+                          </div>
                         ))}
                       </nav>
                     )}

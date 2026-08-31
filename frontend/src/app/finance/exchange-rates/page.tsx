@@ -27,6 +27,9 @@ const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string
     { value: 'Fixed', label: 'Fixed' },
     { value: 'Spot', label: 'Spot' },
 ];
+const ENTRY_RATE_TYPE_OPTIONS = EXCHANGE_RATE_TYPE_OPTIONS.filter(
+    option => option.value !== 'Budget' && option.value !== 'Spot'
+);
 const QUOTE_SIDE_OPTIONS: Array<{ value: ExchangeRateQuoteSide; label: string }> = [
     { value: 'Mid', label: 'Mid / Reference' },
     { value: 'Buying', label: 'Buying (bank buys foreign currency)' },
@@ -395,7 +398,7 @@ export default function ExchangeRatesPage() {
                                         <li>targetCurrencyCode (e.g., USD)</li>
                                         <li>rate (e.g., 12.5000)</li>
                                         <li>effectiveDate (YYYY-MM-DD)</li>
-                                        <li>rateType (Daily/Average/MonthEnd/QuarterEnd/YearEnd/Budget/Fixed/Spot)</li>
+                                        <li>rateType (Daily/Average/MonthEnd/QuarterEnd/YearEnd/Fixed)</li>
                                         <li>rateSource (e.g., Manual, BankFeed, Bank of Ghana)</li>
                                     </ul>
                                 </div>
@@ -513,13 +516,16 @@ export default function ExchangeRatesPage() {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                            {ENTRY_RATE_TYPE_OPTIONS.map((option) => (
                                                 <SelectItem key={option.value} value={option.value}>
                                                     {option.label}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Daily and closing rates are operational. Average and Fixed are advanced; Budget and Spot are hidden until supported workflows exist.
+                                    </p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="quoteSide">Quote Side</Label>
@@ -789,7 +795,12 @@ export default function ExchangeRatesPage() {
                                                                     <SelectValue />
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                                                    {!ENTRY_RATE_TYPE_OPTIONS.some(option => option.value === formData.rateType) && (
+                                                                        <SelectItem value={formData.rateType} disabled>
+                                                                            {formatRateType(formData.rateType)} (legacy)
+                                                                        </SelectItem>
+                                                                    )}
+                                                                    {ENTRY_RATE_TYPE_OPTIONS.map((option) => (
                                                                         <SelectItem key={option.value} value={option.value}>
                                                                             {option.label}
                                                                         </SelectItem>

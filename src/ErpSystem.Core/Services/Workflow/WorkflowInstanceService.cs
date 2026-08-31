@@ -161,8 +161,12 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         }
 
         // Update workflow instance status
+        var cancelledAt = DateTime.UtcNow;
         instance.Status = WorkflowInstanceStatus.Cancelled;
-        instance.CompletedDate = DateTime.UtcNow;
+        // Retain CompletedDate for existing terminal-state consumers, while recording
+        // cancellation in the dedicated field used by workflow audit and reporting.
+        instance.CompletedDate = cancelledAt;
+        instance.CancelledDate = cancelledAt;
         instance.Notes = reason ?? "Workflow cancelled";
 
         await _workflowInstanceRepository.UpdateAsync(instance);

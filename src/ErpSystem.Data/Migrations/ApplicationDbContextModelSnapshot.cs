@@ -19709,6 +19709,16 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("WithdrawalReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("WithdrawnByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("WithdrawnDate")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("IsAutoReversalEntry")
                         .HasColumnType("bit");
 

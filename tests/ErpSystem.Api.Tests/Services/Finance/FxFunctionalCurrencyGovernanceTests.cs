@@ -25,6 +25,66 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
+    public async Task DirectionalPolicyActivationRequiresApprovedDailyRatesForActiveCurrencies()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        SeedFinanceSettings(db, tenantId, "GHS");
+        await db.SaveChangesAsync();
+
+        var service = CreateFinanceSettingsService(db, tenantId);
+
+        await service.Invoking(item => item.UpdateSettingsAsync(new UpdateFinanceSettingsDto
+            {
+                DirectionalExchangeRatePolicyEnabled = true,
+                ArInvoiceQuoteSide = "Buying",
+                ArSettlementQuoteSide = "Buying",
+                ApInvoiceQuoteSide = "Selling",
+                ApSettlementQuoteSide = "Selling"
+            }))
+            .Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*USD Buying*USD Selling*");
+
+        (await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId))
+            .DirectionalExchangeRatePolicyEnabled.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("Budget")]
+    [InlineData("Spot")]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task UnsupportedRateTypesCannotBeCreated(string rateType)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+
+        var service = CreateExchangeRateService(db, tenantId);
+        await service.Invoking(item => item.CreateExchangeRateAsync(new CreateExchangeRateDto
+            {
+                BaseCurrencyCode = "GHS",
+                TargetCurrencyCode = "USD",
+                Rate = 15m,
+                EffectiveDate = new DateTime(2026, 8, 31),
+                RateType = rateType,
+                RateSource = "Manual"
+            }))
+            .Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*reserved for future governed workflows*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
     public async Task TenantCanConfigureFunctionalCurrencyBeforeAccountingActivity()
     {
         var tenantId = Guid.NewGuid();

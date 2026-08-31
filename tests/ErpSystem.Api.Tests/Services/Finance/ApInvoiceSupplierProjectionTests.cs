@@ -71,6 +71,51 @@ public sealed class ApInvoiceSupplierProjectionTests
     }
 
     [Fact]
+    [Trait("Category", "TenantIsolation")]
+    public async Task EntryLookup_ShouldMergeExactIdentitiesAndIncludeUnpairedApprovedPartners()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var canonical = Supplier(tenantId, "MATCH-001", "Legacy supplier name");
+        var matchedPartner = Partner(tenantId, "MATCH-001", "Matched Business Partner", "EUR");
+        var usdPartner = Partner(tenantId, "SUP260001", "USD Supplier", "USD");
+
+        db.Suppliers.Add(canonical);
+        db.BusinessPartners.AddRange(
+            matchedPartner,
+            usdPartner,
+            Partner(tenantId, "PENDING", "Pending Supplier", "GHS", approvalStatus: "Pending"),
+            Partner(tenantId, "CUSTOMER", "Customer Only", "GHS", partnerType: "Customer"));
+        await db.SaveChangesAsync();
+
+        var action = await CreateController(db, tenantId)
+            .GetEntrySuppliers(CancellationToken.None);
+
+        var ok = action.Result.Should().BeOfType<OkObjectResult>().Subject;
+        var options = ok.Value.Should()
+            .BeAssignableTo<IReadOnlyList<ApInvoiceSupplierEntryOptionDto>>()
+            .Subject;
+        options.Should().HaveCount(2);
+        options.Should().ContainEquivalentOf(new ApInvoiceSupplierEntryOptionDto
+        {
+            Id = canonical.Id,
+            SupplierId = canonical.Id,
+            BusinessPartnerId = matchedPartner.Id,
+            Code = matchedPartner.PartnerCode,
+            Name = matchedPartner.PartnerName,
+            Currency = "EUR"
+        }, configuration => configuration.Excluding(item => item.PaymentTermId));
+        options.Should().ContainEquivalentOf(new ApInvoiceSupplierEntryOptionDto
+        {
+            Id = usdPartner.Id,
+            BusinessPartnerId = usdPartner.Id,
+            Code = usdPartner.PartnerCode,
+            Name = usdPartner.PartnerName,
+            Currency = "USD"
+        }, configuration => configuration.Excluding(item => item.PaymentTermId));
+    }
+
+    [Fact]
     [Trait("Category", "FinanceSecurity")]
     public void Lookup_ShouldRequireFinanceReadPermission()
     {
@@ -122,5 +167,26 @@ public sealed class ApInvoiceSupplierProjectionTests
             Status = status,
             IsDeleted = isDeleted,
             PaymentTermId = paymentTermId
+        };
+
+    private static BusinessPartner Partner(
+        Guid tenantId,
+        string code,
+        string name,
+        string currency,
+        string approvalStatus = "Approved",
+        string registrationStatus = "Active",
+        string partnerType = "Supplier") => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PartnerCode = code,
+            PartnerName = name,
+            PartnerType = partnerType,
+            Currency = currency,
+            ApprovalStatus = approvalStatus,
+            RegistrationStatus = registrationStatus,
+            IsActive = true,
+            IsBlacklisted = false
         };
 }

@@ -221,6 +221,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
             var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
             var rateType = ParseRateType(dto.RateType);
+            EnsureOperationalRateType(rateType);
             var quoteSide = ParseQuoteSide(dto.QuoteSide);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
@@ -308,6 +309,8 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             var rateType = ParseRateType(dto.RateType);
+            if (rateType != rate.RateType)
+                EnsureOperationalRateType(rateType);
             var quoteSide = ParseQuoteSide(dto.QuoteSide);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
@@ -395,6 +398,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
                     var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
                     var rateType = ParseRateType(dto.RateType);
+                    EnsureOperationalRateType(rateType);
                     var quoteSide = ParseQuoteSide(dto.QuoteSide);
                     var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
                     var approvalStatus = _workflowService == null
@@ -638,6 +642,15 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             return rateType;
+        }
+
+        private static void EnsureOperationalRateType(ExchangeRateType rateType)
+        {
+            if (rateType is ExchangeRateType.Budget or ExchangeRateType.Spot)
+            {
+                throw new InvalidOperationException(
+                    $"{rateType} exchange rates are reserved for future governed workflows and cannot be created yet.");
+            }
         }
 
         private static RateApprovalStatus ParseApprovalStatus(string? value)

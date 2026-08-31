@@ -271,6 +271,64 @@ public sealed class ApInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task RejectedInvoiceRetry_ShouldRepairAStrandedBudgetReservationWithoutReplayingWorkflow()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Rejected;
+            invoice.ApprovalStatus = "Rejected";
+            invoice.ApprovalComments = "Original rejection";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        var reservation = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceDocumentType = "VendorInvoice",
+            SourceDocumentId = fixture.Invoice.Id,
+            Status = "Reserved",
+            ReservationVersion = 1,
+            EvaluationHash = new string('B', 64),
+            CurrencyCode = "GHS",
+            TransactionCurrencyCode = "GHS",
+            ReservedByUserId = Guid.NewGuid(),
+            ReservedAt = DateTime.UtcNow
+        };
+        db.FinanceBudgetReservations.Add(reservation);
+        await db.SaveChangesAsync();
+
+        var budgetCommitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
+        budgetCommitments
+            .Setup(service => service.ReleaseAsync(
+                reservation.Id,
+                It.Is<ReleaseFinanceBudgetReservationDto>(request =>
+                    request.ExpectedVersion == 1 &&
+                    request.Reason == "Vendor invoice was rejected."),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceBudgetReservationDto
+            {
+                Id = reservation.Id,
+                Status = "Released",
+                Version = 2
+            });
+        var workflow = new Mock<IWorkflowService>(MockBehavior.Strict);
+        var (service, _) = CreateService(db, tenantId, workflow.Object, budgetCommitments.Object);
+
+        var result = await service.RejectAsync(fixture.Invoice.Id, "Retry after lost response");
+
+        result.Status.Should().Be(VendorInvoiceStatus.Rejected);
+        (await db.VendorInvoices.SingleAsync(item => item.Id == fixture.Invoice.Id))
+            .ApprovalComments.Should().Be("Original rejection");
+        budgetCommitments.VerifyAll();
+        workflow.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
     public async Task OpeningBalanceApInvoice_ShouldPostControlAgainstMigrationClearing()
@@ -385,10 +443,12 @@ public sealed class ApInvoicePostingMigrationTests
         (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task ForeignOpeningBalanceApInvoice_ShouldRejectCreateWithoutRateEvidence()
+    public async Task ForeignApInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -402,7 +462,7 @@ public sealed class ApInvoicePostingMigrationTests
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
             ExchangeRate = 15m,
-            IsOpeningBalance = true,
+            IsOpeningBalance = isOpeningBalance,
             LineItems = new List<VendorInvoiceLineItemCreateDto>
             {
                 new()

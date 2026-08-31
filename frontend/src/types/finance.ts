@@ -94,6 +94,8 @@ export interface FiscalPeriod {
     periodStatus: PeriodStatus;
     status?: PeriodStatus;
     isOpen?: boolean;
+    /** Whether this period permits final Finance posting with a date after today. */
+    allowFutureDating: boolean;
     isClosed: boolean;
     isLocked: boolean;
     isGlobalLockSuspended?: boolean;
@@ -346,7 +348,6 @@ export interface JournalEntry {
     isMultiCurrency?: boolean;
     primaryCurrency?: string;
     bookClassification?: string;
-    fiscalPeriodId?: string;
     isRevaluationEntry?: boolean;
     revaluationType?: string;
     reversalDate?: string;

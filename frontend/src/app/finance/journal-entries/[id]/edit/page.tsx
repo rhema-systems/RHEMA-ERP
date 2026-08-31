@@ -11,6 +11,7 @@ import { ArrowLeft, Save, Plus, Trash2, AlertCircle, Loader2 } from 'lucide-reac
 import { useParams, useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ManualJournalDimensionCell, ManualJournalDimensionDefaults } from '@/components/finance/journal-entries/manual-journal-dimension-editor';
+import { ManualJournalAccountCombobox } from '@/components/finance/journal-entries/manual-journal-account-combobox';
 import type {
     Account,
     AccountCurrencyLink,
@@ -432,6 +433,23 @@ export default function EditJournalEntryPage() {
         }
     };
 
+    const clearAccount = (lineId: string) => {
+        setLines(current => current.map(line => line.id === lineId ? {
+            ...line,
+            accountId: '',
+            currencyCode: functionalCurrency,
+            exchangeRate: 1,
+            foreignDebit: undefined,
+            foreignCredit: undefined,
+            dimensions: { ...defaultDimensions },
+            rateStatus: 'ready',
+            rateError: undefined,
+            rateSource: undefined,
+            rateDate: undefined,
+            rateRequestKey: undefined,
+        } : line));
+    };
+
     const handleCurrencyChange = async (lineId: string, currencyCode: string) => {
         const line = lines.find(item => item.id === lineId);
         const account = accounts.find(item => item.id === line?.accountId);
@@ -763,22 +781,16 @@ export default function EditJournalEntryPage() {
                                     return (
                                         <tr key={line.id} className="border-b last:border-0">
                                             <td className="p-3">
-                                                <Select value={line.accountId} onValueChange={(value) => void handleAccountChange(line.id, value)}>
-                                                    <SelectTrigger><SelectValue placeholder="Select Account" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {accounts.map((acc) => {
-                                                            const eligible = targetAccountingBooks.length > 0
-                                                                ? targetAccountingBooks.every(book => isAccountEligibleForBook(acc, book.code))
-                                                                : isAccountEligibleForBook(acc, header.bookClassification);
-                                                            const code = acc.accountNumber || acc.accountCode;
-                                                            return (
-                                                                <SelectItem key={acc.id} value={acc.id} disabled={!eligible}>
-                                                                    {code} - {acc.accountName}{!eligible ? ` (Not classified for ${targetBookLabel})` : ''}
-                                                                </SelectItem>
-                                                            );
-                                                        })}
-                                                    </SelectContent>
-                                                </Select>
+                                                <ManualJournalAccountCombobox
+                                                    accounts={accounts}
+                                                    selectedAccountId={line.accountId}
+                                                    lineNumber={lineIndex + 1}
+                                                    targetAccountingBooks={targetAccountingBooks}
+                                                    fallbackBookCode={header.bookClassification}
+                                                    targetBookLabel={targetBookLabel}
+                                                    onSelect={(accountId) => handleAccountChange(line.id, accountId)}
+                                                    onClear={() => clearAccount(line.id)}
+                                                />
                                             </td>
                                             <td className="p-3">
                                                 <Input value={line.description} onChange={(event) => updateLine(line.id, 'description', event.target.value)} placeholder="Line description" />

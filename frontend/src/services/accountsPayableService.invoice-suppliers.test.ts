@@ -27,4 +27,25 @@ describe('accounts payable supplier identity client', () => {
     );
     expect(apiService.get).toHaveBeenCalledWith('/ap/invoices/suppliers');
   });
+
+  it('loads unified invoice-entry options without changing the canonical report lookup', async () => {
+    const response = [
+      {
+        id: 'business-partner-id',
+        businessPartnerId: 'business-partner-id',
+        supplierId: null,
+        code: 'SUP260001',
+        name: 'USD Supplier',
+        currency: 'USD',
+      },
+    ];
+    vi.mocked(apiService.get).mockResolvedValueOnce(response);
+
+    await expect(
+      accountsPayableService.getInvoiceSupplierEntryOptions()
+    ).resolves.toEqual(response);
+    expect(apiService.get).toHaveBeenCalledWith(
+      '/ap/invoices/entry-suppliers'
+    );
+  });
 });

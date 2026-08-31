@@ -13,8 +13,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { arService } from '@/services/ar-service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
 import type { CustomerPayment } from '@/types/ar';
 import type { BankDeposit, ReturnedChequeCase } from '@/types/cash-management';
+
+type ReturnedChequeChargeTreatment = 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+
+function createInitialForm(chargeTreatment: ReturnedChequeChargeTreatment) {
+    return {
+        customerPaymentId: '',
+        bankDepositBatchId: '',
+        bankAccountId: '',
+        returnDate: new Date().toISOString().slice(0, 10),
+        bankReference: '',
+        returnReason: '',
+        bankChargeAmount: 0,
+        chargeTreatment,
+        customerRecoverableChargeAmount: 0,
+        expenseChargeAmount: 0,
+        drawerBank: '',
+        notes: '',
+    };
+}
 
 export default function ReturnedChequesPage() {
     const [items, setItems] = useState<ReturnedChequeCase[]>([]);
@@ -24,28 +44,20 @@ export default function ReturnedChequesPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [evidence, setEvidence] = useState<File | null>(null);
-    const [form, setForm] = useState({
-        customerPaymentId: '',
-        bankDepositBatchId: '',
-        bankAccountId: '',
-        returnDate: new Date().toISOString().slice(0, 10),
-        bankReference: '',
-        returnReason: '',
-        bankChargeAmount: 0,
-        chargeTreatment: 'CustomerRecoverable' as 'CustomerRecoverable' | 'BankChargeExpense' | 'Split',
-        customerRecoverableChargeAmount: 0,
-        expenseChargeAmount: 0,
-        drawerBank: '',
-        notes: '',
-    });
+    const [defaultChargeTreatment, setDefaultChargeTreatment] = useState<ReturnedChequeChargeTreatment>('CustomerRecoverable');
+    const [form, setForm] = useState(() => createInitialForm('CustomerRecoverable'));
 
     const load = async () => {
         try {
-            const [cases, receiptPage, deposits] = await Promise.all([
+            const [cases, receiptPage, deposits, financeSettings] = await Promise.all([
                 cashManagementDataService.getReturnedCheques(),
                 arService.getPayments({ pageSize: 500, status: 'Posted' }),
                 cashManagementDataService.getBankDeposits('Posted'),
+                financeDataService.getFinanceSettings(),
             ]);
+            const configuredTreatment = financeSettings.defaultReturnedChequeChargeTreatment ?? 'CustomerRecoverable';
+            setDefaultChargeTreatment(configuredTreatment);
+            setForm(current => showForm ? current : { ...current, chargeTreatment: configuredTreatment });
             setItems(cases);
             const returnedPaymentIds = new Set(cases
                 .filter(item => item.status !== 'Rejected')
@@ -66,6 +78,17 @@ export default function ReturnedChequesPage() {
     };
 
     useEffect(() => { void load(); }, []);
+
+    const toggleForm = () => {
+        if (showForm) {
+            setShowForm(false);
+            return;
+        }
+
+        setForm(createInitialForm(defaultChargeTreatment));
+        setEvidence(null);
+        setShowForm(true);
+    };
 
     const selectedPayment = useMemo(
         () => payments.find(payment => payment.id === form.customerPaymentId),
@@ -121,7 +144,7 @@ export default function ReturnedChequesPage() {
                     <Button variant="ghost" size="icon" asChild><Link href="/finance/cash"><ArrowLeft className="h-4 w-4" /></Link></Button>
                     <div><h1 className="text-3xl font-bold">Returned Cheques</h1><p className="text-muted-foreground">Reopen AR and record bank debits for deposited customer cheques.</p></div>
                 </div>
-                <Button onClick={() => setShowForm(value => !value)}><Plus className="mr-2 h-4 w-4" />Record returned cheque</Button>
+                <Button disabled={loading} onClick={toggleForm}><Plus className="mr-2 h-4 w-4" />Record returned cheque</Button>
             </div>
             {showForm && (
                 <Card>
@@ -136,7 +159,7 @@ export default function ReturnedChequesPage() {
                                 <div className="space-y-2"><Label>Drawer bank</Label><Input value={form.drawerBank} onChange={event => setForm({ ...form, drawerBank: event.target.value })} /></div>
                                 <div className="space-y-2"><Label>Returned amount</Label><Input disabled value={selectedPayment ? `${selectedPayment.currencyCode} ${selectedPayment.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ''} /></div>
                                 <div className="space-y-2"><Label>Bank charge</Label><Input min={0} step="0.01" type="number" value={form.bankChargeAmount} onChange={event => setForm({ ...form, bankChargeAmount: Number(event.target.value) })} /></div>
-                                <div className="space-y-2"><Label>Charge treatment</Label><Select value={form.chargeTreatment} onValueChange={chargeTreatment => setForm({ ...form, chargeTreatment: chargeTreatment as typeof form.chargeTreatment })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="CustomerRecoverable">Recover from customer</SelectItem><SelectItem value="BankChargeExpense">Bank charge expense</SelectItem><SelectItem value="Split">Split</SelectItem></SelectContent></Select></div>
+                                <div className="space-y-2"><Label>Charge treatment</Label><Select value={form.chargeTreatment} onValueChange={chargeTreatment => setForm({ ...form, chargeTreatment: chargeTreatment as typeof form.chargeTreatment })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="CustomerRecoverable">Recover from customer</SelectItem><SelectItem value="BankChargeExpense">Bank charge expense</SelectItem><SelectItem value="Split">Split</SelectItem></SelectContent></Select><p className="text-xs text-muted-foreground">Defaults from Finance Settings; you can change it for this case.</p></div>
                                 {form.chargeTreatment === 'Split' && <><div className="space-y-2"><Label>Customer portion</Label><Input type="number" min={0} step="0.01" value={form.customerRecoverableChargeAmount} onChange={event => setForm({ ...form, customerRecoverableChargeAmount: Number(event.target.value) })} /></div><div className="space-y-2"><Label>Expense portion</Label><Input type="number" min={0} step="0.01" value={form.expenseChargeAmount} onChange={event => setForm({ ...form, expenseChargeAmount: Number(event.target.value) })} /></div></>}
                                 <div className="space-y-2 md:col-span-2"><Label>Return reason</Label><Textarea required value={form.returnReason} onChange={event => setForm({ ...form, returnReason: event.target.value })} /></div>
                                 <div className="space-y-2"><Label>Bank return advice (PDF/image)</Label><Input required type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={event => setEvidence(event.target.files?.[0] ?? null)} /></div>

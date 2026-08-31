@@ -391,6 +391,7 @@ public static class FinancePermissionPolicyMap
             // Opening a never-used Future period is deliberately separate from both month-end
             // close preparation and maker-checker reopening of a certified Closed period.
             "OpenPeriod" => One(FinancePermissions.OpenAccountingPeriods),
+            "UpdatePostingDatePolicy" => One(FinancePermissions.AdministerFinance),
             "EvaluatePeriodCloseWorkspace" or "PreparePeriodClose" or "UpdateFinanceCloseTask" or
             "ClosePeriod" or "CloseFiscalYear" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
             "RequestPeriodReopen" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
@@ -440,7 +441,9 @@ public static class FinancePermissionPolicyMap
             "PostJournalEntry" => One(FinancePermissions.PostJournalEntries),
             "ReverseJournalEntry" => One(FinancePermissions.ReverseJournalEntries),
             "RequestApproval" => One(FinancePermissions.SubmitJournalEntries),
-            "WithdrawApproval" => One(FinancePermissions.WorkflowCancel),
+            // Submitters may recall their own request; WorkflowCancel grants the controlled
+            // administrative override. The action performs the resource-level ownership check.
+            "WithdrawApproval" => One(FinancePermissions.WithdrawJournalApprovalPolicy),
             "ApproveJournalEntry" => One(FinancePermissions.ApproveJournalEntries),
             "RejectJournalEntry" => One(FinancePermissions.ApproveJournalEntries),
             "GetPendingApprovals" => One(FinancePermissions.ApproveJournalEntries),

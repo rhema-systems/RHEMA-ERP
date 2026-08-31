@@ -46,6 +46,7 @@ import { cashManagementDataService } from '@/services/finance/cash-management-da
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
 import { CreateCashPaymentDto } from '@/types/cash-management';
+import { loadApprovedCashRate } from '@/lib/finance/cash-exchange-rate';
 
 const paymentSchema = z.object({
     transactionDate: z.date({ message: "Date is required" }),
@@ -53,6 +54,7 @@ const paymentSchema = z.object({
     amount: z.number().min(0.01, "Amount must be greater than 0"),
     currency: z.string().min(1, "Currency is required"),
     exchangeRate: z.number().min(0.0001, "Exchange rate must be greater than 0"),
+    exchangeRateId: z.string().optional(),
     paymentMethodId: z.string().optional(),
     referenceNumber: z.string().optional(),
     description: z.string().optional(),
@@ -84,6 +86,11 @@ export default function RecordPaymentPage() {
         queryFn: () => financeDataService.getAccounts({ status: 'Active' }),
     });
 
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+
     const form = useForm<PaymentFormValues>({
         resolver: zodResolver(paymentSchema),
         defaultValues: {
@@ -91,6 +98,7 @@ export default function RecordPaymentPage() {
             amount: 0,
             currency: 'GHS',
             exchangeRate: 1,
+            exchangeRateId: undefined,
         },
     });
 
@@ -116,16 +124,40 @@ export default function RecordPaymentPage() {
             const account = bankAccounts.find(a => a.id === selectedBankAccountId);
             if (account) {
                 form.setValue('currency', account.currency);
-                if (account.currency === 'GHS') {
-                    form.setValue('exchangeRate', 1);
-                } else {
-                    void financeService.getCurrentExchangeRate(account.currency)
-                        .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-                        .catch(() => form.setValue('exchangeRate', 1));
-                }
             }
         }
     }, [selectedBankAccountId, bankAccounts, form]);
+
+    const watchedCurrency = form.watch('currency');
+    const watchedTransactionDate = form.watch('transactionDate');
+    const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+    const [exchangeRateSource, setExchangeRateSource] = useState('Functional currency');
+
+    useEffect(() => {
+        if (!financeSettings || !watchedTransactionDate) return;
+        form.setValue('exchangeRateId', undefined);
+        setExchangeRateSource('Loading approved rate…');
+        let cancelled = false;
+        void loadApprovedCashRate(
+            {
+                transactionCurrency: watchedCurrency,
+                functionalCurrency,
+                transactionDate: watchedTransactionDate,
+                settings: financeSettings,
+            },
+            (code, query) => financeService.getCurrentExchangeRate(code, query),
+        ).then(snapshot => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            setExchangeRateSource(`${snapshot.source} · ${snapshot.quoteSide}`);
+        }).catch(error => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', 0);
+            setExchangeRateSource(error instanceof Error ? error.message : 'Approved rate unavailable');
+        });
+        return () => { cancelled = true; };
+    }, [financeSettings, form, functionalCurrency, watchedCurrency, watchedTransactionDate]);
 
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
@@ -136,6 +168,10 @@ export default function RecordPaymentPage() {
                 setIsSubmitting(false);
                 return;
             }
+            if (data.currency.toUpperCase() !== functionalCurrency && !data.exchangeRateId) {
+                toast({ title: 'Approved exchange rate required', description: exchangeRateSource, variant: 'destructive' });
+                return;
+            }
 
             const payload: CreateCashPaymentDto = {
                 transactionDate: data.transactionDate.toISOString(),
@@ -143,6 +179,7 @@ export default function RecordPaymentPage() {
                 amount: data.amount,
                 currency: data.currency,
                 exchangeRate: data.exchangeRate,
+                exchangeRateId: data.exchangeRateId,
                 paymentMethodId: data.paymentMethodId,
                 referenceNumber: data.referenceNumber,
                 description: data.description,
@@ -290,12 +327,14 @@ export default function RecordPaymentPage() {
                                         <Input
                                             type="number"
                                             step="0.000001"
-                                            disabled={form.watch('currency') === 'GHS'}
+                                            readOnly
+                                            aria-readonly="true"
                                             {...form.register('exchangeRate', { valueAsNumber: true })}
                                         />
                                         <p className="text-xs text-muted-foreground">
-                                            1 {form.watch('currency')} = {form.watch('exchangeRate') || 1} GHS
+                                            1 {form.watch('currency')} = {form.watch('exchangeRate') || 1} {functionalCurrency}
                                         </p>
+                                        <p className="text-xs text-muted-foreground">{exchangeRateSource}</p>
                                         {form.formState.errors.exchangeRate && <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>}
                                     </div>
                                 </div>
