@@ -24,11 +24,13 @@ internal sealed record TenderBidPaymentAdmissionDecision(
     public bool HasPayment => Fees.Count == 0 || Fees.All(item => item.Payment is not null);
     public bool PaymentSatisfied => Fees.All(item =>
         item.Status is TenderBidPaymentAdmissionStatus.NotRequired or TenderBidPaymentAdmissionStatus.Verified);
-    public bool CanSubmitSealed => Fees.All(item =>
-        item.Status is TenderBidPaymentAdmissionStatus.NotRequired or
-            TenderBidPaymentAdmissionStatus.Verified or
-            TenderBidPaymentAdmissionStatus.PendingVerification);
-    public bool PendingVerification => CanSubmitSealed && !PaymentSatisfied;
+    // Payment is an admission control for opening and evaluation, not a filing
+    // prerequisite. Suppliers must be able to place a sealed bid before the
+    // deadline even when a required fee has not yet been paid or verified.
+    public bool CanSubmitSealed => true;
+    public bool PendingVerification => Fees.Any(item =>
+        item.Status is TenderBidPaymentAdmissionStatus.PendingVerification or
+            TenderBidPaymentAdmissionStatus.PendingProviderConfirmation);
     public bool CanOpenOrEvaluate => PaymentSatisfied;
 
     public TenderBidPaymentAdmissionStatus BlockingStatus =>

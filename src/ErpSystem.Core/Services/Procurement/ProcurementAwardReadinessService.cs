@@ -113,7 +113,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         var source = await ResolveSourceHeaderAsync(
             sourceType, sourceId, cancellationToken);
         await EnsureCapabilityAsync(
-            ApprovePermission,
+            ReadPermission,
             source.Reference,
             normalizedCorrelation,
             cancellationToken);

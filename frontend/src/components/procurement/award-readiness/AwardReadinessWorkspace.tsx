@@ -15,7 +15,6 @@ import {
 import { toast } from 'sonner';
 
 import { AwardReadinessRegister } from './AwardReadinessRegister';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -196,11 +195,7 @@ export function AwardReadinessWorkspace({
             )}
           </div>
           <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-            {decision?.sourceReference ?? sourceId} · server-derived
-            recommendation, evaluation and locked-score lineage, supplier
-            eligibility, verification and due diligence, exact authority,
-            workflow, evidence, actors, blocked remediation, and immutable
-            decisions.
+            Review the current checks before submitting or approving the award.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -238,19 +233,6 @@ export function AwardReadinessWorkspace({
           </Button>
         </div>
       </div>
-
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Authoritative shared-control boundary</AlertTitle>
-        <AlertDescription>
-          This workspace evaluates and explains readiness; it cannot toggle
-          readiness, approve a workflow, replace the recommendation, or create
-          evidence. Existing sourcing, committee, verification, supplier,
-          prequalification, authority, workflow, evidence, SOD, audit, and award
-          services remain authoritative, and the final award boundary rechecks
-          the current server decision.
-        </AlertDescription>
-      </Alert>
 
       <AwardReadinessRegister
         sourceType={sourceType}

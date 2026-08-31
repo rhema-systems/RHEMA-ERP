@@ -40,7 +40,7 @@ public sealed class TenderBidSubmissionLineageTests
     }
 
     [Fact]
-    public void RequiredDeclarationAndPendingMandatoryFeeRemainBlocked()
+    public void RequiredDeclarationAndUnresolvedMandatoryFeeAllowSealedSubmission()
     {
         var tender = new Tender { Id = Guid.NewGuid(), RequiresAcceptanceDeclaration = true };
         var partnerId = Guid.NewGuid();
@@ -88,8 +88,9 @@ public sealed class TenderBidSubmissionLineageTests
         status.DeclarationSatisfied.Should().BeTrue();
         status.PaymentRequired.Should().BeTrue();
         status.PaymentSatisfied.Should().BeFalse();
-        status.PaymentEvidenceAccepted.Should().BeFalse();
-        status.CanProceed.Should().BeFalse();
+        status.PaymentEvidenceAccepted.Should().BeTrue();
+        status.PaymentPendingVerification.Should().BeFalse();
+        status.CanProceed.Should().BeTrue();
         status.Fees.Should().ContainSingle(item => item.Status == "Pending");
     }
 
@@ -206,32 +207,18 @@ public sealed class TenderBidSubmissionLineageTests
     }
 
     [Fact]
-    public async Task PositiveMandatoryFeeBlocksSubmissionUntilVerified()
+    public async Task PositiveMandatoryFeeWithoutPaymentAllowsSealedSubmission()
     {
         var fixture = new Fixture(advancedSourcingCase: false);
         var fee = fixture.AddMandatoryFee(100m);
-
-        var blocked = () => fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
-        var error = await blocked.Should().ThrowAsync<TenderBidInitiationValidationException>();
-        error.Which.Code.Should().Be("TENDER_BID_PAYMENT_EVIDENCE_REQUIRED");
-        fixture.Bid.Status.Should().Be("Draft");
-
-        fixture.Payments.Setup(repository => repository.GetByBusinessPartnerIdAsync(fixture.Bid.BusinessPartnerId))
-            .ReturnsAsync([new TenderPayment
-            {
-                Id = Guid.NewGuid(),
-                TenantId = fixture.Bid.TenantId,
-                TenderFeeId = fee.Id,
-                BusinessPartnerId = fixture.Bid.BusinessPartnerId,
-                Status = "Verified",
-                PaymentReference = "PAY-VERIFIED",
-                Amount = fee.Amount,
-                Currency = fee.Currency,
-                PaymentMethod = fee.PaymentMethod
-            }]);
+        var decision = TenderBidPaymentRules.Assess(fixture.Bid, [fee], []);
 
         var result = await fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
+
         result.Status.Should().Be("Submitted");
+        decision.CanSubmitSealed.Should().BeTrue();
+        decision.CanOpenOrEvaluate.Should().BeFalse();
+        decision.Code.Should().Be("TENDER_BID_PAYMENT_EVIDENCE_REQUIRED");
     }
 
     [Fact]
@@ -261,12 +248,19 @@ public sealed class TenderBidSubmissionLineageTests
             }]);
 
         var result = await fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
+        var decision = TenderBidPaymentRules.Assess(
+            fixture.Bid,
+            [fee],
+            await fixture.Payments.Object.GetByBusinessPartnerIdAsync(fixture.Bid.BusinessPartnerId));
 
         result.Status.Should().Be("Submitted");
+        decision.CanSubmitSealed.Should().BeTrue();
+        decision.CanOpenOrEvaluate.Should().BeFalse();
+        decision.Code.Should().Be("TENDER_BID_PAYMENT_VERIFICATION_PENDING");
     }
 
     [Fact]
-    public async Task OnlinePaymentPendingProviderConfirmationCannotSubmit()
+    public async Task OnlinePaymentPendingProviderConfirmationAllowsSealedSubmission()
     {
         var fixture = new Fixture(advancedSourcingCase: false);
         var fee = fixture.AddMandatoryFee(100m);
@@ -281,15 +275,20 @@ public sealed class TenderBidSubmissionLineageTests
                 Currency = fee.Currency, PaymentMethod = fee.PaymentMethod
             }]);
 
-        var action = () => fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
+        var result = await fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
+        var decision = TenderBidPaymentRules.Assess(
+            fixture.Bid,
+            [fee],
+            await fixture.Payments.Object.GetByBusinessPartnerIdAsync(fixture.Bid.BusinessPartnerId));
 
-        await action.Should().ThrowAsync<TenderBidInitiationValidationException>()
-            .Where(exception => exception.Code == "TENDER_BID_PAYMENT_PROVIDER_PENDING");
-        fixture.Bid.Status.Should().Be("Draft");
+        result.Status.Should().Be("Submitted");
+        decision.CanSubmitSealed.Should().BeTrue();
+        decision.CanOpenOrEvaluate.Should().BeFalse();
+        decision.Code.Should().Be("TENDER_BID_PAYMENT_PROVIDER_PENDING");
     }
 
     [Fact]
-    public async Task RejectedMandatoryPaymentCannotSubmit()
+    public async Task RejectedMandatoryPaymentAllowsSealedSubmissionButRemainsUnresolved()
     {
         var fixture = new Fixture(advancedSourcingCase: false);
         var fee = fixture.AddMandatoryFee(100m);
@@ -303,11 +302,17 @@ public sealed class TenderBidSubmissionLineageTests
                 Currency = fee.Currency, PaymentMethod = fee.PaymentMethod
             }]);
 
-        var action = () => fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
+        var decision = TenderBidPaymentRules.Assess(
+            fixture.Bid,
+            [fee],
+            await fixture.Payments.Object.GetByBusinessPartnerIdAsync(fixture.Bid.BusinessPartnerId));
+        var result = await fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
 
-        await action.Should().ThrowAsync<TenderBidInitiationValidationException>()
-            .Where(exception => exception.Code == "TENDER_BID_PAYMENT_REJECTED");
-        fixture.Bid.Status.Should().Be("Draft");
+        result.Status.Should().Be("Submitted");
+        decision.CanSubmitSealed.Should().BeTrue();
+        decision.CanOpenOrEvaluate.Should().BeFalse();
+        decision.PendingVerification.Should().BeFalse();
+        decision.Code.Should().Be("TENDER_BID_PAYMENT_REJECTED");
     }
 
     [Fact]

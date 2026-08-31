@@ -535,6 +535,17 @@ public class TenderBidService : ITenderBidService
             var tender = await _tenderRepository.GetByIdAsync(bid.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
 
+            var existingItems = (await _bidItemRepository.GetByBidIdAsync(id)).ToList();
+            var allTenderItems = tender.Items
+                .Concat(tender.Lots.SelectMany(lot => lot.Items))
+                .GroupBy(item => item.Id)
+                .ToDictionary(group => group.Key, group => group.First());
+            if (dto.Items is not null &&
+                dto.Items.Select(item => item.TenderItemId).Distinct().Count() != dto.Items.Count)
+            {
+                throw new InvalidOperationException(
+                    "A tender item can appear only once in a bid draft.");
+            }
             var selectedTenderItems = new Dictionary<Guid, TenderItem>();
             if (dto.SelectedLotIds != null)
             {
@@ -571,32 +582,48 @@ public class TenderBidService : ITenderBidService
                         "A bid draft must include every item, and only items, from its selected lots.");
                 }
 
-                var persistedLotIds = bid.BidLots.Select(item => item.LotId).ToHashSet();
-                if (persistedLotIds.Count > 0 && !persistedLotIds.SetEquals(selectedLotIds))
+                var persistedLots = bid.BidLots
+                    .Where(lot => !lot.IsDeleted)
+                    .ToList();
+                var removedLots = persistedLots
+                    .Where(lot => !selectedLotIds.Contains(lot.LotId))
+                    .ToList();
+                foreach (var removedLot in removedLots)
                 {
-                    throw new InvalidOperationException(
-                        "Selected lots cannot be changed after their draft lineage has been saved.");
-                }
-                if (persistedLotIds.Count == 0)
-                {
-                    foreach (var selectedLot in selectedLots)
+                    var removedItems = existingItems
+                        .Where(item => item.BidLotId == removedLot.Id)
+                        .ToList();
+                    foreach (var removedItem in removedItems)
                     {
-                        var bidLot = new TenderBidLot
-                        {
-                            Id = Guid.NewGuid(),
-                            TenantId = _currentUserProvider.TenantId,
-                            TenderBidId = bid.Id,
-                            LotId = selectedLot.Id,
-                            TotalLotAmount = 0m,
-                            Currency = tender.Currency,
-                            Status = "Draft",
-                            CreatedAt = DateTime.UtcNow,
-                            Lot = selectedLot,
-                            TenderBid = bid
-                        };
-                        bid.BidLots.Add(bidLot);
-                        await _bidLotRepository.CreateAsync(bidLot);
+                        await _bidItemRepository.DeleteAsync(removedItem.Id);
+                        existingItems.Remove(removedItem);
                     }
+                    await _bidLotRepository.DeleteAsync(removedLot.Id);
+                    bid.BidLots.Remove(removedLot);
+                }
+
+                var persistedLotIds = bid.BidLots
+                    .Where(lot => !lot.IsDeleted)
+                    .Select(lot => lot.LotId)
+                    .ToHashSet();
+                foreach (var selectedLot in selectedLots.Where(
+                             lot => !persistedLotIds.Contains(lot.Id)))
+                {
+                    var bidLot = new TenderBidLot
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = _currentUserProvider.TenantId,
+                        TenderBidId = bid.Id,
+                        LotId = selectedLot.Id,
+                        TotalLotAmount = 0m,
+                        Currency = tender.Currency,
+                        Status = "Draft",
+                        CreatedAt = DateTime.UtcNow,
+                        Lot = selectedLot,
+                        TenderBid = bid
+                    };
+                    bid.BidLots.Add(bidLot);
+                    await _bidLotRepository.CreateAsync(bidLot);
                 }
             }
 
@@ -619,11 +646,22 @@ public class TenderBidService : ITenderBidService
             await _bidRepository.UpdateAsync(bid);
 
             // Update bid items if provided
-            if (dto.Items != null && dto.Items.Any())
+            if (dto.Items != null)
             {
-                // Get existing items
-                var existingItems = (await _bidItemRepository.GetByBidIdAsync(id)).ToList();
-                var bidLotByTenderLotId = bid.BidLots.ToDictionary(item => item.LotId);
+                var suppliedTenderItemIds = dto.Items
+                    .Select(item => item.TenderItemId)
+                    .ToHashSet();
+                foreach (var removedItem in existingItems
+                             .Where(item => !suppliedTenderItemIds.Contains(item.TenderItemId))
+                             .ToList())
+                {
+                    await _bidItemRepository.DeleteAsync(removedItem.Id);
+                    existingItems.Remove(removedItem);
+                }
+
+                var bidLotByTenderLotId = bid.BidLots
+                    .Where(item => !item.IsDeleted)
+                    .ToDictionary(item => item.LotId);
 
                 decimal totalBidAmount = 0;
 
@@ -655,7 +693,12 @@ public class TenderBidService : ITenderBidService
                     }
                     else
                     {
-                        selectedTenderItems.TryGetValue(itemDto.TenderItemId, out var tenderItem);
+                        if (!selectedTenderItems.TryGetValue(itemDto.TenderItemId, out var tenderItem) &&
+                            !allTenderItems.TryGetValue(itemDto.TenderItemId, out tenderItem))
+                        {
+                            throw new InvalidOperationException(
+                                "One or more bid items do not belong to this tender.");
+                        }
                         TenderBidLot? bidLot = null;
                         if (tenderItem?.LotId is Guid tenderLotId)
                             bidLotByTenderLotId.TryGetValue(tenderLotId, out bidLot);
@@ -692,7 +735,7 @@ public class TenderBidService : ITenderBidService
                 bid.TotalBidAmount = totalBidAmount;
                 await _bidRepository.UpdateAsync(bid);
 
-                foreach (var bidLot in bid.BidLots)
+                foreach (var bidLot in bid.BidLots.Where(lot => !lot.IsDeleted))
                 {
                     bidLot.TotalLotAmount = existingItems
                         .Where(item => item.BidLotId == bidLot.Id)
@@ -1780,8 +1823,16 @@ public class TenderBidService : ITenderBidService
             RejectionReason = bid.RejectionReason,
             CreatedAt = bid.CreatedAt,
             UpdatedAt = bid.UpdatedAt ?? bid.CreatedAt,
-            BidLots = bid.BidLots?.Select(MapToBidLotDto).ToList() ?? new(),
-            BidLotCount = bid.BidLots?.Count ?? 0,
+            SelectedLotIds = bid.BidLots?
+                .Where(lot => !lot.IsDeleted)
+                .Select(lot => lot.LotId)
+                .Distinct()
+                .ToList() ?? new(),
+            BidLots = bid.BidLots?
+                .Where(lot => !lot.IsDeleted)
+                .Select(MapToBidLotDto)
+                .ToList() ?? new(),
+            BidLotCount = bid.BidLots?.Count(lot => !lot.IsDeleted) ?? 0,
             Items = items.Select(MapBidItemToDto).ToList(),
             Documents = documents.Select(MapBidDocumentToDto).ToList(),
             Evaluations = bid.Evaluations?.Select(MapEvaluationToDto).ToList() ?? new(),
@@ -2220,8 +2271,8 @@ public class TenderBidService : ITenderBidService
             Rank = bidLot.Rank,
             EvaluationNotes = bidLot.EvaluationNotes,
             Notes = bidLot.Notes,
-            ItemCount = bidLot.Items?.Count ?? 0,
-            Items = bidLot.Items?.Select(i => new TenderBidItemDto
+            ItemCount = bidLot.Items?.Count(item => !item.IsDeleted) ?? 0,
+            Items = bidLot.Items?.Where(item => !item.IsDeleted).Select(i => new TenderBidItemDto
             {
                 Id = i.Id,
                 TenderBidId = i.TenderBidId,

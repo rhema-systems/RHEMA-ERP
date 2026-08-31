@@ -22,6 +22,25 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementGhanepsExchangeServiceTests
 {
     [Fact]
+    public async Task MissingEffectiveDec009IsAdvisoryForOptionsButMutationsRemainStrict()
+    {
+        await using var fixture = new Fixture();
+        fixture.Profile.LifecycleStatus = ProcurementConfigurationProfileStatus.Retired;
+        fixture.Context.Update(fixture.Profile);
+        await fixture.Context.SaveChangesAsync();
+
+        var options = await fixture.Service.GetOptionsAsync(
+            ProcurementGhanepsSourceType.Tender, fixture.Tender.Id);
+        var mutation = () => fixture.PrepareAsync("missing-profile", "PUB");
+
+        options.IsConfigured.Should().BeFalse();
+        options.AllowedActions.Should().BeEmpty();
+        options.ConfigurationMessage.Should().Contain("optional");
+        await mutation.Should().ThrowAsync<ProcurementGhanepsExchangeConflictException>()
+            .Where(exception => exception.Code == "GHANEPS_PROFILE_NOT_EFFECTIVE");
+    }
+
+    [Fact]
     public async Task OptionsAndExportUseOneEffectiveDec009ProfileAndServerDerivedSource()
     {
         await using var fixture = new Fixture();
@@ -32,6 +51,7 @@ public sealed class ProcurementGhanepsExchangeServiceTests
         var replay = await fixture.PrepareAsync("export-1", "PUB");
 
         options.ConfigurationProfileId.Should().Be(fixture.Profile.Id);
+        options.IsConfigured.Should().BeTrue();
         options.ConfigurationDecisionId.Should().Be(fixture.Decision.Id);
         options.Mappings.Should().Contain(item =>
             item.MappingKey == "PUB" &&
@@ -1340,7 +1360,7 @@ public sealed class ProcurementGhanepsExchangeServiceTests
         private readonly string _databaseName = Guid.NewGuid().ToString("N");
         private Guid _tenantId;
         private Guid _actorId;
-        private IReadOnlyList<string> _roles = ["Administrator"];
+        private IReadOnlyList<string> _roles = ["TDC_PROCUREMENT_OFFICER"];
         private bool _external;
 
         public Fixture()

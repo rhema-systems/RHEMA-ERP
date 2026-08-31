@@ -66,10 +66,25 @@ export interface TenderBidDetailDto {
   updatedAt: string;
 
   // Related Data
+  selectedLotIds?: string[];
+  bidLots?: TenderBidLotDto[];
   items?: TenderBidItemDto[];
   documents?: TenderBidDocumentDto[];
   evaluations?: TenderEvaluationDto[];
   interviews?: TenderInterviewDto[];
+}
+
+export interface TenderBidLotDto {
+  id: string;
+  tenderBidId: string;
+  lotId: string;
+  lotCode: string;
+  lotTitle: string;
+  totalLotAmount: number;
+  currency?: string;
+  status: string;
+  itemCount: number;
+  items?: TenderBidItemDto[];
 }
 
 export interface TenderBidItemDto {
