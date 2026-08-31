@@ -9,6 +9,67 @@ using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
 
+/// <summary>
+/// The rule every disciplinary sanction shares: a penalty must have a confirmed decision behind it.
+/// </summary>
+/// <remarks>
+/// ⚠ It lives here rather than on one service because the four sanctions are four separate classes
+/// in this file, and the guard was private to the termination one — which is precisely how warning,
+/// suspension and fine came to be unguarded. A shared rule with four call sites cannot drift; four
+/// copies would.
+/// </remarks>
+internal static class DisciplineSanctionGuard
+{
+    /// <summary>
+    /// Refuses a sanction until the decision behind it is final and any appeal against it has been
+    /// answered.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things were unguarded. A termination could be recorded against a case in ANY status
+    /// — a draft, or one whose proposed sanction was still sitting in an approver's queue — so the
+    /// record could say an employee had been dismissed on a decision nobody had confirmed. And it
+    /// could be recorded while an appeal was live and undecided, which is the procedural failure this
+    /// whole area exists to prevent: dismissing someone while they are still contesting the finding.</para>
+    ///
+    /// <para>⚠ <b>It guarded the termination alone, and the other three sanctions were open.</b> The
+    /// closure ledger's D-18 recorded this as "a warning is not [gated]"; running it found
+    /// <b>warning, suspension AND fine</b> all accepted against a case in <c>UnderReview</c> with no
+    /// decision at all. Every one of those entities says in its own summary that it is "created when
+    /// the decision includes" that penalty — so a sanction with no decision behind it contradicts the
+    /// model as designed, not merely good practice. All four now call this.</para>
+    ///
+    /// <para><b>FR-HR-092 is NOT implemented as a flag here.</b> "The MD shall sign all terminations
+    /// except procedural ones, which HR approves automatically per policy" is a statement about WHO
+    /// CONFIRMS the decision, and that is already expressed: the action type carries its
+    /// <c>MinimumAuthority</c>, and the workflow definition routes on it. A dismissal action type set
+    /// to Management routes to the MD; a procedural one set to Hr does not. Adding an "MD signed"
+    /// boolean here would be a second, unenforced copy of a fact the approval record already holds —
+    /// and it would have to be kept in step with it by hand.</para>
+    /// </remarks>
+    public static async Task EnsureFoundedAsync(
+        StaffDisciplinaryAction disciplinaryCase,
+        IStaffDisciplineAppealRepository appealRepository,
+        Guid tenantId,
+        string sanctionNoun)
+    {
+        if (disciplinaryCase.Status is not (DisciplinaryStatus.DecisionMade
+            or DisciplinaryStatus.UnderAppeal
+            or DisciplinaryStatus.Closed))
+        {
+            throw new InvalidOperationException(
+                $"A {sanctionNoun} cannot be recorded for a case in '{disciplinaryCase.Status}' status. "
+                + "The decision must be confirmed first.");
+        }
+
+        var appeal = await appealRepository.GetByCaseIdAsync(tenantId, disciplinaryCase.Id);
+        if (appeal != null && appeal.AppealOutcome == null)
+            throw new InvalidOperationException(
+                "This decision is under appeal and the appeal has not been decided. "
+                + $"Record the appeal outcome before recording a {sanctionNoun}.");
+    }
+}
+
+
 // ============================================================================
 // STAFF DISCIPLINE INVESTIGATION SERVICE
 // ============================================================================
@@ -389,6 +450,9 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
 {
     private readonly IStaffDisciplineWarningRepository _warningRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    // ⚠ Injected for DisciplineSanctionGuard: a sanction is refused while an appeal against the
+    // decision is live and undecided.
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineWarningService> _logger;
@@ -396,12 +460,14 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
     public StaffDisciplineWarningService(
         IStaffDisciplineWarningRepository warningRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineWarningService> logger)
     {
         _warningRepository = warningRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -486,6 +552,8 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "warning");
+
         var existing = await _warningRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A warning penalty already exists for this case. Use Update instead.");
@@ -546,6 +614,9 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
 {
     private readonly IStaffDisciplineSuspensionRepository _suspensionRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    // ⚠ Injected for DisciplineSanctionGuard: a sanction is refused while an appeal against the
+    // decision is live and undecided.
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineSuspensionService> _logger;
@@ -553,12 +624,14 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
     public StaffDisciplineSuspensionService(
         IStaffDisciplineSuspensionRepository suspensionRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineSuspensionService> logger)
     {
         _suspensionRepository = suspensionRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -636,6 +709,13 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
+        // ⚠ A PRECAUTIONARY suspension — sending somebody home pending the investigation — is a real
+        // and legitimate act, and it is NOT what this entity models. `StaffDisciplineSuspension`
+        // carries only dates and a with-pay flag, and its own summary says "created when the decision
+        // includes a suspension". So this is a penalty, and a penalty needs a decision behind it. If
+        // TDC needs precautionary suspension it needs its own concept on the case, not this one.
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "suspension");
+
         var existing = await _suspensionRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A suspension penalty already exists for this case. Use Update instead.");
@@ -696,6 +776,9 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
 {
     private readonly IStaffDisciplineFineRepository _fineRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    // ⚠ Injected for DisciplineSanctionGuard: a sanction is refused while an appeal against the
+    // decision is live and undecided.
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineFineService> _logger;
@@ -703,12 +786,14 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     public StaffDisciplineFineService(
         IStaffDisciplineFineRepository fineRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineFineService> logger)
     {
         _fineRepository = fineRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -795,6 +880,8 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
+
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "fine");
 
         var existing = await _fineRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
@@ -1376,42 +1463,6 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         return employee;
     }
 
-    /// <summary>
-    /// Refuses a termination until the decision behind it is final and any appeal against it has
-    /// been answered.
-    /// </summary>
-    /// <remarks>
-    /// <para>Two things were unguarded. A termination could be recorded against a case in ANY status
-    /// — a draft, or one whose proposed sanction was still sitting in an approver's queue — so the
-    /// record could say an employee had been dismissed on a decision nobody had confirmed. And it
-    /// could be recorded while an appeal was live and undecided, which is the procedural failure this
-    /// whole area exists to prevent: dismissing someone while they are still contesting the finding.</para>
-    ///
-    /// <para><b>FR-HR-092 is NOT implemented as a flag here.</b> "The MD shall sign all terminations
-    /// except procedural ones, which HR approves automatically per policy" is a statement about WHO
-    /// CONFIRMS the decision, and that is already expressed: the action type carries its
-    /// <c>MinimumAuthority</c>, and the workflow definition routes on it. A dismissal action type set
-    /// to Management routes to the MD; a procedural one set to Hr does not. Adding an "MD signed"
-    /// boolean here would be a second, unenforced copy of a fact the approval record already holds —
-    /// and it would have to be kept in step with it by hand.</para>
-    /// </remarks>
-    private async Task EnsureTerminationIsFoundedAsync(StaffDisciplinaryAction disciplinaryCase, Guid tenantId)
-    {
-        if (disciplinaryCase.Status is not (DisciplinaryStatus.DecisionMade
-            or DisciplinaryStatus.UnderAppeal
-            or DisciplinaryStatus.Closed))
-        {
-            throw new InvalidOperationException(
-                $"A termination cannot be recorded for a case in '{disciplinaryCase.Status}' status. "
-                + "The decision must be confirmed first.");
-        }
-
-        var appeal = await _appealRepository.GetByCaseIdAsync(tenantId, disciplinaryCase.Id);
-        if (appeal != null && appeal.AppealOutcome == null)
-            throw new InvalidOperationException(
-                "This decision is under appeal and the appeal has not been decided. "
-                + "Record the appeal outcome before terminating.");
-    }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -1500,7 +1551,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A termination record already exists for this case. Use Update instead.");
 
-        await EnsureTerminationIsFoundedAsync(disciplinaryCase, tenantId);
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "termination");
 
         var entity = new StaffDisciplineTermination
         {

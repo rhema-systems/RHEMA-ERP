@@ -343,10 +343,13 @@ _d("AwardsController.cs", [
                "nothing at all: the evidence a nomination is supposed to carry has never been "
                "uploadable.")),
     ("PUT", "api/Awards/nomination-attachments/{}",
-     ("BUILD", "Still open, and deliberately: D-39 gave the family an upload, a list, a download "
-               "and a delete, but the panel offers no way to change an attachment's TYPE or "
-               "description after the fact. Re-upload and delete is the workaround; a small edit "
-               "dialog would close it.")),
+     ("DONE", "Built 2026-08-31 (lane 3). The shared attachments panel gained a correction dialog, "
+              "enabled only for a family whose API has an update route — today this one alone. It "
+              "changes what an attachment IS (type, description) and never where it lives: the "
+              "update DTO carries no file fields, and `hr-awards/probe-lane3-awards.mjs` sends a "
+              "Windows SAM path through this route to assert the stored file is untouched. "
+              "⚠ Still flagged because the caller builds the path (`editPath={(id) => ...}`) — the "
+              "path-builder artefact, not a gap.")),
     ("DELETE", "api/Awards/nomination-attachments/{}",
      ("DONE", "Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39.")),
 ])
@@ -441,25 +444,35 @@ _d("PerformanceAppraisalsController.cs", [
     ("PUT", "api/PerformanceAppraisals/evaluations/{}/scores/{}", _APPR_RAW),
     ("DELETE", "api/PerformanceAppraisals/evaluations/{}/scores/{}", _APPR_RAW),
     ("PUT", "api/PerformanceAppraisals/{}",
-     ("BUILD", "A generated appraisal's header — dates, evaluator, template — has no correction "
-               "path. Regenerating the cycle is not one: it would not touch an appraisal that "
-               "already exists.")),
+     ("DONE", "Built 2026-08-31 (lane 3) as 'Correct dates' on /hr/performance/hr-review/[id]. "
+              "⚠ It was not a correction route as written: `EmployeeId`, `AppraisalCycleId` and "
+              "`Status` are all [Required] on the replace-shaped DTO and were honoured, so a "
+              "'correction' could move an appraisal — with its goals, self-evaluation and scores — "
+              "onto a DIFFERENT PERSON, into another cycle, and walk it Draft→Completed past the "
+              "forward-only state machine in `UpdateStatusAsync`. All three proven against the "
+              "running API before the fix. The server now ignores them and the form binds the "
+              "window only. Still flagged: the caller builds the path.")),
     ("DELETE", "api/PerformanceAppraisals/{}",
-     ("BUILD", "Admin-tier cleanup for an appraisal generated against someone who should not have "
-               "been in scope. No other route removes one.")),
+     ("DONE", "Built 2026-08-31 (lane 3), behind a `HR.Performance.Admin` PermissionGate — an "
+              "HR-role caller is refused with a 403, established by the probe rather than assumed, "
+              "so the control is gated rather than shown-and-refused. Still flagged: path-builder.")),
     ("POST", "api/PerformanceAppraisals/{}/attachments",
-     ("BUILD", "The gated multipart upload exists and was purpose-built here — the controller's own "
-               "remarks record replacing a caller-supplied filePath route and adding the "
-               "entitlement test — and nothing calls it. An appraisal cannot carry evidence.")),
+     ("FALSE", "Built 2026-08-31 (lane 2) via the shared `PerformanceAttachmentsPanel`, which "
+               "assembles `{base}/{owner}/attachments` from props — the path-builder artefact. "
+               "Wired, not missing.")),
     ("DELETE", "api/PerformanceAppraisals/{}/attachments/{}",
-     ("BUILD", "The other half of the same gap.")),
+     ("FALSE", "As the upload above: wired through the shared panel, invisible to instrument 01.")),
     ("POST", "api/PerformanceAppraisals/{}/responses",
-     ("BUILD", "The employee's written answer to their appraisal, gated on the cycle's "
-               "`AllowEmployeeResponse` setting. The read is there, the write has no screen, and "
-               "the setting therefore does nothing. Note before building: the create DTO carries "
-               "no author and the service stamps none — the response is keyed to the appraisal "
-               "alone — and it sits on the HR-desk write policy, so as it stands 'the employee's "
-               "response' is whatever HR types.")),
+     ("INTENTIONAL", "Deliberately unwired as of lane 3, and that IS the fix. ⚠ The entry here used "
+                     "to say the `AllowEmployeeResponse` setting 'therefore does nothing' — wrong: "
+                     "the service enforces it at PerformanceAppraisalService.cs:1003. What was "
+                     "missing was any way to write a response. `AppraisalEmployeeResponse` has NO "
+                     "author column, and this route sits on the HR-desk policy, so through it 'the "
+                     "employee's response' was whatever HR typed. Lane 3 added "
+                     "`POST api/performance-appraisals/me/{}/responses`, which refuses anyone but "
+                     "the appraisal's own employee (404, never 403) — with no field to check, the "
+                     "ROUTE is the author. This one survives for HR transcribing a paper response, "
+                     "the disposition D-32 gave the travel desk's acknowledge.")),
 ])
 
 # ── SuccessionPlan — 8 flagged, all real; 2 blocked on D-14/D-15 ─────────────
@@ -624,11 +637,56 @@ _d("PositionVacanciesController.cs", [
 ])
 
 # ── CheckIns — 2 flagged, both real ─────────────────────────────────────────
-_CHECKIN = ("BUILD", "Goals and appraisal review events both wire their attachment panel; check-ins "
-                     "do not, so a check-in cannot carry evidence.")
+_CHECKIN = ("FALSE", "Built 2026-08-31 (lane 2) via the shared `PerformanceAttachmentsPanel` — "
+                     "check-ins and appraisals are the same four routes with a different prefix, so "
+                     "one panel serves both. It assembles `{base}/{owner}/attachments` from props, "
+                     "which is the path-builder artefact instrument 01 cannot resolve. Wired.")
 _d("CheckInsController.cs", [
     ("POST", "api/CheckIns/{}/attachments", _CHECKIN),
     ("DELETE", "api/CheckIns/{}/attachments/{}", _CHECKIN),
+])
+
+# ── Three controller-level rows that were stale, re-read endpoint by endpoint 2026-08-31 ──
+#
+# ⚠ Each note named something different from what its controller actually flags. A controller-level
+# disposition ages badly precisely because the endpoints under it change while the note does not —
+# the same failure the MedicalInsurance row had, and the reason D2 exists.
+_d("SeparationsController.cs", [
+    # The note said "Clearance — refresh assets". That was built in lane 3 and left the queue; what
+    # is actually flagged is the two sweeps.
+    ("POST", "api/hr/separations/retirements/sweep",
+     ("BUILD", "`runRetirementSweep` exists as a client method with **no screen caller** — an orphan "
+               "of the shape lane 2 kept finding. Low severity, and worth stating why: closure "
+               "lane 1 hosted both sweeps on `SeparationReminderBackgroundService` at a 17-minute "
+               "stagger, so FR-HR-093's retirement alerts DO run nightly. What is missing is the "
+               "manual run-now the other reminder engines offer, which matters when somebody wants "
+               "to see the effect of a policy change today rather than tomorrow.")),
+    ("POST", "api/hr/separations/contract-expiries/sweep",
+     ("BUILD", "_As the retirement sweep above._ Both also carry `?withinDays=`, so they are "
+               "double-flagged — the interpolated query-string artefact on top of having no "
+               "caller.")),
+])
+
+_d("StaffDisciplineSupportController.cs", [
+    # The note said "Action steps and legal reviews are displayed but can never be recorded". Both
+    # were built in slice 9 and are wired; the flags are the document pair.
+    ("POST", "api/discipline/cases/{}/documents",
+     ("INTENTIONAL", "The metadata-only route, deliberately unwired: it rejects every file-location "
+                     "field, so through the API it can only mint a row naming a file that does not "
+                     "exist. Kept for the legacy migration utility. Same split as the succession "
+                     "and staff-movement document routes.")),
+    ("POST", "api/discipline/cases/{}/documents/upload",
+     ("FALSE", "Wired through `hrDocumentService.upload(endpoint, file, fields)` — the helper "
+               "indirection, the single largest false-positive source in this queue.")),
+])
+
+_d("EmployeeCompetencyController.cs", [
+    # The note said "Batch assessment", built in lane 3 and gone from the queue. The delete remains.
+    ("DELETE", "api/employee-competencies/{}",
+     ("BUILD", "An assessment recorded against the wrong person or the wrong competency cannot be "
+               "removed — only re-assessed, which leaves the original in the history as though it "
+               "had been a real judgement. Small, and the new /hr/competencies/assess screen is "
+               "where it belongs.")),
 ])
 
 # ── Movement sub-types — the same hole four times ───────────────────────────
@@ -1128,28 +1186,40 @@ BLOCKERS = [
      "`Microsoft.AspNetCore.Mvc.Filters` happily. An action filter reaches the same result "
      "through an API this solution already builds against.",
      "Cleared for the endpoint that exposed it. The class is addressable now, not addressed"),
-    ("D-18", "The sanctions' block stands, but not for the reason recorded", "OPEN",
-     "The case screen has said since slice 1 that the sanctions must stay read-only \u2014 warning, "
-     "suspension, fine, termination, separation \u2014 \"until the issuing-authority rule is in "
-     "place\". Slice 10 made `MinimumAuthority` maintainable per action type and "
-     "`RecordDecision` does contain the rule, so the condition looked met. It is not, and "
-     "`probe-authority-gate.mjs` establishes why with seven passing assertions.\n\n"
-     "  **No actor reaches the rule.** `HR.Discipline.Write` is granted only to HR, LegacyHrUser, "
-     "SuperAdmin, TenantAdmin and Admin, and the check excludes HR, SuperAdmin and Admin **by "
-     "name**. A head of department \u2014 the actor the rule was written for \u2014 holds none of "
-     "those permissions and is refused at the endpoint gate long before the service check runs. "
-     "There is no head-of-department role at all, which is the deferred org-authority model "
-     "showing through: 0 of 41 org units have a head recorded.\n\n"
-     "  **And the sanctions are not uniformly gated by the decision.** A termination is refused "
-     "until the decision is confirmed (`EnsureTerminationIsFoundedAsync`); a **warning is not**, "
-     "and can be recorded against a case nobody has decided. So even a working authority rule on "
-     "the decision would not govern an editable warning \u2014 the sanction can be written with no "
-     "decision behind it at all.\n\n"
-     "  Two things would clear this: a role that actually holds `HR.Discipline.Write` without "
-     "being HR (which is the org-authority model), and a founded-ness guard on the remaining "
-     "sanctions matching the one termination already has. Until then an editable sanction would "
-     "ship exactly the hole the original note warned about.",
-     "Blocks the 10 sanction endpoints on StaffDisciplineSubEntity"),
+    ("D-18", "The sanctions were blocked on two findings, and one of them was wrong", "DONE 2026-08-31",
+     "The sanctions stayed read-only until the issuing-authority rule was in place, and "
+     "`probe-authority-gate.mjs` held two findings as passing assertions:\n\n"
+     "  **A \u2014 \"no actor reaches the authority rule\". FALSE.** The probe asserted that a head "
+     "of department and a TenantAdmin are both stopped at the endpoint gate, expecting **401**. A "
+     "401 is *not authenticated*; a permission refusal is 403. Both were addressed with tokens "
+     "minted at the top of the run, and this API invalidates tokens well before their `exp` \u2014 so "
+     "those assertions passed against expired credentials and proved nothing about permissions. "
+     "Re-run with a fresh login per actor: a plain employee IS refused at the gate (403, naming the "
+     "permission), a TenantAdmin PASSES it, and the rule then governs them \u2014 refused 403 for a "
+     "Management-authority action, accepted for a HeadOfDepartment one. **The rule works end to end "
+     "and discriminates correctly.**\n\n"
+     "  **B \u2014 the sanctions were not uniformly founded on a decision. TRUE, and "
+     "understated.** The entry said \"a warning is not\" gated; running it found **warning, "
+     "suspension AND fine** all accepted against a case in `UnderReview` with no decision at all. "
+     "Only termination was guarded. Each of those entities says in its own summary that it is "
+     "\"created when the decision includes\" that penalty, so an ungated sanction contradicted the "
+     "model as designed.\n\n"
+     "  **Fixed 2026-08-31.** `EnsureTerminationIsFoundedAsync` became "
+     "`DisciplineSanctionGuard.EnsureFoundedAsync(case, appealRepository, tenantId, noun)` and all "
+     "four sanctions call it. \u26a0 It had to be lifted out of the termination service to a shared "
+     "helper because the four sanctions are four SEPARATE classes in one file and the guard was "
+     "private to one of them \u2014 which is exactly how the other three came to be unguarded. The "
+     "warning, suspension and fine services each gained `IStaffDisciplineAppealRepository`; none had "
+     "it, so none could have enforced the appeal half even if someone had tried. Separation needs no "
+     "guard: it already requires a termination record, so it is transitively founded.\n\n"
+     "  Proven by the rewritten `probe-authority-gate.mjs`, **22 assertions**, which now proves the "
+     "gate WORKS rather than that it does not \u2014 including the positive control that a warning IS "
+     "accepted once the decision is confirmed, without which the four refusals would also pass "
+     "against an endpoint that refuses everything. \u26a0 That control also established that "
+     "proposing a decision is not deciding: it leaves the case `AwaitingDecision`, and the guard "
+     "correctly refuses a sanction there too.",
+     "Cleared. The ten sanction endpoints are unblocked; what FR-HR-080 still wants is a "
+     "head-of-department ROLE to hold the capped authority the rule already enforces"),
     ("D-19", "The per-plan actions read was a summary its panel could not edit from", "DONE 2026-08-30",
      "`GET succession-plans/{id}/actions` returned `SuccessionActionSummaryDto` — id, description, "
      "type, priority, status, due date and the responsible person's NAME. "
@@ -1656,7 +1726,8 @@ w("| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are *
 w("| 2026-08-30 | **The investigation and the hearing are recordable** (area 9 slice 11, 29 assertions). Both were read-only for no reason beyond nobody having built the editors \u2014 neither imposes a penalty, so FR-HR-080 never governed them. Five endpoints, and the panel is built around three traps: `complete` takes a bare JSON string, recording findings does NOT complete the investigation, and clearing the accompaniment must clear every representative field with it. |")
 w("| 2026-08-30 | **A control that cannot enforce does not get an editor.** Travel policy RULES are read by nothing — the booking guard uses the policy's own scalar caps — so the rules register ships read-only and the policy-exception flow does not ship at all. An editable control that enforces nothing creates false assurance, which is worse than no control: a rule set to `Block` is a promise to whoever configures it, and hand-raised exceptions would manufacture audit records implying a control was in force and waived. The write paths exist and stay harness-covered, so enforcement is a screen change. |")
 w("| 2026-08-30 | **Succession documents get one panel, not three.** A `SuccessionDocument` hangs off a plan, a plan candidate or a talent-pool member, and one table, one DTO and one upload route already served all three — so one frontend component takes the owner as a discriminated union and is mounted from the plan detail, the successors tab and the pool members table. The alternative was three near-identical panels drifting apart. |")
-w("| 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** The recorded reason (\"blocked on FR-HR-080\") was imprecise \u2014 the rule exists \u2014 but the substance holds: no actor reaches the rule, and a warning can be recorded against a case nobody has decided. Tested rather than assumed; `probe-authority-gate.mjs` keeps both findings as passing assertions, so the day one fails is the day the gap closed. |")
+w("| 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** \u26a0 **This row was superseded on 2026-08-31 and is kept because it was acted on for a day.** It said no actor reaches the authority rule and a warning can be recorded against an undecided case. The second half was right and understated; the first was wrong — it rested on two probe assertions that expected a **401** where a permission refusal is a 403, and passed against tokens that had gone stale. See D-18. |")
+w("| 2026-08-31 | **The authority rule works, and three of the four sanctions were unfounded.** Re-run with a fresh login per actor, a capped-authority caller is refused a Management-level sanction BY THE RULE and accepted for a head-of-department one — it discriminates rather than merely refusing. Separately, warning, suspension and fine were all accepted on a case with no decision; only termination was guarded. The guard is now shared by all four. The ten sanction endpoints are unblocked; what FR-HR-080 still wants is a head-of-department ROLE to hold the capped authority. |")
 w("| 2026-08-30 | **Stale-navigation-on-a-write-response, fourth instance.** `investigatorName`, `hearingOfficerName` and `representativeEmployeeName` all came back null from the create and update responses while the detail and queue reads resolved them. Four writers now re-read before mapping, the same fix the succession document uploader got. Every instance so far has been found by a harness assertion, never by reading the code. |")
 w("| 2026-08-30 | **The discipline catalogue is authorable** (area 9 slice 10, 43 assertions). Offences, their procedure ladders and the sanction catalogue can all be created, corrected, reordered and retired from `/administration/hr/discipline/catalogue`. A client was previously stuck with whatever the seed shipped — unable to name an offence it had not anticipated, or fix a typo in one it had. |")
 w("| 2026-08-30 | ⚠ **Instrument 01 invented a phantom route for every real one in a file holding two controllers.** It crossed every `[Route]` in a FILE with every `[Http*]` in it, so `StaffDisciplineLookup` read as 20 writes when it has 10, and `Competency` as 12 when it has 6. `api/discipline/action-types/{}/procedures` was reported for months and answers 404 — slice 10 proves it. **Fixed at the instrument**: routes are now attributed per class. 16 phantom endpoints left the backend count (2151 → 2135). |")

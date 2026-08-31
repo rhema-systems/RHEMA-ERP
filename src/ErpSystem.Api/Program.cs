@@ -176,6 +176,52 @@ if (args.Length > 0 && args[0] == "seed-hr-all")
     return;
 }
 
+// Gives the organisation an authority hierarchy — a head on every unit and a line manager on every
+// employee — so the rules that read reporting lines (FR-HR-080's issuing authority, FR-HR-181's
+// grievance ladder, FR-HR-084's responder matrix) have something to resolve against.
+//
+// ⚠ SEPARATE FROM 'seed-hr-all' ON PURPOSE. That command seeds TDC's REAL organisation structure;
+// who heads which unit is fact of the same kind and TDC has not supplied it, so inventing it there
+// would put fabricated management lines behind a command that is otherwise trustworthy. This one
+// never overwrites an existing head or manager, so running it where the real hierarchy has been
+// entered does nothing.
+if (args.Length > 0 && args[0] == "seed-hr-org-authority")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        var tenant = await context.Set<ErpSystem.Core.Entities.Tenant>()
+            .FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+        if (tenant is null)
+        {
+            Console.WriteLine("❌ DEFAULT tenant not found. Run 'rebuild-db', then 'seed', then 'seed-hr-all'.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var seeder = new ErpSystem.Data.Seeders.HrOrgAuthoritySeeder(
+            context, loggerFactory.CreateLogger<ErpSystem.Data.Seeders.HrOrgAuthoritySeeder>());
+
+        // ⚠ Deliberately NOT short-circuited on "every unit has a head". Heads and managers are two
+        // passes, and gating the whole command on the first one means a re-run skips the second —
+        // which is how a cycle in the manager graph survived its first correction. The seeder is
+        // idempotent by never-overwriting, so running it always is safe and reports what it kept.
+        await seeder.SeedAsync(tenant.Id);
+    }
+
+    Console.WriteLine("✅ Org authority seeded (TEST data — see the warning in the log).");
+    return;
+}
+
 // Check for workflow-only seeding command.
 if (args.Length > 0 && args[0] == "seed-workflows")
 {
