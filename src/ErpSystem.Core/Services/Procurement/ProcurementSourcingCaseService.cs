@@ -552,7 +552,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             };
         }
         return await BuildEntryGateAsync(entity, expectedMethod, sourceType, sourceReference,
-            normalizedCorrelation, cancellationToken);
+            normalizedCorrelation, recordAllowedDecision: true, cancellationToken);
     }
 
     public async Task<ProcurementSourcingCaseEntryGateDto> RecoverTenderSourceEntryAsync(
@@ -635,8 +635,13 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
                 "SOURCING_CASE_REQUIRED",
                 "The tender's current immutable release could not be locked into a policy-controlled sourcing case.");
 
+        var sourceAlreadyRegistered = entity.SourceRequests.Any(item =>
+            !item.IsDeleted &&
+            item.Status == ProcurementSourcingCaseSourceRequestStatus.Created &&
+            item.SourceEntityId == tenderId &&
+            string.Equals(item.SourceType, "Tender", StringComparison.OrdinalIgnoreCase));
         var gate = await BuildEntryGateAsync(entity, null, "Tender", tenderReference,
-            normalizedCorrelation, cancellationToken);
+            normalizedCorrelation, recordAllowedDecision: !sourceAlreadyRegistered, cancellationToken);
         await RegisterSourceRequestCoreAsync(entity.Id, "Tender", tenderId, tenderReference,
             normalizedCorrelation, cancellationToken);
         return gate;
@@ -661,6 +666,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         string sourceType,
         string sourceReference,
         string normalizedCorrelation,
+        bool recordAllowedDecision,
         CancellationToken cancellationToken)
     {
         if (entity.Status is ProcurementSourcingCaseStatus.Closed or ProcurementSourcingCaseStatus.Cancelled)
@@ -682,9 +688,12 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             throw new ProcurementRequisitionSourcingValidationException(state.Code, state.Message);
         }
         var methodRule = await LoadOperationalMethodRuleAsync(entity.MethodRuleId, cancellationToken);
-        await RecordAsync(entity, "SourcingCaseEntryAllowed", ProcurementControlEventResult.Allowed,
-            new { sourceType, sourceReference, entity.SourcingReleaseId }, normalizedCorrelation, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (recordAllowedDecision)
+        {
+            await RecordAsync(entity, "SourcingCaseEntryAllowed", ProcurementControlEventResult.Allowed,
+                new { sourceType, sourceReference, entity.SourcingReleaseId }, normalizedCorrelation, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
         return new ProcurementSourcingCaseEntryGateDto
         {
             SourcingCaseId = entity.Id,

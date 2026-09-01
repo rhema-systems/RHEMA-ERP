@@ -370,7 +370,7 @@ public sealed class ProcurementSourcingCaseServiceTests
             fixture.ReleaseDto.Id,
             tenderId,
             "TND-LEGACY-001",
-            "trace-evaluation-recovery-retry");
+            "trace-evaluation-recovery");
 
         recovered.SourcingReleaseId.Should().Be(fixture.ReleaseDto.Id);
         recovered.SourcingCaseId.Should().NotBeNull();
@@ -383,6 +383,12 @@ public sealed class ProcurementSourcingCaseServiceTests
             item.SourceType == "Tender" &&
             item.SourceEntityId == tenderId &&
             item.SourceEntityReference == "TND-LEGACY-001");
+        (await fixture.Context.ProcurementControlEvents.CountAsync(item =>
+            item.Action == "SourcingCaseEntryAllowed" &&
+            item.CorrelationId == "trace-evaluation-recovery")).Should().Be(1);
+        (await fixture.Context.ProcurementControlEvents.CountAsync(item =>
+            item.Action == "SourcingSourceRegistered" &&
+            item.CorrelationId == "trace-evaluation-recovery")).Should().Be(1);
         (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
         fixture.VerifyRecoveryAuthorization("procurement.tender.evaluate", Times.Exactly(2));
     }
