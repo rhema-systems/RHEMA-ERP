@@ -1504,6 +1504,53 @@ public sealed class ControlledOpeningBalancePostingTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Reversal")]
+    public async Task PostedOpeningBalanceReversal_ShouldRequireIndependentReviewAndPostCompensatingEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var maker = CreateService(db, tenantId, withAudit: true);
+        var batch = await maker.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+        await maker.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
+        var posted = await maker.PostAsync(batch.Id);
+
+        var request = await maker.RequestReversalAsync(batch.Id, new RequestOpeningBalanceBatchReversalDto
+        {
+            ReversalDate = new DateTime(2026, 1, 1),
+            Reason = "Incorrect cutover values require controlled correction",
+            ImpactAssessment = "The original GL opening will be neutralized before a corrected controlled batch is prepared."
+        });
+        await FluentActions.Awaiting(() => maker.ReviewReversalAsync(batch.Id, request.Id, new ReviewOpeningBalanceBatchReversalDto
+            {
+                Approved = true,
+                ReviewComment = "Independent review confirms the correction is necessary."
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The reversal requester cannot review the same request.");
+
+        var checker = CreateService(db, tenantId, withAudit: true);
+        var approved = await checker.ReviewReversalAsync(batch.Id, request.Id, new ReviewOpeningBalanceBatchReversalDto
+        {
+            Approved = true,
+            ReviewComment = "Independent review confirms the correction is necessary."
+        });
+        approved.Status.Should().Be(OpeningBalanceBatchReversalStatuses.Approved);
+
+        var reversed = await checker.PostReversalAsync(batch.Id, request.Id);
+        reversed.Status.Should().Be(OpeningBalanceBatchReversalStatuses.Posted);
+        reversed.OriginalJournalEntryId.Should().Be(posted.JournalEntryId!.Value);
+        reversed.ReversalJournalEntryId.Should().NotBeNull();
+        reversed.ReversalPostingEventId.Should().NotBeNull();
+        (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Reversed");
+        (await db.Accounts.SingleAsync(item => item.Id == fixture.Cash.Id)).Balance.Should().Be(0m);
+        (await db.Accounts.SingleAsync(item => item.Id == fixture.Equity.Id)).Balance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "AccountingControl")]
     public async Task FreeFormOpeningBalance_ShouldRejectEveryProtectedAccountSourceBeforePersistence()
     {
@@ -1827,7 +1874,7 @@ public sealed class ControlledOpeningBalancePostingTests
             .Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Controlled opening balances require the Finance approval workflow*");
 
-        (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Draft");
+        (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Validated");
     }
 
     [Fact]
@@ -2829,7 +2876,8 @@ public sealed class ControlledOpeningBalancePostingTests
             postingEngine,
             audit,
             withoutWorkflow ? null : workflow ?? CreatePendingOpeningWorkflow(),
-            logger);
+            logger,
+            reversalPolicyService: new FinanceReversalPolicyService(db, currentUser.Object));
     }
 
     private static IWorkflowService CreateCompletedOpeningWorkflow()

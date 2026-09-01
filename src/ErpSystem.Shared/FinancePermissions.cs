@@ -150,6 +150,7 @@ public static class FinancePermissions
     public const string RunMigrationDiagnostics = "Finance.Migration.Diagnostics.Run";
     public const string RunMigrationAdjustments = "Finance.Migration.Adjustments.Run";
     public const string PrepareOpeningBalances = "Finance.Migration.OpeningBalances.Prepare";
+    public const string ApproveOpeningBalanceReversal = "Finance.Migration.OpeningBalances.Reversal.Approve";
 
     public const string ViewBudgets = "Finance.Budgeting.Read";
     public const string MaintainBudgets = "Finance.Budgeting.Write";
@@ -287,6 +288,7 @@ public static class FinancePermissions
         new(RunMigrationDiagnostics, "Run Finance Migration Diagnostics", "Run finance migration diagnostics and reconciliation checks.", CategoryMigration),
         new(RunMigrationAdjustments, "Run Finance Migration Adjustments", "Run approved finance migration adjustment actions.", CategoryMigration),
         new(PrepareOpeningBalances, "Prepare Opening Balances", "Create, validate, and submit controlled opening-balance batches for approval.", CategoryMigration),
+        new(ApproveOpeningBalanceReversal, "Approve Opening Balance Reversal", "Independently approve or reject controlled opening-balance reversal requests.", CategoryMigration),
 
         new(ViewBudgets, "View Budgets", "View budget scenarios, returns, and worksheets.", CategoryBudgeting),
         new(MaintainBudgets, "Maintain Budgets", "Create budget scenarios, returns, and entries.", CategoryBudgeting),

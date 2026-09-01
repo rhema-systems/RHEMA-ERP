@@ -418,6 +418,10 @@ public static class FinanceAuditEvents
     public const string OpeningBalancePosted = "Finance.Migration.OpeningBalancePosted";
     public const string OpeningBalancePostingFailed = "Finance.Migration.OpeningBalancePostingFailed";
     public const string OpeningBalanceBlockedInvalidConfiguration = "Finance.Migration.OpeningBalanceBlockedInvalidConfiguration";
+    public const string OpeningBalanceReversalRequested = "Finance.Migration.OpeningBalanceReversalRequested";
+    public const string OpeningBalanceReversalApproved = "Finance.Migration.OpeningBalanceReversalApproved";
+    public const string OpeningBalanceReversalRejected = "Finance.Migration.OpeningBalanceReversalRejected";
+    public const string OpeningBalanceReversed = "Finance.Migration.OpeningBalanceReversed";
     public const string BankSnapshotRebuildDiagnosticRun = "Finance.Migration.BankSnapshotRebuildDiagnosticRun";
     public const string BankSnapshotRebuildApplied = "Finance.Migration.BankSnapshotRebuildApplied";
     public const string PostingBackReferenceRepairDiagnosticRun = "Finance.Migration.PostingBackReferenceRepairDiagnosticRun";

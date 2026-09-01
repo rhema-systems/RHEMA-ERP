@@ -174,6 +174,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<SubledgerSettlementApplication> SubledgerSettlementApplications { get; set; }
     public DbSet<SubledgerUnappliedSettlementBalance> SubledgerUnappliedSettlementBalances { get; set; }
     public DbSet<OpeningBalanceBatch> OpeningBalanceBatches { get; set; }
+    public DbSet<OpeningBalanceBatchReversal> OpeningBalanceBatchReversals { get; set; }
     public DbSet<OpeningBalanceLine> OpeningBalanceLines { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
@@ -3524,6 +3525,51 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<ExchangeRate>()
                 .WithMany()
                 .HasForeignKey(e => e.CapitalizationApprovalExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<OpeningBalanceBatchReversal>(entity =>
+        {
+            entity.ToTable("OpeningBalanceBatchReversals");
+            entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Status] <> N'Rejected'");
+            entity.HasIndex(e => new { e.TenantId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
+            entity.Property(e => e.SourceKind).HasMaxLength(40).IsRequired();
+            entity.Property(e => e.BookClassification).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.RequestedByUserName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ReviewedByUserName).HasMaxLength(200);
+            entity.Property(e => e.ReviewComment).HasMaxLength(2000);
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.Property(e => e.OriginalTotalDebit).HasPrecision(18, 2);
+            entity.Property(e => e.OriginalTotalCredit).HasPrecision(18, 2);
+            entity.HasOne(e => e.OpeningBalanceBatch)
+                .WithMany(e => e.Reversals)
+                .HasForeignKey(e => e.OpeningBalanceBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

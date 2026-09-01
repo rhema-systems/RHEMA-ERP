@@ -14,6 +14,7 @@ import {
     Loader2,
     Plus,
     RefreshCw,
+    RotateCcw,
     Send,
     ShieldCheck,
     Trash2,
@@ -54,7 +55,7 @@ type OpeningLine = {
     notes: string;
 };
 
-type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | 'specialized' | 'governed-bank' | 'governed-inventory' | 'governed-residual' | null;
+type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | 'specialized' | 'governed-bank' | 'governed-inventory' | 'governed-residual' | 'reversal-request' | 'reversal-review' | 'reversal-post' | null;
 type SpecializedOpeningKind = 'supplierAdvance' | 'customerAdvance' | 'apWithholding' | 'arWithholding';
 
 const BASE_CURRENCY = 'GHS';
@@ -140,6 +141,7 @@ export default function OpeningBalancesPage() {
     const canPrepareOpeningBalances = hasPermission('Finance.Migration.OpeningBalances.Prepare');
     const canSubmitOpeningBalances = canPrepareOpeningBalances && hasPermission('Finance.Workflow.Submit');
     const canPostOpeningBalances = hasPermission('Finance.Migration.Adjustments.Run');
+    const canApproveOpeningReversal = hasPermission('Finance.Migration.OpeningBalances.Reversal.Approve');
     const canViewOpeningBalances = hasPermission('Finance.Read') || canPrepareOpeningBalances || canPostOpeningBalances;
     const canRunDiagnostics = hasPermission('Finance.Migration.Diagnostics.Run');
     const canPrepareInventoryOpening = hasPermission('procurement.inventory.adjust.request');
@@ -160,6 +162,12 @@ export default function OpeningBalancesPage() {
     // because the operator changes the batch header after selecting a row.
     const [selectedFixedAssetBookValueIds, setSelectedFixedAssetBookValueIds] = useState<string[]>([]);
     const [comment, setComment] = useState('');
+    const [reversalForm, setReversalForm] = useState({
+        reversalDate: todayInputValue(),
+        reason: '',
+        impactAssessment: '',
+        reviewComment: '',
+    });
     const [specialized, setSpecialized] = useState({
         kind: 'supplierAdvance' as SpecializedOpeningKind,
         partyId: '', taxId: '', sourceReference: '', currencyCode: BASE_CURRENCY,
@@ -669,6 +677,64 @@ export default function OpeningBalancesPage() {
             toast({ title: 'Opening batch posted', description: posted.batchNumber });
         } catch (error: any) {
             toast({ title: 'Post failed', description: error?.message || 'Unable to post opening balance batch.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const refreshCurrentBatch = async () => {
+        if (!currentBatch) return;
+        const refreshed = await financeDataService.getOpeningBalanceBatch(currentBatch.id);
+        applyBatchToForm(refreshed);
+        await Promise.all([refetchDiagnostics(), batchesQuery.refetch(), subledgerReadinessQuery.refetch()]);
+    };
+
+    const handleRequestReversal = async () => {
+        if (!currentBatch) return;
+        try {
+            setBusyAction('reversal-request');
+            await financeDataService.requestOpeningBalanceReversal(currentBatch.id, {
+                reversalDate: reversalForm.reversalDate,
+                reason: reversalForm.reason,
+                impactAssessment: reversalForm.impactAssessment,
+            });
+            await refreshCurrentBatch();
+            toast({ title: 'Reversal submitted for independent review' });
+        } catch (error: any) {
+            toast({ title: 'Reversal request failed', description: error?.message || 'Unable to request reversal.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleReviewReversal = async (approved: boolean) => {
+        const request = currentBatch?.reversals?.[0];
+        if (!currentBatch || !request) return;
+        try {
+            setBusyAction('reversal-review');
+            await financeDataService.reviewOpeningBalanceReversal(currentBatch.id, request.id, {
+                approved,
+                reviewComment: reversalForm.reviewComment,
+            });
+            await refreshCurrentBatch();
+            toast({ title: approved ? 'Reversal approved' : 'Reversal rejected' });
+        } catch (error: any) {
+            toast({ title: 'Reversal review failed', description: error?.message || 'Unable to review reversal.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handlePostReversal = async () => {
+        const request = currentBatch?.reversals?.[0];
+        if (!currentBatch || !request) return;
+        try {
+            setBusyAction('reversal-post');
+            await financeDataService.postOpeningBalanceReversal(currentBatch.id, request.id);
+            await refreshCurrentBatch();
+            toast({ title: 'Opening-balance correction posted' });
+        } catch (error: any) {
+            toast({ title: 'Reversal posting failed', description: error?.message || 'Unable to post reversal.', variant: 'destructive' });
         } finally {
             setBusyAction(null);
         }
@@ -1305,6 +1371,69 @@ export default function OpeningBalancesPage() {
                                             <span className="text-muted-foreground">Posted</span>
                                             <span>{currentBatch.postedAt ? normalizeDate(currentBatch.postedAt) : '-'}</span>
                                         </div>
+                                        {(currentBatch.status === 'Posted' || currentBatch.status === 'Reversed') && (
+                                            <>
+                                                <Separator />
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className="font-medium">Controlled correction</span>
+                                                        {currentBatch.reversals?.[0] && (
+                                                            <Badge variant={statusVariant(currentBatch.reversals[0].status)}>{currentBatch.reversals[0].status}</Badge>
+                                                        )}
+                                                    </div>
+
+                                                    {(!currentBatch.reversals?.[0] || currentBatch.reversals[0].status === 'Rejected') && currentBatch.status === 'Posted' && (
+                                                        <div className="space-y-3 rounded-md border p-3">
+                                                            <Alert>
+                                                                <RotateCcw className="h-4 w-4" />
+                                                                <AlertTitle>Compensating reversal only</AlertTitle>
+                                                                <AlertDescription>The original journal remains immutable. Source dependencies are checked before review and posting.</AlertDescription>
+                                                            </Alert>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor="opening-reversal-date">Reversal date</Label>
+                                                                <Input id="opening-reversal-date" type="date" value={reversalForm.reversalDate} onChange={(event) => setReversalForm(value => ({ ...value, reversalDate: event.target.value }))} />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor="opening-reversal-reason">Reason</Label>
+                                                                <Textarea id="opening-reversal-reason" rows={3} value={reversalForm.reason} onChange={(event) => setReversalForm(value => ({ ...value, reason: event.target.value }))} placeholder="Explain the cutover error." />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor="opening-reversal-impact">Impact assessment</Label>
+                                                                <Textarea id="opening-reversal-impact" rows={3} value={reversalForm.impactAssessment} onChange={(event) => setReversalForm(value => ({ ...value, impactAssessment: event.target.value }))} placeholder="Describe the GL, subledger, bank, tax, or asset impact." />
+                                                            </div>
+                                                            <Button variant="destructive" className="w-full" onClick={handleRequestReversal} disabled={!canPostOpeningBalances || busyAction !== null || reversalForm.reason.trim().length < 10 || reversalForm.impactAssessment.trim().length < 20}>
+                                                                {busyAction === 'reversal-request' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                                                                Request reversal
+                                                            </Button>
+                                                        </div>
+                                                    )}
+
+                                                    {currentBatch.reversals?.[0]?.status === 'PendingApproval' && (
+                                                        <div className="space-y-3 rounded-md border p-3">
+                                                            <div className="text-muted-foreground">{currentBatch.reversals[0].reason}</div>
+                                                            <Textarea rows={3} value={reversalForm.reviewComment} onChange={(event) => setReversalForm(value => ({ ...value, reviewComment: event.target.value }))} placeholder="Independent review comment (minimum 20 characters)" />
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                <Button variant="outline" onClick={() => handleReviewReversal(false)} disabled={!canApproveOpeningReversal || busyAction !== null || reversalForm.reviewComment.trim().length < 20}>Reject</Button>
+                                                                <Button onClick={() => handleReviewReversal(true)} disabled={!canApproveOpeningReversal || busyAction !== null || reversalForm.reviewComment.trim().length < 20}>Approve</Button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {currentBatch.reversals?.[0]?.status === 'Approved' && (
+                                                        <Button variant="destructive" className="w-full" onClick={handlePostReversal} disabled={!canPostOpeningBalances || busyAction !== null}>
+                                                            {busyAction === 'reversal-post' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                                                            Post approved correction
+                                                        </Button>
+                                                    )}
+
+                                                    {currentBatch.reversals?.[0]?.reversalJournalEntryId && (
+                                                        <Link className="font-medium text-primary hover:underline" href={`/finance/journal-entries/${currentBatch.reversals[0].reversalJournalEntryId}`}>
+                                                            View reversal journal
+                                                        </Link>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
                                     </CardContent>
                                 </Card>
                             )}

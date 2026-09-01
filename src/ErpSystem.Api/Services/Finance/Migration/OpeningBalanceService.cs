@@ -28,6 +28,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     private const string StatusApproved = "Approved";
     private const string StatusRejected = "Rejected";
     private const string StatusPosted = "Posted";
+    private const string StatusReversed = "Reversed";
     private const string StatusFailed = "Failed";
     private const string StatusPostingFailed = "PostingFailed";
     private const string FixedAssetOpeningCost = "FixedAssetOpeningCost";
@@ -53,6 +54,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     private readonly IWorkflowService? _workflowService;
     private readonly ILogger<OpeningBalanceService>? _logger;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFinanceReversalPolicyService? _reversalPolicyService;
 
     public OpeningBalanceService(
         ApplicationDbContext db,
@@ -61,7 +63,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         IFinanceAuditService? financeAuditService = null,
         IWorkflowService? workflowService = null,
         ILogger<OpeningBalanceService>? logger = null,
-        IUnitOfWork? unitOfWork = null)
+        IUnitOfWork? unitOfWork = null,
+        IFinanceReversalPolicyService? reversalPolicyService = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -70,6 +73,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         _workflowService = workflowService;
         _logger = logger;
         _unitOfWork = unitOfWork ?? new UnitOfWork(db);
+        _reversalPolicyService = reversalPolicyService;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -1584,6 +1588,206 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             ?? throw new InvalidOperationException("Opening balance batch was posted but could not be reloaded.");
     }
 
+    public async Task<OpeningBalanceBatchReversalDto> RequestReversalAsync(
+        Guid batchId,
+        RequestOpeningBalanceBatchReversalDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        if (_reversalPolicyService == null)
+            throw new InvalidOperationException("Finance reversal policy is not configured for opening balances.");
+        var userId = CurrentUserId() ?? throw new InvalidOperationException("A resolved user identity is required to request an opening-balance reversal.");
+        var batch = await LoadBatchAsync(TenantId, batchId, cancellationToken);
+        EnsurePostedBatchCanBeReversed(batch);
+        await EnsureOpeningReversalDependenciesAsync(batch, cancellationToken);
+
+        var existing = await _db.OpeningBalanceBatchReversals.AnyAsync(item =>
+            item.TenantId == batch.TenantId && item.OpeningBalanceBatchId == batch.Id &&
+            item.Status != OpeningBalanceBatchReversalStatuses.Rejected && !item.IsDeleted,
+            cancellationToken);
+        if (existing)
+            throw new InvalidOperationException("This opening-balance batch already has an active or posted reversal request.");
+
+        var policy = await _reversalPolicyService.ResolveAsync(batch.OpeningDate, dto.Reason, dto.ReversalDate, cancellationToken);
+        var impact = dto.ImpactAssessment?.Trim() ?? string.Empty;
+        if (impact.Length < 20)
+            throw new ArgumentException("The opening-balance reversal impact assessment must contain at least 20 characters.", nameof(dto));
+
+        var request = new OpeningBalanceBatchReversal
+        {
+            TenantId = batch.TenantId,
+            OpeningBalanceBatchId = batch.Id,
+            OriginalPostingEventId = batch.PostingEventId!.Value,
+            OriginalJournalEntryId = batch.JournalEntryId!.Value,
+            SourceKind = GetOpeningSourceKind(batch),
+            BookClassification = batch.BookClassification,
+            OriginalOpeningDate = batch.OpeningDate,
+            OriginalTotalDebit = batch.TotalDebit,
+            OriginalTotalCredit = batch.TotalCredit,
+            Status = OpeningBalanceBatchReversalStatuses.PendingApproval,
+            Reason = policy.Reason,
+            ImpactAssessment = impact,
+            RequestedReversalDate = policy.ReversalDate,
+            RequestedByUserId = userId,
+            RequestedByUserName = _currentUser.UserName ?? "system",
+            RequestedAt = DateTime.UtcNow,
+            CreatedBy = _currentUser.UserName ?? "system",
+            CreatedById = userId
+        };
+        _db.OpeningBalanceBatchReversals.Add(request);
+        await _db.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            FinanceAuditEvents.OpeningBalanceReversalRequested,
+            batch,
+            beforeValues: new { batch.Status, batch.JournalEntryId, batch.PostingEventId },
+            afterValues: MapReversal(request),
+            reason: request.Reason,
+            comment: impact,
+            cancellationToken: cancellationToken);
+        return MapReversal(request);
+    }
+
+    public async Task<OpeningBalanceBatchReversalDto> ReviewReversalAsync(
+        Guid batchId,
+        Guid requestId,
+        ReviewOpeningBalanceBatchReversalDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var userId = CurrentUserId() ?? throw new InvalidOperationException("A resolved user identity is required to review an opening-balance reversal.");
+        var request = await LoadReversalAsync(batchId, requestId, cancellationToken);
+        if (request.Status != OpeningBalanceBatchReversalStatuses.PendingApproval)
+            throw new InvalidOperationException("Only an opening-balance reversal awaiting approval can be reviewed.");
+        if (request.RequestedByUserId == userId)
+            throw new InvalidOperationException("The reversal requester cannot review the same request.");
+        var comment = dto.ReviewComment?.Trim() ?? string.Empty;
+        if (comment.Length < 20)
+            throw new ArgumentException("The opening-balance reversal review comment must contain at least 20 characters.", nameof(dto));
+
+        if (dto.Approved)
+        {
+            EnsureReversalSnapshotStillMatches(request);
+            await EnsureOpeningReversalDependenciesAsync(request.OpeningBalanceBatch, cancellationToken);
+        }
+        request.Status = dto.Approved
+            ? OpeningBalanceBatchReversalStatuses.Approved
+            : OpeningBalanceBatchReversalStatuses.Rejected;
+        request.ReviewedByUserId = userId;
+        request.ReviewedByUserName = _currentUser.UserName ?? "system";
+        request.ReviewedAt = DateTime.UtcNow;
+        request.ReviewComment = comment;
+        request.UpdatedAt = DateTime.UtcNow;
+        request.UpdatedBy = _currentUser.UserName ?? "system";
+        request.LastModifiedById = userId;
+        await _db.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            dto.Approved ? FinanceAuditEvents.OpeningBalanceReversalApproved : FinanceAuditEvents.OpeningBalanceReversalRejected,
+            request.OpeningBalanceBatch,
+            beforeValues: new { Status = OpeningBalanceBatchReversalStatuses.PendingApproval },
+            afterValues: new { request.Id, request.Status, request.ReviewedByUserId, request.ReviewedAt },
+            reason: request.Reason,
+            comment: comment,
+            cancellationToken: cancellationToken);
+        return MapReversal(request);
+    }
+
+    public async Task<OpeningBalanceBatchReversalDto> PostReversalAsync(
+        Guid batchId,
+        Guid requestId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_reversalPolicyService == null)
+            throw new InvalidOperationException("Finance reversal policy is not configured for opening balances.");
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null
+                ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var request = await LoadReversalAsync(batchId, requestId, cancellationToken);
+                if (request.Status == OpeningBalanceBatchReversalStatuses.Posted)
+                    return MapReversal(request);
+                if (request.Status != OpeningBalanceBatchReversalStatuses.Approved)
+                    throw new InvalidOperationException("Only an independently approved opening-balance reversal can be posted.");
+                EnsureReversalSnapshotStillMatches(request);
+                await EnsureOpeningReversalDependenciesAsync(request.OpeningBalanceBatch, cancellationToken);
+                var policy = await _reversalPolicyService.ResolveAsync(
+                    request.OriginalOpeningDate, request.Reason, request.RequestedReversalDate, cancellationToken);
+                var plan = await _postingEngine.GetReversalPlanAsync(
+                    request.OriginalPostingEventId, policy.Reason, policy.ReversalDate, cancellationToken);
+                var functionalCurrency = await GetFunctionalCurrencyAsync(request.TenantId, cancellationToken);
+                var posting = await _postingEngine.PostAsync(new FinancePostingRequestDto
+                {
+                    SourceModule = SourceModule,
+                    SourceDocumentType = "OpeningBalanceBatchReversal",
+                    SourceDocumentId = request.Id,
+                    SourceDocumentTenantId = request.TenantId,
+                    PostingAction = "ReverseOpeningBalance",
+                    SourceDocumentReference = request.OpeningBalanceBatch.BatchNumber,
+                    Description = $"Reverse opening balance batch {request.OpeningBalanceBatch.BatchNumber}",
+                    PostingDate = plan.ReversalDate,
+                    JournalType = "Opening Balance Reversal",
+                    BookClassification = request.BookClassification,
+                    FunctionalCurrencyCode = functionalCurrency,
+                    ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+                    ReversalReason = policy.Reason,
+                    ReversalType = "Opening Balance",
+                    IdempotencyKey = $"MIGRATION:OpeningBalanceReversal:{request.TenantId:N}:{request.Id:N}",
+                    ReturnExistingOnDuplicate = true,
+                    Lines = plan.ReversalLines
+                }, cancellationToken);
+
+                if (_db.Entry(request).State == EntityState.Detached)
+                    request = await LoadReversalAsync(batchId, requestId, cancellationToken);
+                await ApplyOpeningReversalToSourceAsync(request, posting, cancellationToken);
+                request.ReversalJournalEntryId = posting.JournalEntryId;
+                request.ReversalPostingEventId = posting.PostingEventId;
+                request.PostedAt = posting.PostingDate;
+                request.Status = OpeningBalanceBatchReversalStatuses.Posted;
+                request.OpeningBalanceBatch.Status = StatusReversed;
+                request.OpeningBalanceBatch.UpdatedAt = DateTime.UtcNow;
+                request.OpeningBalanceBatch.UpdatedBy = _currentUser.UserName ?? "system";
+                request.OpeningBalanceBatch.LastModifiedById = CurrentUserId();
+                await _db.SaveChangesAsync(cancellationToken);
+                await RecordAuditAsync(
+                    FinanceAuditEvents.OpeningBalanceReversed,
+                    request.OpeningBalanceBatch,
+                    beforeValues: new { Status = StatusPosted, request.OriginalJournalEntryId, request.OriginalPostingEventId },
+                    afterValues: new { request.Status, posting.JournalEntryId, posting.PostingEventId, posting.PostingDate },
+                    reason: policy.Reason,
+                    comment: request.ImpactAssessment,
+                    cancellationToken: cancellationToken);
+                if (transaction != null)
+                    await transaction.CommitAsync(cancellationToken);
+                return MapReversal(request);
+            }
+            catch
+            {
+                if (transaction != null)
+                    await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
+    }
+
+    public async Task<IReadOnlyList<OpeningBalanceBatchReversalDto>> GetReversalsAsync(
+        Guid batchId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var exists = await _db.OpeningBalanceBatches.AsNoTracking().AnyAsync(batch =>
+            batch.TenantId == tenantId && batch.Id == batchId && !batch.IsDeleted, cancellationToken);
+        if (!exists)
+            throw new InvalidOperationException("Opening balance batch was not found for the current tenant.");
+        var reversals = await _db.OpeningBalanceBatchReversals.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.OpeningBalanceBatchId == batchId && !item.IsDeleted)
+            .OrderByDescending(item => item.RequestedAt)
+            .ToListAsync(cancellationToken);
+        return reversals.Select(MapReversal).ToList();
+    }
+
     public async Task<IReadOnlyList<OpeningBalanceDiagnosticDto>> GetDiagnosticsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -2232,6 +2436,223 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         }
     }
 
+    private async Task<OpeningBalanceBatchReversal> LoadReversalAsync(
+        Guid batchId,
+        Guid requestId,
+        CancellationToken cancellationToken)
+        => await _db.OpeningBalanceBatchReversals
+            .Include(item => item.OpeningBalanceBatch)
+                .ThenInclude(batch => batch.Lines)
+            .SingleOrDefaultAsync(item =>
+                item.TenantId == TenantId && item.Id == requestId &&
+                item.OpeningBalanceBatchId == batchId && !item.IsDeleted,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Opening-balance reversal request was not found for the current tenant.");
+
+    private static void EnsurePostedBatchCanBeReversed(OpeningBalanceBatch batch)
+    {
+        if (!string.Equals(batch.Status, StatusPosted, StringComparison.OrdinalIgnoreCase) ||
+            !batch.JournalEntryId.HasValue || !batch.PostingEventId.HasValue)
+        {
+            throw new InvalidOperationException("Only a posted opening-balance batch with complete journal evidence can be reversed.");
+        }
+    }
+
+    private static void EnsureReversalSnapshotStillMatches(OpeningBalanceBatchReversal request)
+    {
+        var batch = request.OpeningBalanceBatch;
+        EnsurePostedBatchCanBeReversed(batch);
+        if (batch.JournalEntryId != request.OriginalJournalEntryId ||
+            batch.PostingEventId != request.OriginalPostingEventId ||
+            batch.OpeningDate != request.OriginalOpeningDate ||
+            !string.Equals(batch.BookClassification, request.BookClassification, StringComparison.OrdinalIgnoreCase) ||
+            batch.TotalDebit != request.OriginalTotalDebit || batch.TotalCredit != request.OriginalTotalCredit ||
+            !string.Equals(GetOpeningSourceKind(batch), request.SourceKind, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The posted opening-balance evidence no longer matches the approved reversal snapshot.");
+        }
+    }
+
+    private async Task EnsureOpeningReversalDependenciesAsync(
+        OpeningBalanceBatch batch,
+        CancellationToken cancellationToken)
+    {
+        EnsurePostedBatchCanBeReversed(batch);
+        if (!HasResidualGlEquityOpeningEvidence(batch))
+        {
+            var residualStillPosted = await _db.OpeningBalanceBatches.AnyAsync(candidate =>
+                candidate.TenantId == batch.TenantId && candidate.Id != batch.Id && !candidate.IsDeleted &&
+                candidate.Status == StatusPosted && candidate.OpeningDate == batch.OpeningDate &&
+                candidate.BookClassification == batch.BookClassification &&
+                candidate.Lines.Any(line => line.CounterpartyType == ResidualAccruedOpening ||
+                    line.CounterpartyType == ResidualShareCapitalOpening ||
+                    line.CounterpartyType == ResidualRetainedEarnings ||
+                    line.CounterpartyType == ResidualMigrationClearing) &&
+                !candidate.Reversals.Any(reversal => !reversal.IsDeleted &&
+                    reversal.Status == OpeningBalanceBatchReversalStatuses.Posted),
+                cancellationToken);
+            if (residualStillPosted)
+                throw new InvalidOperationException("Reverse the posted residual GL/equity close-out batch before reversing an upstream opening source.");
+        }
+
+        if (HasBankAccountOpeningEvidence(batch))
+        {
+            var primary = batch.Lines.Single(IsBankAccountOpeningPrimaryLine);
+            var bankId = primary.BankAccountId ?? throw new InvalidOperationException("Bank opening evidence is missing its bank account link.");
+            var bank = await _db.BankAccounts.AsNoTracking().SingleAsync(item =>
+                item.TenantId == batch.TenantId && item.Id == bankId && !item.IsDeleted, cancellationToken);
+            var originalAmount = primary.TransactionDebitAmount ?? primary.DebitAmount;
+            if (bank.CurrentBalance != originalAmount || bank.AvailableBalance != originalAmount || bank.OpeningDate.Date != batch.OpeningDate.Date)
+                throw new InvalidOperationException("The bank balance has changed since cutover; reverse or reconcile downstream bank activity before reversing this opening batch.");
+        }
+
+        var specialized = batch.Lines.SingleOrDefault(IsSpecializedOpeningLine);
+        if (specialized?.CounterpartyId is Guid counterpartyId)
+        {
+            if (specialized.CounterpartyType is SupplierAdvanceOpening or ApWithholdingOpening)
+            {
+                var payment = await _db.Set<VendorPayment>().AsNoTracking().SingleAsync(item =>
+                    item.TenantId == batch.TenantId && item.Id == counterpartyId && !item.IsDeleted, cancellationToken);
+                if (payment.ReversalPostingEventId.HasValue)
+                    throw new InvalidOperationException("The AP opening source has already been reversed through another workflow.");
+                if (specialized.CounterpartyType == SupplierAdvanceOpening && payment.AllocatedAmount != 0m)
+                    throw new InvalidOperationException("The supplier advance has downstream allocations and must be unapplied before its opening batch can be reversed.");
+                if (specialized.CounterpartyType == ApWithholdingOpening &&
+                    await _db.WithholdingTaxCertificates.AsNoTracking().AnyAsync(certificate =>
+                        certificate.TenantId == batch.TenantId && certificate.VendorPaymentId == payment.Id && !certificate.IsDeleted,
+                        cancellationToken))
+                    throw new InvalidOperationException("The AP withholding opening has issued certificate evidence and cannot be reversed until that evidence is cancelled.");
+            }
+            else
+            {
+                var payment = await _db.Set<CustomerPayment>().AsNoTracking().SingleAsync(item =>
+                    item.TenantId == batch.TenantId && item.Id == counterpartyId && !item.IsDeleted, cancellationToken);
+                if (payment.ReversalPostingEventId.HasValue)
+                    throw new InvalidOperationException("The AR opening source has already been reversed through another workflow.");
+                if (specialized.CounterpartyType == CustomerAdvanceOpening && payment.AllocatedAmount != 0m)
+                    throw new InvalidOperationException("The customer advance has downstream allocations and must be unapplied before its opening batch can be reversed.");
+                if (specialized.CounterpartyType == ArWithholdingOpening &&
+                    (!string.IsNullOrWhiteSpace(payment.WithholdingCertificateNumber) || payment.WithholdingCertificateDate.HasValue))
+                    throw new InvalidOperationException("The AR withholding opening has certificate evidence and cannot be reversed until that evidence is cancelled.");
+            }
+        }
+
+        if (HasFixedAssetOpeningEvidence(batch))
+        {
+            var valueIds = batch.Lines.Where(IsFixedAssetOpeningLine).Where(line => line.CounterpartyId.HasValue)
+                .Select(line => line.CounterpartyId!.Value).Distinct().ToArray();
+            var values = await _db.FixedAssetBookValues.AsNoTracking()
+                .Where(value => value.TenantId == batch.TenantId && valueIds.Contains(value.Id) && !value.IsDeleted)
+                .ToListAsync(cancellationToken);
+            if (values.Any(value => value.OpeningJournalEntryId != batch.JournalEntryId || !value.OpeningPostedToGl ||
+                value.OpeningReversalPostingEventId.HasValue || value.LastDepreciationDate.HasValue ||
+                value.CapitalizationPostingEventId.HasValue || value.CapitalizationReversalPostingEventId.HasValue))
+                throw new InvalidOperationException("Fixed-asset opening evidence has changed or has downstream accounting and cannot be reversed as a simple opening correction.");
+            var assetIds = values.Select(value => value.FixedAssetId).Distinct().ToArray();
+            var hasDownstream = await _db.AssetTransactions.AsNoTracking().AnyAsync(transaction =>
+                transaction.TenantId == batch.TenantId && assetIds.Contains(transaction.FixedAssetId) && !transaction.IsDeleted &&
+                transaction.TransactionType != "Opening Acquisition" &&
+                transaction.TransactionType != "Opening Accumulated Depreciation",
+                cancellationToken);
+            if (hasDownstream)
+                throw new InvalidOperationException("Fixed-asset depreciation, valuation, transfer, or disposal activity must be reversed before the opening batch.");
+        }
+    }
+
+    private async Task ApplyOpeningReversalToSourceAsync(
+        OpeningBalanceBatchReversal request,
+        FinancePostingResultDto posting,
+        CancellationToken cancellationToken)
+    {
+        var batch = request.OpeningBalanceBatch;
+        var now = DateTime.UtcNow;
+        if (HasBankAccountOpeningEvidence(batch))
+        {
+            var bankId = batch.Lines.Single(IsBankAccountOpeningPrimaryLine).BankAccountId!.Value;
+            var bank = await _db.BankAccounts.SingleAsync(item => item.TenantId == batch.TenantId && item.Id == bankId, cancellationToken);
+            bank.CurrentBalance = 0m;
+            bank.AvailableBalance = 0m;
+            bank.OpeningDate = default;
+            bank.UpdatedAt = now;
+            bank.UpdatedBy = _currentUser.UserName ?? "system";
+            bank.LastModifiedById = CurrentUserId();
+        }
+
+        var specialized = batch.Lines.SingleOrDefault(IsSpecializedOpeningLine);
+        if (specialized?.CounterpartyId is Guid counterpartyId)
+        {
+            if (specialized.CounterpartyType is SupplierAdvanceOpening or ApWithholdingOpening)
+            {
+                var payment = await _db.Set<VendorPayment>().SingleAsync(item => item.TenantId == batch.TenantId && item.Id == counterpartyId, cancellationToken);
+                payment.Status = VendorPaymentStatus.Reversed;
+                payment.ReversalJournalEntryId = posting.JournalEntryId;
+                payment.ReversalPostingEventId = posting.PostingEventId;
+                payment.ReversalDate = posting.PostingDate;
+                payment.ReversedAt = now;
+                payment.ReversedById = CurrentUserId();
+                payment.ReversalReason = request.Reason;
+            }
+            else
+            {
+                var payment = await _db.Set<CustomerPayment>().SingleAsync(item => item.TenantId == batch.TenantId && item.Id == counterpartyId, cancellationToken);
+                payment.Status = "Reversed";
+                payment.ReversalJournalEntryId = posting.JournalEntryId;
+                payment.ReversalPostingEventId = posting.PostingEventId;
+                payment.ReversalDate = posting.PostingDate;
+                payment.ReversedAt = now;
+                payment.ReversedById = CurrentUserId();
+                payment.ReversalReason = request.Reason;
+            }
+        }
+
+        if (HasFixedAssetOpeningEvidence(batch))
+        {
+            var valueIds = batch.Lines.Where(IsFixedAssetOpeningLine).Where(line => line.CounterpartyId.HasValue)
+                .Select(line => line.CounterpartyId!.Value).Distinct().ToArray();
+            var values = await _db.FixedAssetBookValues.Where(value =>
+                value.TenantId == batch.TenantId && valueIds.Contains(value.Id)).ToListAsync(cancellationToken);
+            foreach (var value in values)
+            {
+                value.OpeningPostedToGl = false;
+                value.OpeningReversalJournalEntryId = posting.JournalEntryId;
+                value.OpeningReversalPostingEventId = posting.PostingEventId;
+                value.OpeningReversedAt = now;
+                value.UpdatedAt = now;
+                value.UpdatedBy = _currentUser.UserName ?? "system";
+                value.LastModifiedById = CurrentUserId();
+            }
+        }
+    }
+
+    private static OpeningBalanceBatchReversalDto MapReversal(OpeningBalanceBatchReversal item)
+        => new()
+        {
+            Id = item.Id,
+            OpeningBalanceBatchId = item.OpeningBalanceBatchId,
+            OriginalPostingEventId = item.OriginalPostingEventId,
+            OriginalJournalEntryId = item.OriginalJournalEntryId,
+            ReversalPostingEventId = item.ReversalPostingEventId,
+            ReversalJournalEntryId = item.ReversalJournalEntryId,
+            SourceKind = item.SourceKind,
+            BookClassification = item.BookClassification,
+            OriginalOpeningDate = item.OriginalOpeningDate,
+            OriginalTotalDebit = item.OriginalTotalDebit,
+            OriginalTotalCredit = item.OriginalTotalCredit,
+            Status = item.Status,
+            Reason = item.Reason,
+            ImpactAssessment = item.ImpactAssessment,
+            RequestedReversalDate = item.RequestedReversalDate,
+            RequestedByUserId = item.RequestedByUserId,
+            RequestedByUserName = item.RequestedByUserName,
+            RequestedAt = item.RequestedAt,
+            ReviewedByUserId = item.ReviewedByUserId,
+            ReviewedByUserName = item.ReviewedByUserName,
+            ReviewedAt = item.ReviewedAt,
+            ReviewComment = item.ReviewComment,
+            PostedAt = item.PostedAt,
+            FailureReason = item.FailureReason
+        };
+
     private static bool HasGeneratedSubledgerOpeningEvidence(OpeningBalanceBatch batch)
         => HasFixedAssetOpeningEvidence(batch) ||
            batch.Lines.Any(IsSpecializedOpeningLine) ||
@@ -2279,6 +2700,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         var batch = await _db.OpeningBalanceBatches
             .AsNoTracking()
             .Include(b => b.FiscalPeriod)
+            .Include(b => b.Reversals.Where(reversal => !reversal.IsDeleted))
             .Include(b => b.Lines)
                 .ThenInclude(l => l.Account)
             .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == batchId && !b.IsDeleted, cancellationToken);
@@ -2318,6 +2740,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             FailureReason = batch.FailureReason,
             CreatedAt = batch.CreatedAt,
             UpdatedAt = batch.UpdatedAt,
+            Reversals = batch.Reversals.OrderByDescending(item => item.RequestedAt).Select(MapReversal).ToList(),
             Lines = batch.Lines
                 .OrderBy(l => l.LineNumber)
                 .Select(l => new OpeningBalanceLineDto

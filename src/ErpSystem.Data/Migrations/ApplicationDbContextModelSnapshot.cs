@@ -17232,6 +17232,15 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("OpeningPostedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("OpeningReversalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OpeningReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("OpeningReversedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("OpeningPostedToGl")
                         .HasColumnType("bit");
 
@@ -20258,6 +20267,79 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("ModuleDefinitions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatchReversal", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
+                    b.Property<string>("BookClassification").IsRequired().HasMaxLength(30).HasColumnType("nvarchar(30)");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
+                    b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
+                    b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
+                    b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
+                    b.Property<string>("FailureReason").HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+                    b.Property<string>("ImpactAssessment").IsRequired().HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+                    b.Property<bool>("IsDeleted").HasColumnType("bit");
+                    b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("OpeningBalanceBatchId").HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("OriginalJournalEntryId").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime>("OriginalOpeningDate").HasColumnType("datetime2");
+                    b.Property<Guid>("OriginalPostingEventId").HasColumnType("uniqueidentifier");
+                    b.Property<decimal>("OriginalTotalCredit").HasPrecision(18, 2).HasColumnType("decimal(18,2)");
+                    b.Property<decimal>("OriginalTotalDebit").HasPrecision(18, 2).HasColumnType("decimal(18,2)");
+                    b.Property<DateTime?>("PostedAt").HasColumnType("datetime2");
+                    b.Property<string>("Reason").IsRequired().HasMaxLength(1000).HasColumnType("nvarchar(1000)");
+                    b.Property<DateTime>("RequestedAt").HasColumnType("datetime2");
+                    b.Property<Guid>("RequestedByUserId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("RequestedByUserName").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<DateTime>("RequestedReversalDate").HasColumnType("datetime2");
+                    b.Property<Guid?>("ReversalJournalEntryId").HasColumnType("uniqueidentifier");
+                    b.Property<Guid?>("ReversalPostingEventId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("ReviewComment").HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+                    b.Property<DateTime?>("ReviewedAt").HasColumnType("datetime2");
+                    b.Property<Guid?>("ReviewedByUserId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("ReviewedByUserName").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<string>("SourceKind").IsRequired().HasMaxLength(40).HasColumnType("nvarchar(40)");
+                    b.Property<string>("Status").IsRequired().HasMaxLength(30).HasColumnType("nvarchar(30)");
+                    b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
+                    b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
+                    b.HasKey("Id");
+                    b.HasIndex("OpeningBalanceBatchId");
+                    b.HasIndex("OriginalJournalEntryId");
+                    b.HasIndex("OriginalPostingEventId");
+                    b.HasIndex("ReversalJournalEntryId");
+                    b.HasIndex("ReversalPostingEventId");
+                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "OpeningBalanceBatchId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [Status] <> N'Rejected'");
+                    b.HasIndex("TenantId", "ReversalPostingEventId");
+                    b.HasIndex("TenantId", "Status");
+                    b.ToTable("OpeningBalanceBatchReversals", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatchReversal", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.OpeningBalanceBatch", "OpeningBalanceBatch")
+                        .WithMany("Reversals")
+                        .HasForeignKey("OpeningBalanceBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany().HasForeignKey("OriginalJournalEntryId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany().HasForeignKey("OriginalPostingEventId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany().HasForeignKey("ReversalJournalEntryId").OnDelete(DeleteBehavior.Restrict);
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany().HasForeignKey("ReversalPostingEventId").OnDelete(DeleteBehavior.Restrict);
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany().HasForeignKey("TenantId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.Navigation("OpeningBalanceBatch");
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatch", b =>
@@ -199747,6 +199829,8 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatch", b =>
                 {
                     b.Navigation("Lines");
+
+                    b.Navigation("Reversals");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.PaymentBatch", b =>

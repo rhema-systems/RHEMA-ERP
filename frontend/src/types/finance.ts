@@ -1509,6 +1509,45 @@ export interface OpeningBalanceBatch {
     createdAt: string;
     updatedAt?: string;
     lines: OpeningBalanceLine[];
+    reversals?: OpeningBalanceBatchReversal[];
+}
+
+export interface OpeningBalanceBatchReversal {
+    id: string;
+    openingBalanceBatchId: string;
+    originalPostingEventId: string;
+    originalJournalEntryId: string;
+    reversalPostingEventId?: string;
+    reversalJournalEntryId?: string;
+    sourceKind: string;
+    bookClassification: string;
+    originalOpeningDate: string;
+    originalTotalDebit: number;
+    originalTotalCredit: number;
+    status: string;
+    reason: string;
+    impactAssessment: string;
+    requestedReversalDate: string;
+    requestedByUserId: string;
+    requestedByUserName: string;
+    requestedAt: string;
+    reviewedByUserId?: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewComment?: string;
+    postedAt?: string;
+    failureReason?: string;
+}
+
+export interface RequestOpeningBalanceBatchReversalDto {
+    reversalDate: string;
+    reason: string;
+    impactAssessment: string;
+}
+
+export interface ReviewOpeningBalanceBatchReversalDto {
+    approved: boolean;
+    reviewComment: string;
 }
 
 export interface OpeningBalanceLine {

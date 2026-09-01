@@ -89,3 +89,19 @@ The backend and test projects compile and focused Finance regression tests pass.
 This resolves the implementation scope of `FIN-LIM-0048`: AP opening invoices, AR opening invoices, fixed-asset opening register-to-GL evidence, unapplied supplier/customer advances, unremitted AP WHT, and outstanding AR WHT certificates now have canonical source records and controlled posting paths. Foreign-currency invoices and advances use immutable FX evidence rules.
 
 TDC confirmed that the specialised data shapes are present at cutover. The remaining activity is representative-data rehearsal, reconciliation, and accountant approval under `FIN-LIM-0017`; that acceptance work is not a missing product feature.
+
+## Legacy retirement and controlled correction
+
+Manual-journal `Opening Balance`, `ALL_ACTIVE_BOOKS` opening posting, subledger opening adjustments, and the Finance Settings auto-routing toggle are retired runtime paths. Historical journals remain readable and can use their existing historical correction controls, but new cutover facts must enter through the controlled Opening Balances workspace or the canonical AP/AR opening-invoice processes.
+
+Every controlled opening-balance type now requires a real pending maker/checker approval workflow; missing workflow integration and completed-at-start workflows fail closed. A posted controlled batch can be corrected only through a separate opening-batch reversal request. The request freezes the original batch, journal, posting event, date, book, source kind, and totals. An independent reviewer must approve it before the central posting engine creates the compensating journal.
+
+Source-aware reversal checks preserve operational evidence:
+
+- reverse the residual GL/equity close-out before upstream opening sources;
+- bank snapshots must still equal the posted cutover amount;
+- supplier/customer advances must be unallocated;
+- issued WHT certificate evidence must first be cancelled;
+- fixed assets must have no later depreciation, valuation, transfer, disposal, or other downstream accounting.
+
+The schema changes are supplied by `20260831234500_RetireLegacyOpeningBalanceAutoRouting` and `20260901003000_AddOpeningBalanceBatchReversals`. They are migration source only until deliberately applied in the target environment.

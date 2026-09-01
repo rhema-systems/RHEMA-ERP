@@ -48,6 +48,9 @@ import type {
     UpdateCurrencyLinkRatePolicyDto,
     ModuleDefinition,
     OpeningBalanceBatch,
+    OpeningBalanceBatchReversal,
+    RequestOpeningBalanceBatchReversalDto,
+    ReviewOpeningBalanceBatchReversalDto,
     OpeningBalanceDiagnostic,
     OpeningBalanceValidationResult,
     SubledgerOpeningBalanceReadiness,
@@ -695,6 +698,18 @@ class FinanceDataService {
 
     async postOpeningBalanceBatch(batchId: string, comment?: string): Promise<OpeningBalanceBatch> {
         return apiService.post<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}/post`, { comment });
+    }
+
+    async requestOpeningBalanceReversal(batchId: string, dto: RequestOpeningBalanceBatchReversalDto): Promise<OpeningBalanceBatchReversal> {
+        return apiService.post<OpeningBalanceBatchReversal>(`/finance/opening-balances/${batchId}/reversals`, dto);
+    }
+
+    async reviewOpeningBalanceReversal(batchId: string, requestId: string, dto: ReviewOpeningBalanceBatchReversalDto): Promise<OpeningBalanceBatchReversal> {
+        return apiService.post<OpeningBalanceBatchReversal>(`/finance/opening-balances/${batchId}/reversals/${requestId}/review`, dto);
+    }
+
+    async postOpeningBalanceReversal(batchId: string, requestId: string): Promise<OpeningBalanceBatchReversal> {
+        return apiService.post<OpeningBalanceBatchReversal>(`/finance/opening-balances/${batchId}/reversals/${requestId}/post`, {});
     }
 
     async getOpeningBalanceDiagnostics(): Promise<OpeningBalanceDiagnostic[]> {
