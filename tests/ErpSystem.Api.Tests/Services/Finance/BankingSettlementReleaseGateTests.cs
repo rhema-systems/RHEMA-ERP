@@ -108,6 +108,49 @@ public sealed class BankingSettlementReleaseGateTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-Dimensions")]
+    public async Task DepositDraftEdit_ShouldPreserveStableAllocationIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            500m);
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+        var created = await service.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        var allocationId = created.Allocations.Single().Id;
+
+        var updated = await service.UpdateDepositAsync(created.Id, new UpdateBankDepositDto
+        {
+            BankAccountId = setup.BankAccount.Id,
+            DepositDate = created.DepositDate,
+            DepositReference = "SLIP-001-EDITED",
+            RowVersion = created.RowVersion,
+            Allocations =
+            [
+                new BankDepositAllocationRequestDto
+                {
+                    LiquidityAccountEntryId = receipt.Id,
+                    AllocationType = BankDepositAllocationType.Receipt,
+                    Amount = 400m
+                }
+            ]
+        });
+
+        updated.Allocations.Should().ContainSingle();
+        updated.Allocations.Single().Id.Should().Be(allocationId);
+        updated.Allocations.Single().Amount.Should().Be(400m);
+        (await db.LiquidityAccountEntries.SingleAsync(item => item.Id == receipt.Id))
+            .AllocatedAmount.Should().Be(400m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank")]
     public async Task Deposit_ShouldRequireMakerCheckerThenPostOneNetBankTransaction()
     {

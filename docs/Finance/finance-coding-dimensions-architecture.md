@@ -177,17 +177,24 @@ unchanged.
 
 ### Finance-owned settlement expansion
 
-The next certified settlement slice is deliberately limited to Finance-owned vendor payments,
-customer payments/receipts, direct Cash payments, direct Cash receipts and cash/bank transfers.
+The Finance-owned settlement slice covers vendor payments, customer payments/receipts, direct Cash
+payments, direct Cash receipts and cash/bank transfers.
 It captures stable source-line evidence for allocations, advances, direct offsets and both transfer
 legs. Invoice settlements inherit the exact originating invoice-line combinations; discounts,
 withholding, fees, write-offs and realised FX must remain split over those combinations with the
 final deterministic allocation carrying any rounding residual.
 
-Bank deposits, returned cheques, reconciliation adjustments, fixed-asset settlement and payment
-paths produced by another module remain later dimension-expansion candidates. They require their
-own route identity, additive Finance adapter/contract, consumer tests and governed certification;
-sharing an underlying Finance service does not certify them implicitly.
+Bank deposits and returned cheques now extend that generic source/settlement store with their own
+compiled `CaptureOptional` routes. Deposits retain the destination bank leg and every persisted
+allocation independently. Returned cheques inherit exact frozen principal/discount combinations
+from the original receipt; bank, customer-charge and expense lines resolve their own account rules.
+Both routes have tenant-scoped readiness providers and require stable, frozen evidence before a
+future promotion to `Enforced`.
+
+Reconciliation adjustments, fixed-asset settlement and payment paths produced by another module
+remain later dimension-expansion candidates. They require their own bounded route or additive
+Finance adapter/contract, consumer tests and governed certification; sharing an underlying Finance
+service does not certify them implicitly.
 
 ## Acceptance criteria
 

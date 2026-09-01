@@ -15,7 +15,9 @@ public enum FinanceDimensionRouteId
     SalesCreditNote = 30,
     FinanceCashPayment = 40,
     FinanceCashReceipt = 41,
-    FinanceCashBankTransfer = 42
+    FinanceCashBankTransfer = 42,
+    FinanceBankDeposit = 43,
+    FinanceReturnedCheque = 44
 }
 
 public enum FinanceDimensionCertificationState
@@ -198,7 +200,33 @@ public static class FinanceDimensionRouteCatalog
             SupportsDocumentDefaults: true,
             RequiresReadinessProvider: true,
             "Finance / Cash Management",
-            "Each bank-transfer leg is an independent source line and resolves its own account rules.")
+            "Each bank-transfer leg is an independent source line and resolves its own account rules."),
+        new(
+            FinanceDimensionRouteId.FinanceBankDeposit,
+            "Finance",
+            "CASHBANK",
+            "finance.cash.bank-deposits",
+            "BankDepositBatch",
+            "1.0",
+            FinanceDimensionGrain.SettlementAllocationLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Cash Management",
+            "Finance-owned bank deposits. The destination bank leg and every persisted liquidity allocation retain independent account-rule evidence."),
+        new(
+            FinanceDimensionRouteId.FinanceReturnedCheque,
+            "Finance",
+            "CASHBANK",
+            "finance.cash.returned-cheques",
+            "ReturnedChequeCase",
+            "1.0",
+            FinanceDimensionGrain.SettlementAllocationLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Cash Management",
+            "Finance-owned returned customer cheques. Reopened principal and discounts retain the exact frozen receipt-allocation combinations; bank and charge lines resolve their own account rules.")
     ];
 
     public static FinanceDimensionRouteDefinition GetRequired(FinanceDimensionRouteId id) =>

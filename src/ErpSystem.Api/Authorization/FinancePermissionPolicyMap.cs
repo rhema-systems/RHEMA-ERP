@@ -491,13 +491,13 @@ public static class FinancePermissionPolicyMap
         {
             "CompleteSetup" => One(FinancePermissions.ManageBankingSettings),
             "CreateLiquidityAccount" or "UpdateLiquidityAccount" => One(FinancePermissions.ManageLiquidityAccounts),
-            "CreateDeposit" or "UpdateDeposit" or "LinkDepositAttachment" or "UnlinkDepositAttachment" or "RegisterPostedPayment" =>
+            "CreateDeposit" or "UpdateDeposit" or "UpdateDepositDimensions" or "LinkDepositAttachment" or "UnlinkDepositAttachment" or "RegisterPostedPayment" =>
                 One(FinancePermissions.CreateBankDeposits),
             "SubmitDeposit" or "CancelDeposit" => One(FinancePermissions.SubmitBankDeposits),
             "ApproveDeposit" or "RejectDeposit" or "ReturnDeposit" => One(FinancePermissions.ApproveBankDeposits),
             "PostDeposit" => One(FinancePermissions.WorkflowPostAfterApproval),
             "ConfirmDeposit" => One(FinancePermissions.ConfirmBankDeposits),
-            "CreateReturnedCheque" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
+            "CreateReturnedCheque" or "UpdateReturnedChequeDimensions" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
                 One(FinancePermissions.ManageReturnedCheques),
             "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ApproveBankDeposits),
             _ => One(FinancePermissions.ViewFinance)

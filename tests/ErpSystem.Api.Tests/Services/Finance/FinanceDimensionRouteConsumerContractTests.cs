@@ -77,4 +77,34 @@ public sealed class FinanceDimensionRouteConsumerContractTests
             && method.GetParameters().Any(parameter =>
                 parameter.ParameterType == typeof(FinanceSourceDocumentDimensionInputDto)));
     }
+
+    [Fact]
+    public void FinanceBankingSettlementRoutesUseTheGenericAllocationContract()
+    {
+        var routes = new[]
+        {
+            FinanceDimensionRouteId.FinanceBankDeposit,
+            FinanceDimensionRouteId.FinanceReturnedCheque
+        }.Select(FinanceDimensionRouteCatalog.GetRequired).ToArray();
+
+        routes.Should().OnlyContain(route =>
+            route.ProducerModule == "Finance"
+            && route.PostingSourceModule == "CASHBANK"
+            && route.Grain == FinanceDimensionGrain.SettlementAllocationLine
+            && route.DefaultState == FinanceDimensionCertificationState.CaptureOptional
+            && route.SupportsDocumentDefaults
+            && route.RequiresReadinessProvider);
+        typeof(CreateBankDepositDto).GetProperty(nameof(CreateBankDepositDto.FinanceDimensions))!
+            .PropertyType.Should().Be(typeof(FinanceSourceDocumentDimensionInputDto));
+        typeof(CreateReturnedChequeCaseDto).GetProperty(nameof(CreateReturnedChequeCaseDto.FinanceDimensions))!
+            .PropertyType.Should().Be(typeof(FinanceSourceDocumentDimensionInputDto));
+
+        var returnedChequeId = Guid.NewGuid();
+        FinanceBankingDimensionIdentity.ReturnedChequeBankLine(returnedChequeId)
+            .Should().Be(FinanceBankingDimensionIdentity.ReturnedChequeBankLine(returnedChequeId));
+        FinanceBankingDimensionIdentity.ReturnedChequeBankLine(returnedChequeId)
+            .Should().NotBe(FinanceBankingDimensionIdentity.ReturnedChequeCustomerLine(returnedChequeId));
+        FinanceBankingDimensionIdentity.ReturnedChequeExpenseLine(returnedChequeId)
+            .Should().NotBe(FinanceBankingDimensionIdentity.ReturnedChequeCustomerLine(returnedChequeId));
+    }
 }
