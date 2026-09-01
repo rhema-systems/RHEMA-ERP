@@ -54,11 +54,20 @@ export interface ExchangeRate {
     rate: number;
     currentExchangeRate?: number;
     effectiveDate: string;
+    expiryDate?: string;
     rateType: ExchangeRateType;
     quoteSide: ExchangeRateQuoteSide;
     rateSource: string;
+    sourceName?: string;
+    sourceReference?: string;
     comments?: string;
     isActive: boolean;
+    approvalStatus?: 'Pending' | 'Approved' | 'Rejected' | 'AutoApproved';
+    hasBeenUsed?: boolean;
+    usageLocked?: boolean;
+    usageCount?: number;
+    firstUsedDate?: string;
+    lastUsedDate?: string;
     createdAt: string;
     updatedAt: string;
 }

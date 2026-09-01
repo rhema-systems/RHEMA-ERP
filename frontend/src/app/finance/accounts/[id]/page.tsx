@@ -420,9 +420,8 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 <SelectValue />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="Spot">Spot</SelectItem>
                                                                 <SelectItem value="Daily">Daily</SelectItem>
-                                                                <SelectItem value="Average">Average</SelectItem>
+                                                                <SelectItem value="Fixed">Fixed contractual</SelectItem>
                                                             </SelectContent>
                                                         </Select>
                                                     </div>
@@ -634,10 +633,8 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                             <Select value={policyForm.transactionRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, transactionRateType: value })}>
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="Spot">Spot</SelectItem>
                                                     <SelectItem value="Daily">Daily</SelectItem>
-                                                    <SelectItem value="Average">Average</SelectItem>
-                                                    <SelectItem value="Fixed">Fixed</SelectItem>
+                                                    <SelectItem value="Fixed">Fixed contractual</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>

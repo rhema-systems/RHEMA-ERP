@@ -55,7 +55,7 @@ public class AccountCurrencyLinkPersistenceTests
             LinkedCurrencyCode = "USD",
             RevaluationRequired = true,
             RevaluationFrequency = "Monthly",
-            TransactionRateType = "Spot",
+            TransactionRateType = "Daily",
             TransactionQuoteSide = "Mid",
             RevaluationRateType = "Month End",
             RevaluationQuoteSide = "Mid"
@@ -67,6 +67,53 @@ public class AccountCurrencyLinkPersistenceTests
         persisted.AccountId.Should().Be(account.Id);
         persisted.TenantId.Should().Be(tenantId);
         persisted.LinkedCurrencyCode.Should().Be("USD");
+    }
+
+    [Theory]
+    [InlineData("Average")]
+    [InlineData("Spot")]
+    [InlineData("Budget")]
+    public async Task AddCurrencyLinkAsync_RejectsNonGovernedTransactionRateTypes(string rateType)
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var account = new Account
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountCode = "1010-FX",
+            AccountNumber = "1010-FX",
+            AccountName = "Foreign currency cash",
+            AccountType = AccountType.Asset,
+            CurrencyCode = "GHS",
+            IsMultiCurrency = true,
+            Status = AccountStatus.Active,
+            AllowDirectPosting = true
+        };
+        db.Accounts.Add(account);
+        await db.SaveChangesAsync();
+
+        using var unitOfWork = new UnitOfWork(db);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(user => user.TenantId).Returns(tenantId);
+        currentUser.SetupGet(user => user.UserName).Returns("finance.test");
+        var service = new AccountService(
+            unitOfWork,
+            currentUser.Object,
+            Mock.Of<IAccountingBookService>(),
+            Mock.Of<ILogger<AccountService>>());
+
+        var action = () => service.AddCurrencyLinkAsync(new AddCurrencyLinkDto
+        {
+            AccountId = account.Id,
+            LinkedCurrencyCode = "USD",
+            TransactionRateType = rateType,
+            RevaluationRateType = "MonthEnd"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Daily or Fixed*");
+        (await db.AccountCurrencyLinks.CountAsync()).Should().Be(0);
     }
 
     private static ApplicationDbContext CreateContext()

@@ -588,7 +588,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 RateEffectiveDate = dto.OpeningBalanceDate?.Date,
                 RevaluationRequired = dto.RevaluationRequired,
                 RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency),
-                TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily"),
+                TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType),
                 TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide),
                 RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End"),
                 RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide),
@@ -725,7 +725,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
-            link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType);
             link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
             link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
             link.RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide);
@@ -834,6 +834,22 @@ namespace ErpSystem.Api.Services.Finance.GL
             return normalized;
         }
 
+        private static string NormalizeTransactionRateType(string? value)
+        {
+            var normalized = NormalizeRateType(value, "Daily");
+            if (!Enum.TryParse<ExchangeRateType>(
+                    normalized.Replace("-", string.Empty).Replace(" ", string.Empty),
+                    ignoreCase: true,
+                    out var rateType)
+                || rateType is not (ExchangeRateType.Daily or ExchangeRateType.Fixed))
+            {
+                throw new InvalidOperationException(
+                    "Transaction rate type must be Daily or Fixed. Average is reserved for reporting/valuation, and Spot requires a governed provider workflow.");
+            }
+
+            return rateType.ToString();
+        }
+
         private static RevaluationFrequency ParseRevaluationFrequency(string? value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -874,7 +890,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
-            link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType);
             link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
             link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
             link.RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide);
