@@ -46,8 +46,13 @@ import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
+import {
+    getEligibleReceiptLiquidityAccounts,
+    liquidityTypeForPaymentMethod,
+} from '@/lib/finance/ar-receipt-liquidity';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import { useAuth } from '@/hooks/use-auth';
 
 const paymentSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
@@ -83,20 +88,6 @@ const directBankMethodTypes = new Set<PaymentMethodType>([
     PaymentMethodType.StandingOrder,
 ]);
 
-const liquidityTypeForPaymentMethod = (type?: PaymentMethodType) => {
-    switch (type) {
-        case PaymentMethodType.Cheque:
-            return 'ChequesAwaitingDeposit';
-        case PaymentMethodType.Card:
-            return 'CardSettlementClearing';
-        case PaymentMethodType.MobileMoney:
-            return 'MobileMoneyClearing';
-        case PaymentMethodType.Cash:
-        default:
-            return 'UndepositedCash';
-    }
-};
-
 const toCustomerPaymentMethod = (type?: PaymentMethodType): string => {
     switch (type) {
         case PaymentMethodType.Cash:
@@ -123,6 +114,7 @@ const toCustomerPaymentMethod = (type?: PaymentMethodType): string => {
 export default function NewReceiptPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { user } = useAuth();
     const preselectedCustomerId = searchParams.get('customerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
     const existingAdvancePaymentId = searchParams.get('paymentId');
@@ -253,6 +245,11 @@ export default function NewReceiptPage() {
     const selectedLiquidityAccountId = form.watch('liquidityAccountId');
     const selectedPaymentMethodId = form.watch('paymentMethodId');
     const selectedPaymentMethod = paymentMethods?.find((method) => method.id === selectedPaymentMethodId);
+    const { data: openTillSessions = [] } = useQuery({
+        queryKey: ['cashier-till-sessions', 'open', user?.id],
+        queryFn: () => cashManagementDataService.getCashierTillSessions({ status: 'Open' }),
+        enabled: selectedPaymentMethod?.type === PaymentMethodType.Cash && Boolean(user?.id),
+    });
     const selectedWithholdingTaxId = form.watch('withholdingTaxId');
     const selectedVatWithholdingTaxId = form.watch('vatWithholdingTaxId');
     const selectedWithholdingTax = withholdingTaxes?.find((tax: Tax) => tax.id === selectedWithholdingTaxId);
@@ -265,9 +262,15 @@ export default function NewReceiptPage() {
         ? directBankMethodTypes.has(selectedPaymentMethod.type)
         : true;
     const expectedLiquidityType = liquidityTypeForPaymentMethod(selectedPaymentMethod?.type);
-    const eligibleLiquidityAccounts = liquidityAccounts?.filter(account =>
-        account.accountType === expectedLiquidityType && account.isActive,
-    ) ?? [];
+    const eligibleLiquidityAccounts = getEligibleReceiptLiquidityAccounts(
+        liquidityAccounts,
+        selectedPaymentMethod?.type,
+        openTillSessions,
+        user?.id,
+    );
+    const openCashierTillIds = new Set(openTillSessions
+        .filter(session => session.status === 'Open' && session.cashierUserId === user?.id)
+        .map(session => session.liquidityAccountId));
 
     useEffect(() => {
         if (existingAdvancePaymentId) return;
@@ -682,6 +685,7 @@ export default function NewReceiptPage() {
                                             {eligibleLiquidityAccounts.map((account) => (
                                                 <SelectItem key={account.id} value={account.id}>
                                                     {account.name} ({account.currency}) - {account.glAccountNumber}
+                                                    {openCashierTillIds.has(account.id) ? ' — My open till' : ''}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
@@ -689,7 +693,9 @@ export default function NewReceiptPage() {
                                     {form.formState.errors.liquidityAccountId && (
                                         <p className="text-sm text-red-500">{form.formState.errors.liquidityAccountId.message}</p>
                                     )}
-                                    <p className="text-xs text-muted-foreground">This receipt will enter the banking queue after posting.</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Cash can enter your open till or Undeposited Cash; the posted receipt then enters the banking queue.
+                                    </p>
                                 </div>
                             )}
 
