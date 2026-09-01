@@ -66,6 +66,7 @@ public class CashTransactionDto
     public Guid? ReversedById { get; set; }
     public string? ReversalReason { get; set; }
     public ControlledDocumentIssueSummaryDto? PaymentSlipIssuance { get; set; }
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
 }
@@ -83,6 +84,7 @@ public class CreateCashReceiptDto
     public string? PayerName { get; set; }
     public string? Description { get; set; }
     public Guid? GLAccountId { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class CreateCashPaymentDto
@@ -99,6 +101,7 @@ public class CreateCashPaymentDto
     public string? Description { get; set; }
     public Guid? GLAccountId { get; set; }
     public Guid? ChequeId { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class CreateBankTransferDto
@@ -117,6 +120,7 @@ public class CreateBankTransferDto
     public Guid? DestinationExchangeRateId { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? Description { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 /// <summary>

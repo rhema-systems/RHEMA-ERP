@@ -1,4 +1,5 @@
 import type { ControlledDocumentIssueSummary } from '@/types/controlled-documents';
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from '@/types/finance';
 
 // Cash Management & Bank Reconciliation Types
 
@@ -153,6 +154,7 @@ export interface CashTransaction {
     reversedById?: string;
     reversalReason?: string;
     paymentSlipIssuance?: ControlledDocumentIssueSummary;
+    financeDimensions?: FinanceSourceDocumentDimension;
     createdAt: string;
     createdBy?: string;
 }
@@ -592,6 +594,7 @@ export interface CreateCashReceiptDto {
     payerName?: string;
     description?: string;
     glAccountId?: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface CreateCashPaymentDto {
@@ -607,6 +610,7 @@ export interface CreateCashPaymentDto {
     description?: string;
     glAccountId?: string;
     chequeId?: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface CreateBankTransferDto {
@@ -621,6 +625,7 @@ export interface CreateBankTransferDto {
     destinationExchangeRateId?: string;
     referenceNumber?: string;
     description?: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 /**

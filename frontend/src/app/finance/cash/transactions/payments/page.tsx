@@ -47,6 +47,8 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
 import { CreateCashPaymentDto } from '@/types/cash-management';
 import { loadApprovedCashRate } from '@/lib/finance/cash-exchange-rate';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const paymentSchema = z.object({
     transactionDate: z.date({ message: "Date is required" }),
@@ -69,6 +71,10 @@ export default function RecordPaymentPage() {
     const router = useRouter();
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [sourceLineId] = useState(() => globalThis.crypto.randomUUID());
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Fetch data
     const { data: bankAccounts } = useQuery({
@@ -103,6 +109,8 @@ export default function RecordPaymentPage() {
     });
 
     const selectedBankAccountId = form.watch('bankAccountId');
+    const selectedGLAccountId = form.watch('glAccountId');
+    const selectedGLAccount = glAccounts?.find(account => account.id === selectedGLAccountId);
 
     const openVendorPaymentFlow = () => {
         const values = form.getValues();
@@ -192,6 +200,15 @@ export default function RecordPaymentPage() {
             }
             payload.glAccountId = data.glAccountId;
             payload.payeeName = data.payeeName || 'Miscellaneous';
+            payload.financeDimensions = {
+                defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                lines: [{
+                    sourceLineId,
+                    accountId: data.glAccountId,
+                    dimensions: toFinancePostingDimensionValues(lineDimensionValues[sourceLineId] || {}),
+                }],
+                applyDefaultToEligibleLines: applyDefaultToAll,
+            };
 
             await cashManagementDataService.createCashPayment(payload);
 
@@ -229,7 +246,7 @@ export default function RecordPaymentPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
+                <div className="space-y-6 lg:col-span-2">
                     <Card>
                         <form onSubmit={form.handleSubmit(onSubmit)}>
                             <CardHeader>
@@ -398,6 +415,42 @@ export default function RecordPaymentPage() {
                                 </Button>
                             </CardFooter>
                         </form>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Finance coding dimensions</CardTitle>
+                            <CardDescription>
+                                The direct expense/offset line is authoritative; the bank line resolves its own account rules.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'CASHBANK',
+                                    sourceDocumentType: 'CashBankPayment',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.cash.payments.direct',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(form.watch('transactionDate') || new Date(), 'yyyy-MM-dd')}
+                                lines={selectedGLAccountId ? [{
+                                    id: sourceLineId,
+                                    accountId: selectedGLAccountId,
+                                    accountLabel: selectedGLAccount
+                                        ? `${selectedGLAccount.accountCode} - ${selectedGLAccount.accountName}`
+                                        : 'Direct payment offset',
+                                }] : []}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={lineDimensionValues}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={setLineDimensionValues}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                disabled={isSubmitting}
+                            />
+                        </CardContent>
                     </Card>
                 </div>
 
