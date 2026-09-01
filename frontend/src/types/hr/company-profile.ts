@@ -80,6 +80,11 @@ export interface CompanyProfile {
 }
 
 /** `UpdateCompanyProfileDto`. No id — the service resolves the current tenant's row, or creates it. */
+/**
+ * ⚠ No signatureImageUrl or companySealImageUrl. The API ignores them: a seal is uploaded through
+ * the gate and versioned, not typed as a path. They remain on `CompanyProfile` (the READ shape) so
+ * a tenant that has not uploaded yet still renders what it had.
+ */
 export interface UpdateCompanyProfileRequest {
   legalName: string;
   tradingName: string | null;
@@ -106,8 +111,6 @@ export interface UpdateCompanyProfileRequest {
 
   defaultSignatoryName: string | null;
   defaultSignatoryTitle: string | null;
-  signatureImageUrl: string | null;
-  companySealImageUrl: string | null;
   logoUrl: string | null;
   offerAcceptanceInstructions: string | null;
   documentFooterText: string | null;
@@ -131,3 +134,28 @@ export const COMPANY_LEGAL_FORMS: { value: CompanyLegalForm; label: string }[] =
   { value: 'StatutoryBody', label: 'Statutory / State Entity' },
   { value: 'Other', label: 'Other' },
 ];
+
+/** Seal or signature. Matches `CompanySealAssetKind` in HREnums.cs. */
+export type CompanySealAssetKind = 'Seal' | 'Signature';
+
+/**
+ * One seal or signature image and the window it was current for.
+ *
+ * ⚠ Carries no URL and no bytes, deliberately. A seal is an instrument of authority, so it is
+ * never reachable by address — a letter embeds it, and this shape says only which image is in
+ * force and who put it there.
+ */
+export interface CompanySealAsset {
+  id: string;
+  kind: CompanySealAssetKind;
+  fileName?: string | null;
+  mimeType?: string | null;
+  fileSizeBytes?: number | null;
+  effectiveFrom: string;
+  retiredOn?: string | null;
+  retiredReason?: string | null;
+  /** Derived from `retiredOn`, never stored. */
+  isCurrent: boolean;
+  uploadedBy?: string | null;
+  uploadedAt: string;
+}

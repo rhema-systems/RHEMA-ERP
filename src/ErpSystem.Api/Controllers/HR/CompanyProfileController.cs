@@ -1,5 +1,9 @@
+﻿using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,13 +31,22 @@ public class CompanyProfileController : ControllerBase
 {
     private readonly ICompanyProfileService _service;
     private readonly ILogger<CompanyProfileController> _logger;
+    private readonly ErpSystem.Core.Services.HR.ICompanySealAssetService _seals;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICurrentUserService _currentUser;
 
     public CompanyProfileController(
         ICompanyProfileService service,
-        ILogger<CompanyProfileController> logger)
+        ILogger<CompanyProfileController> logger,
+        ErpSystem.Core.Services.HR.ICompanySealAssetService seals,
+        IHrControlledDocumentService hrDocuments,
+        ICurrentUserService currentUser)
     {
         _service = service;
         _logger = logger;
+        _seals = seals;
+        _hrDocuments = hrDocuments;
+        _currentUser = currentUser;
     }
 
     /// <summary>Get the current tenant's company profile (Tenant/config-resolved defaults if none saved yet).</summary>
@@ -77,4 +90,93 @@ public class CompanyProfileController : ControllerBase
             return StatusCode(500, "An error occurred while updating the company profile");
         }
     }
+
+    // ── The seal and the signature ──────────────────────────────────────────
+    //
+    // ⚠ **Gated on Admin, not Write, and that is the point.** HR maintains the company profile —
+    // the letterhead, the addresses, the statutory numbers. Replacing the seal is a different act:
+    // it is what makes a generated document look authentic, so it sits with the tier that already
+    // holds the settings described as "knobs that move trust boundaries". A no new permission was
+    // seeded for it; AdministerCompany already excludes the HR role and already means this.
+    //
+    // ⚠ Until these existed, both images were caller-supplied path STRINGS on the update DTO,
+    // substituted straight into rendered offer and probation letters — so an arbitrary value became
+    // an image source in a document sent to a candidate.
+
+    /// <summary>The seal and signature in force, and every image used before them.</summary>
+    [HttpGet("seal-assets")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<CompanySealAssetDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSealAssets(CancellationToken ct)
+        => Ok(await _seals.GetHistoryAsync(ct));
+
+    /// <summary>Replaces the seal or the signature, retiring whatever it supersedes.</summary>
+    [HttpPost("seal-assets/{kind}")]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    [RequestSizeLimit(10_000_000)]
+    [ProducesResponseType(typeof(CompanySealAssetDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ReplaceSealAsset(
+        CompanySealAssetKind kind, IFormFile? file, [FromForm] string? reason, CancellationToken ct)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest(new { message = "Tenant context could not be resolved." });
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No file provided." });
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                // ⚠ UserId is a STRING on ICurrentUserService, and the seal deliberately does NOT
+                // require a linked employee the way HrAttachmentUpload does — the tier that replaces
+                // a seal is an administrator, who often has no employee record.
+                ActorUserId = Guid.TryParse(_currentUser.UserId, out var actorId) ? actorId : Guid.Empty,
+                ActorName = _currentUser.UserName ?? "administrator",
+                Category = ControlledFileUploadCategories.HrCompanySealAssets,
+                File = file,
+                // ⚠ Registered in the DMS, unlike an avatar. An instrument of authority is a
+                // retained document: after a compromise, "which documents carry the seal that
+                // leaked?" has to stay answerable.
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceEntityType = nameof(Core.Entities.HR.CompanySealAsset),
+                    // The company profile is one row per tenant, so the tenant IS the owning record.
+                    SourceRecordId = tenantId,
+                    SourceLabel = $"Company {kind}",
+                    Title = $"Company {kind}",
+                    DocumentType = $"Company{kind}",
+                    ChangeSummary = reason
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            _logger.LogWarning(ex, "Company {Kind} upload refused by the gate", kind);
+            return BadRequest(new { message = ex.Message });
+        }
+
+        return Ok(await _seals.ReplaceAsync(
+            kind, document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+            document.OriginalFileName, document.ContentType, document.FileSize, reason, ct));
+    }
+
+    /// <summary>
+    /// Withdraws the current seal or signature without replacing it.
+    /// </summary>
+    /// <remarks>
+    /// A compromised seal must be able to stop being used before a replacement exists. Letters then
+    /// render without one, which is the right outcome: the alternative is continuing to stamp
+    /// documents with an image known to be bad.
+    /// </remarks>
+    [HttpPost("seal-assets/{kind}/retire")]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RetireSealAsset(
+        CompanySealAssetKind kind, [FromBody] RetireCompanySealAssetDto? dto, CancellationToken ct)
+        => await _seals.RetireCurrentAsync(kind, dto?.Reason, ct)
+            ? NoContent()
+            : NotFound(new { message = $"There is no {kind} in force to withdraw." });
 }

@@ -134,3 +134,66 @@ public class CompanyProfile : TenantEntity
     [MaxLength(1000)]
     public string? DocumentFooterText { get; set; }
 }
+
+/// <summary>
+/// One seal or signature image the company has used, and the window it was current for.
+/// </summary>
+/// <remarks>
+/// <para><b>Why a history table and not two columns.</b> A company seal is an instrument of
+/// authority: whoever controls it can make a document look authentic. Overwriting one destroys the
+/// answer to the question that matters after a compromise — <i>which documents carry the seal that
+/// leaked?</i> Every image ever used is kept, with who uploaded it and when it was current, so that
+/// question stays answerable.</para>
+///
+/// <para><b>Currency is derived, not stored.</b> The current asset of a kind is the one with no
+/// <see cref="RetiredOn"/>. This follows the temporal idiom already in this module —
+/// <c>EmployeeSalaryAssignment</c> closes the open row and inserts a new one rather than keeping an
+/// <c>IsCurrent</c> flag — because a stored flag is a second source of truth that drifts from the
+/// window it describes. Exactly one row per tenant per kind may be open; the service enforces that
+/// with close-then-insert rather than a unique index, because the delete here is soft.</para>
+///
+/// <para>⚠ <b>The image is private.</b> It goes through the controlled upload gate and is registered
+/// in the central DMS — unlike an avatar, a seal has real retention value. There is deliberately no
+/// public URL: the legacy <c>CompanyProfile.SignatureImageUrl</c> and <c>CompanySealImageUrl</c>
+/// were caller-supplied strings substituted straight into rendered letters, which made an
+/// attacker-controlled value an image source in a document sent to a candidate. Those two survive
+/// read-only so ported tenants keep rendering until they upload a real one.</para>
+/// </remarks>
+public class CompanySealAsset : TenantEntity
+{
+    /// <summary>Seal or signature. See <see cref="CompanySealAssetKind"/> for why one table.</summary>
+    public CompanySealAssetKind Kind { get; set; }
+
+    /// <summary>Scanned controlled upload holding the image.</summary>
+    public Guid FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, because an instrument of authority is a retained document.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    public Guid? DocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? FileName { get; set; }
+
+    [MaxLength(150)]
+    public string? MimeType { get; set; }
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>When this image became the one in use.</summary>
+    public DateTime EffectiveFrom { get; set; }
+
+    /// <summary>
+    /// When it stopped being used. <c>null</c> means it is the current one.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This is the currency test. Do not add an <c>IsCurrent</c> flag beside it — the module has
+    /// already met the cost of that shape on <c>EmployeeContractDetail</c>, where the flag is
+    /// hardcoded true at creation and updated by nothing.
+    /// </remarks>
+    public DateTime? RetiredOn { get; set; }
+
+    /// <summary>Why it was retired — routine replacement, or a compromise worth recording.</summary>
+    [MaxLength(500)]
+    public string? RetiredReason { get; set; }
+}

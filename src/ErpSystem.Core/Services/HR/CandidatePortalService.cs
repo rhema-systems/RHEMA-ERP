@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -838,7 +838,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // Compliance
         c.WorkAuthorizationStatus = dto.WorkAuthorizationStatus;
         // Documents
-        c.ProfilePhotoUrl = dto.ProfilePhotoUrl;
+        // ⚠ ProfilePhotoUrl is NOT taken from the payload. It is the legacy public URL, and
+        // UpdateProfilePhotoAsync above deliberately nulls it when a photo is uploaded through the
+        // gate — so accepting it here let an EXTERNAL candidate put an arbitrary 500-character
+        // string back on their own record, and every profile save undid the upload's own cleanup.
+        // The photo is set by uploading it; there is no public URL to store.
         c.IsInTalentPool  = dto.IsInTalentPool;
         if (dto.IsInTalentPool && !c.TalentPoolAddedDate.HasValue)
             c.TalentPoolAddedDate = DateTime.UtcNow;

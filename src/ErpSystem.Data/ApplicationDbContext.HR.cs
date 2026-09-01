@@ -127,6 +127,7 @@ public partial class ApplicationDbContext
     public DbSet<GoalRequiredSkill> GoalRequiredSkills { get; set; } = null!;
     public DbSet<CompanyHrPolicySettings> CompanyHrPolicySettings { get; set; } = null!;
     public DbSet<CompanyProfile> CompanyProfiles { get; set; } = null!;
+    public DbSet<CompanySealAsset> CompanySealAssets { get; set; } = null!;
     public DbSet<CheckIn> CheckIns { get; set; } = null!;
     public DbSet<CheckInGoalUpdate> CheckInGoalUpdates { get; set; } = null!;
     public DbSet<CheckInObjectiveLink> CheckInObjectiveLinks { get; set; } = null!;
@@ -3601,6 +3602,19 @@ private void ConfigureHREntities(ModelBuilder builder)
         // =====================================================
         // COMPANY HR POLICY SETTINGS
         // =====================================================
+
+        builder.Entity<CompanySealAsset>(entity =>
+        {
+            // Reading "the current seal" is the hot path — every generated letter does it — and it
+            // is always (tenant, kind, still open).
+            entity.HasIndex(x => new { x.TenantId, x.Kind, x.RetiredOn })
+                  .HasDatabaseName("IX_CompanySealAsset_Tenant_Kind_RetiredOn");
+
+            // ⚠ No unique index on "one open row per kind". The delete is soft, and a filtered
+            // unique index over soft-deleted rows is the defect this module has met nine times —
+            // most recently in lane 3b, where a withdrawal did not release the slot. The service
+            // closes the open row before inserting, and the suite asserts retire-then-re-add.
+        });
 
         builder.Entity<CompanyProfile>(entity =>
         {

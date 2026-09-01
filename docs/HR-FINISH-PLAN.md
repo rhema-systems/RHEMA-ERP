@@ -23,7 +23,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **0** | Ledger truth — make the instruments tell the truth again | ✅ **done 2026-08-31** | — | — |
 | **1** | Close the coverage queue | ✅ **done 2026-08-31** | — | — |
 | **2** | Decisions owed — 6 settings ✅ built, the rest is a memo | 13 asks | memo | TDC / the user |
-| **3** | Employee Master feedback block | **3a ✅ · 3c ✅ · 3d’s buildable rows ✅** · 3a-ii + 3b left | 1–2 slices | — (1 row needs TDC) |
+| **3** | Employee Master feedback block | ✅ **3a · 3a-ii · 3b · 3c · 3d’s buildable rows all done** | — | — (1 row needs TDC) |
 | **4** | Leave · Training · Succession · Recruitment feedback | 15 | 2 slices | partly lane 2 |
 | **5** | Section E — 5a ✅; **5b 47 of 49 fields built** | 2 fields | — | **blocked on D-13** |
 | **6** | Deferred area residues | 13 | 2 slices | 4 are blocked outside HR |
@@ -39,7 +39,8 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
-▶ **Recommended next: lane 3a-ii or lane 6.** Lane 3b is closed.
+▶ **Recommended next: lane 6.** Lanes 3b and **3a-ii** are closed — all four caller-supplied image
+paths are gone, and the seal and signature are versioned instruments rather than settings fields.
 
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
 `GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job
@@ -406,9 +407,51 @@ Found while gating the employee, dependant and guarantor photographs. Kept OUT o
 they belong to other areas, and one of them deserves its own thinking rather than being swept in.
 
 - [ ] **`ExternalAssociate.PicturePath`** — non-nullable, so a location is *expected* to be filled.
-- [ ] **`JobCandidate.ProfilePhotoUrl`** — recruitment (area 6).
-- [ ] ⚠ **`CompanyProfile.SignatureImageUrl` and `CompanySealImageUrl`** — **the one to think about
-      before touching.** A company seal is what stamps a document as authentic; a caller-supplied
+      <br>✅ **DONE 2026-09-01.** `PhotoFileUploadRecordId` (one column, no DMS — the JobCandidate
+      avatar precedent, not the Employee personnel one), `POST|GET api/external-associates/{id}/photo`
+      on its own controller, and the DTO sink closed. **The last of the four.**
+- [x] **`JobCandidate.ProfilePhotoUrl`** — ✅ **DONE 2026-09-01.** Removed from
+      `UpdateCandidatePortalProfileDto` and from `MapDtoToCandidate`; asserted in
+      `hr-recruitment/slice-f` (**69**, was 66).
+      <br>⚠ **The sharpest of the four: an EXTERNAL candidate wrote it**, and every profile save
+      undid `UpdateProfilePhotoAsync`'s own cleanup — that method deliberately nulls the legacy URL
+      because a gated photo has no public URL. Never served as a file (both downloads pass
+      `legacyPath: null`), so a stored attacker-controlled string reaching HR's screens, not file
+      read.
+- [x] ⚠ **NOT IN THE ORIGINAL LIST, and the one that mattered most: `CreateEmployeeDto`,
+      `UpdateEmployeeDto` and both dependant write DTOs still accepted `PicturePath`** — lane 3a's
+      own comment claimed "nothing new writes it" and that was false. `DownloadEmployeePhoto` passes
+      the stored value to the file server as `legacyPath`, so a caller could choose which file an
+      employee's photo resolved to. ✅ **DONE 2026-09-01 · 11 assertions ×2**
+      (`hr-probation/run-lane3aii.mjs`).
+      <br>⚠ **State it accurately:** `IsServeableLegacyPath` rejects rooted paths and `..` and
+      requires an allow-listed legacy root, so this was **never arbitrary file read** — it was a
+      caller picking a file *within* those roots. Bounded, real, and not what the field is for.
+      <br>⚠ `CreateEmployeeDependentDto.PicturePath` is **not** a sink: `IEmployeeDependentService`
+      is implemented by nothing and injected nowhere. Dead interface, left alone.
+- [x] ✅ **`CompanyProfile.SignatureImageUrl` and `CompanySealImageUrl` — DONE 2026-09-01 ·
+      30 assertions ×2** (`hr-probation/run-lane3aii-seal.mjs`). New `CompanySealAssets` table,
+      migration `HrImagePathGovernance`.
+      <br>**USER DECISION: build it as recommended.** Replacing one is gated on `AdministerCompany`
+      — **no new permission seeded**: that tier already excludes the HR role and is already described
+      as holding the settings that move trust boundaries, which is exactly what a seal is. HR edits
+      the letterhead; HR cannot replace the seal.
+      <br>**Versioned, never overwritten.** Currency is derived from `RetiredOn is null`, close-then-
+      insert, the `EmployeeSalaryAssignment` idiom — deliberately no `IsCurrent` flag, and no unique
+      index on "one open row per kind" because the delete is soft. Withdraw-without-replace is a
+      first-class action: a compromised seal must stop being used before a replacement exists.
+      <br>⚠ **Sharper than this row assumed.** They were not merely stored — they were substituted
+      as tokens into rendered offer and probation letters, so an arbitrary value became an image
+      source in a document sent to a candidate.
+      <br>⚠ **The gap that would have made the whole feature invisible:** after the suite was green,
+      **no template referenced either token**. A tenant could upload a seal, see it "in force", and
+      never see it on a document. Both built-in templates now render them (hidden when nothing is in
+      force) and both tokens are declared in the catalogues. **A capability with no reader is the
+      same defect as a client method with no caller — one level further out.**
+      <br>⚠ **No public URL, by design.** A letter embeds the bytes as a data URI, and
+      `GetCurrentAsDataUriAsync` refuses anything without a `Clean` scan verdict. Verified end to
+      end: a rendered confirmation letter contains `data:image`.
+      <br>_(the original note)_ **the one to think about before touching.** A company seal is what stamps a document as authentic; a caller-supplied
       path to one is not merely the usual sink, it is a path to an instrument of authority. Who may
       replace the seal, whether a change is audited, and whether the old image survives are product
       questions, not a gating exercise.

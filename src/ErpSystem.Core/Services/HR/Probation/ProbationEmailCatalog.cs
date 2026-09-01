@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces.Common;
+﻿using ErpSystem.Core.Interfaces.Common;
 
 namespace ErpSystem.Core.Services.HR.Probation;
 
@@ -51,7 +51,9 @@ public static class ProbationEmailCatalog
         "<p>All other terms and conditions of your employment remain unchanged. " +
         "On behalf of {{CompanyName}}, congratulations, and thank you for your contribution so far.</p>\n" +
         "<p style='margin-top:2rem'>Yours sincerely,</p>\n" +
-        "<p style='margin-top:2.5rem'><strong>{{SignatoryName}}</strong><br/>{{SignatoryTitle}}</p>\n" +
+        "{{#if SignatureImageUrl}}<img src='{{SignatureImageUrl}}' alt='' style='height:56px;display:block;margin-top:2rem' />{{/if}}\n" +
+        "<p style='margin-top:0.5rem'><strong>{{SignatoryName}}</strong><br/>{{SignatoryTitle}}</p>\n" +
+        "{{#if CompanySealImageUrl}}<img src='{{CompanySealImageUrl}}' alt='' style='height:84px;display:block;margin-top:0.5rem' />{{/if}}\n" +
         "{{#if CompanyFooter}}<hr style='border:none;border-top:1px solid #e5e7eb;margin-top:2rem' />" +
         "<p style='font-size:0.75rem;color:#6b7280'>{{CompanyFooter}}</p>{{/if}}\n" +
         "</body></html>";
@@ -88,6 +90,10 @@ public static class ProbationEmailCatalog
                 new() { Token = "ReviewSummary",      Description = "Outcome of the final review",      SampleValue = "Your final probation review recorded a recommendation to confirm." },
                 new() { Token = "SignatoryName",      Description = "Signing officer",                  SampleValue = "Head of Human Resources" },
                 new() { Token = "SignatoryTitle",     Description = "Signing officer's title",          SampleValue = "Head of Human Resources" },
+                // ⚠ Embedded images, not links — a seal has no public URL by design. The block is
+                // hidden when nothing is in force, which is what a withdrawal leaves behind.
+                new() { Token = "SignatureImageUrl",   Description = "Authorised signature, embedded",  SampleValue = "" },
+                new() { Token = "CompanySealImageUrl", Description = "Company seal, embedded",          SampleValue = "" },
             },
         },
     };

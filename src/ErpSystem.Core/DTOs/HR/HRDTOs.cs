@@ -245,7 +245,9 @@ public class CreateEmployeeDto
     public bool Tier2Only { get; set; }
     public bool Overtime { get; set; }
     public string? BadgeNumber { get; set; }
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
     public string? Notes { get; set; }
 
     public bool IsExpatriate { get; set; }
@@ -321,7 +323,9 @@ public class UpdateEmployeeDto
     public bool? Tier2Only { get; set; }
     public bool? Overtime { get; set; }
     public string? BadgeNumber { get; set; }
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
     public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
     public DateTime? LastReviewDate { get; set; }
@@ -636,8 +640,9 @@ public class EmployeeDependentCreateDto
     public bool IsEligibleForBenefits { get; set; }
     public bool IsDeceased { get; set; }
 
-    [MaxLength(500)]
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -668,7 +673,9 @@ public class EmployeeDependentUpdateDto
     public string? Occupation { get; set; }
     public bool? IsEligibleForBenefits { get; set; }
     public bool? IsDeceased { get; set; }
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
     public string? Notes { get; set; }
 }
 

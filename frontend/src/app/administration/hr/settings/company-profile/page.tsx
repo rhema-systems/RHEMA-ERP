@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { Loader2, Building2 } from 'lucide-react';
+import { Loader2, Building2, ShieldCheck, Stamp, Upload } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +21,13 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { companyProfileService } from '@/services/hr/company-profile.service';
 import { countryService } from '@/services/hr/country.service';
-import { COMPANY_LEGAL_FORMS, type CompanyLegalForm } from '@/types/hr/company-profile';
+import {
+  COMPANY_LEGAL_FORMS,
+  type CompanyLegalForm,
+  type CompanySealAsset,
+  type CompanySealAssetKind,
+} from '@/types/hr/company-profile';
+import { Badge } from '@/components/ui/badge';
 
 /**
  * The tenant's company (legal-employer) profile.
@@ -62,8 +68,6 @@ const profileSchema = z.object({
 
   defaultSignatoryName: z.string().trim().max(200).optional(),
   defaultSignatoryTitle: z.string().trim().max(200).optional(),
-  signatureImageUrl: z.string().trim().max(500).optional(),
-  companySealImageUrl: z.string().trim().max(500).optional(),
   logoUrl: z.string().trim().max(500).optional(),
   offerAcceptanceInstructions: z.string().trim().max(2000).optional(),
   documentFooterText: z.string().trim().max(1000).optional(),
@@ -133,8 +137,6 @@ export default function CompanyProfilePage() {
 
       defaultSignatoryName: data.defaultSignatoryName ?? '',
       defaultSignatoryTitle: data.defaultSignatoryTitle ?? '',
-      signatureImageUrl: data.signatureImageUrl ?? '',
-      companySealImageUrl: data.companySealImageUrl ?? '',
       logoUrl: data.logoUrl ?? '',
       offerAcceptanceInstructions: data.offerAcceptanceInstructions ?? '',
       documentFooterText: data.documentFooterText ?? '',
@@ -171,8 +173,6 @@ export default function CompanyProfilePage() {
 
         defaultSignatoryName: orNull(values.defaultSignatoryName),
         defaultSignatoryTitle: orNull(values.defaultSignatoryTitle),
-        signatureImageUrl: orNull(values.signatureImageUrl),
-        companySealImageUrl: orNull(values.companySealImageUrl),
         logoUrl: orNull(values.logoUrl),
         offerAcceptanceInstructions: orNull(values.offerAcceptanceInstructions),
         documentFooterText: orNull(values.documentFooterText),
@@ -336,11 +336,7 @@ export default function CompanyProfilePage() {
                 placeholder="Head of Human Resources"
               />
             </FieldRow>
-            <FieldRow>
-              <TextField form={form} name="logoUrl" label="Logo URL" />
-              <TextField form={form} name="signatureImageUrl" label="Signature image URL" />
-            </FieldRow>
-            <TextField form={form} name="companySealImageUrl" label="Company seal image URL" />
+            <TextField form={form} name="logoUrl" label="Logo URL" />
             <TextareaField
               form={form}
               name="offerAcceptanceInstructions"
@@ -358,6 +354,181 @@ export default function CompanyProfilePage() {
           </Button>
         </div>
       </form>
+
+      {/*
+        Outside the profile form on purpose. Editing the letterhead and replacing the seal are
+        different acts under different permissions, and putting the seal inside a form whose Save
+        button is Write-gated would imply otherwise.
+      */}
+      <SealAssetsPanel />
+    </div>
+  );
+}
+
+// ── the seal and the signature ──────────────────────────────────────────────
+
+/**
+ * The images that make a generated document look authentic.
+ *
+ * ⚠ **Replacing one is Admin-gated, not Write-gated.** HR maintains the company profile; changing
+ * what stamps a document as authentic sits with the tier that already holds the settings described
+ * as moving trust boundaries. A user without it sees the history and no buttons.
+ *
+ * ⚠ **Every image is kept.** Overwriting would destroy the answer to the question that matters
+ * after a compromise — which documents carry the seal that leaked.
+ */
+function SealAssetsPanel() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: assets, isLoading } = useQuery({
+    queryKey: ['hr', 'company-seal-assets'],
+    queryFn: () => companyProfileService.getSealAssets(),
+  });
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ['hr', 'company-seal-assets'] });
+
+  const history = assets ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5" /> Seal &amp; signature
+        </CardTitle>
+        <CardDescription>
+          The images embedded in generated offer and confirmation letters. Replacing one retires the
+          image it supersedes rather than overwriting it, so it stays possible to say which letters
+          carry which seal.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {isLoading ? (
+          <Skeleton className="h-32 w-full" />
+        ) : (
+          <>
+            <SealKindRow kind="Seal" label="Company seal" history={history} onChanged={invalidate} toast={toast} />
+            <SealKindRow kind="Signature" label="Authorised signature" history={history} onChanged={invalidate} toast={toast} />
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SealKindRow({
+  kind,
+  label,
+  history,
+  onChanged,
+  toast,
+}: {
+  kind: CompanySealAssetKind;
+  label: string;
+  history: CompanySealAsset[];
+  onChanged: () => Promise<unknown>;
+  toast: ReturnType<typeof useToast>['toast'];
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const mine = history.filter((a) => a.kind === kind);
+  const current = mine.find((a) => a.isCurrent) ?? null;
+  const retired = mine.filter((a) => !a.isCurrent);
+
+  const upload = async (file: File) => {
+    setBusy(true);
+    try {
+      await companyProfileService.replaceSealAsset(kind, file);
+      await onChanged();
+      toast({ title: `${label} replaced`, description: 'The previous image was retired, not overwritten.' });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error?.message || 'Upload failed.', variant: 'destructive' });
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const retire = async () => {
+    setBusy(true);
+    try {
+      await companyProfileService.retireSealAsset(kind);
+      await onChanged();
+      toast({
+        title: `${label} withdrawn`,
+        description: 'Letters will render without it until a replacement is uploaded.',
+      });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error?.message || 'Could not withdraw it.', variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 font-medium">
+            <Stamp className="h-4 w-4 text-muted-foreground" />
+            {label}
+            {current ? <Badge variant="secondary">In force</Badge> : <Badge variant="outline">None</Badge>}
+          </div>
+          {current ? (
+            <p className="text-sm text-muted-foreground">
+              {current.fileName || 'Uploaded image'} · in force since{' '}
+              {current.effectiveFrom.slice(0, 10)}
+              {current.uploadedBy ? ` · uploaded by ${current.uploadedBy}` : ''}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No image is in force. Letters render without one, and any legacy image the tenant was
+              carrying is used until you upload a replacement.
+            </p>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void upload(file);
+            }}
+          />
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            {current ? 'Replace' : 'Upload'}
+          </Button>
+          {current && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void retire()}>
+              Withdraw
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {retired.length > 0 && (
+        <div className="mt-3 border-t pt-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Previously used
+          </div>
+          <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
+            {retired.map((a) => (
+              <li key={a.id}>
+                {a.fileName || 'Image'} · {a.effectiveFrom.slice(0, 10)} to{' '}
+                {a.retiredOn?.slice(0, 10) ?? '—'}
+                {a.retiredReason ? ` · ${a.retiredReason}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

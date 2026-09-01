@@ -1,5 +1,10 @@
 import { apiService } from '../api.service';
-import type { CompanyProfile, UpdateCompanyProfileRequest } from '@/types/hr/company-profile';
+import type {
+  CompanyProfile,
+  CompanySealAsset,
+  CompanySealAssetKind,
+  UpdateCompanyProfileRequest,
+} from '@/types/hr/company-profile';
 
 /**
  * The tenant's company (legal-employer) profile. Backend route: `api/hr/company-profile`.
@@ -19,6 +24,35 @@ class CompanyProfileService {
 
   update(data: UpdateCompanyProfileRequest): Promise<CompanyProfile> {
     return apiService.put<CompanyProfile>(this.baseUrl, data);
+  }
+
+  // ── The seal and the signature ────────────────────────────────────────────
+  //
+  // ⚠ There is no URL for either. They live in private storage and a letter embeds the bytes, so
+  // these methods manage WHICH image is in force, never where it is.
+
+  /** Every seal and signature ever used, newest first — the audit trail. */
+  getSealAssets(): Promise<CompanySealAsset[]> {
+    return apiService.get<CompanySealAsset[]>(`${this.baseUrl}/seal-assets`);
+  }
+
+  /** Replaces the seal or signature, retiring whatever it supersedes. Admin-gated. */
+  replaceSealAsset(kind: CompanySealAssetKind, file: File, reason?: string): Promise<CompanySealAsset> {
+    const form = new FormData();
+    form.append('file', file);
+    if (reason) form.append('reason', reason);
+    return apiService.post<CompanySealAsset>(`${this.baseUrl}/seal-assets/${kind}`, form);
+  }
+
+  /**
+   * Withdraws the current one without replacing it.
+   *
+   * ⚠ A real operation, not a delete: a compromised seal has to stop being used before a
+   * replacement exists. Letters then render without one, which beats stamping documents with an
+   * image known to be bad.
+   */
+  retireSealAsset(kind: CompanySealAssetKind, reason?: string): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/seal-assets/${kind}/retire`, { reason: reason ?? null });
   }
 }
 
@@ -59,8 +93,8 @@ export function toUpdateRequest(profile: CompanyProfile): UpdateCompanyProfileRe
 
     defaultSignatoryName: profile.defaultSignatoryName,
     defaultSignatoryTitle: profile.defaultSignatoryTitle,
-    signatureImageUrl: profile.signatureImageUrl,
-    companySealImageUrl: profile.companySealImageUrl,
+    // ⚠ signatureImageUrl and companySealImageUrl are NOT sent. They are legacy read-only: a seal
+    // is an instrument of authority, uploaded through the gate and versioned, not typed as a path.
     logoUrl: profile.logoUrl,
     offerAcceptanceInstructions: profile.offerAcceptanceInstructions,
     documentFooterText: profile.documentFooterText,

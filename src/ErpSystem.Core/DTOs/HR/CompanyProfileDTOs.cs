@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -83,9 +83,45 @@ public class UpdateCompanyProfileDto
     // Employer / document presentation
     [MaxLength(200)] public string? DefaultSignatoryName { get; set; }
     [MaxLength(200)] public string? DefaultSignatoryTitle { get; set; }
-    [MaxLength(500)] public string? SignatureImageUrl { get; set; }
-    [MaxLength(500)] public string? CompanySealImageUrl { get; set; }
+    // ⚠ No SignatureImageUrl or CompanySealImageUrl. They were caller-supplied path strings
+    // substituted straight into rendered offer and probation letters, which made an arbitrary value
+    // an image source in a document sent to a candidate. Both are set by UPLOADING an image to
+    // POST seal-assets/{kind}, which is Admin-gated, scanned and versioned. The two columns survive
+    // read-only so a tenant that has not uploaded yet keeps rendering what it had.
     [MaxLength(500)] public string? LogoUrl { get; set; }
     [MaxLength(2000)] public string? OfferAcceptanceInstructions { get; set; }
     [MaxLength(1000)] public string? DocumentFooterText { get; set; }
+}
+
+/// <summary>
+/// One seal or signature image, and the window it was current for.
+/// </summary>
+/// <remarks>
+/// ⚠ Carries no URL and no bytes. A seal is an instrument of authority, so it is never reachable by
+/// address — a letter embeds it, and this screen-facing shape says only which image is in force and
+/// who put it there.
+/// </remarks>
+public class CompanySealAssetDto
+{
+    public Guid Id { get; set; }
+    public CompanySealAssetKind Kind { get; set; }
+    public string? FileName { get; set; }
+    public string? MimeType { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? RetiredOn { get; set; }
+    public string? RetiredReason { get; set; }
+
+    /// <summary>Derived from <see cref="RetiredOn"/>, never stored — see the entity's remarks.</summary>
+    public bool IsCurrent { get; set; }
+
+    public string? UploadedBy { get; set; }
+    public DateTime UploadedAt { get; set; }
+}
+
+/// <summary>Why a seal is being withdrawn or replaced. Recorded, because "why" is the audit.</summary>
+public class RetireCompanySealAssetDto
+{
+    [MaxLength(500)]
+    public string? Reason { get; set; }
 }

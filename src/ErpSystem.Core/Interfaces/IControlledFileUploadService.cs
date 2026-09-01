@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Interfaces;
 
@@ -205,6 +205,27 @@ public static class ControlledFileUploadCategories
     public const string HrEmployeeDocuments = "hr-employee-documents";
 
     /// <summary>
+    /// The photograph of an external associate — a panellist, assessor or adviser.
+    /// </summary>
+    /// <remarks>
+    /// An avatar of a third party, so it follows <see cref="HrCandidatePhotos"/> rather than
+    /// <see cref="HrEmployeeDocuments"/>: scanned and access-controlled, but not registered in the
+    /// central DMS, because a contact's photograph carries no retention value.
+    /// </remarks>
+    public const string HrExternalAssociatePhotos = "hr-external-associate-photos";
+
+    /// <summary>
+    /// The company seal and the authorised signature — the images that make a generated document
+    /// look authentic.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The opposite call from an avatar, and for the opposite reason. These ARE registered in the
+    /// central DMS: an instrument of authority is a retained document, and after a compromise the
+    /// question "which documents carry the seal that leaked?" has to stay answerable.
+    /// </remarks>
+    public const string HrCompanySealAssets = "hr-company-seal-assets";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -234,6 +255,12 @@ public static class ControlledFileUploadCategories
                 QuantitySurveyDayworkEvidence,
                 QuantitySurveySubcontractEvidence,
                 HrEmployeeDocuments,
+                // ⚠ Declared above AND registered here. A category that is only declared passes the
+                // upload gate unscanned and then fails DMS registration as a 500 — the trap area 11
+                // met with SystemCleanScanRequired. The seal especially: an unscanned image that
+                // every offer letter embeds is not a risk worth a tenant policy toggle.
+                HrExternalAssociatePhotos,
+                HrCompanySealAssets,
                 HrCandidateCv,
                 HrCandidateDocuments,
                 HrCandidatePhotos,

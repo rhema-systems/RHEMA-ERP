@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 
 namespace ErpSystem.Core.Enums;
 
@@ -9729,6 +9729,23 @@ public enum HrPolicyAcknowledgementOutcome
 
     /// <summary>They read it and refused, with a reason. A real outcome, not a failure.</summary>
     Declined = 2
+}
+
+/// <summary>
+/// Which instrument of authority a stored company image is.
+/// </summary>
+/// <remarks>
+/// ⚠ One table, two kinds, because they are governed identically: both are what makes a generated
+/// document look authentic, both must be versioned rather than overwritten, and both are replaced
+/// by the same restricted act. Two tables would duplicate that governance and let it drift.
+/// </remarks>
+public enum CompanySealAssetKind
+{
+    /// <summary>The company seal or stamp.</summary>
+    Seal = 1,
+
+    /// <summary>The authorised signatory's signature image.</summary>
+    Signature = 2
 }
 
 #endregion

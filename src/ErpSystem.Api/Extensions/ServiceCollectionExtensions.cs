@@ -1011,6 +1011,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
                                ErpSystem.Core.Services.HR.ReferenceDimensionService>();
 
+            // Lane 3a-ii. The company seal and signature, versioned rather than overwritten.
+            services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
+                               ErpSystem.Core.Services.HR.CompanySealAssetService>();
+
             // The identification-expiry sweep. ⚠ The SERVICE and its HOST are registered together
             // on purpose: lane 1 found two HR engines that existed, had endpoints, and had never
             // run because nothing hosted them.

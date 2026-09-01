@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces.Common;
+﻿using ErpSystem.Core.Interfaces.Common;
 
 namespace ErpSystem.Core.Services.HR.Recruitment;
 
@@ -480,6 +480,11 @@ public static class RecruitmentEmailCatalog
                 T("AcceptanceInstructions", "How to accept the offer.", "Sign and return one copy of this letter, or accept via the candidate portal."),
                 T("SignatoryName", "Name of the company signatory; block hidden when empty.", "Kwaku Owusu"),
                 T("SignatoryTitle", "Title of the company signatory.", "Head of Human Resources"),
+                // ⚠ Both are embedded IMAGES, not links. The seal lives in private storage with no
+                // public URL, so the letter carries the bytes; the block is hidden when nothing is
+                // in force, which is also what happens after a seal is withdrawn.
+                T("SignatureImageUrl", "Authorised signature image, embedded; hidden when none is in force.", ""),
+                T("CompanySealImageUrl", "Company seal image, embedded; hidden when none is in force.", ""),
             }
         });
 
@@ -549,10 +554,12 @@ public static class RecruitmentEmailCatalog
   <p style='font-size:13px'>{{AcceptanceInstructions}}{{#if ExpiryDate}} This offer remains open for acceptance until <strong>{{ExpiryDate}}</strong>.{{/if}}</p>
 
   <p style='margin-top:1.5rem'>Yours sincerely,</p>
-  <div style='margin-top:2.5rem'>
+  <div style='margin-top:1rem'>
+    {{#if SignatureImageUrl}}<img src='{{SignatureImageUrl}}' alt='' style='height:56px;display:block;margin-bottom:0.25rem' />{{/if}}
     {{#if SignatoryName}}<div style='font-weight:700'>{{SignatoryName}}</div>{{/if}}
     <div style='color:#6b7280;font-size:13px'>{{SignatoryTitle}}</div>
     <div style='color:#6b7280;font-size:13px'>{{CompanyName}}</div>
+    {{#if CompanySealImageUrl}}<img src='{{CompanySealImageUrl}}' alt='' style='height:84px;display:block;margin-top:0.75rem' />{{/if}}
   </div>
 
   <div style='margin-top:2.5rem;border-top:1px dashed #9ca3af;padding-top:1rem;font-size:13px'>

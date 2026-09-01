@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
 
@@ -5531,8 +5531,9 @@ public class UpdateCandidatePortalProfileDto
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
     // Documents
-    [MaxLength(500)]
-    public string? ProfilePhotoUrl { get; set; }
+    // ⚠ No ProfilePhotoUrl. The candidate sets their photo by uploading it through the gate,
+    // which stores a scanned upload record and leaves the legacy public URL null. Accepting a
+    // URL here let an external user write an arbitrary string onto a record HR then reads.
     public bool IsInTalentPool { get; set; }
     public List<ExternalWorkHistoryDto> WorkHistories { get; set; } = new();
     public List<ExternalQualificationDto> Qualifications { get; set; } = new();

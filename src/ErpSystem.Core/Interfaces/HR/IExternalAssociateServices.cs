@@ -1,5 +1,6 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -25,4 +26,16 @@ public interface IExternalAssociateService
     // ── Workflow ──────────────────────────────────────────────────────────────
     Task<ExternalAssociateDto> ActivateAsync(Guid id, Guid userId, CancellationToken ct = default);
     Task<ExternalAssociateDto> DeactivateAsync(Guid id, Guid userId, CancellationToken ct = default);
+
+    /// <summary>The associate as an entity, for the photo endpoints to read and stamp.</summary>
+    Task<ExternalAssociate?> GetEntityForPhotoAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records the controlled upload that now holds this associate's photograph.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>PicturePath</c> is deliberately NOT cleared — it is the ported location and may be the
+    /// only copy of an older image, and the download prefers the gated record and falls back to it.
+    /// </remarks>
+    Task<ExternalAssociate> AttachPhotoAsync(Guid id, Guid fileUploadRecordId, CancellationToken ct = default);
 }

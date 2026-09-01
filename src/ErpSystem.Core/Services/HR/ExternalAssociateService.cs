@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
@@ -86,6 +86,26 @@ public class ExternalAssociateService : IExternalAssociateService
         var entity = await _repo.GetByIdAsync(id);
         if (entity is null || entity.IsDeleted || entity.TenantId != GetTenantId())
             throw new ArgumentException($"External associate '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<ExternalAssociate?> GetEntityForPhotoAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await _repo.GetByIdAsync(id);
+        return entity is null || entity.IsDeleted || entity.TenantId != GetTenantId() ? null : entity;
+    }
+
+    public async Task<ExternalAssociate> AttachPhotoAsync(
+        Guid id, Guid fileUploadRecordId, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        entity.PhotoFileUploadRecordId = fileUploadRecordId;
+
+        // ⚠ PicturePath is deliberately NOT cleared. It is the ported location and may still be the
+        // only copy of an older image; the download prefers the gated record and falls back to it,
+        // so clearing it here would destroy the fallback for anyone who has not re-uploaded.
+        await _repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(ct);
         return entity;
     }
 

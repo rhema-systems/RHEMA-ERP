@@ -1,7 +1,11 @@
+﻿using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -41,14 +45,30 @@ public class ExternalAssociatesController : ControllerBase
     private readonly ICurrentUserService       _currentUser;
     private readonly ILogger<ExternalAssociatesController> _logger;
 
+    // The controlled-upload gate's four dependencies. They sit here rather than the photo endpoints
+    // moving to EmployeeDocumentsController, because an associate is not an employee and the route
+    // belongs with the register it describes.
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
+
     public ExternalAssociatesController(
         IExternalAssociateService service,
         ICurrentUserService currentUser,
-        ILogger<ExternalAssociatesController> logger)
+        ILogger<ExternalAssociatesController> logger,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db)
     {
         _service     = service;
         _currentUser = currentUser;
         _logger      = logger;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
     }
 
     /// <summary>
@@ -243,5 +263,58 @@ public class ExternalAssociatesController : ControllerBase
         }
         catch (ArgumentException ex)         { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    // ── The photograph, through the controlled gate ─────────────────────────
+    //
+    // ⚠ Until these existed the only way to set an associate's photo was to put a path string on
+    // the create or update DTO — a caller-supplied file location, the last of the four this module
+    // carried. `PicturePath` survives for ported images and the download falls back to it; nothing
+    // new writes it.
+
+    /// <summary>Replaces the associate's photograph, through the scanning gate.</summary>
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    [HttpPost("{id:guid}/photo")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadPhoto(Guid id, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var associate = await _service.GetEntityForPhotoAsync(id, ct);
+        if (associate is null) return NotFound(new { message = $"External associate '{id}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.ExternalAssociate),
+            sourceRecordId: id,
+            sourceLabel: "External associate photograph",
+            documentType: "ExternalAssociatePhoto",
+            description: null,
+            persist: (_, document) => _service.AttachPhotoAsync(id, document.FileUploadRecordId, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrExternalAssociatePhotos);
+    }
+
+    /// <summary>Streams the associate's photograph.</summary>
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    [HttpGet("{id:guid}/photo")]
+    public async Task<IActionResult> DownloadPhoto(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var associate = await _service.GetEntityForPhotoAsync(id, ct);
+        if (associate is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            documentRecordId: null, documentVersionId: null,
+            associate.PhotoFileUploadRecordId,
+            // ⚠ The one place the legacy path is still read — a ported image has no gate record,
+            // and refusing to serve it would lose every photo the port brought over.
+            legacyPath: associate.PicturePath,
+            fallbackFileName: "associate-photo",
+            fallbackContentType: null,
+            inline: true, ct);
     }
 }

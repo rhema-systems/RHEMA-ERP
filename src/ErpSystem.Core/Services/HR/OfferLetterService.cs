@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
@@ -28,6 +28,7 @@ public sealed class OfferLetterService : IOfferLetterService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly ICompanyProfileProvider _companyProfile;
+    private readonly ICompanySealAssetService _seals;
     private readonly ILogger<OfferLetterService> _logger;
 
     public OfferLetterService(
@@ -36,6 +37,7 @@ public sealed class OfferLetterService : IOfferLetterService
         IUnitOfWork unitOfWork,
         ITemplatedEmailService templatedEmail,
         ICompanyProfileProvider companyProfile,
+        ICompanySealAssetService seals,
         ILogger<OfferLetterService> logger)
     {
         _offerRepository = offerRepository;
@@ -43,6 +45,7 @@ public sealed class OfferLetterService : IOfferLetterService
         _unitOfWork = unitOfWork;
         _templatedEmail = templatedEmail;
         _companyProfile = companyProfile;
+        _seals = seals;
         _logger = logger;
     }
 
@@ -144,8 +147,16 @@ public sealed class OfferLetterService : IOfferLetterService
             // them however it was written, and the only image any letter could render was the logo.
             // Emitting them here is what makes the two fields mean something; a template that does not
             // use them is unaffected, because an unused token is simply not substituted.
-            ["SignatureImageUrl"]   = NullIfBlank(company.SignatureImageUrl),
-            ["CompanySealImageUrl"] = NullIfBlank(company.CompanySealImageUrl),
+            // ⚠ The seal and signature are EMBEDDED, not linked. They live in private storage and
+            // have no public URL by design, so a letter carries the bytes as a data URI. The legacy
+            // column is the fallback for a tenant that has not uploaded one yet; once it has, the
+            // string is never consulted again.
+            ["SignatureImageUrl"]   = await _seals.GetCurrentAsDataUriAsync(
+                                          CompanySealAssetKind.Signature, cancellationToken)
+                                      ?? NullIfBlank(company.SignatureImageUrl),
+            ["CompanySealImageUrl"] = await _seals.GetCurrentAsDataUriAsync(
+                                          CompanySealAssetKind.Seal, cancellationToken)
+                                      ?? NullIfBlank(company.CompanySealImageUrl),
         };
 
         var rendered = await _templatedEmail.RenderAsync(

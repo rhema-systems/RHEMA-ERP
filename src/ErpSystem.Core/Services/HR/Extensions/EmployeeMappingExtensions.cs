@@ -354,7 +354,7 @@ public static class EmployeeMappingExtensions
             Tier2Only = dto.Tier2Only,
             Overtime = dto.Overtime,
             BadgeNumber = dto.BadgeNumber,
-            PicturePath = dto.PicturePath,
+            // ⚠ PicturePath deliberately NOT set from the DTO — see Apply below.
             Notes = dto.Notes,
             IsExpatriate = dto.IsExpatriate,
             IsActive = IsLiveRecordFor(dto.StaffStatus)
@@ -435,7 +435,10 @@ public static class EmployeeMappingExtensions
 
         if (dto.BadgeNumber != null) e.BadgeNumber = dto.BadgeNumber;
         if (dto.Notes != null) e.Notes = dto.Notes;
-        if (dto.PicturePath != null) e.PicturePath = dto.PicturePath;
+        // ⚠ PicturePath is NOT written from the DTO. It is the legacy caller-supplied file
+        // location, kept so ported images still resolve; the photo is set through the gated
+        // upload endpoint on EmployeeDocumentsController. Accepting it here let a caller point
+        // the photo at any file under the legacy roots the download will serve from.
 
         if (dto.LastPromotionDate.HasValue) e.LastPromotionDate = dto.LastPromotionDate;
         if (dto.LastReviewDate.HasValue) e.LastReviewDate = dto.LastReviewDate;
@@ -646,7 +649,7 @@ public static class EmployeeMappingExtensions
             Occupation = dto.Occupation,
             IsEligibleForBenefits = dto.IsEligibleForBenefits,
             IsDeceased = dto.IsDeceased,
-            PicturePath = dto.PicturePath,
+            // ⚠ As above: the dependant photo goes through the gated upload, not a path string.
             Notes = dto.Notes
         };
 
@@ -668,7 +671,7 @@ public static class EmployeeMappingExtensions
         d.Occupation = dto.Occupation;
         if (dto.IsEligibleForBenefits.HasValue) d.IsEligibleForBenefits = dto.IsEligibleForBenefits.Value;
         if (dto.IsDeceased.HasValue) d.IsDeceased = dto.IsDeceased.Value;
-        d.PicturePath = dto.PicturePath;
+        // ⚠ PicturePath is legacy-read-only; the gated upload sets the dependant's photo.
         d.Notes = dto.Notes;
     }
 

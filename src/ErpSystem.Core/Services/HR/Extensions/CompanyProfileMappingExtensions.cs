@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Services.HR.Extensions;
@@ -79,8 +79,9 @@ public static class CompanyProfileMappingExtensions
 
         entity.DefaultSignatoryName        = dto.DefaultSignatoryName?.Trim();
         entity.DefaultSignatoryTitle       = dto.DefaultSignatoryTitle?.Trim();
-        entity.SignatureImageUrl           = dto.SignatureImageUrl?.Trim();
-        entity.CompanySealImageUrl         = dto.CompanySealImageUrl?.Trim();
+        // ⚠ SignatureImageUrl and CompanySealImageUrl are legacy read-only — see the update DTO.
+        // A seal is an instrument of authority; it is uploaded through the gate and versioned, not
+        // typed as a path on a profile edit.
         entity.LogoUrl                     = dto.LogoUrl?.Trim();
         entity.OfferAcceptanceInstructions = dto.OfferAcceptanceInstructions?.Trim();
         entity.DocumentFooterText          = dto.DocumentFooterText?.Trim();

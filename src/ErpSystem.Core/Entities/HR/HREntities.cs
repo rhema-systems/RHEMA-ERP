@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Maintenance;
@@ -2430,8 +2430,28 @@ public class ExternalAssociate : TenantEntity
 
     public string? Role { get; set; }
 
+    /// <summary>
+    /// Legacy caller-supplied file location for the associate's photograph.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Kept for ported values only; nothing new writes it.</b> A photograph is set through the
+    /// controlled upload endpoint, which stores <see cref="PhotoFileUploadRecordId"/>. Non-nullable
+    /// with an empty default, so "no photo" is an empty string here rather than null.
+    /// </remarks>
     [MaxLength(500)]
     public string PicturePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Scanned controlled upload holding the associate's photograph.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>One column, not the employee's six.</b> An associate's photo is an avatar, and the
+    /// house precedent for an avatar is <c>JobCandidate.ProfilePhotoFileUploadRecordId</c>: it is
+    /// deliberately NOT registered in the central DMS, because an avatar carries no retention value
+    /// and one document record per photo is repository noise. An employee photograph is part of a
+    /// personnel file and does get DMS ids; an external associate is a contact, not personnel.
+    /// </remarks>
+    public Guid? PhotoFileUploadRecordId { get; set; }
 
     public bool IsActive { get; set; }
 
