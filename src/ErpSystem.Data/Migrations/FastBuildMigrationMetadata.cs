@@ -266,3 +266,5 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831232612_AddHrPolicyDeadlineSettings")] partial class AddHrPolicyDeadlineSettings { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260901001749_AddEmployeeDocuments")] partial class AddEmployeeDocuments { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260901013629_AddExtraEmployeeMasterFields")] partial class AddExtraEmployeeMasterFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260901120439_HrReferenceDataDimensions")] partial class HrReferenceDataDimensions { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260901124815_HrIdentificationExpirySweep")] partial class HrIdentificationExpirySweep { }

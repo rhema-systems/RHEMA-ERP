@@ -566,6 +566,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     public DbSet<Country> Countries { get; set; }
     public DbSet<Qualification> Qualifications { get; set; }
+
+    /// <summary>The ordered academic / professional ladder a Qualification can sit on.</summary>
+    public DbSet<QualificationLevel> QualificationLevels { get; set; }
+
+    /// <summary>Catalogued bodies that certify a skill, replacing free-text certifier names.</summary>
+    public DbSet<CertifyingBody> CertifyingBodies { get; set; }
+
+    /// <summary>Per-register staff-number formats. One row per employee register per tenant.</summary>
+    public DbSet<StaffNumberFormat> StaffNumberFormats { get; set; }
     public DbSet<ExternalAssociate> ExternalAssociates { get; set; }
 
     #endregion

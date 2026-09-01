@@ -237,6 +237,21 @@ public class CompanyHrPolicySettings : TenantEntity
     public string SuccessionPlanNumberPrefix { get; set; } = "SP";
 
     // ═══════════════════════════════════════════
+    //  STAFF NUMBERING — deliberately NOT here
+    // ═══════════════════════════════════════════
+    //
+    // ⚠ Staff numbering is per-REGISTER, not per-company. One organisation numbers permanent staff
+    // as bare digits (10482) and contract staff with a prefix (ABC123); the next uses EMP/26/0417
+    // for everyone. Four flat columns were written here first and could not express the first case,
+    // and adding a ContractStaffNumberPrefix beside them would have hardcoded a two-register
+    // assumption into a multi-tenant product.
+    //
+    // See StaffNumberFormat: one row per register per tenant, each with its own format and its own
+    // sequence. There is also no global auto/manual switch — the ABSENCE of a rule for a register
+    // means the number is typed by hand. A toggle here beside that flag would be a second source of
+    // truth for one fact, and the two would eventually disagree.
+
+    // ═══════════════════════════════════════════
     //  ANSWERS TDC HAS NOT GIVEN YET
     // ═══════════════════════════════════════════
     //

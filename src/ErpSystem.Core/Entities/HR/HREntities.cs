@@ -2001,8 +2001,23 @@ public class EmployeeSkill : TenantEntity
     [MaxLength(200)]
     public string? CertificationNumber { get; set; }
 
+    /// <summary>
+    /// Who certified the skill, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ KEPT alongside <see cref="CertifyingBodyId"/> rather than replaced. Two reasons: the
+    /// existing rows are free text and dropping the column would discard them, and a genuinely
+    /// one-off certifier does not deserve a catalogue row. The lookup is what makes the common
+    /// case consistent; this stays for the tail.
+    /// </remarks>
     [MaxLength(200)]
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued body that certified this skill, where there is one.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
+    [ForeignKey(nameof(CertifyingBodyId))]
+    public virtual CertifyingBody? CertifyingBodyRef { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -2191,12 +2206,100 @@ public class Qualification : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// What KIND of qualification this is — Education, Certification, License, Membership.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A category, NOT a rank. It cannot answer "is a Master's higher than a Diploma", which is
+    /// what shortlisting and succession need; <see cref="QualificationLevelId"/> is the ladder.
+    /// </remarks>
     public QualificationType Type { get; set; }
+
+    /// <summary>Where this sits on the academic / professional ladder, when it sits on one.</summary>
+    /// <remarks>
+    /// Nullable because plenty of qualifications are unranked — a membership or a short course has
+    /// a kind but no level, and forcing one would invent a comparison that does not exist.
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
+
+    [ForeignKey(nameof(QualificationLevelId))]
+    public virtual QualificationLevel? QualificationLevel { get; set; }
 
     [MaxLength(200)]
     public string? IssuingAuthority { get; set; }
 
     public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// An organisation that certifies a skill — an institute, board or awarding body.
+/// </summary>
+/// <remarks>
+/// <para>Introduced because <c>EmployeeSkill.CertifyingBody</c> was free text, so "Institute of
+/// Chartered Accountants", "ICAG" and "I.C.A.G." were three different certifiers as far as any
+/// report was concerned.</para>
+///
+/// <para>⚠ The free-text column stays. A lookup that forces every one-off certifier into the
+/// catalogue makes the catalogue worthless; this exists so the COMMON certifiers are consistent,
+/// not so the rare ones are impossible.</para>
+/// </remarks>
+public class CertifyingBody : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Short form, e.g. "ICAG", "CIPS". What people actually write.</summary>
+    [MaxLength(50)]
+    public string? Abbreviation { get; set; }
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    /// <summary>Country the body is based in, where that distinguishes it.</summary>
+    public Guid? CountryId { get; set; }
+
+    [ForeignKey(nameof(CountryId))]
+    public virtual Country? Country { get; set; }
+
+    [MaxLength(255)]
+    public string? Website { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<EmployeeSkill> EmployeeSkills { get; set; } = new List<EmployeeSkill>();
+}
+
+/// <summary>
+/// The academic / professional ladder a <see cref="Qualification"/> can sit on.
+/// </summary>
+/// <remarks>
+/// <para>Separate from <see cref="QualificationType"/>, which is a CATEGORY (Education,
+/// Certification, License…) and cannot be ordered. This is what makes "at least a Bachelor's"
+/// answerable.</para>
+///
+/// <para><b><see cref="Rank"/> is the whole point.</b> A ladder whose rungs cannot be compared is
+/// just a second category. Rank ascends — higher means more advanced — and is what a shortlisting
+/// rule or a succession readiness check compares.</para>
+/// </remarks>
+public class QualificationLevel : TenantEntity
+{
+    [Required]
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string? Code { get; set; }
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    /// <summary>Ascending order. Higher is more advanced; ties are permitted for equivalents.</summary>
+    public int Rank { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<Qualification> Qualifications { get; set; } = new List<Qualification>();
 }
 
 #endregion
@@ -2265,6 +2368,22 @@ public class IdentificationType : TenantEntity
     /// Whether this ID has an expiry date
     /// </summary>
     public bool HasExpiryDate { get; set; } = true;
+
+    /// <summary>
+    /// How many days before a card of this type expires the holder should be reminded.
+    /// </summary>
+    /// <remarks>
+    /// Per TYPE, because the lead time is a property of the document, not of the person: a Ghana
+    /// Card renewal is not a passport renewal. <c>null</c> means no reminder for this type, which
+    /// is the correct reading for an ID that does not expire at all — see
+    /// <see cref="HasExpiryDate"/>.
+    ///
+    /// ⚠ Read by <c>IdentificationExpiryReminderBackgroundService</c>. Before 2026-09-01 nothing
+    /// swept <c>EmployeeIdentificationCard.ExpiryDate</c> at all, so this column and that sweep
+    /// were added together — a lead time nothing acts on is a setting that only looks like a
+    /// feature.
+    /// </remarks>
+    public int? ExpiryNotificationLeadDays { get; set; }
 
     public bool IsActive { get; set; } = true;
 

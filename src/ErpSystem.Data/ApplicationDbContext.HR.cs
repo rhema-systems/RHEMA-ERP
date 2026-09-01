@@ -334,6 +334,10 @@ public partial class ApplicationDbContext
     /// <summary>One pass of the separation reminder sweep (FR-HR-111).</summary>
     public DbSet<SeparationReminderRun> SeparationReminderRuns { get; set; } = null!;
 
+    /// <summary>Lane 3b — the identification-expiry sweep, the sixth area to carry its own pair.</summary>
+    public DbSet<IdentificationExpiryReminderRun> IdentificationExpiryReminderRuns { get; set; } = null!;
+    public DbSet<IdentificationExpiryDispatchLog> IdentificationExpiryDispatchLogs { get; set; } = null!;
+
     /// <summary>One reminder the sweep raised, with the key that stops it repeating.</summary>
     public DbSet<SeparationReminderDispatchLog> SeparationReminderDispatchLogs { get; set; } = null!;
 
@@ -2115,6 +2119,16 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(e => new { e.TenantId, e.EmployeeId, e.SkillId })
                 .IsUnique()
                 .HasDatabaseName("IX_EmployeeSkill_Tenant_Employee_Skill");
+
+            entity.HasIndex(e => e.CertifyingBodyId);
+
+            // ⚠ Paired EXPLICITLY with CertifyingBody.EmployeeSkills. An unpaired navigation makes
+            // EF mint a second shadow FK column (CertifyingBodyId1) beside the real one — the
+            // duplicate-shadow-FK defect this module has already had to clean out once.
+            entity.HasOne(e => e.CertifyingBodyRef)
+                .WithMany(b => b.EmployeeSkills)
+                .HasForeignKey(e => e.CertifyingBodyId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.Employee)
                 .WithMany(e => e.Skills)
@@ -8472,6 +8486,30 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<IdentificationExpiryReminderRun>(entity =>
+        {
+            entity.HasIndex(x => x.StartedAt).HasDatabaseName("IX_IdentificationExpiryRun_StartedAt");
+            entity.HasIndex(x => new { x.TenantId, x.StartedAt })
+                .HasDatabaseName("IX_IdentificationExpiryRun_Tenant_StartedAt");
+        });
+
+        builder.Entity<IdentificationExpiryDispatchLog>(entity =>
+        {
+            entity.HasIndex(x => x.RunId).HasDatabaseName("IX_IdentificationExpiryDispatch_RunId");
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_IdentificationExpiryDispatch_EmployeeId");
+            entity.HasIndex(x => x.Kind).HasDatabaseName("IX_IdentificationExpiryDispatch_Kind");
+
+            // Looked up on every sweep for every candidate — the one index that decides whether a
+            // daily pass over a whole workforce is cheap.
+            entity.HasIndex(x => new { x.TenantId, x.DedupeKey })
+                .HasDatabaseName("IX_IdentificationExpiryDispatch_Tenant_DedupeKey");
+
+            entity.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<SeparationSettlement>(entity =>
         {
             // One settlement per separation. Filtered, so a soft-deleted draft does not block a
@@ -10188,8 +10226,64 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.ShortCode);
             entity.HasIndex(x => x.Type);
             entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.QualificationLevelId);
 
             entity.Property(x => x.Type).HasConversion<int>();
+
+            // Restrict, not Cascade: retiring a level must not silently delete every qualification
+            // sitting on it. The level is a label on the qualification, not its owner.
+            entity.HasOne(x => x.QualificationLevel)
+                .WithMany(l => l.Qualifications)
+                .HasForeignKey(x => x.QualificationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<QualificationLevel>(entity =>
+        {
+            entity.HasIndex(x => x.Name);
+            entity.HasIndex(x => x.IsActive);
+
+            // Rank is what makes the ladder comparable, so it is indexed and ordered on.
+            entity.HasIndex(x => new { x.TenantId, x.Rank });
+
+            // ⚠ Filtered on IsDeleted. An unfiltered unique index would keep a retired level's name
+            // reserved for ever — the soft-delete/unique-index shape this module has met nine times.
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+        });
+
+        builder.Entity<StaffNumberFormat>(entity =>
+        {
+            entity.Property(x => x.AppliesToEmploymentType).HasConversion<int?>();
+
+            entity.HasIndex(x => x.IsActive);
+
+            // ⚠ Filtered on IsDeleted, and on IsActive too: a RETIRED rule must not keep its
+            // register reserved. Without the IsActive leg, switching a tenant from one contract-staff
+            // format to another would need the old rule hard-deleted, and a soft delete would not
+            // release it — the shape this module has met nine times.
+            entity.HasIndex(x => new { x.TenantId, x.AppliesToEmploymentType })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsActive] = 1");
+
+            entity.HasIndex(x => new { x.TenantId, x.SequenceKey });
+        });
+
+        builder.Entity<CertifyingBody>(entity =>
+        {
+            entity.HasIndex(x => x.Name);
+            entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.CountryId);
+
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            entity.HasOne(x => x.Country)
+                .WithMany()
+                .HasForeignKey(x => x.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<OrganizationChartNode>(entity =>
