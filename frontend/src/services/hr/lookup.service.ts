@@ -14,6 +14,7 @@ import type {
   CertifyingBodyRequest,
   StaffNumberFormat,
   StaffNumberFormatRequest,
+  StaffNumberCounterState,
   IdentificationExpiryItem,
   IdentificationExpiryRunResult,
   IdentificationExpiryRun,
@@ -204,6 +205,22 @@ class ReferenceDimensionService {
     yearDigits: number; sequenceDigits: number; suffix: string;
   }): Promise<{ example: string }> {
     return apiService.post<{ example: string }>(`${this.baseUrl}/staff-number-formats/preview`, data);
+  }
+
+  /**
+   * Where a rule's counter stands against the numbers already in the register.
+   *
+   * ⚠ Reads only. A format can be perfectly configured and still be about to issue a number
+   * somebody already has, because numbers that arrived by data load were never counted.
+   */
+  getStaffNumberCounter(id: string): Promise<StaffNumberCounterState> {
+    return apiService.get<StaffNumberCounterState>(`${this.baseUrl}/staff-number-formats/${id}/counter`);
+  }
+
+  /** Moves the counter past every number the rule could reissue. Forward-only and idempotent. */
+  reconcileStaffNumberCounter(id: string): Promise<StaffNumberCounterState> {
+    return apiService.post<StaffNumberCounterState>(
+      `${this.baseUrl}/staff-number-formats/${id}/counter/reconcile`, {});
   }
 }
 

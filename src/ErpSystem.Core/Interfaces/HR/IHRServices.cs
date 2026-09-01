@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
@@ -14,6 +14,23 @@ public interface IEmployeeService
     #region 1) Core Employee Lifecycle (writes - transactional)
 
     Task<EmployeeDetailDto> CreateEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records an employee who already exists elsewhere, keeping the staff number they already have.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Loading an existing employee is not the same act as hiring one.</b> A hire is given
+    /// a number by whichever rule governs their register; a loaded employee arrives with one, and it
+    /// is not ours to reissue — it is printed on their ID card and referenced by payroll. So this
+    /// path REQUIRES the number and honours it, where <see cref="CreateEmployeeAsync"/> refuses one
+    /// on an auto-numbered register.</para>
+    ///
+    /// <para>It also teaches the counter what it just took in. Without that, a register loaded with
+    /// eight thousand staff leaves the counter at zero and the first real hire is handed a number
+    /// somebody already has — a failure that surfaces as a unique-index violation on an unrelated
+    /// screen, with nothing pointing back at the load that caused it.</para>
+    /// </remarks>
+    Task<EmployeeDetailDto> ImportEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeDetailDto> UpdateEmployeeAsync(Guid employeeId, UpdateEmployeeDto dto, CancellationToken cancellationToken = default);
 
     Task<EmployeeDetailDto> ActivateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);

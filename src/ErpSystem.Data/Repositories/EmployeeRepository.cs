@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -225,17 +225,34 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        /// <summary>
+        /// Whether a staff number is taken. <b>Tombstones count as taken.</b>
+        /// </summary>
+        /// <remarks>
+        /// <para>⚠ <c>IX_Employee_Tenant_EmployeeNumber</c> is NOT filtered, so a soft-deleted
+        /// employee's number is still occupied. This check used to exclude them twice over — the
+        /// explicit <c>!IsDeleted</c> predicate and the soft-delete query filter behind it — so a
+        /// caller-supplied number belonging to a leaver passed validation and then died in
+        /// <c>SaveChanges</c> as a 500, with the index name as the only clue.</para>
+        ///
+        /// <para>The same shape as the generator's scan, which was corrected in lane 3d; this is
+        /// the half of it that was left behind, and it is the half the import path relies on,
+        /// because there the number always comes from the caller. Saying "that number belongs to a
+        /// former employee" is a worse answer than nothing only if it is not true.</para>
+        /// </remarks>
         public async Task<bool> EmployeeNumberExistsAsync(string employeeNumber)
         {
-            return await _dbSet.AnyAsync(e => e.EmployeeNumber == employeeNumber && !e.IsDeleted);
+            return await _dbSet
+                .IgnoreQueryFilters()
+                .AnyAsync(e => e.EmployeeNumber == employeeNumber);
         }
 
+        /// <inheritdoc cref="EmployeeNumberExistsAsync(string)"/>
         public async Task<bool> EmployeeNumberExistsAsync(string employeeNumber, Guid excludeEmployeeId)
         {
-            return await _dbSet.AnyAsync(e =>
-                e.EmployeeNumber == employeeNumber &&
-                e.Id != excludeEmployeeId &&
-                !e.IsDeleted);
+            return await _dbSet
+                .IgnoreQueryFilters()
+                .AnyAsync(e => e.EmployeeNumber == employeeNumber && e.Id != excludeEmployeeId);
         }
 
         public async Task<bool> EmailExistsAsync(string email)

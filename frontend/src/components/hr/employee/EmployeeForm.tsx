@@ -22,6 +22,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { employeeService } from '@/services/hr/employee.service';
+import { referenceDimensionService } from '@/services/hr/lookup.service';
 import {
   GENDER_OPTIONS,
   MARITAL_STATUS_OPTIONS,
@@ -142,6 +143,19 @@ interface EmployeeFormProps {
   initialManagerLabel?: string | null;
   /** The employee's saved location level, to seed the location cascade on edit. */
   initialLocationLevelId?: string | null;
+  /**
+   * Show what the tenant's numbering rules will do with the staff-number field. Create only.
+   *
+   * ⚠ On edit the number already exists and the rule has nothing to say about it, so the field
+   * carries no claim at all rather than a claim that is false.
+   */
+  showNumberingRule?: boolean;
+  /**
+   * Present when the caller can record an employee who already HAS a staff number, i.e. a data
+   * load rather than a hire. Providing the handler is what puts the choice on the form.
+   */
+  importMode?: boolean;
+  onImportModeChange?: (value: boolean) => void;
 }
 
 // Sort comparators: levels by number then name; everything else alphabetical.
@@ -251,6 +265,9 @@ export function EmployeeForm({
   onCancel,
   initialManagerLabel,
   initialLocationLevelId,
+  showNumberingRule = false,
+  importMode = false,
+  onImportModeChange,
 }: EmployeeFormProps) {
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
@@ -275,6 +292,53 @@ export function EmployeeForm({
     id: e.id as string,
     label: (e.displayName || e.fullName || `${e.firstName ?? ''} ${e.lastName ?? ''}`).trim(),
   }));
+
+  // ── what the register's numbering rule will do with the staff number ──────
+  //
+  // ⚠ The hint here used to read "Auto-generated if left blank", which stopped being true the day
+  // numbering became configuration. Whether a number is issued or typed is the REGISTER's
+  // decision now, and a register with no rule REFUSES a blank rather than inventing one — so a
+  // form promising to fill it in was sending people into a create that fails.
+  const employmentType = form.watch('employmentType');
+  const numberingRules = useQuery({
+    queryKey: ['hr', 'staff-number-formats'],
+    queryFn: () => referenceDimensionService.getStaffNumberFormats(),
+    enabled: showNumberingRule,
+  });
+
+  // Own rule first, then the tenant default — the same resolution the server does, and only
+  // ACTIVE rules compete, because retiring one stops it governing new hires immediately.
+  const numberingRule = useMemo(() => {
+    const active = (numberingRules.data ?? []).filter((r) => r.isActive);
+    return (
+      active.find((r) => r.appliesToEmploymentType === employmentType) ??
+      active.find((r) => r.appliesToEmploymentType === null) ??
+      null
+    );
+  }, [numberingRules.data, employmentType]);
+
+  const registerLabel =
+    EMPLOYMENT_TYPE_OPTIONS.find((o) => o.value === employmentType)?.label.toLowerCase() ?? 'these';
+  const numberIsIssued = showNumberingRule && !importMode && !!numberingRule?.autoGenerate;
+
+  // A disabled input still submits whatever react-hook-form holds. Without this, typing a number
+  // and then switching to an auto-numbered register sends a value the server is obliged to refuse,
+  // from a field the user can no longer see or clear.
+  useEffect(() => {
+    if (numberIsIssued && form.getValues('employeeNumber')) {
+      form.setValue('employeeNumber', '');
+    }
+  }, [numberIsIssued, form]);
+
+  const numberHint = !showNumberingRule
+    ? undefined
+    : importMode
+      ? 'Required — the number this employee already has. It is kept exactly as given, and the register’s counter is moved past it so the next hire does not collide with it.'
+      : numberingRule?.autoGenerate
+        ? `Issued automatically from “${numberingRule.name}”, e.g. ${numberingRule.example}. A number cannot be supplied while that rule is on.`
+        : numberingRule
+          ? `Required — “${numberingRule.name}” is set to be entered by hand.`
+          : `Required — no numbering rule is configured for ${registerLabel} staff, so the system does not issue one.`;
 
   // Org level name derived from the position (its DTO carries the level id, but
   // the level name isn't always populated — resolve it against the levels list).
@@ -340,8 +404,27 @@ export function EmployeeForm({
               </Field>
             </div>
             <div className={GRID3}>
-              <Field label="Employee Number" htmlFor="employeeNumber" hint="Auto-generated if left blank">
-                <Input id="employeeNumber" {...form.register('employeeNumber')} />
+              <Field label="Employee Number" htmlFor="employeeNumber" hint={numberHint}>
+                <Input
+                  id="employeeNumber"
+                  disabled={numberIsIssued}
+                  placeholder={numberIsIssued ? numberingRule?.example : undefined}
+                  {...form.register('employeeNumber')}
+                />
+                {onImportModeChange && (
+                  <label className="flex items-start gap-2 pt-1 text-xs text-muted-foreground">
+                    <Checkbox
+                      id="importMode"
+                      className="mt-0.5"
+                      checked={importMode}
+                      onCheckedChange={(v) => onImportModeChange(v === true)}
+                    />
+                    <span>
+                      This person already has a staff number (recording an existing employee, not a
+                      new hire)
+                    </span>
+                  </label>
+                )}
               </Field>
               <Field label="Title" htmlFor="title">
                 <Input id="title" placeholder="Mr / Ms / Dr" {...form.register('title')} />

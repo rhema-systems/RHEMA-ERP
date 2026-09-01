@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -130,6 +130,43 @@ public class EmployeesController : ControllerBase
         try
         {
             var created = await _service.CreateEmployeeAsync(dto, cancellationToken);
+            return CreatedAtAction(nameof(GetEmployeeDetails), new { id = created.Id }, created);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Records an employee who already exists elsewhere, keeping the staff number they came with.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Not a variant of create — a different act.</b> The normal create REFUSES a
+    /// supplied number on an auto-numbered register, because a hand-typed value can occupy a number
+    /// the sequence is about to issue. An existing employee's number is not ours to reissue: it is
+    /// on their ID card and referenced by payroll, so this path requires it and honours it.</para>
+    ///
+    /// <para><b>And it teaches the counter.</b> A register loaded without this endpoint leaves the
+    /// counter at zero while thousands of numbers are in use, and the first hire afterwards is
+    /// handed one of them — surfacing as a unique-index violation on an unrelated screen. Where a
+    /// load has already happened by other means, the settings screen's counter reconcile repairs
+    /// the same thing after the fact.</para>
+    ///
+    /// <para>Admin-gated rather than Write-gated: accepting numbers as given bypasses the rule that
+    /// keeps the register consistent, which is a different privilege from adding a new hire.</para>
+    /// </remarks>
+    [HttpPost("import")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [ProducesResponseType(typeof(EmployeeDetailDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<EmployeeDetailDto>> ImportEmployee([FromBody] CreateEmployeeDto dto, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        try
+        {
+            var created = await _service.ImportEmployeeAsync(dto, cancellationToken);
             return CreatedAtAction(nameof(GetEmployeeDetails), new { id = created.Id }, created);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)

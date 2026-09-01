@@ -102,6 +102,7 @@ import {
   Phone,
   Swords,
   BookTemplate,
+  Hash,
   Landmark,
   HardHat,
   Bandage,
@@ -3403,6 +3404,14 @@ export const navigationItems: NavItem[] = [
                 title: 'Policy Settings',
                 href: '/administration/hr/settings/policy',
                 icon: SlidersHorizontal,
+              },
+              {
+                // Lane 3b. Per-register numbering rules AND the counter behind them — the counter
+                // only knows about numbers it issued, so a loaded register leaves it at zero while
+                // thousands are in use, and nothing said so until this screen existed.
+                title: 'Staff Numbering',
+                href: '/administration/hr/settings/staff-numbering',
+                icon: Hash,
               },
             ],
           },

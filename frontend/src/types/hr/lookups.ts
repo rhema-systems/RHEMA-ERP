@@ -238,6 +238,36 @@ export interface StaffNumberFormatRequest {
   isActive: boolean;
 }
 
+/**
+ * Where one rule's counter stands against the numbers already in the register.
+ *
+ * ⚠ The read that makes the import hazard visible. A counter only knows about numbers it issued
+ * itself, so a register loaded by SQL, a seeder or a restore leaves it at zero with thousands of
+ * numbers already in use — and nothing says so until a hire fails on the unique index.
+ */
+export interface StaffNumberCounterState {
+  formatId: string;
+  formatName: string;
+  sequenceKey: string;
+  autoGenerate: boolean;
+  isActive: boolean;
+  /** The counter's year bucket, or null when the rule does not print the year. */
+  yearBucket?: number | null;
+  /** The value last issued. 0 when the counter has never been used. */
+  counterStandsAt: number;
+  /** What the next auto-issued number would be, composed by the rule itself. */
+  nextNumber: string;
+  /** ⚠ True when that next number is already somebody's. */
+  nextNumberIsInUse: boolean;
+  numbersInRegister: number;
+  /** Did not fit the rule at all — another register's numbering, or another year. */
+  numbersNotMatchingFormat: number;
+  highestInRegister: number;
+  highestNumberInRegister?: string | null;
+  /** True when the register is ahead of the counter, so reconciliation is owed. */
+  counterIsBehind: boolean;
+}
+
 /** One card the sweep would remind about, or has. */
 export interface IdentificationExpiryItem {
   /** `IdentificationExpiring` or `IdentificationExpired`. */

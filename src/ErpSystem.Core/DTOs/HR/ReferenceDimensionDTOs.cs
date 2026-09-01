@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -189,6 +189,55 @@ public class UpdateStaffNumberFormatDto : CreateStaffNumberFormatDto
 {
     [Required]
     public Guid Id { get; set; }
+}
+
+/// <summary>
+/// Where one rule's counter stands against the numbers already in the register.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>The read that makes the import hazard visible.</b> A counter only knows about numbers it
+/// issued itself. Everything loaded, seeded or migrated in is invisible to it, so a tenant can hold
+/// eight thousand staff numbers with the counter still sitting at zero — and nothing says so until
+/// a hire fails on the unique index, in a place that gives no clue why.
+/// </remarks>
+public class StaffNumberCounterStateDto
+{
+    public Guid FormatId { get; set; }
+    public string FormatName { get; set; } = string.Empty;
+    public string SequenceKey { get; set; } = string.Empty;
+    public bool AutoGenerate { get; set; }
+    public bool IsActive { get; set; }
+
+    /// <summary>The counter's year bucket, or <c>null</c> when the rule does not print the year.</summary>
+    public int? YearBucket { get; set; }
+
+    /// <summary>The value last issued. Zero when the counter has never been used.</summary>
+    public long CounterStandsAt { get; set; }
+
+    /// <summary>What the next auto-issued number would be, composed by the rule itself.</summary>
+    public string NextNumber { get; set; } = string.Empty;
+
+    /// <summary>⚠ True when that next number is already somebody's. The failure, before it happens.</summary>
+    public bool NextNumberIsInUse { get; set; }
+
+    /// <summary>How many numbers in the register this rule could have issued.</summary>
+    public int NumbersInRegister { get; set; }
+
+    /// <summary>
+    /// How many did not fit the rule at all — a different register's numbering, or a different year.
+    /// </summary>
+    /// <remarks>Reported rather than hidden: a rule that matches nothing is usually a rule with the
+    /// wrong prefix, and a silent zero looks identical to a clean register.</remarks>
+    public int NumbersNotMatchingFormat { get; set; }
+
+    /// <summary>The highest counter value found in the register.</summary>
+    public long HighestInRegister { get; set; }
+
+    /// <summary>The number it was read from, so a reader can check the match by eye.</summary>
+    public string? HighestNumberInRegister { get; set; }
+
+    /// <summary>True when the register is ahead of the counter — reconciliation is owed.</summary>
+    public bool CounterIsBehind { get; set; }
 }
 
 /// <summary>A preview request, so a settings screen can show output before the rule is saved.</summary>

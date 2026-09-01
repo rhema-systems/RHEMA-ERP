@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR;
@@ -135,4 +135,61 @@ public class StaffNumberFormat : TenantEntity
 
     /// <summary>What this rule produces for counter 1, for a settings screen to display.</summary>
     public string Example(int year) => Compose(1, year);
+
+    /// <summary>
+    /// Reads the counter back out of a number this rule could have produced, for the given year.
+    /// </summary>
+    /// <remarks>
+    /// <para>The exact inverse of <see cref="Compose"/>, and deliberately so: an import advances the
+    /// counter past what it just loaded, and a loose "take the trailing digits" reader would learn
+    /// the wrong lesson from a number some other system issued. Anything that does not fit the rule
+    /// returns <c>false</c>, which means "nothing to learn from this one" — not an error. A data
+    /// load must not fail because one legacy number was formatted differently.</para>
+    ///
+    /// <para>⚠ <b>The year is part of the match, not decoration.</b> Counters for a rule that prints
+    /// the year are per-year buckets, so <c>EMP/25/0417</c> says nothing at all about where the 2026
+    /// counter should stand — reading 417 out of it would push next January's numbering forward for
+    /// no reason.</para>
+    ///
+    /// <para>Padding width is NOT checked. Registers loaded from elsewhere are full of numbers that
+    /// are right but unpadded (<c>8072</c> where the rule prints <c>08072</c>), and refusing those
+    /// would leave the counter behind precisely on the register that has the most numbers in it.</para>
+    /// </remarks>
+    public bool TryReadSequence(string? number, int year, out long sequence)
+    {
+        sequence = 0;
+        var text = number?.Trim();
+        if (string.IsNullOrEmpty(text)) return false;
+
+        if (!string.IsNullOrEmpty(Prefix))
+        {
+            if (!text.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) return false;
+            text = text[Prefix.Length..];
+            text = TrimLeadingSeparator(text);
+        }
+
+        if (IncludeYear)
+        {
+            var token = YearDigits == 2 ? (year % 100).ToString("D2") : year.ToString("D4");
+            if (!text.StartsWith(token, StringComparison.Ordinal)) return false;
+            text = text[token.Length..];
+            text = TrimLeadingSeparator(text);
+        }
+
+        if (!string.IsNullOrEmpty(Suffix))
+        {
+            if (!text.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase)) return false;
+            text = text[..^Suffix.Length];
+            if (!string.IsNullOrEmpty(Separator) && text.EndsWith(Separator, StringComparison.Ordinal))
+                text = text[..^Separator.Length];
+        }
+
+        if (text.Length == 0 || !text.All(char.IsAsciiDigit)) return false;
+        return long.TryParse(text, out sequence);
+    }
+
+    private string TrimLeadingSeparator(string text) =>
+        !string.IsNullOrEmpty(Separator) && text.StartsWith(Separator, StringComparison.Ordinal)
+            ? text[Separator.Length..]
+            : text;
 }

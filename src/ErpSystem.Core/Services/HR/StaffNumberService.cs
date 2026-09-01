@@ -1,3 +1,4 @@
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -44,6 +45,28 @@ public interface IStaffNumberService
     /// <summary>The rule that governs a register, or <c>null</c> when the register is manual.</summary>
     Task<StaffNumberFormat?> GetRuleAsync(
         EmploymentType employmentType, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Where a rule's counter stands against the numbers already in the register, without moving it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The question this answers is <b>"will the next hire be given a number somebody already
+    /// has?"</b> A counter only knows about numbers it issued; every number that arrived by data
+    /// load, seed or migration is invisible to it. On a freshly loaded tenant the counter stands at
+    /// zero while the register holds thousands of numbers, and nothing says so until a create fails
+    /// on the unique index.
+    /// </remarks>
+    Task<StaffNumberCounterStateDto> InspectCounterAsync(Guid formatId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Moves a rule's counter past every number already in the register that the rule could issue.
+    /// </summary>
+    /// <remarks>
+    /// The bulk form of <see cref="AcceptImportedAsync"/>, and the one that copes with a load that
+    /// did not come through this service at all — SQL, a seeder, a restored database. Idempotent,
+    /// and forward-only.
+    /// </remarks>
+    Task<StaffNumberCounterStateDto> ReconcileCounterAsync(Guid formatId, CancellationToken cancellationToken = default);
 }
 
 public class StaffNumberService : IStaffNumberService
@@ -131,23 +154,111 @@ public class StaffNumberService : IStaffNumberService
 
         // Advance the counter past what was just loaded, so the first hire after the load does not
         // collide with, or sort below, the staff it imported. Best-effort by design: a number that
-        // does not match the rule's shape simply carries no counter to learn from, and a data load
-        // must not fail because a legacy number was formatted differently.
-        var trailing = ExtractTrailingSequence(supplied, rule);
-        if (trailing is not { } value) return supplied;
+        // does not fit the rule's shape carries no counter to learn from, and a data load must not
+        // fail because a legacy number was formatted differently.
+        var year = DateTime.UtcNow.Year;
+        if (!rule.TryReadSequence(supplied, year, out var value)) return supplied;
+
+        await _numberSequence.AdvanceToAtLeastAsync(
+            rule.SequenceKey, value, rule.IncludeYear ? year : null, cancellationToken);
+
+        return supplied;
+    }
+
+    // ── the counter against the register ────────────────────────────────────
+
+    public Task<StaffNumberCounterStateDto> InspectCounterAsync(
+        Guid formatId, CancellationToken cancellationToken = default)
+        => ExamineCounterAsync(formatId, reconcile: false, cancellationToken);
+
+    public Task<StaffNumberCounterStateDto> ReconcileCounterAsync(
+        Guid formatId, CancellationToken cancellationToken = default)
+        => ExamineCounterAsync(formatId, reconcile: true, cancellationToken);
+
+    /// <summary>
+    /// Reads the register through one rule's eyes, and optionally moves the counter to match.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Selection is by the SHAPE of the number, not by employment type.</b> The rule
+    /// records which register somebody entered by, so a converted employee keeps a number their
+    /// current employment type would never produce — partitioning the scan by
+    /// <c>Employee.EmploymentType</c> would both miss numbers this rule can reissue and count
+    /// numbers it cannot. What matters is exactly "which existing numbers could this rule hand out
+    /// again", and that is a question about the string.</para>
+    ///
+    /// <para>⚠ <b>Soft-deleted employees are included.</b> The unique index on
+    /// <c>(TenantId, EmployeeNumber)</c> is unfiltered, so a leaver's number is still taken — the
+    /// defect that made employee creation fail for the rest of the year once anybody was deleted.
+    /// A watermark that ignored tombstones would walk straight back into it.</para>
+    /// </remarks>
+    private async Task<StaffNumberCounterStateDto> ExamineCounterAsync(
+        Guid formatId, bool reconcile, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        var rule = await _unitOfWork.Repository<StaffNumberFormat>()
+            .GetQueryable()
+            .FirstOrDefaultAsync(r => r.Id == formatId && !r.IsDeleted, cancellationToken);
+
+        if (rule is null || rule.TenantId != tenantId)
+            throw new ArgumentException($"Staff number format with ID '{formatId}' not found.");
 
         var year = DateTime.UtcNow.Year;
-        for (var guard = 0; guard < 10_000; guard++)
+        int? bucket = rule.IncludeYear ? year : null;
+
+        // ⚠ GetQueryableIncludingDeleted, and NOT GetQueryable().IgnoreQueryFilters() — which is a
+        // no-op here. The generic repository bakes an explicit `Where(e => !e.IsDeleted)` into
+        // GetQueryable(), and no filter switch removes a predicate that is written into the query.
+        // The first cut of this read used it and silently under-counted tombstones, which is the
+        // exact failure the whole read exists to prevent.
+        var numbers = await _unitOfWork.Repository<Employee>()
+            .GetQueryableIncludingDeleted(e => e.TenantId == tenantId && e.EmployeeNumber != "")
+            .Select(e => e.EmployeeNumber)
+            .ToListAsync(cancellationToken);
+
+        long highest = 0;
+        string? highestNumber = null;
+        var matched = 0;
+        foreach (var number in numbers)
         {
-            var next = await _numberSequence.NextAsync(
-                rule.SequenceKey, rule.IncludeYear ? year : null, cancellationToken);
-            if (next > value) return supplied;
+            if (!rule.TryReadSequence(number, year, out var value)) continue;
+            matched++;
+            if (value <= highest) continue;
+            highest = value;
+            highestNumber = number.Trim();
         }
 
-        _logger.LogWarning(
-            "Staff number sequence '{Key}' could not be advanced past imported value {Value} within 10,000 steps; "
-            + "the counter may need seeding by hand.", rule.SequenceKey, value);
-        return supplied;
+        var standsAt = reconcile && highest > 0
+            ? await _numberSequence.AdvanceToAtLeastAsync(rule.SequenceKey, highest, bucket, cancellationToken)
+            : await _numberSequence.PeekAsync(rule.SequenceKey, bucket, cancellationToken);
+
+        if (reconcile)
+            _logger.LogInformation(
+                "Staff number counter '{Key}' reconciled for rule {Rule}: {Matched} numbers read, watermark now {Value}.",
+                rule.SequenceKey, rule.Name, matched, standsAt);
+
+        var nextNumber = rule.Compose(standsAt + 1, year);
+        var taken = new HashSet<string>(
+            numbers.Select(n => n.Trim()), StringComparer.OrdinalIgnoreCase);
+
+        return new StaffNumberCounterStateDto
+        {
+            FormatId = rule.Id,
+            FormatName = rule.Name,
+            SequenceKey = rule.SequenceKey,
+            AutoGenerate = rule.AutoGenerate,
+            IsActive = rule.IsActive,
+            YearBucket = bucket,
+            CounterStandsAt = standsAt,
+            NextNumber = nextNumber,
+            // ⚠ The whole point of the read. A rule can be perfectly configured and still be about
+            // to hand out a number somebody is already using.
+            NextNumberIsInUse = rule.AutoGenerate && taken.Contains(nextNumber),
+            NumbersInRegister = matched,
+            NumbersNotMatchingFormat = numbers.Count - matched,
+            HighestInRegister = highest,
+            HighestNumberInRegister = highestNumber,
+            CounterIsBehind = rule.AutoGenerate && highest > standsAt,
+        };
     }
 
     private static string RequireSupplied(
@@ -161,30 +272,6 @@ public class StaffNumberService : IStaffNumberService
             : $"A staff number is required for {Describe(employmentType)}. No numbering series is configured "
               + "for this register, so the system does not issue one — set one up under staff numbering, "
               + "or enter the number manually.");
-    }
-
-    /// <summary>
-    /// Reads the counter out of an existing number, so an import can advance past it.
-    /// </summary>
-    /// <remarks>
-    /// Takes the trailing digit run, after any suffix the rule prints. Deliberately forgiving: this
-    /// runs over legacy data that predates the rule, and returning null simply means "nothing to
-    /// learn from this one".
-    /// </remarks>
-    private static long? ExtractTrailingSequence(string number, StaffNumberFormat rule)
-    {
-        var text = number;
-        if (!string.IsNullOrEmpty(rule.Suffix) && text.EndsWith(rule.Suffix, StringComparison.OrdinalIgnoreCase))
-            text = text[..^rule.Suffix.Length];
-        if (!string.IsNullOrEmpty(rule.Separator))
-            text = text.TrimEnd(rule.Separator.ToCharArray());
-
-        var end = text.Length;
-        var start = end;
-        while (start > 0 && char.IsDigit(text[start - 1])) start--;
-        if (start == end) return null;
-
-        return long.TryParse(text[start..end], out var value) ? value : null;
     }
 
     private static string Describe(EmploymentType type) => type switch

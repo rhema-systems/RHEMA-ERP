@@ -39,7 +39,10 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
-▶ **Recommended next: finish lane 3b's UI.** Its whole backend landed 2026-09-01 and the expiry
+▶ **Recommended next: lane 3b's last two lookups** — the certifying-body and qualification-level
+admin screens plus their two pickers. Everything they need exists; only the screens are missing.
+
+_(previous note)_ ▶ **finish lane 3b's UI.** Its whole backend landed 2026-09-01 and the expiry
 sweep has its screen, but **five backend surfaces still have no caller**: the certifying-body and
 qualification-level lookup screens, the two pickers that would use them, the staff-number settings
 screen, and an import endpoint for `AcceptImportedAsync`.
@@ -55,7 +58,7 @@ data-corruption hazard sitting behind a screen nobody has built yet, not a polis
 | Next | Why | Needs a build? |
 | --- | --- | --- |
 | ~~**Lane 5b**~~ — section E is **as done as it can be** | **47 of 49 fields.** Criteria 34 ×2, class 3 **69 ×2**, visa 41 ×2. The last 2 (`BenefitTierId`) need an employee-policy editor, which is **D-13 — a deferral by decision, not a gap**. Nothing here is buildable without reopening that. → pick **3b**, **3d**, **3a-ii** or **lane 6** next. | — |
-| **Lane 3b** — reference-data dimensions | **Backend complete; ~half the UI owed.** ID-type lead days + the expiry sweep and its screen ✅ (39 ×2). Certifying-body and qualification-level lookups and the staff-number settings screen are still owed, plus an import endpoint for `AcceptImportedAsync`. Both migrations applied. | yes |
+| **Lane 3b** — reference-data dimensions | **Two of three dimensions closed.** ID-type lead days + the expiry sweep and its screen ✅ (39 ×2); staff numbering — settings screen, counter panel and the import door — ✅ (49 ×2). **Owed: the certifying-body and qualification-level admin screens, and the two pickers that consume them** (a level picker on qualifications, a certifying-body picker on skills). Their backends and client methods already exist and have no caller. Both migrations applied. ⚠ One decision owed — see § 3b. | yes |
 | ~~**Lane 3d**~~ — guards and pickers | ✅ **Both schema-free rows done 2026-09-01** (35 assertions ×2). What remains in 3d needs schema or TDC: the exit-interview question set, the labour-law checklist, and bulk benefit application (the excluded `docs/HR/` programme). | — |
 | **Lane 6** — buildable residues | Travel's caller-supplied exchange rate onto Finance (`HrCurrencyBridge` now exists for exactly this), `getCasesForSource`, the portal feedback form. | some |
 
@@ -437,7 +440,46 @@ pair (`HrIdentificationExpirySweep`). Both are applied.
       union claimed. Read the enum before designing the ladder.
       <br>Backend done (`QualificationLevel`, ranked); **the level picker on the qualification form
       and the admin lookup screen are still owed.**
-- [x] Staff number auto/manual is behaviour, not configuration — ✅ **backend DONE 2026-09-01.**
+- [x] Staff number auto/manual is behaviour, not configuration — ✅ **DONE 2026-09-01 (backend +
+      UI) · 49 assertions ×2** (`hr-probation/run-lane3b-staffnumbers.mjs`).
+      The settings screen is at `/administration/hr/settings/staff-numbering` (HR Settings → Staff
+      Numbering): per-register rules with a **server-composed** live preview, and a counter panel on
+      every auto rule. `POST api/hr/Employees/import` is the import door, wired to a "this person
+      already has a staff number" choice on the employee create form.
+      <br>⚠ **`AcceptImportedAsync` advanced the counter by LOOPING `NextAsync`** — 8,000 round
+      trips for TDC's register, and a **silent give-up** after 10,000 steps, on exactly the loads
+      that need it most. Replaced by `INumberSequenceService.AdvanceToAtLeastAsync`, one guarded
+      forward-only update, plus `PeekAsync` so a screen can read the counter without moving it.
+      <br>⚠ **`StaffNumberFormat.TryReadSequence` is an exact inverse of `Compose`**, replacing a
+      "take the trailing digits" reader. It makes the **year part of the match**: counters for a
+      rule that prints the year are per-year buckets, so `EMP/25/0417` no longer pushes the 2026
+      counter forward for no reason.
+      <br>⚠ **The counter read scans by the SHAPE of the number, not by employment type.** A staff
+      number records which register somebody ENTERED by, so a converted employee keeps a number
+      their current type would never produce — partitioning by `Employee.EmploymentType` would both
+      miss numbers the rule can reissue and count numbers it cannot.
+      <br>⚠ **A defect found on the way, in `EmployeeRepository.EmployeeNumberExistsAsync`:** it
+      excluded soft-deleted rows twice over while `IX_Employee_Tenant_EmployeeNumber` is unfiltered,
+      so reusing a leaver's number passed validation and then **500'd in SaveChanges** with the
+      index name as the only clue. Lane 3d fixed the generator's scan; this was the half left
+      behind, and it is the half every manual register and every import relies on.
+      <br>⚠ **`GetQueryable().IgnoreQueryFilters()` is a NO-OP** — `GenericRepository.GetQueryable()`
+      bakes an explicit `Where(e => !e.IsDeleted)` into the query, and no filter switch removes a
+      written predicate. The first cut of the counter read used it and silently under-counted
+      tombstones, which is the exact failure the read exists to prevent. Use
+      `GetQueryableIncludingDeleted(predicate)`. **Caught only by the two assertions that read the
+      count** — the sibling assertion on the same fact passed, because the repository fix uses raw
+      `_dbSet` where `IgnoreQueryFilters` does work.
+      <br>⚠ **Lane 3d's section D was testing a retired mechanism** and had four red assertions: it
+      created employees with a BLANK number and asserted the generator issued one, which stopped
+      being the contract when the absence of a rule became manual entry. Rewritten onto the same
+      hazard where it actually lives now — a tombstoned number under a manual register — rather than
+      deleted. Count held at 35.
+      <br>⚠ **LIVE: the DEFAULT tenant has NO numbering rule**, so every blank-number create is
+      refused. `hr-recruitment/setup.mjs` and three sibling probes create employees without a
+      number, which takes **all seven recruitment suites** down at setup. Confirmed by running one,
+      not by grep. See the decision row below.
+      <br>_(original entry)_ ✅ **backend DONE 2026-09-01.**
       `StaffNumberFormat` is a per-register table on `INumberSequenceService`, keyed on
       `AppliesToEmploymentType` with `null` as the tenant default. Built configurable because TDC's
       own register already numbers permanent and contract staff differently.
@@ -450,6 +492,20 @@ pair (`HrIdentificationExpirySweep`). Both are applied.
       would leave the counter re-issuing numbers already in use.
       <br>⚠ Five sub-questions went to TDC (`HR-OPEN-QUESTIONS-FOR-TDC.md`), one of them a
       counter-seeding hazard.
+- [x] **RESOLVED 2026-09-01 — the tenant stays unconfigured; the four harness sites now pass explicit
+      numbers.** `hr-recruitment/setup.mjs` (per-employee counter) plus the three sibling probes.
+      Verified by running `run-lane5b.mjs` — **34/34**, matching its recorded count exactly. Seeding a
+      dev-tenant rule was rejected because it would quietly pre-decide a question already put to TDC.
+      <br>⚠ `hr-recruitment/run.mjs` now gets past employee creation and stops on a **separate,
+      pre-existing** prerequisite it names itself: no published StaffRequisition workflow definition
+      (`run publish-requisition-definition.mjs`). Unrelated to numbering, and left alone.
+      <br>_(the decision as it stood)_ **does the DEFAULT tenant get a numbering rule?** A tenant that has configured
+      nothing gets manual entry everywhere, which is the designed and correct default. But this
+      tenant has configured nothing, so seven recruitment suites fail at setup and a fresh install
+      cannot add an employee from the UI without typing a number. Either seed one default rule (one
+      row, through the new screen) or pass explicit numbers at the four recruitment create sites.
+      ⚠ Seeding one picks a format on TDC's behalf while **that is one of the five questions already
+      put to them**, so a dev-tenant rule would quietly become the assumed answer.
 
 ### 3c — The document surface · ✅ **DONE 2026-09-01** · 47 assertions ×2
 

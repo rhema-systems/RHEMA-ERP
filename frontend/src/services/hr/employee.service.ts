@@ -112,6 +112,19 @@ class EmployeeService {
     return apiService.post<EmployeeDetail>(this.baseUrl, data);
   }
 
+  /**
+   * Records an employee who already exists elsewhere, keeping the staff number they came with.
+   *
+   * ⚠ Not a variant of `create` — a different act. `create` REFUSES a supplied number on an
+   * auto-numbered register, because a hand-typed value can occupy a number the sequence is about
+   * to issue. An existing employee's number is on their ID card and referenced by payroll, so it
+   * is not ours to reissue: this path requires it, honours it, and advances the register's counter
+   * past it so the next real hire does not collide with what was just loaded.
+   */
+  importExisting(data: CreateEmployeeRequest): Promise<EmployeeDetail> {
+    return apiService.post<EmployeeDetail>(`${this.baseUrl}/import`, data);
+  }
+
   update(id: string, data: UpdateEmployeeRequest): Promise<EmployeeDetail> {
     return apiService.put<EmployeeDetail>(`${this.baseUrl}/${id}`, data);
   }

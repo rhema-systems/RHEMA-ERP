@@ -1,4 +1,4 @@
-using ErpSystem.Core.Services.HR.Extensions;
+﻿using ErpSystem.Core.Services.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
@@ -78,6 +78,41 @@ public class EmployeeService : IEmployeeService
         var employeeNumber = await _staffNumbers.ResolveForCreateAsync(
             dto.EmploymentType, dto.EmployeeNumber, cancellationToken);
 
+        return await CreateWithNumberAsync(dto, employeeNumber, cancellationToken);
+    }
+
+    public async Task<EmployeeDetailDto> ImportEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var supplied = dto.EmployeeNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(supplied))
+            throw new ArgumentException(
+                "An imported employee must carry the staff number they already have. Use the normal create "
+                + "for a new hire, which issues one from the register's own numbering rule.");
+
+        // Everything else about an import is an ordinary create — the same validation, the same
+        // position history. The ONE difference is where the number comes from, so this shares the
+        // body rather than reimplementing it: a second copy of employee validation would drift.
+        var created = await CreateWithNumberAsync(dto, supplied, cancellationToken);
+
+        // ⚠ Deliberately AFTER the row is committed. The counter is a watermark over numbers that
+        // are actually in the register, and advancing it for an import that then failed validation
+        // would burn numbers nobody holds. The other order is only recoverable by reconciling.
+        await _staffNumbers.AcceptImportedAsync(dto.EmploymentType, supplied, cancellationToken);
+
+        _logger.LogInformation(
+            "Employee imported with their existing number: {EmployeeNumber} ({EmployeeId})", supplied, created.Id);
+
+        return created;
+    }
+
+    /// <summary>
+    /// Everything a create does once the staff number has been settled, whichever way it was settled.
+    /// </summary>
+    private async Task<EmployeeDetailDto> CreateWithNumberAsync(
+        CreateEmployeeDto dto, string employeeNumber, CancellationToken cancellationToken)
+    {
         var email = NormalizeEmail(dto.EmailAddress);
 
         if (!await IsEmployeeNumberUniqueAsync(employeeNumber, null, cancellationToken))

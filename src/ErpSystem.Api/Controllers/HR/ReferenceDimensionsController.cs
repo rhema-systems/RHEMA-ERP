@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Services.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -20,13 +20,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class ReferenceDimensionsController : ControllerBase
 {
     private readonly IReferenceDimensionService _service;
+    private readonly IStaffNumberService _staffNumbers;
     private readonly ILogger<ReferenceDimensionsController> _logger;
 
     public ReferenceDimensionsController(
         IReferenceDimensionService service,
+        IStaffNumberService staffNumbers,
         ILogger<ReferenceDimensionsController> logger)
     {
         _service = service;
+        _staffNumbers = staffNumbers;
         _logger = logger;
     }
 
@@ -185,5 +188,38 @@ public class ReferenceDimensionsController : ControllerBase
         try { await _service.DeleteStaffNumberFormatAsync(id, ct); return NoContent(); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Rejected(ex, "removing a staff number format"); }
+    }
+
+    // ── The counter behind a rule ───────────────────────────────────────────
+    //
+    // ⚠ A numbering rule is only half the story. The rule says what a number LOOKS like; the counter
+    // says which one comes next, and it knows only about numbers it issued itself. Load a register
+    // from anywhere else — SQL, a seeder, a restored database, the import below — and the counter is
+    // still at zero while the register holds thousands. Nothing surfaces that until a hire fails on
+    // the unique index, so these two endpoints exist to make it readable and fixable in advance.
+
+    /// <summary>Where a rule's counter stands against the numbers already in the register.</summary>
+    [HttpGet("staff-number-formats/{id:guid}/counter")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(StaffNumberCounterStateDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<StaffNumberCounterStateDto>> GetStaffNumberCounter(Guid id, CancellationToken ct)
+    {
+        try { return Ok(await _staffNumbers.InspectCounterAsync(id, ct)); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
+    /// <summary>Moves the counter past every number in the register the rule could reissue.</summary>
+    /// <remarks>
+    /// Forward-only and idempotent, so running it twice is safe and running it on a clean register
+    /// does nothing. Admin-gated: it changes what number the next person hired will be given.
+    /// </remarks>
+    [HttpPost("staff-number-formats/{id:guid}/counter/reconcile")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [ProducesResponseType(typeof(StaffNumberCounterStateDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<StaffNumberCounterStateDto>> ReconcileStaffNumberCounter(Guid id, CancellationToken ct)
+    {
+        try { return Ok(await _staffNumbers.ReconcileCounterAsync(id, ct)); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Rejected(ex, "reconciling a staff number counter"); }
     }
 }
