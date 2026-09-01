@@ -31,9 +31,11 @@ public class EmployeeService : IEmployeeService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         HrCurrencyBridge currencies,
+        IStaffNumberService staffNumbers,
         ILogger<EmployeeService> logger)
     {
         _currencies = currencies;
+        _staffNumbers = staffNumbers;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -50,6 +52,10 @@ public class EmployeeService : IEmployeeService
     // validates is how travel became able to file a claim in "XYZ" and total it.
     private readonly HrCurrencyBridge _currencies;
 
+    // Which staff number a new employee gets is the REGISTER's decision, not this service's, and
+    // not a compiled-in format. See StaffNumberService.
+    private readonly IStaffNumberService _staffNumbers;
+
     private Guid GetTenantId()
     {
         var tenantId = _currentUserProvider.TenantId;
@@ -64,9 +70,13 @@ public class EmployeeService : IEmployeeService
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var employeeNumber = string.IsNullOrWhiteSpace(dto.EmployeeNumber)
-            ? await _employeeRepository.GenerateEmployeeNumberAsync()
-            : dto.EmployeeNumber.Trim();
+        // ⚠ There is no longer a "blank means generate" rule. Whether a number is issued or typed
+        // is the REGISTER's decision, held in StaffNumberFormat — previously it was decided per
+        // request by whether this field happened to be filled, which is behaviour masquerading as
+        // configuration. A register with no rule is manual and REFUSES a blank number rather than
+        // inventing one in a format nobody chose.
+        var employeeNumber = await _staffNumbers.ResolveForCreateAsync(
+            dto.EmploymentType, dto.EmployeeNumber, cancellationToken);
 
         var email = NormalizeEmail(dto.EmailAddress);
 

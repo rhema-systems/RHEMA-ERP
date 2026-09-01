@@ -474,6 +474,19 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        /// <summary>
+        /// The original staff-number generator. <b>Superseded — do not call it for new employees.</b>
+        /// </summary>
+        /// <remarks>
+        /// <para>⚠ <c>IStaffNumberService</c> is the way in now. This method hardcodes one format
+        /// (<c>{year}{sequence:D4}</c>) for every register, which cannot express an organisation that
+        /// numbers permanent staff as bare digits and contract staff with a prefix — and it is a
+        /// max+1 scan, so it is not atomic under concurrent creates.</para>
+        ///
+        /// <para>Kept because it is still reachable through <c>IEmployeeService</c> and removing it is
+        /// a separate change; both callers that mattered (employee create and the recruitment hire
+        /// path) now go through the register's rule instead.</para>
+        /// </remarks>
         public async Task<string> GenerateEmployeeNumberAsync()
         {
             var currentYear = DateTime.UtcNow.Year.ToString();

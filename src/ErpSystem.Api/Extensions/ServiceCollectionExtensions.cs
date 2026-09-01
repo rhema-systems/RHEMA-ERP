@@ -1002,6 +1002,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // HR Services - NOW ENABLED
             services.AddScoped<IEmployeeService, EmployeeService>();
 
+            // Staff numbering is per-register configuration, not a compiled-in format.
+            services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,
+                               ErpSystem.Core.Services.HR.StaffNumberService>();
+
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
             services.AddScoped<IOrganizationLevelService, OrganizationLevelService>();

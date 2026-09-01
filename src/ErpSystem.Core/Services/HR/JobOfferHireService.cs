@@ -1167,6 +1167,11 @@ public class JobHireService : IJobHireService
     private readonly IEmployeeSkillRepository _skillRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+
+    // The register's numbering rule. A hire is how contract staff actually arrive, so this is the
+    // path that most needs to honour a register with its own series.
+    private readonly IStaffNumberService _staffNumbers;
+
     private readonly ILogger<JobHireService> _logger;
 
     public JobHireService(
@@ -1184,8 +1189,10 @@ public class JobHireService : IJobHireService
         IEmployeeSkillRepository skillRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IStaffNumberService staffNumbers,
         ILogger<JobHireService> logger)
     {
+        _staffNumbers             = staffNumbers;
         _hireRepository           = hireRepository;
         _offerRepository          = offerRepository;
         _pipelineService          = pipelineService;
@@ -1434,7 +1441,17 @@ public class JobHireService : IJobHireService
                     "Cannot auto-create employee: hire record is missing offer or candidate data.");
 
             // 1 — Employee
-            var empNumber = await _employeeRepository.GenerateEmployeeNumberAsync();
+            // ⚠ Through the register's rule, not the old compiled-in format. This is the path by
+            // which contract staff actually arrive, so it is the path that most needs to honour a
+            // register with its own numbering — a hire that bypassed it would silently issue a
+            // permanent-series number to a contract employee.
+            //
+            // The offer's EmploymentType selects the register. A register set to manual has no
+            // number to offer here, so the resolver refuses and the hire cannot complete without
+            // one — which is correct: nobody should be hired into a register whose numbers the
+            // organisation issues by hand without somebody supplying the number.
+            var empNumber = await _staffNumbers.ResolveForCreateAsync(
+                offer.EmploymentType, null, cancellationToken);
             var probDays  = offer.ProbationPeriodMonths.HasValue ? offer.ProbationPeriodMonths.Value * 30 : 90;
             var employee  = new Employee
             {
