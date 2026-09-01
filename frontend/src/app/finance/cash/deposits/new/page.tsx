@@ -12,7 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { expectedChequeClearingDate } from '@/lib/finance/banking-policy';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type {
@@ -37,6 +39,9 @@ export default function NewBankDepositPage() {
     const [paymentEntryType, setPaymentEntryType] = useState<
         'CashExpense' | 'PettyCashReplenishment' | 'CustomerRefund' | 'OtherPayment'
     >('CashExpense');
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
     const [form, setForm] = useState({
         bankAccountId: '',
         depositDate: new Date().toISOString().slice(0, 10),
@@ -80,6 +85,26 @@ export default function NewBankDepositPage() {
         });
         return { receipts, deductions, net: receipts - deductions };
     }, [entries, selected]);
+
+    const dimensionLines = useMemo(() => {
+        const bank = banks.find(item => item.id === form.bankAccountId);
+        const selectedEntries = entries.filter(entry => selected[entry.id] !== undefined);
+        return [
+            ...(bank?.glAccountId ? [{
+                id: bank.id,
+                accountId: bank.glAccountId,
+                accountLabel: `Bank · ${bank.accountName}`,
+            }] : []),
+            ...selectedEntries.flatMap(entry => {
+                const account = setup?.accounts.find(item => item.id === entry.liquidityAccountId);
+                return account?.glAccountId ? [{
+                    id: entry.id,
+                    accountId: account.glAccountId,
+                    accountLabel: `${entry.entryNumber} · ${entry.liquidityAccountName}`,
+                }] : [];
+            }),
+        ];
+    }, [banks, entries, form.bankAccountId, selected, setup?.accounts]);
 
     const chequeHoldingAccountIds = useMemo(
         () => new Set(setup?.accounts
@@ -139,6 +164,15 @@ export default function NewBankDepositPage() {
                     allocationType: entry.direction === 'Increase' ? 'Receipt' : 'Deduction',
                     amount: selected[entry.id],
                 })),
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: dimensionLines.map(line => ({
+                        sourceLineId: line.id,
+                        accountId: line.accountId,
+                        dimensions: toFinancePostingDimensionValues(lineDimensionValues[line.id] || {}),
+                    })),
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
             toast.success('Draft deposit created. Attach the deposit slip before submission.');
             router.push(`/finance/cash/deposits/${deposit.id}`);
@@ -244,6 +278,36 @@ export default function NewBankDepositPage() {
                             })}</tbody>
                         </table>
                     </div>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Finance coding dimensions</CardTitle>
+                    <CardDescription>
+                        Code the destination bank and every selected settlement line. Fixed values are resolved and locked by Finance account rules.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <SourceDocumentDimensionPanel
+                        context={{
+                            sourceModule: 'CASHBANK',
+                            sourceDocumentType: 'BankDepositBatch',
+                            postingAction: 'Post',
+                            sourceRoute: 'finance.cash.bank-deposits',
+                            contractVersion: '1.0',
+                        }}
+                        effectiveDate={form.depositDate}
+                        lines={dimensionLines}
+                        defaultValues={defaultDimensionValues}
+                        lineValues={lineDimensionValues}
+                        onDefaultValuesChange={(values) => {
+                            setDefaultDimensionValues(values);
+                            setApplyDefaultToAll(false);
+                        }}
+                        onLineValuesChange={setLineDimensionValues}
+                        onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        disabled={saving}
+                    />
                 </CardContent>
             </Card>
             <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-4 border bg-background p-4 shadow-sm">

@@ -481,6 +481,7 @@ export interface BankDepositAllocation {
     entryNumber: string;
     entryDate: string;
     liquidityAccountName: string;
+    glAccountId: string;
     entryType: string;
     allocationType: BankDepositAllocationType;
     amount: number;
@@ -495,6 +496,7 @@ export interface BankDeposit {
     depositNumber: string;
     bankAccountId: string;
     bankAccountName: string;
+    bankGLAccountId?: string;
     depositDate: string;
     depositReference: string;
     currency: string;
@@ -526,6 +528,8 @@ export interface BankDeposit {
     cancellationReason?: string;
     allocations: BankDepositAllocation[];
     attachments: BankingAttachment[];
+    financeDimensions?: import('./finance').FinanceSourceDocumentDimension;
+    settlementDimensionEvidence?: import('./finance').FinanceSettlementDimensionComponent[];
     rowVersion: string;
 }
 
@@ -570,6 +574,8 @@ export interface ReturnedChequeCase {
     notes?: string;
     rejectionReason?: string;
     attachments: BankingAttachment[];
+    financeDimensions?: import('./finance').FinanceSourceDocumentDimension;
+    settlementDimensionEvidence?: import('./finance').FinanceSettlementDimensionComponent[];
     rowVersion: string;
 }
 

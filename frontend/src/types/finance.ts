@@ -498,8 +498,15 @@ export type FinanceDimensionRouteId =
     | 'ManualJournalEntry'
     | 'FinanceApVendorInvoice'
     | 'FinanceApSupplierDebitNote'
+    | 'FinanceApVendorPayment'
     | 'FinanceArCustomerInvoice'
-    | 'SalesCreditNote';
+    | 'FinanceArCustomerPayment'
+    | 'SalesCreditNote'
+    | 'FinanceCashPayment'
+    | 'FinanceCashReceipt'
+    | 'FinanceCashBankTransfer'
+    | 'FinanceBankDeposit'
+    | 'FinanceReturnedCheque';
 
 export type FinanceDimensionCertificationState = 'LegacyReadOnly' | 'CaptureOptional' | 'Enforced';
 
