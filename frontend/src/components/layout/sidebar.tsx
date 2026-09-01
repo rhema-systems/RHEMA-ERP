@@ -19,6 +19,7 @@ import {
   Package,
   CreditCard,
   UserCheck,
+  BadgeAlert,
   Briefcase,
   BookText,
   Megaphone,
@@ -831,6 +832,14 @@ export const navigationItems: NavItem[] = [
         title: 'Letter Requests',
         href: '/hr/employees/letter-requests',
         icon: Mail,
+        permissions: ['HR.Employee.Read'],
+      },
+      // Lane 3b — the identification-expiry sweep. Read-gated, not write-gated: seeing what is
+      // about to lapse is the point, and the run button is the only part the API gates on Write.
+      {
+        title: 'ID Expiry',
+        href: '/hr/employees/identification-expiry',
+        icon: BadgeAlert,
         permissions: ['HR.Employee.Read'],
       },
       // Read-only view of the org's own records. Lives here rather than under Administration

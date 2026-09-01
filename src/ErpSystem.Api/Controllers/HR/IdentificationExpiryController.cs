@@ -47,6 +47,31 @@ public class IdentificationExpiryController : ControllerBase
     public async Task<ActionResult<IEnumerable<IdentificationExpiryReminderItemDto>>> Preview(CancellationToken ct)
         => Ok(await _reminders.PreviewAsync(ct));
 
+    /// <summary>The most recent passes, newest first.</summary>
+    /// <remarks>
+    /// A pass that queued nothing still appears. "The sweep ran and found nothing" and "the sweep
+    /// never ran" are indistinguishable from the dispatch log alone, and only one is a defect —
+    /// lane 1 found two nightly sweeps in this module that had never once executed.
+    /// </remarks>
+    [HttpGet("runs")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<IdentificationExpiryRunDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<IdentificationExpiryRunDto>>> GetRuns(
+        [FromQuery] int count = 20, CancellationToken ct = default)
+        => Ok(await _reminders.GetRunsAsync(count, ct));
+
+    /// <summary>Reminders actually raised, over a trailing window.</summary>
+    /// <remarks>
+    /// ⚠ The RAISED record, not a live view of the cards. Its dates are as they stood when the
+    /// reminder went out — renewing a document raises a fresh reminder rather than rewriting this.
+    /// </remarks>
+    [HttpGet("log")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<IdentificationExpiryLogEntryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<IdentificationExpiryLogEntryDto>>> GetLog(
+        [FromQuery] int days = 14, CancellationToken ct = default)
+        => Ok(await _reminders.GetLogAsync(days, ct));
+
     /// <summary>Runs the sweep now. The nightly host runs the same code path.</summary>
     [HttpPost("run")]
     [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]

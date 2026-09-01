@@ -70,3 +70,56 @@ public class IdentificationExpiryRunResultDto
     public int AlreadyRaised { get; set; }
 }
 
+
+/// <summary>One pass of the sweep, for the history list.</summary>
+/// <remarks>
+/// The run header answers "did it run last night, and did it find anything" — the question a
+/// reminder engine gets asked when someone did not receive a reminder they expected. Without it the
+/// only evidence a sweep happened is the absence of new dispatch rows, which is indistinguishable
+/// from the sweep never running at all.
+/// </remarks>
+public class IdentificationExpiryRunDto
+{
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" for the nightly host, "Manual" for a run from the screen.</summary>
+    public string Trigger { get; set; } = string.Empty;
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+}
+
+/// <summary>A reminder that was actually raised — the dispatch log, read back.</summary>
+/// <remarks>
+/// ⚠ This is the RAISED record, not a live view of the card. <c>DueDate</c> and
+/// <c>DaysRemaining</c> are as they stood when the reminder went out; renewing the document does
+/// not rewrite history here, it raises a fresh reminder against the new deadline.
+/// </remarks>
+public class IdentificationExpiryLogEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+
+    public Guid EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
+    public string? EmployeeNumber { get; set; }
+
+    public Guid EmployeeIdentificationCardId { get; set; }
+    public Guid IdentificationTypeId { get; set; }
+    public string? IdentificationTypeName { get; set; }
+
+    public string? Reference { get; set; }
+    public DateOnly? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+
+    /// <summary>The holder at tier 1, null (HR) at tier 2 — whose job it was, not who could see it.</summary>
+    public Guid? RoutedToEmployeeId { get; set; }
+
+    /// <summary>When the reminder was raised.</summary>
+    public DateTime RaisedAt { get; set; }
+}

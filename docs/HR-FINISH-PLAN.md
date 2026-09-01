@@ -39,19 +39,23 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
-▶ **Recommended next: lane 3b** — and not merely because it is next in the list. Lane 3d proved the
-**prefix-scan number defect is live and reachable**: `GenerateEmployeeNumberAsync` collided with a
-soft-deleted number and 500'd on employee creation. That was patched to agree with the index, but it
-is **still not atomic**, and 3b is where `INumberSequenceService` — the platform mechanism that is
-atomic per tenant — finally replaces the scan. The staff-number half of 3b now has a measured defect
-behind it rather than a principle.
+▶ **Recommended next: finish lane 3b's UI.** Its whole backend landed 2026-09-01 and the expiry
+sweep has its screen, but **five backend surfaces still have no caller**: the certifying-body and
+qualification-level lookup screens, the two pickers that would use them, the staff-number settings
+screen, and an import endpoint for `AcceptImportedAsync`.
+
+⚠ The import gap is the one with teeth. `StaffNumberFormat` now issues numbers from
+`INumberSequenceService`, and `AcceptImportedAsync` — which advances the counter past numbers
+loaded from outside — **exists and is called by nothing**. Load TDC's real staff numbers before
+that endpoint exists and the counter starts at 1 and re-issues numbers already in use. That is a
+data-corruption hazard sitting behind a screen nobody has built yet, not a polish item.
 
 **Pick one of these; all are unblocked and none needs TDC:**
 
 | Next | Why | Needs a build? |
 | --- | --- | --- |
 | ~~**Lane 5b**~~ — section E is **as done as it can be** | **47 of 49 fields.** Criteria 34 ×2, class 3 **69 ×2**, visa 41 ×2. The last 2 (`BenefitTierId`) need an employee-policy editor, which is **D-13 — a deferral by decision, not a gap**. Nothing here is buildable without reopening that. → pick **3b**, **3d**, **3a-ii** or **lane 6** next. | — |
-| **Lane 3b** — reference-data dimensions | ID-type lead days, certifying-body lookup, qualification LEVEL, staff-number config on `INumberSequenceService`. One migration. | yes |
+| **Lane 3b** — reference-data dimensions | **Backend complete; ~half the UI owed.** ID-type lead days + the expiry sweep and its screen ✅ (39 ×2). Certifying-body and qualification-level lookups and the staff-number settings screen are still owed, plus an import endpoint for `AcceptImportedAsync`. Both migrations applied. | yes |
 | ~~**Lane 3d**~~ — guards and pickers | ✅ **Both schema-free rows done 2026-09-01** (35 assertions ×2). What remains in 3d needs schema or TDC: the exit-interview question set, the labour-law checklist, and bulk benefit application (the excluded `docs/HR/` programme). | — |
 | **Lane 6** — buildable residues | Travel's caller-supplied exchange rate onto Finance (`HrCurrencyBridge` now exists for exactly this), `getCasesForSource`, the portal feedback form. | some |
 
@@ -404,15 +408,48 @@ are not lost.
 
 ### 3b — Reference data that should be a dimension (one migration + admin screens)
 
-- [ ] `IdentificationType` has no expiry notification lead days — a per-type setting, and the
-      reminder engine has nothing to read.
+Two migrations, not one: the dimensions (`HrReferenceDataDimensions`) and the sweep's run/dispatch
+pair (`HrIdentificationExpirySweep`). Both are applied.
+
+- [x] `IdentificationType` has no expiry notification lead days — ✅ **DONE 2026-09-01 ·
+      39 assertions ×2** (`hr-probation/run-lane3b-sweep.mjs`). The column, the sweep that reads it
+      (`IdentificationExpiryReminderService`, two tiers, deduped per card per deadline), the run and
+      dispatch tables, its own `IdentificationExpiryController`, and the screen at
+      `/hr/employees/identification-expiry`. The lead-days input is on the identification-type form
+      and the list carries a **"Never warns"** column.
+      <br>⚠ **Tiers move OWNERSHIP, not volume.** Inside the window the holder is asked to renew
+      their own document; once it lapses it becomes HR's compliance gap. One row either way — a
+      second row addressed to HR at tier 1 would double the log and make "how many cards are
+      expiring" ambiguous. `RoutedToEmployeeId` is an ownership stamp, **not a visibility switch**:
+      the read is policy-gated, so HR sees both tiers throughout.
+      <br>⚠ **The sweep shipped with no reader.** `runs` and `log` were added before the screen,
+      because a preview plus a run button leaves the dispatch log unreadable — and "it ran and
+      found nothing" then looks identical to "it never ran", which is precisely how lane 1 found
+      two nightly sweeps that had **never once executed**.
+      <br>⚠ **Self-inflicted, caught before the screen:** `EmployeeName`/`EmployeeNumber` were
+      declared on the item DTO and set by nothing. Fifth instance of that shape in this module. The
+      join is LEFT on purpose — a card outliving its employee row is the case HR most needs.
 - [ ] Certification bodies are free text (`EmployeeSkill.CertifyingBody`) — should be a lookup.
+      <br>Backend done (`CertifyingBody`, in `ReferenceDimensionsController`); **the picker on the
+      skills form and the admin lookup screen are still owed.**
 - [ ] Qualification level is not a dimension. ⚠ `QualificationType` is a **category**, not an
       academic level — and area 17's closure slice already proved that enum is wider than the TS
       union claimed. Read the enum before designing the ladder.
-- [ ] Staff number auto/manual is behaviour, not configuration — no mode flag, no prefix, no format.
-      ⚠ Build it on `INumberSequenceService`, not a max+1 scan: this module has met the
-      prefix-scan defect **at least eight times**, and the platform mechanism is atomic per tenant.
+      <br>Backend done (`QualificationLevel`, ranked); **the level picker on the qualification form
+      and the admin lookup screen are still owed.**
+- [x] Staff number auto/manual is behaviour, not configuration — ✅ **backend DONE 2026-09-01.**
+      `StaffNumberFormat` is a per-register table on `INumberSequenceService`, keyed on
+      `AppliesToEmploymentType` with `null` as the tenant default. Built configurable because TDC's
+      own register already numbers permanent and contract staff differently.
+      <br>⚠ **There is no auto/manual mode flag, deliberately.** The ABSENCE of a rule IS manual.
+      A flag plus a table would be two sources of truth for one question, and the module has met
+      that shape before.
+      <br>**Still owed:** the settings screen with its live preview, and an endpoint for
+      `AcceptImportedAsync` — which exists and has no caller, so a data load cannot yet accept
+      numbers as given and advance the counter past them. Until it does, loading real staff numbers
+      would leave the counter re-issuing numbers already in use.
+      <br>⚠ Five sub-questions went to TDC (`HR-OPEN-QUESTIONS-FOR-TDC.md`), one of them a
+      counter-seeding hazard.
 
 ### 3c — The document surface · ✅ **DONE 2026-09-01** · 47 assertions ×2
 

@@ -37,6 +37,12 @@ public interface IIdentificationExpiryReminderService
     /// <summary>Runs the sweep for a named tenant — the background service has no user to resolve one from.</summary>
     Task<IdentificationExpiryRunResultDto> RunSweepForTenantAsync(
         Guid tenantId, string trigger, Guid? triggeredByUserId, CancellationToken ct = default);
+
+    /// <summary>The most recent passes, newest first.</summary>
+    Task<IEnumerable<IdentificationExpiryRunDto>> GetRunsAsync(int count = 20, CancellationToken ct = default);
+
+    /// <summary>Reminders actually raised in the last <paramref name="days"/> days.</summary>
+    Task<IEnumerable<IdentificationExpiryLogEntryDto>> GetLogAsync(int days = 14, CancellationToken ct = default);
 }
 
 public class IdentificationExpiryReminderService : IIdentificationExpiryReminderService
@@ -158,6 +164,87 @@ public class IdentificationExpiryReminderService : IIdentificationExpiryReminder
         };
     }
 
+    /// <summary>The most recent passes, newest first.</summary>
+    /// <remarks>
+    /// ⚠ Reads the run header, not the dispatch rows. A pass that queued nothing still gets a row,
+    /// and that row is the point: "the sweep ran and found nothing" and "the sweep never ran" look
+    /// identical from the log alone, and only one of them is a defect.
+    /// </remarks>
+    public async Task<IEnumerable<IdentificationExpiryRunDto>> GetRunsAsync(
+        int count = 20, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        count = Math.Clamp(count, 1, 200);
+
+        return await _unitOfWork.Repository<IdentificationExpiryReminderRun>().GetQueryable()
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && !r.IsDeleted)
+            .OrderByDescending(r => r.StartedAt)
+            .Take(count)
+            .Select(r => new IdentificationExpiryRunDto
+            {
+                Id = r.Id,
+                StartedAt = r.StartedAt,
+                CompletedAt = r.CompletedAt,
+                Trigger = r.Trigger,
+                TriggeredByUserId = r.TriggeredByUserId,
+                RemindersQueued = r.RemindersQueued,
+            })
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Reminders actually raised in the last <paramref name="days"/> days.</summary>
+    /// <remarks>
+    /// <para>⚠ Names are joined LEFT, as in the sweep itself. A dispatch row outliving the employee
+    /// row it names must still appear — an unreturned company ID belonging to someone who has been
+    /// purged is the case HR most needs to see, and an inner join would hide exactly that.</para>
+    ///
+    /// <para>The type name is joined rather than stored: the dispatch row keeps a rendered
+    /// <c>Reference</c> for the historical record, but the type's current name is what a reader
+    /// filtering by document type expects to match.</para>
+    /// </remarks>
+    public async Task<IEnumerable<IdentificationExpiryLogEntryDto>> GetLogAsync(
+        int days = 14, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        days = Math.Clamp(days, 1, 365);
+        var since = DateTime.UtcNow.Date.AddDays(-days);
+
+        return await _unitOfWork.Repository<IdentificationExpiryDispatchLog>().GetQueryable()
+            .AsNoTracking()
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted && d.CreatedAt >= since)
+            .GroupJoin(_unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+                    .Where(e => e.TenantId == tenantId),
+                  d => d.EmployeeId, e => e.Id, (d, es) => new { Log = d, Employees = es })
+            .SelectMany(x => x.Employees.DefaultIfEmpty(), (x, e) => new { x.Log, Employee = e })
+            .GroupJoin(_unitOfWork.Repository<IdentificationType>().GetQueryable().AsNoTracking()
+                    .Where(t => t.TenantId == tenantId),
+                  x => x.Log.IdentificationTypeId, t => t.Id,
+                  (x, ts) => new { x.Log, x.Employee, Types = ts })
+            .SelectMany(x => x.Types.DefaultIfEmpty(), (x, t) => new IdentificationExpiryLogEntryDto
+            {
+                Id = x.Log.Id,
+                RunId = x.Log.RunId,
+                Kind = x.Log.Kind,
+                EmployeeId = x.Log.EmployeeId,
+                EmployeeName = x.Employee == null
+                    ? null
+                    : ((x.Employee.FirstName ?? "") + " " + (x.Employee.LastName ?? "")).Trim(),
+                EmployeeNumber = x.Employee == null ? null : x.Employee.EmployeeNumber,
+                EmployeeIdentificationCardId = x.Log.EmployeeIdentificationCardId,
+                IdentificationTypeId = x.Log.IdentificationTypeId,
+                IdentificationTypeName = t == null ? null : t.Name,
+                Reference = x.Log.Reference,
+                DueDate = x.Log.DueDate,
+                DaysRemaining = x.Log.DaysRemaining,
+                EscalationTier = x.Log.EscalationTier,
+                RoutedToEmployeeId = x.Log.RoutedToEmployeeId,
+                RaisedAt = x.Log.CreatedAt,
+            })
+            .OrderByDescending(d => d.RaisedAt)
+            .ToListAsync(ct);
+    }
+
     /// <summary>
     /// Every card whose type asks for a warning and whose expiry is inside it, or past.
     /// </summary>
@@ -188,6 +275,29 @@ public class IdentificationExpiryReminderService : IIdentificationExpiryReminder
                       TypeName = t.Name,
                       LeadDays = t.ExpiryNotificationLeadDays!.Value,
                   })
+            // ⚠ The employee is joined, not left out: the DTO declares EmployeeName and
+            // EmployeeNumber, and a reminder that names nobody is unreadable — "a card expires in
+            // 12 days" is not actionable without whose card it is. Declaring a field nothing
+            // resolves is the defect this module has met repeatedly; caught here before a screen
+            // was built on a blank column.
+            //
+            // A LEFT join, deliberately. Inactive employees are included by design, and an employee
+            // row that has gone missing entirely must not make its card vanish from the sweep —
+            // that is the case HR most needs to see.
+            .GroupJoin(_unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+                    .Where(e => e.TenantId == tenantId),
+                  x => x.Card.EmployeeId,
+                  e => e.Id,
+                  (x, es) => new { x.Card, x.TypeName, x.LeadDays, Employees = es })
+            .SelectMany(x => x.Employees.DefaultIfEmpty(),
+                  (x, e) => new
+                  {
+                      x.Card,
+                      x.TypeName,
+                      x.LeadDays,
+                      EmployeeName = e == null ? null : ((e.FirstName ?? "") + " " + (e.LastName ?? "")).Trim(),
+                      EmployeeNumber = e == null ? null : e.EmployeeNumber,
+                  })
             .ToListAsync(ct);
 
         var candidates = new List<Candidate>();
@@ -213,6 +323,8 @@ public class IdentificationExpiryReminderService : IIdentificationExpiryReminder
                 {
                     Kind = kind,
                     EmployeeId = r.Card.EmployeeId,
+                    EmployeeName = string.IsNullOrWhiteSpace(r.EmployeeName) ? null : r.EmployeeName,
+                    EmployeeNumber = r.EmployeeNumber,
                     EmployeeIdentificationCardId = r.Card.Id,
                     IdentificationTypeId = r.Card.IdentificationTypeId,
                     IdentificationTypeName = r.TypeName,
