@@ -23,19 +23,42 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **0** | Ledger truth — make the instruments tell the truth again | ✅ **done 2026-08-31** | — | — |
 | **1** | Close the coverage queue | ✅ **done 2026-08-31** | — | — |
 | **2** | Decisions owed — 6 settings ✅ built, the rest is a memo | 13 asks | memo | TDC / the user |
-| **3** | Employee Master feedback block | 19 | 4 slices | — (1 of 19 needs TDC) |
+| **3** | Employee Master feedback block | **3a ✅ · 3c ✅ · 3d’s buildable rows ✅** · 3a-ii + 3b left | 1–2 slices | — (1 row needs TDC) |
 | **4** | Leave · Training · Succession · Recruitment feedback | 15 | 2 slices | partly lane 2 |
-| **5** | Section E — fields no form can set | 69 fields / 27 DTOs | 2 slices | own classification pass |
+| **5** | Section E — 5a ✅; **5b 47 of 49 fields built** | 2 fields | — | **blocked on D-13** |
 | **6** | Deferred area residues | 13 | 2 slices | 4 are blocked outside HR |
 | **7** | Org-authority model | ✅ built · 4 residues | — | — |
 | **8** | HR ↔ Finance GL posting sweep | 7 prerequisites + the adapters | 5+ slices | lane 2, Finance owner, Payroll owner |
 | **9** | Hand-offs — real, but not HR's to fix | 3 | file and acknowledge | other owners |
 
-**Buildable by this team: roughly 14–15 slices**, of which lanes 5 and 6 are unblocked today. Lane 7 is done; lane 2 is now a memo plus a small settings slice that can start immediately.
+**Buildable by this team: roughly 9–10 slices.** Unblocked today: **3b, 3a-ii, lane 6** (and lane 4). Lanes 0, 1, 7, 2a, 3a, 3c, 5a, 5b and 3d’s schema-free rows are done.
 
 ### Critical path
 
-~~Lane 0~~ ✅ → ~~lane 1~~ ✅ **the queue is empty (0 BUILD).** Next is lane 2's settings half, then lane 5 or 6. Lane 2's remaining half is a **memo, and it should still go out on day one** — but ⚠ **it does not gate lane 3**, which is what this line used to claim. Checked item by item on 2026-08-31: of lane 3's nineteen rows, **one** (the labour-law checklist) genuinely needs TDC before it can be built, three want TDC's *data* to fill a mechanism that can be built now, and fifteen need nothing at all. What the memo does gate is lane 8's money decisions and the four `DECIDE` rows. It no longer gates lane 7, which is built.
+**Where to start next (as of 2026-09-01, end of the section-E stretch).** Done: lanes 0, 1, 7, lane
+2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
+D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
+
+▶ **Recommended next: lane 3b** — and not merely because it is next in the list. Lane 3d proved the
+**prefix-scan number defect is live and reachable**: `GenerateEmployeeNumberAsync` collided with a
+soft-deleted number and 500'd on employee creation. That was patched to agree with the index, but it
+is **still not atomic**, and 3b is where `INumberSequenceService` — the platform mechanism that is
+atomic per tenant — finally replaces the scan. The staff-number half of 3b now has a measured defect
+behind it rather than a principle.
+
+**Pick one of these; all are unblocked and none needs TDC:**
+
+| Next | Why | Needs a build? |
+| --- | --- | --- |
+| ~~**Lane 5b**~~ — section E is **as done as it can be** | **47 of 49 fields.** Criteria 34 ×2, class 3 **69 ×2**, visa 41 ×2. The last 2 (`BenefitTierId`) need an employee-policy editor, which is **D-13 — a deferral by decision, not a gap**. Nothing here is buildable without reopening that. → pick **3b**, **3d**, **3a-ii** or **lane 6** next. | — |
+| **Lane 3b** — reference-data dimensions | ID-type lead days, certifying-body lookup, qualification LEVEL, staff-number config on `INumberSequenceService`. One migration. | yes |
+| ~~**Lane 3d**~~ — guards and pickers | ✅ **Both schema-free rows done 2026-09-01** (35 assertions ×2). What remains in 3d needs schema or TDC: the exit-interview question set, the labour-law checklist, and bulk benefit application (the excluded `docs/HR/` programme). | — |
+| **Lane 6** — buildable residues | Travel's caller-supplied exchange rate onto Finance (`HrCurrencyBridge` now exists for exactly this), `getCasesForSource`, the portal feedback form. | some |
+
+⚠ **Read `§ Standing rules` above before starting any of them** — they are the mistakes already paid
+for once each, and this session repeated three of them anyway (see the note at the end of lane 3a).
+
+~~Lane 0~~ ✅ → ~~lane 1~~ ✅ Lane 2's remaining half is a **memo, and it should still go out on day one** — but ⚠ **it does not gate lane 3**, which is what this line used to claim. Checked item by item on 2026-08-31: of lane 3's nineteen rows, **one** (the labour-law checklist) genuinely needs TDC before it can be built, three want TDC's *data* to fill a mechanism that can be built now, and fifteen need nothing at all. What the memo does gate is lane 8's money decisions and the four `DECIDE` rows. It no longer gates lane 7, which is built.
 
 ⚠ **Lane 2 is smaller than it looks.** Eight of its questions convert to `CompanyHrPolicySettings` entries whose defaults are what the system already does, so those ship now and TDC's answer later costs an edit rather than a deploy. Do that half (½ slice) without waiting for anybody. Lanes 5 and 6 run in parallel with the wait. Lane 8 is the long pole and cannot finish without two other module owners.
 
@@ -426,11 +449,55 @@ are not lost.
 
 ### 3d — Guards, pickers and the rest
 
-- [ ] **Probation dates stay editable after confirmation** — no confirmed-state guard on contract
-      update. Same shape as D-03, which was closed by a service-level guard across 36 write paths;
-      copy `RequireAuthorableJobDescriptionAsync`, do not put the rule on the screen.
-- [ ] **Manager picker ignores `ReportsToPosition`.** ✅ *verified — `ReportsToPositionId` exists at
-      `HREntities.cs:777` and is populated; the picker does not use it.*
+- [x] **Probation dates stay editable after confirmation** — ✅ **DONE 2026-09-01 · 35 assertions ×2**
+      (`hr-probation/run-lane3d.mjs`). Guarded in `EmployeeService.RequireUnconfirmedProbationAsync`,
+      keyed off **`Employee.ConfirmationDate`** — the field `ProbationService.MarkEmployeeConfirmed`
+      actually writes. `EmployeeContractDetail.ConfirmationDate` is a separate hand-typed copy;
+      guarding it against itself would let the real confirmation be contradicted.
+      <br>⚠ **The row was understated.** The two probation fields were also **settable and readable
+      nowhere** — `EmployeeContractDetailDto` carried neither, so the edit form hardcoded them blank
+      and a probation term could be recorded and never seen again. That is very likely why nobody
+      noticed it could also be rewritten. **Instrument 03 is blind to this class**: it scans
+      Create/Update DTOs, not read ones.
+      <br>Only the two probation fields are gated — A9/A10 assert a confirmed employee can still be
+      given a pay rise and an hours change.
+- [x] **Manager picker ignores `ReportsToPosition`** — ✅ **DONE 2026-09-01.** The form now offers the
+      holders of the position this one reports to (**121 of 174 positions carry a reporting line**,
+      and it already drives the organogram), and keeps the free search, since a manager is not
+      always the post-holder. A vacant supervising post says so in words rather than rendering an
+      empty list. The `positionId` filter was verified to actually filter before anything was built
+      on it — a picker fed by a broken filter renders empty and says nothing.
+
+- [x] **The eight contract fields that reached no DTO** — ✅ **classified and half built 2026-09-01.**
+      **Four exposed** on all three DTOs, the mapper, the service and the form: `CurrencyCode` (a
+      salary was shown as a bare number and assumed GHS — now gated through `HrCurrencyBridge`, the
+      same Finance master 3a used), `WorkSchedule`, `SpecialConditions`, `Notes`.
+      **Four NOT exposed** — twins of live fields. ⛔ **`EffectiveDate`, `ContractEndDate` and
+      `IsCurrent` are RESERVED by decision 2026-09-01: contract versioning is coming and the columns
+      are being held for it. DO NOT DROP.** The ledger carries the three obligations that keeping
+      them creates — chiefly that `IsCurrent` is hardcoded `true` and maintained by nothing, so it
+      is wrong on every terminated contract today. `AnnualLeaveEntitlementDays` is **not** covered
+      by that decision and is still open.
+      <br>⚠ **A defect fell out of it.** The form's default was `employmentType: 'FullTime'`, which
+      is **not an `EmploymentType` member** — it belongs to `WorkArrangementType`, the very field
+      that was on the entity and on no DTO. The dialog opened with a value its own select could not
+      show and the API could not parse, so an untouched Add failed.
+
+- [x] **⚠ Employee creation was broken by any prior delete** — found by a probe, not looked for.
+      `GenerateEmployeeNumberAsync` scanned `BaseQuery()`, which filters `!IsDeleted`, while
+      `IX_Employee_Tenant_EmployeeNumber` is **unfiltered** and still holds tombstoned numbers. So
+      soft-deleting the newest employee handed their number straight back to the next create, which
+      the index rejected — **as a 500 from SaveChanges, on the most ordinary path in HR**, for the
+      rest of the calendar year. Deterministic, not a race. The scan now ignores query filters so it
+      agrees with the index. ⚠ It is still not atomic; the durable fix is `INumberSequenceService`,
+      which is **lane 3b's** work.
+      <br>✅ **Verified.** Assertions D1–D4 create with a generated number, soft-delete, then
+      create again. They were **red against the unfixed build** — four failures naming the cause
+      — and are green after it. ⚠ The **second** run is what proves it: it inherits the first
+      run's tombstones, which is exactly the condition that broke it.
+      <br>⚠ **The suite was green while this defect was live**, because every other create in it
+      passes an explicit `employeeNumber` and never reaches the generator. A passing suite tests
+      only what it exercises.
 - [ ] Exit interview questions are fixed fields, not a configurable question set, and carry no
       attachments.
 - [ ] No labour-law checklist.
@@ -494,27 +561,133 @@ caller" has been wrong before.
 
 ---
 
-## Lane 5 — Section E · 2 slices · unblocked
+## Lane 5 — Section E · 5a ✅ · 5b: 47 of 49 fields built · 2 left (D-13)
 
 **69 fields across 27 DTOs.** These endpoints *are* wired; the form omits fields, so the feature is
 degraded rather than missing — the class an endpoint audit cannot see.
 
-- [ ] **Classification pass first, endpoint by endpoint.** Section D's lesson applies exactly: of
-      149 `REVIEW` endpoints only 65 were real. Some of these 69 fields are correctly omitted
-      (server-computed, or set by a transition rather than a form). Produce a `BUILD` /
-      `INTENTIONAL` verdict per field **before** any screen work, and put the reasons in the ledger.
-- [ ] `UpdateAppraisalHRReviewDto` — **6 of 8**, including `AdjustedOverallScore` and
-      `AdjustmentReason`. HR can adjust a score and cannot say why. Highest severity in the table.
-- [ ] `Create`/`UpdateJobShortlistingCriteriaDto` — 6 each: `MatchMode`, `MatchStrategy`,
-      `ComparisonOperator`, `RequiredValue`, and both required-entity FKs. The **entire matching
-      mechanism** is unreachable from the form.
-- [ ] `Create`/`UpdateStaffTravelVisaRequirementDto` — 6 and 5.
-- [ ] The medical insurance plan and provider pairs — 4 and 3 each (contribution percentages,
-      lifetime limit, claims portal).
-- [ ] The remaining 21 DTOs — 1 or 2 fields each; batch by screen, not by DTO.
+### 5a — The classification pass · ✅ **DONE 2026-09-01** · 49 `BUILD` · 20 `INTENTIONAL`
+
+### 5b — The screens · **47 of 49 fields done 2026-09-01** (criteria + class 3 + visa + NHIS)
+
+- [x] **Classification pass first, endpoint by endpoint.** **Done** — all 69 fields read against
+      their mapper, their service and their screen; verdicts and reasons in
+      [`HR-CLOSURE-LEDGER.md` § E2](HR-CLOSURE-LEDGER.md). Section D's lesson held at almost the
+      same rate: **20 of 69 (29%) are correctly omitted**, and an input for any of them would have
+      done nothing or fought a transition. No build, no migration, nothing owed by the user.
+
+⚠ **Four rows below changed because of it. Read § E2 before building any of them.**
+
+- [x] ~~`UpdateAppraisalHRReviewDto` — HR can adjust a score and cannot say why. Highest severity.~~
+      **Wrong, in the other direction.** `Create`/`UpdateAppraisalHRReviewDto` reach **no
+      controller at all** — their only consumers are two mapper methods nothing calls. HR cannot
+      adjust the score at sign-off *at all*; `ApproveAppraisalDto` carries only `HRRemarks` and
+      `ApproveAndFinalizeAsync` recalculates. The live adjustment path is the appeal
+      (`ResolveAppealDto.AdjustedScore` → `PerformanceAppraisal.AdjustedScore`, reason in
+      `ResolutionNotes`), which is arguably the correct design. **6 of the 8 fields are
+      `INTENTIONAL`** (a transition stamps them); the other two are dead columns. → **a question
+      for the user, not a build.**
+- [x] **`Create`/`UpdateJobShortlistingCriteriaDto`** — ✅ **DONE 2026-09-01 · 34 assertions ×2**
+      (`dev-harness/hr-recruitment/run-lane5b.mjs`). Every claim in the classification was probed
+      against the live API first, and all four held: the panel's exact payload **400s** on
+      `weight: null` into a non-nullable `int`; with a weight it stores `"type": 0, "typeName": "0"`
+      and reaches the scoring switch's `default:` arm; `minimumScore`/`displayOrder` are discarded;
+      and the full payload round-trips.
+      <br>**Two backend defects the probe found that reading had not.** `ToEntity` never assigned
+      `ComparisonOperator` — `ToDto` returned it and `UpdateEntity` assigned it, so a criterion
+      created with an operator came back with none and the numeric arm fell to its `?? Between`
+      default. And `RequireScorableCriterion` now refuses an undefined type on **both** create and
+      update, because a screen-only fix leaves the hole open to every other caller; the controller
+      catches it, since `GlobalExceptionHandlingMiddleware` discards `InvalidOperationException`
+      messages.
+      <br>**Frontend**: the type rewritten from probed payloads with the four real enums, the panel
+      rebuilt around what each criterion type actually uses in the engine (read off
+      `EvaluateCriterion`, not guessed), both catalogue pickers **probed HR-readable first** — 26
+      skills, 186 qualifications — an edit path it never had, and a banner on any untyped row.
+      <br>⚠ **A third finding, from the probe rather than the plan**: DELETE is on
+      `RecruitmentAdminPolicy` while POST and PUT beside it are on Write, so the Remove button
+      answered an HR user 403 with a toast explaining nothing. The panel now takes a separate
+      `canRemove`.
+      <br>⚠ **Blast radius: nil, and that is the tell.** Ten vacancies, **zero criteria** in the
+      whole tenant — nobody had ever created one, because the Add button 400'd whenever the weight
+      was left blank. The banner is defensive, not remedial. A feature with no rows is not
+      evidence that it works.
+      <br>⚠ `GET {id}/criteria/mandatory` stays without a client method: it is a filtered subset of
+      the full read the panel already makes, which returns `isMandatory` on every row. Not a gap.
+- [x] **`Create`/`UpdateStaffTravelVisaRequirementDto`** — ✅ **DONE 2026-09-01 · 41 assertions ×2**
+      (`hr-travel/run-lane5b-visa.mjs`, **41 assertions**). Register screen built at `/hr/travel/visa-requirements` and
+      linked from the sidebar; TS interface rewritten from a live response (six of nine declared
+      fields existed on neither the entity nor either DTO).
+      <br>⚠ **Three backend defects the probe found that reading had not.** A country pair could be
+      recorded **twice with contradictory answers** — Ghana → UK as both `EmbassyVisa` and
+      `VisaFree`, while `GetRequirementAsync` picks one with `FirstOrDefaultAsync`, so a traveller
+      could be told no visa is needed by a register that also says an embassy visa is. Both writes
+      returned **null country names** (fresh entity, no navigation loaded) while the lookup beside
+      them resolved them. And the by-destination list had an **uneven `.Include`**, naming the
+      passport and not the destination.
+      <br>⚠ The uniqueness guard is in the SERVICE, not a unique index: the delete is soft, and this
+      module has met "a soft delete does not release a unique index" nine times. Retire-then-re-add
+      is asserted.
+      <br>⚠ `getVisaRequirements()` called a two-parameter lookup route with **no parameters** and
+      typed the result as an array — it returned `null` cast as `[]` on every call, and had no
+      screen caller, which is why nothing noticed.
+      <br>⚠ **The register is consulted, not just fillable.** The pair lookup was first left unwired
+      behind a written disposition; that was wrong, because **reference data nobody reads does not
+      get maintained** — a register with a data-entry screen and no reader is this lane's own failure
+      one step along. `TravelCompliancePanel` now answers "what does this traveller's passport need
+      here?" on the Visas card. The passport country is the issuing country of their Passport travel
+      document, not a field on the employee; and ⚠ the travel-request LIST carries
+      `destinationCountryName` but **not** `destinationCountryId`, so the panel is fed the detail
+      record — the D-09/D-12 shape, met for the third time in this lane.
+- [x] **Class 3 — ✅ DONE 2026-09-01 · 40 assertions ×2** (`hr-medical/run-lane5b-class3.mjs`).
+      Provider (6), plan (8), facility (4 + the three more of an accreditation block the instrument
+      could not see), clearance template (2 + the four more the add strip never sent). No schema, no
+      backend change.
+      <br>⚠ **The count was wrong and it was mine: 20, not 24.** `BenefitTierId` (×2) and
+      `LinkedMedicalClaimId` (×2) are **not** "a live screen omits an input" — neither write has a
+      form. HR has no employee-policy editor at all (**D-13**), and the NHIS screen never calls its
+      own `create` client method. I checked that a *page* existed for each and stopped there; a
+      screen that READS a collection is not one that WRITES it. Both pairs moved to class 4.
+      <br>⚠ **Three TS unions were short of their C# enum** — `MedicalInsuranceProviderType` missing
+      `Other`, `HealthFacilityType` missing `MentalHealthFacility` and `Other`. A row stored as any
+      of them failed the form's own schema and **could not be edited at all**.
+      <br>⚠ **A summary list behind an edit dialog blanks optional fields**, and this slice was about
+      to add three. `ResourceCollectionTab` now takes an opt-in `loadForEdit`; an assertion holds the
+      thin projection in place so the reason stays visible.
+      <br>⚠ **The premium split was under-fixed first time.** 90/90 was accepted with a 201, and
+      that was recorded as "a policy question". Only half of it was: *must a split total exactly
+      100* is policy (a third party can fund the balance); *may it total MORE than 100* is
+      arithmetic. `RequireCoherentContributionSplit` now refuses the over-100 case in the service,
+      on create and update, with the exact-100 boundary asserted.
+
+- [x] **The NHIS claim create form — ✅ DONE 2026-09-01**, folded into the class-3 suite (sections E
+      and F). It was misfiled as a missing *field*; the screen had **no create form at all** and
+      never called its own `create`, so `GetByLinkedMedicalClaimIdAsync` could only return empty.
+      <br>⚠ **Building the edit path found `UpdateClaimAsync` had no state guard** — a claim already
+      submitted, approved or paid could have its amounts and service date rewritten. The D-03 shape.
+      Draft and Rejected stay editable; everything past Submitted does not.
+      <br>⚠ **Then the two greps found the lifecycle had no middle.** `updateStatus` had **no screen
+      caller**, so nothing could leave `Submitted`, and "Record payment" — offered only on Approved
+      — was UI on a branch nothing could reach. **All five NHIS claims in the tenant were `Draft`**:
+      the same tell as the shortlisting criteria, where an empty table meant *never worked* rather
+      than *unused*. F1–F6 now walk Draft → Submitted → PartiallyApproved → Paid.
+- [x] ~~The remaining 21 DTOs — 1 or 2 fields each.~~ **Classified.** 20 are `INTENTIONAL` and close
+      here: a transition owns 12 (`ReviewedByHRId`, `ScoreAdjusted`, `IsAuthoritative`,
+      `LastPromotionDate`, `TrophyIssued`…), and 8 cannot be persisted or are superseded —
+      `PublishToIntranet` has no column, `IsStudentDependent`/`IsEmergencyContact` are DTO-only,
+      `RevisedScore` is written and read by nothing, and `CreateSectionDto.SectionHeadId` belongs to
+      `ISectionService`, **which no class implements**.
 
 **Done when:** every field is either settable or carries a recorded reason, and instrument 03
-re-runs clean against the classification.
+re-runs clean against the classification. ⚠ 03 will keep reporting the 20 `INTENTIONAL` fields — it
+matches identifiers, not intent. § E2 is the answer to it, not a number that will fall to zero.
+
+**Two residues 5a leaves behind, neither of them lane 5's:**
+
+- `BMIRecorded` should be **computed on save** from `heightCm`/`weightKg`, not asked for. A stored
+  BMI that disagrees with the height and weight beside it is a defect waiting.
+- `IsStudentDependent` is a real product gap — student status is how `MaxChildAge` dependant
+  eligibility actually works — but it needs a column before it needs a form. Recorded in section F.
 
 ---
 
