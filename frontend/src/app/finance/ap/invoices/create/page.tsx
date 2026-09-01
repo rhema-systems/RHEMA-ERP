@@ -195,7 +195,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
 
     const { data: withholdingTaxes = [] } = useQuery({
         queryKey: ['taxes', 'ap-invoice-withholding'],
-        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+        queryFn: () => taxDataService.getActiveTaxes({
+            applicability: TaxApplicability.Purchases,
+            category: TaxCategory.Withholding,
+        }),
     });
 
     const { data: warehousesData } = useQuery({
@@ -319,7 +322,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
     const watchWithholdingTaxId = form.watch('withholdingTaxId');
     const withholdingTaxOptions = (withholdingTaxes as Tax[]).filter(tax =>
-        tax.isActive && (
+        tax.isActive && tax.category === TaxCategory.Withholding && (
             tax.applicability === TaxApplicability.Purchases ||
             tax.applicability === TaxApplicability.Both
         )

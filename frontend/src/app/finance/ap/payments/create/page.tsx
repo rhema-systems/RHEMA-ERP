@@ -156,7 +156,10 @@ export default function NewVendorPaymentPage() {
 
     const { data: withholdingTaxes } = useQuery({
         queryKey: ['taxes', 'withholding', 'active'],
-        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+        queryFn: () => taxDataService.getActiveTaxes({
+            applicability: TaxApplicability.Purchases,
+            category: TaxCategory.Withholding,
+        }),
     });
 
     const form = useForm<PaymentFormValues>({
@@ -248,8 +251,10 @@ export default function NewVendorPaymentPage() {
     const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
     const selectedWithholdingTax = withholdingTaxes?.find((tax: Tax) => tax.id === selectedWithholdingTaxId);
     const withholdingTaxOptions = (withholdingTaxes ?? []).filter((tax: Tax) =>
-        tax.applicability === TaxApplicability.Purchases ||
-        tax.applicability === TaxApplicability.Both
+        tax.category === TaxCategory.Withholding && (
+            tax.applicability === TaxApplicability.Purchases ||
+            tax.applicability === TaxApplicability.Both
+        )
     );
     const supplierOptions = (suppliersData?.items ?? []).filter((partner: BusinessPartnerDto) =>
         ['supplier', 'contractor', 'both'].includes((partner.partnerType ?? '').toLowerCase()) &&

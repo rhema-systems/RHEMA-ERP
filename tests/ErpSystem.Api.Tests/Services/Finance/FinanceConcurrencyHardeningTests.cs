@@ -721,7 +721,7 @@ public sealed class FinanceConcurrencyHardeningTests
             "PaymentService.cs"));
         var createMethod = ExtractMember(
             source,
-            "public async Task<CustomerPaymentDto> CreateAsync",
+            "private async Task<CustomerPaymentDto> CreateAsync",
             "public async Task<CustomerPaymentDto> UpdateAsync");
         var allocationMethod = ExtractMember(
             source,
@@ -752,6 +752,10 @@ public sealed class FinanceConcurrencyHardeningTests
             "allocation references must be validated before invoice or customer snapshots are changed");
         allocationMethod.Should().NotContain("skipping allocation",
             "missing or mismatched invoice references must fail rather than silently becoming unapplied cash");
+        allocationMethod.Should().NotContain("Capping",
+            "maker-entered cash and statutory deductions must never be silently rewritten");
+        allocationMethod.Should().Contain("Allocation would over-settle invoice",
+            "every over-allocation must fail closed for maker correction");
         resolverMethod.Should().Contain("i.TenantId == TenantId", "allocation invoice lookup must remain tenant-scoped");
         resolverMethod.Should().Contain("i.BusinessPartnerId != payment.CustomerId",
             "every allocated invoice must belong to the receipt customer");

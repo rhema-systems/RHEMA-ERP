@@ -1567,29 +1567,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 if (totalApplied > outstandingBalance)
                 {
-                    if (isCrossCurrency)
-                    {
-                        // Never change one side of an explicit conversion: doing so silently
-                        // changes the commercial cross-rate approved by the maker.
-                        throw new InvalidOperationException(
-                            $"Cross-currency allocation would over-settle invoice '{invoice.InvoiceNumber}'.");
-                    }
-
-                    _logger.LogWarning(
-                        "Allocation of {Requested} exceeds outstanding balance {Outstanding} on invoice {InvoiceNumber}. Capping.",
-                        totalApplied, outstandingBalance, invoice.InvoiceNumber);
-
-                    // Proportionally reduce every native component so their sum equals the
-                    // outstanding invoice balance without changing the maker's relative split.
-                    var ratio = totalApplied > 0 ? outstandingBalance / totalApplied : 0m;
-                    cashAmount = Math.Round(cashAmount * ratio, 2);
-                    requestedDiscountAmount = Math.Round(requestedDiscountAmount * ratio, 2);
-                    requestedWithholdingAmount = Math.Round(requestedWithholdingAmount * ratio, 2);
-                    requestedVatWithholdingAmount = Math.Max(
-                        outstandingBalance - cashAmount - requestedDiscountAmount - requestedWithholdingAmount,
-                        0m);
-                    paymentCashAmount = cashAmount;
-                    totalApplied = outstandingBalance;
+                    // Never rewrite maker-entered settlement evidence. Proportional capping is
+                    // especially unsafe for statutory deductions because it silently changes the
+                    // amount supported by the customer's withholding certificate.
+                    throw new InvalidOperationException(
+                        $"Allocation would over-settle invoice '{invoice.InvoiceNumber}'. Reduce cash, discount or withholding amounts and submit again.");
                 }
 
                 var invoiceRate = await ResolveApprovedSettlementRateAsync(

@@ -33,6 +33,33 @@ public sealed class GhanaStatutoryTaxEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-GhanaTax")]
     [Trait("Category", "Tax")]
+    public async Task ActiveTaxSelector_ShouldFilterByApplicabilityAndCategory()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var payable = SeedAccount(db, tenantId, "2205", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var receivable = SeedAccount(db, tenantId, "1405", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var salesWht = SeedTax(db, tenantId, "WHT-SALES", "Sales WHT", 5m, TaxCategory.Withholding, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        salesWht.Applicability = TaxApplicability.Sales;
+        var purchaseWht = SeedTax(db, tenantId, "WHT-PURCH", "Purchase WHT", 5m, TaxCategory.Withholding, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        purchaseWht.Applicability = TaxApplicability.Purchases;
+        var salesVat = SeedTax(db, tenantId, "VAT-SALES", "Sales VAT", 15m, TaxCategory.Standard, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        salesVat.Applicability = TaxApplicability.Sales;
+        SeedTax(db, tenantId, "WHT-INACTIVE", "Inactive WHT", 5m, TaxCategory.Withholding, receivable.Id, payable.Id, new DateTime(2026, 1, 1), isActive: false);
+        await db.SaveChangesAsync();
+
+        var service = new TaxConfigurationService(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<TaxConfigurationService>>());
+
+        var result = await service.GetActiveTaxesAsync(TaxApplicability.Sales, TaxCategory.Withholding);
+
+        result.Should().ContainSingle();
+        result.Single().Code.Should().Be("WHT-SALES");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-GhanaTax")]
+    [Trait("Category", "Tax")]
     public async Task CurrentGhanaVatNhiltGetfund_ShouldCalculateFromEffectiveDatedTenantConfigWithoutCovidLevy()
     {
         var tenantId = Guid.NewGuid();
