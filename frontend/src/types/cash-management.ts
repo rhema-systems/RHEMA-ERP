@@ -724,6 +724,7 @@ export interface CreateReconciliationAdjustmentDto {
     description?: string;
     notes?: string;
     idempotencyKey: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ReconciliationAdjustment {
@@ -739,6 +740,14 @@ export interface ReconciliationAdjustment {
     referenceNumber?: string;
     transactionDate: string;
     wasDuplicate: boolean;
+    currency: string;
+    baseAmount: number;
+    exchangeRate: number;
+    exchangeRateId?: string;
+    exchangeRateSource?: string;
+    exchangeRateDate?: string;
+    exchangeRateQuoteSide?: string;
+    financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 // Summary/Report Interfaces

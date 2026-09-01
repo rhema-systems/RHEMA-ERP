@@ -506,7 +506,8 @@ export type FinanceDimensionRouteId =
     | 'FinanceCashReceipt'
     | 'FinanceCashBankTransfer'
     | 'FinanceBankDeposit'
-    | 'FinanceReturnedCheque';
+    | 'FinanceReturnedCheque'
+    | 'FinanceBankReconciliationAdjustment';
 
 export type FinanceDimensionCertificationState = 'LegacyReadOnly' | 'CaptureOptional' | 'Enforced';
 
