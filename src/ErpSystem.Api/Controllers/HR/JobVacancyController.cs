@@ -373,7 +373,14 @@ public class JobVacancyController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        return Ok(await _service.AddCriteriaAsync(dto, tenantId.Value, employeeId.Value));
+        try
+        {
+            return Ok(await _service.AddCriteriaAsync(dto, tenantId.Value, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return CriterionRuleRejected(ex, "adding a shortlisting criterion");
+        }
     }
 
     [HttpPut("criteria/{criteriaId:guid}")]
@@ -388,7 +395,33 @@ public class JobVacancyController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        return Ok(await _service.UpdateCriteriaAsync(dto, employeeId.Value));
+        try
+        {
+            return Ok(await _service.UpdateCriteriaAsync(dto, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return CriterionRuleRejected(ex, "updating a shortlisting criterion");
+        }
+    }
+
+    /// <summary>
+    /// Reports a criterion rule in its own words.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without this the refusal reaches nobody: <c>GlobalExceptionHandlingMiddleware</c> maps
+    /// <see cref="InvalidOperationException"/> to a fixed string and DISCARDS the message, so a
+    /// carefully-worded rule arrives at the screen as a generic error. Same shape as the three
+    /// mute refusals lane 3c had to fix.
+    ///
+    /// <para>⚠ Returns <see cref="ActionResult"/>, not <c>IActionResult</c>: both callers are
+    /// declared <c>ActionResult&lt;JobShortlistingCriteriaDto&gt;</c>, and that type has an
+    /// implicit conversion from <c>ActionResult</c> only.</para>
+    /// </remarks>
+    private ActionResult CriterionRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Shortlisting criterion rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
     }
 
     [HttpDelete("criteria/{criteriaId:guid}")]

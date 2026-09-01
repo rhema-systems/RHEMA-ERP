@@ -80,9 +80,12 @@ export default function VacancyDetailPage() {
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyRole } = useAuth();
+  const { hasAnyRole, hasPermission } = useAuth();
 
   const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  // Deleting a shortlisting criterion sits on RecruitmentAdminPolicy, a tier above the write
+  // policy that guards adding one, so isHr is not the right gate for the remove control.
+  const canAdministerRecruitment = hasPermission('HR.Recruitment.Admin');
 
   const [closing, setClosing] = useState<null | 'cancel' | 'applications'>(null);
   const [closureReason, setClosureReason] = useState<VacancyClosureReason>('Other');
@@ -357,7 +360,7 @@ export default function VacancyDetailPage() {
         </TabsContent>
 
         <TabsContent value="criteria" className="pt-4">
-          <VacancyCriteriaPanel vacancyId={id} canManage={isHr} />
+          <VacancyCriteriaPanel vacancyId={id} canManage={isHr} canRemove={canAdministerRecruitment} />
         </TabsContent>
 
         {/* ⚠ Stage OWNERS, not the application board — /pipeline moves applications between

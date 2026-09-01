@@ -740,6 +740,13 @@ public static class RecruitmentMappingExtensions
             RequiredSkillId = dto.RequiredSkillId,
             RequiredQualificationId = dto.RequiredQualificationId,
             Weight = dto.Weight,
+            // ⚠ This assignment was missing. The create DTO carries ComparisonOperator, ToDto
+            // returns it and UpdateEntity assigns it — only the create path dropped it, so a
+            // criterion could be created with an operator and come back with none, and the
+            // numeric arm of the scoring switch fell to its `?? Between` default. Found by
+            // dev-harness/hr-recruitment/probe-lane5-criteria.mjs (lane 5b), which sent
+            // "Equals" on create and read null back.
+            ComparisonOperator = dto.ComparisonOperator,
         };
     }
 

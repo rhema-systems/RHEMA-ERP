@@ -436,15 +436,75 @@ export interface JobVacancyStatusHistoryEntry {
   comments?: string | null;
 }
 
+// ── shortlisting criteria ───────────────────────────────────────────────────
+// ⚠ Every shape below was read off a live response (dev-harness/hr-recruitment/
+// probe-lane5-criteria.mjs), not inferred from the endpoint name. The interface that stood here
+// until 2026-09-01 declared `minimumScore` and `displayOrder`, which exist on neither the entity
+// nor the DTO — the form sent them and the server discarded them silently.
+
+/** HREnums.cs `JobShortlistingCriteriaType` — 1..10. There is no member at 0. */
+export const SHORTLISTING_CRITERIA_TYPES = [
+  'Qualification',
+  'YearsOfExperience',
+  'Skill',
+  'Certification',
+  'Language',
+  'Gender',
+  'Age',
+  'Location',
+  'EducationLevel',
+  'Other',
+] as const;
+export type ShortlistingCriteriaType = (typeof SHORTLISTING_CRITERIA_TYPES)[number];
+
+/** HREnums.cs `MandatoryMatchMode` — how a multi-valued required list is matched. */
+export const MANDATORY_MATCH_MODES = ['AnyMatched', 'AllRequired'] as const;
+export type MandatoryMatchMode = (typeof MANDATORY_MATCH_MODES)[number];
+
+/** HREnums.cs `ValueMatchStrategy` — how one required value is compared to a candidate string. */
+export const VALUE_MATCH_STRATEGIES = ['Exact', 'Contains', 'Fuzzy'] as const;
+export type ValueMatchStrategy = (typeof VALUE_MATCH_STRATEGIES)[number];
+
+/** HREnums.cs `ShortlistingComparisonOperator` — 1..9. */
+export const SHORTLISTING_COMPARISON_OPERATORS = [
+  'Equals',
+  'NotEquals',
+  'Contains',
+  'GreaterThan',
+  'GreaterThanOrEqual',
+  'LessThan',
+  'LessThanOrEqual',
+  'Between',
+  'In',
+] as const;
+export type ShortlistingComparisonOperator = (typeof SHORTLISTING_COMPARISON_OPERATORS)[number];
+
 export interface ShortlistingCriteria {
   id: string;
   jobVacancyId: string;
   criteriaName: string;
   description?: string | null;
+  /**
+   * What the criterion measures — this is what selects the arm of the scoring engine.
+   *
+   * ⚠ `0` is not a member. Rows created before 2026-09-01 carry it, because the old form never
+   * sent a type and a non-nullable enum binds to `0`; those rows reach the engine's `default:`
+   * arm and **pass every candidate**. `typeName` comes back as the string `"0"` for them. The
+   * panel flags them; the service now refuses to create any more.
+   */
+  type: ShortlistingCriteriaType | 0;
+  typeName: string;
+  requiredValue?: string | null;
+  minValue?: number | null;
+  maxValue?: number | null;
   isMandatory: boolean;
-  weight?: number | null;
-  minimumScore?: number | null;
-  displayOrder?: number | null;
+  matchMode: MandatoryMatchMode;
+  matchStrategy: ValueMatchStrategy;
+  requiredSkillId?: string | null;
+  requiredQualificationId?: string | null;
+  weight: number;
+  comparisonOperator?: ShortlistingComparisonOperator | null;
+  comparisonOperatorName?: string | null;
 }
 
 export interface VacancyAttachment {
@@ -469,13 +529,27 @@ export interface JobPostingAttachment {
   uploadedByName: string;
 }
 
+/**
+ * The create/update payload.
+ *
+ * ⚠ `weight` is a **non-nullable `int`** on both DTOs. Sending `null` is not "leave it out" — the
+ * request is rejected 400 by the JSON reader before any handler sees it, which is what the old
+ * form did on every add that left the weight blank. Keep it a number.
+ */
 export interface ShortlistingCriteriaForm {
   criteriaName: string;
   description?: string | null;
+  type: ShortlistingCriteriaType;
+  requiredValue?: string | null;
+  minValue?: number | null;
+  maxValue?: number | null;
   isMandatory: boolean;
-  weight?: number | null;
-  minimumScore?: number | null;
-  displayOrder?: number | null;
+  matchMode: MandatoryMatchMode;
+  matchStrategy: ValueMatchStrategy;
+  requiredSkillId?: string | null;
+  requiredQualificationId?: string | null;
+  weight: number;
+  comparisonOperator?: ShortlistingComparisonOperator | null;
 }
 
 // ── pipeline stage assignments (stage owners) ──────────────────────────────

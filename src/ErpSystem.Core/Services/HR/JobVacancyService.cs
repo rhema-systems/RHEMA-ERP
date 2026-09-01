@@ -802,6 +802,7 @@ public class JobVacancyService : IJobVacancyService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedAsync(createDto.JobVacancyId);
+        RequireScorableCriterion(createDto.Type);
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _criteriaRepository.AddAsync(entity);
@@ -821,12 +822,35 @@ public class JobVacancyService : IJobVacancyService
     public async Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCriteriaAsync(updateDto.Id);
+        RequireScorableCriterion(updateDto.Type);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _criteriaRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await MarkApplicationScoresStaleAsync(entity.JobVacancyId, cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Refuses a shortlisting criterion whose <see cref="JobShortlistingCriteriaType"/> is not a
+    /// defined member.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>[Required]</c> does not catch this. The property is a non-nullable enum, so a payload
+    /// that omits <c>type</c> binds to <c>0</c> and <c>RequiredAttribute</c> sees a value; the enum
+    /// starts at <c>1</c>. A criterion stored with <c>0</c> reaches
+    /// <c>JobApplicationService</c>'s scoring switch at its <c>default:</c> arm — *"Unknown / Other
+    /// — default pass with neutral score"* — so it passes every candidate and discriminates
+    /// between none of them. That is exactly what the only screen that creates criteria was doing
+    /// (lane 5b; ledger § E2 finding 1), and a screen fix alone would leave the hole open to any
+    /// other caller.
+    /// </remarks>
+    private static void RequireScorableCriterion(JobShortlistingCriteriaType type)
+    {
+        if (!Enum.IsDefined(typeof(JobShortlistingCriteriaType), type))
+            throw new InvalidOperationException(
+                $"'{(int)type}' is not a shortlisting criterion type. A criterion with no type is scored as "
+                + "Unknown, which passes every candidate — choose what the criterion measures.");
     }
 
     public async Task<bool> DeleteCriteriaAsync(Guid criteriaId, CancellationToken cancellationToken = default)
