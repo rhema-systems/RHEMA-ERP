@@ -438,6 +438,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> JournalEntryPolicy(string action)
         => action switch
         {
+            "GetJournalEntryById" or "GetAttachments" => One(FinancePermissions.ViewTenderPaymentJournalPolicy),
             "CreateJournalEntry" => One(FinancePermissions.CreateJournalEntries),
             "UpdateJournalEntry" or "LinkAttachment" or "UnlinkAttachment" => One(FinancePermissions.EditJournalEntries),
             "DeleteJournalEntry" => One(FinancePermissions.DeleteJournalEntries),

@@ -28,6 +28,7 @@ import { tenderService, type TenderDetailDto } from '@/services/tenderService';
 import * as tenderBidService from '@/services/tenderBidService';
 import { format, formatDistanceToNow } from 'date-fns';
 import { TenderClarifications } from '@/components/procurement/tenders/TenderClarifications';
+import { getSupplierTenderBidPath } from '@/lib/tender-bid-routing';
 
 export default function ExternalTenderDetailPage() {
   const params = useParams();
@@ -98,13 +99,7 @@ export default function ExternalTenderDetailPage() {
 
   const handleViewMyBid = () => {
     if (myBid) {
-      // If bid is a draft, navigate to submit-bid page to continue editing
-      // Otherwise, navigate to my-bids page to view the submitted bid
-      if (myBid.status === 'Draft') {
-        router.push(`/external-portal/tenders/${tenderId}/submit-bid`);
-      } else {
-        router.push(`/external-portal/my-bids/${myBid.id}`);
-      }
+      router.push(getSupplierTenderBidPath(tenderId, myBid));
     }
   };
 

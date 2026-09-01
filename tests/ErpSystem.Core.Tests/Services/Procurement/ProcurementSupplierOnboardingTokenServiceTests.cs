@@ -950,12 +950,30 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 .Returns(() => _authenticationProvider);
             current.SetupGet(item => item.Claims).Returns(_claims);
             current.SetupGet(item => item.Roles).Returns(() =>
-                _external ? ["External"] : ["TenantAdmin"]);
+                _external ? ["External"] : ["TDC_PROCUREMENT_OFFICER"]);
             current.Setup(item => item.HasRole(It.IsAny<string>()))
-                .Returns((string role) => !_external && role == "TenantAdmin");
+                .Returns((string role) =>
+                    !_external && role == "TDC_PROCUREMENT_OFFICER");
 
             _unitOfWork = new UnitOfWork(Context);
             var access = new Mock<IProcurementAccessControlService>();
+            access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((
+                    ProcurementAccessCapabilityRequest request,
+                    string _,
+                    CancellationToken _) => new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ACCESS_ALLOWED",
+                    Message = "The test actor has the required controlled capability.",
+                    ActorUserId = _userId,
+                    TenantId = _tenantId,
+                    PermissionCode = request.PermissionCode,
+                    EvaluatedAtUtc = DateTime.UtcNow
+                });
             var sod = new Mock<IProcurementSodGuardService>();
             sod.Setup(item => item.EnforceAsync(
                     It.IsAny<ProcurementSodGuardRequest>(),

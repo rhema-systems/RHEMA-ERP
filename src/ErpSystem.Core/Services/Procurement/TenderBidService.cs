@@ -2158,12 +2158,21 @@ public class TenderBidService : ITenderBidService
         IReadOnlyCollection<TenderFee> fees,
         IReadOnlyCollection<TenderPayment> payments)
     {
-        var feeStatuses = fees
-            .Where(fee => !fee.IsDeleted)
+        var scopedFees = fees
+            .Where(fee => !fee.IsDeleted &&
+                          fee.TenantId == tender.TenantId &&
+                          fee.TenderId == tender.Id)
+            .ToList();
+        var scopedPayments = payments
+            .Where(payment => !payment.IsDeleted &&
+                              payment.TenantId == tender.TenantId &&
+                              payment.BusinessPartnerId == businessPartnerId)
+            .ToList();
+        var feeStatuses = scopedFees
             .Select(fee =>
             {
-                var feePayments = payments
-                    .Where(payment => !payment.IsDeleted && payment.TenderFeeId == fee.Id)
+                var feePayments = scopedPayments
+                    .Where(payment => payment.TenderFeeId == fee.Id)
                     .OrderByDescending(payment => payment.PaymentDate)
                     .ToList();
                 var satisfied = feePayments.FirstOrDefault(IsPaymentSatisfied);
@@ -2196,18 +2205,22 @@ public class TenderBidService : ITenderBidService
                 TenderId = tender.Id,
                 BusinessPartnerId = businessPartnerId
             },
-            fees,
-            payments);
+            scopedFees,
+            scopedPayments);
         var declarationSatisfied = !tender.RequiresAcceptanceDeclaration || bid?.AcceptedDeclaration == true;
-        var hasAssignment = assignment is not null;
+        var validAssignment = assignment is not null &&
+                              !assignment.IsDeleted &&
+                              assignment.TenantId == tender.TenantId &&
+                              assignment.TenderId == tender.Id &&
+                              assignment.BusinessPartnerId == businessPartnerId;
 
         return new TenderBidInitiationStatusDto
         {
             TenderId = tender.Id,
             BusinessPartnerId = businessPartnerId,
             DraftBidId = bid is { Status: "Draft" } ? bid.Id : null,
-            HasAssignment = hasAssignment,
-            AssignmentType = assignment?.AssignmentType,
+            HasAssignment = validAssignment,
+            AssignmentType = validAssignment ? assignment!.AssignmentType : null,
             RequiresAcceptanceDeclaration = tender.RequiresAcceptanceDeclaration,
             DeclarationAccepted = bid?.AcceptedDeclaration == true,
             DeclarationSatisfied = declarationSatisfied,
@@ -2216,7 +2229,7 @@ public class TenderBidService : ITenderBidService
             PaymentSatisfied = paymentAdmission.PaymentSatisfied,
             PaymentEvidenceAccepted = paymentAdmission.CanSubmitSealed,
             PaymentPendingVerification = paymentAdmission.PendingVerification,
-            CanProceed = hasAssignment && declarationSatisfied && paymentAdmission.CanSubmitSealed,
+            CanProceed = validAssignment && declarationSatisfied && paymentAdmission.CanSubmitSealed,
             Fees = feeStatuses
         };
     }

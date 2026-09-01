@@ -95,6 +95,165 @@ public sealed class TenderBidSubmissionLineageTests
     }
 
     [Fact]
+    public void UnpaidMandatoryFeeReturnsAmountAndRetainsSealedFilingPolicy()
+    {
+        var tenantId = Guid.NewGuid();
+        var partnerId = Guid.NewGuid();
+        var tender = new Tender
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            RequiresAcceptanceDeclaration = false
+        };
+        var fee = new TenderFee
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TenderId = tender.Id,
+            FeeType = "TenderFee",
+            Amount = 500m,
+            Currency = "GHS",
+            PaymentMethod = "MobileMoney",
+            IsMandatory = true
+        };
+
+        var status = TenderBidService.BuildInitiationStatus(
+            tender,
+            partnerId,
+            ExactAssignment(tender, partnerId),
+            null,
+            [fee],
+            []);
+
+        status.PaymentRequired.Should().BeTrue();
+        status.HasPayment.Should().BeFalse();
+        status.PaymentSatisfied.Should().BeFalse();
+        status.PaymentEvidenceAccepted.Should().BeTrue();
+        status.CanProceed.Should().BeTrue();
+        status.Fees.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new
+            {
+                TenderFeeId = fee.Id,
+                FeeType = "TenderFee",
+                Amount = 500m,
+                Currency = "GHS",
+                IsMandatory = true,
+                Status = "NotPaid"
+            });
+    }
+
+    [Fact]
+    public void VerifiedMandatoryFeeForExactSupplierIsSatisfied()
+    {
+        var tenantId = Guid.NewGuid();
+        var partnerId = Guid.NewGuid();
+        var tender = new Tender { Id = Guid.NewGuid(), TenantId = tenantId };
+        var fee = new TenderFee
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TenderId = tender.Id,
+            FeeType = "TenderFee",
+            Amount = 500m,
+            Currency = "GHS",
+            IsMandatory = true
+        };
+        var payment = new TenderPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TenderFeeId = fee.Id,
+            BusinessPartnerId = partnerId,
+            Status = "Verified",
+            Amount = fee.Amount,
+            Currency = fee.Currency
+        };
+
+        var status = TenderBidService.BuildInitiationStatus(
+            tender,
+            partnerId,
+            ExactAssignment(tender, partnerId),
+            null,
+            [fee],
+            [payment]);
+
+        status.PaymentRequired.Should().BeTrue();
+        status.HasPayment.Should().BeTrue();
+        status.PaymentSatisfied.Should().BeTrue();
+        status.CanProceed.Should().BeTrue();
+        status.Fees.Should().ContainSingle(item =>
+            item.Status == "Verified" && item.PaymentId == payment.Id);
+    }
+
+    [Fact]
+    public void InitiationIgnoresWrongTenderAssignmentsAndAnotherSuppliersPayment()
+    {
+        var tenantId = Guid.NewGuid();
+        var partnerId = Guid.NewGuid();
+        var tender = new Tender { Id = Guid.NewGuid(), TenantId = tenantId };
+        var fee = new TenderFee
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TenderId = tender.Id,
+            Amount = 500m,
+            Currency = "GHS",
+            IsMandatory = true
+        };
+        var otherSupplierPayment = new TenderPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TenderFeeId = fee.Id,
+            BusinessPartnerId = Guid.NewGuid(),
+            Status = "Verified",
+            Amount = fee.Amount,
+            Currency = fee.Currency
+        };
+        var wrongTenderAssignment = ExactAssignment(tender, partnerId);
+        wrongTenderAssignment.TenderId = Guid.NewGuid();
+
+        var status = TenderBidService.BuildInitiationStatus(
+            tender,
+            partnerId,
+            wrongTenderAssignment,
+            null,
+            [fee],
+            [otherSupplierPayment]);
+
+        status.HasAssignment.Should().BeFalse();
+        status.AssignmentType.Should().BeNull();
+        status.PaymentRequired.Should().BeTrue();
+        status.HasPayment.Should().BeFalse();
+        status.PaymentSatisfied.Should().BeFalse();
+        status.CanProceed.Should().BeFalse();
+        status.Fees.Should().ContainSingle(item =>
+            item.Status == "NotPaid" && item.PaymentId == null);
+    }
+
+    [Fact]
+    public void InitiationIgnoresAssignmentForAnotherBusinessPartner()
+    {
+        var tenantId = Guid.NewGuid();
+        var partnerId = Guid.NewGuid();
+        var tender = new Tender { Id = Guid.NewGuid(), TenantId = tenantId };
+        var otherSupplierAssignment = ExactAssignment(tender, Guid.NewGuid());
+
+        var status = TenderBidService.BuildInitiationStatus(
+            tender,
+            partnerId,
+            otherSupplierAssignment,
+            null,
+            [],
+            []);
+
+        status.HasAssignment.Should().BeFalse();
+        status.PaymentRequired.Should().BeFalse();
+        status.PaymentSatisfied.Should().BeTrue();
+        status.CanProceed.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ReleaseOnlyTenderBidSubmitsWithoutAdvancedDocumentGuard()
     {
         var fixture = new Fixture(advancedSourcingCase: false);
@@ -435,6 +594,15 @@ public sealed class TenderBidSubmissionLineageTests
         fixture.Bids.Verify(repository => repository.GetBidsAsync(
             1, 10, null, null, fixture.Tender.Id), Times.Once);
     }
+
+    private static TenderAssignment ExactAssignment(Tender tender, Guid businessPartnerId) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tender.TenantId,
+        TenderId = tender.Id,
+        BusinessPartnerId = businessPartnerId,
+        AssignmentType = "AllUsers"
+    };
 
     private sealed class Fixture
     {

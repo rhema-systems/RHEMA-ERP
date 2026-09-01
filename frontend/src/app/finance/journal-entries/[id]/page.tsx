@@ -28,6 +28,7 @@ export default function JournalEntryDetailPage() {
     const { toast } = useToast();
     const { user, hasAnyPermission, hasPermission } = useAuth();
     const id = params.id as string;
+    const canViewFinanceWorkspace = hasPermission('Finance.Read');
 
     const [entry, setEntry] = useState<JournalEntry | null>(null);
     const [loading, setLoading] = useState(true);
@@ -84,19 +85,24 @@ export default function JournalEntryDetailPage() {
                 setAuditTrail([]);
             }
 
-            try {
-                setBudgetControl(await financeDataService.getJournalEntryBudgetControl(id));
-                setBudgetControlError(null);
-            } catch (error: any) {
+            if (canViewFinanceWorkspace) {
+                try {
+                    setBudgetControl(await financeDataService.getJournalEntryBudgetControl(id));
+                    setBudgetControlError(null);
+                } catch (error: any) {
+                    setBudgetControl(null);
+                    setBudgetControlError(error?.message || 'Budget control could not be evaluated.');
+                }
+            } else {
                 setBudgetControl(null);
-                setBudgetControlError(error?.message || 'Budget control could not be evaluated.');
+                setBudgetControlError(null);
             }
         } catch (err) {
             toast({ title: 'Error', description: 'Failed to load journal entry', variant: 'destructive' });
         } finally {
             setLoading(false);
         }
-    }, [id, toast]);
+    }, [canViewFinanceWorkspace, id, toast]);
 
     useEffect(() => {
         fetchEntry();
@@ -433,22 +439,26 @@ export default function JournalEntryDetailPage() {
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Back
                     </Button>
-                    <Button variant="outline" onClick={handlePrint} disabled={actionLoading === 'print' || actionLoading === 'export'}>
-                        {actionLoading === 'print' ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                            <Printer className="mr-2 h-4 w-4" />
-                        )}
-                        Print
-                    </Button>
-                    <Button variant="outline" onClick={handleExport} disabled={actionLoading === 'print' || actionLoading === 'export'}>
-                        {actionLoading === 'export' ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                            <Download className="mr-2 h-4 w-4" />
-                        )}
-                        Export PDF
-                    </Button>
+                    {canViewFinanceWorkspace && (
+                        <>
+                            <Button variant="outline" onClick={handlePrint} disabled={actionLoading === 'print' || actionLoading === 'export'}>
+                                {actionLoading === 'print' ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Printer className="mr-2 h-4 w-4" />
+                                )}
+                                Print
+                            </Button>
+                            <Button variant="outline" onClick={handleExport} disabled={actionLoading === 'print' || actionLoading === 'export'}>
+                                {actionLoading === 'export' ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Download className="mr-2 h-4 w-4" />
+                                )}
+                                Export PDF
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
 

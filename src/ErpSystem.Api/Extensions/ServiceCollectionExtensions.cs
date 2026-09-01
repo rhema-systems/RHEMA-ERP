@@ -1465,7 +1465,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 .AddPolicy(FinancePermissions.WithdrawJournalApprovalPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.SubmitJournalEntries,
-                        FinancePermissions.WorkflowCancel)));
+                        FinancePermissions.WorkflowCancel)))
+                .AddPolicy(FinancePermissions.ViewTenderPaymentJournalPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.ViewFinance,
+                        ProcurementAccessControlRegistry.TenderPaymentVerifyPermission)));
 
             foreach (var permission in FinancePermissions.All)
             {

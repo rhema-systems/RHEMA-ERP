@@ -182,7 +182,7 @@ jobs:
         run: |
           assert_trx_count() {
             local trx="$1"
-            local expected="$2"
+            local minimum="$2"
             local label="$3"
 
             if [ ! -f "$trx" ]; then
@@ -196,8 +196,19 @@ jobs:
               exit 1
             fi
 
-            if ! grep -Eq "<Counters[^>]*total=\"$expected\"[^>]*executed=\"$expected\"[^>]*passed=\"$expected\"" "$trx"; then
-              echo "$label expected exactly $expected executed and passing contracts."
+            local counters
+            counters="$(grep -o '<Counters[^>]*/>' "$trx" | tail -n 1)"
+            local total
+            local executed
+            local passed
+            total="$(sed -n 's/.*total="\([0-9][0-9]*\)".*/\1/p' <<<"$counters")"
+            executed="$(sed -n 's/.*executed="\([0-9][0-9]*\)".*/\1/p' <<<"$counters")"
+            passed="$(sed -n 's/.*passed="\([0-9][0-9]*\)".*/\1/p' <<<"$counters")"
+
+            if [ -z "$total" ] || [ -z "$executed" ] || [ -z "$passed" ] || \
+               [ "$total" -lt "$minimum" ] || [ "$executed" -ne "$total" ] || \
+               [ "$passed" -ne "$total" ]; then
+              echo "$label expected at least $minimum contracts, with every discovered contract executed and passing."
               cat "$trx"
               exit 1
             fi

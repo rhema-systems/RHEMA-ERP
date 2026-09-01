@@ -39,6 +39,106 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
 {
     [SqlServerFact]
     [Trait("Category", "SqlServerIntegration")]
+    public async Task TenderLineageGuardAllowsOnlyValidatedOneTimeSourcingCaseRecovery()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync(
+            TenderLineageRecoverySchemaSql);
+        await database.ApplySqlOperationsAsync(
+            new AllowGovernedTenderLineageRecovery());
+
+        var tenantId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var sourcingCaseId = Guid.NewGuid();
+        var replacementCaseId = Guid.NewGuid();
+        var mismatchedCaseId = Guid.NewGuid();
+        var tenderId = Guid.NewGuid();
+        var mismatchedTenderId = Guid.NewGuid();
+        const string fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        await database.ExecuteAsync(
+            """
+            INSERT dbo.PurchaseRequisitions (Id,TenantId,IsDeleted,Status,TotalAmount,Currency)
+            VALUES (@id,@tenant,0,'Approved',30000,'GHS');
+            """,
+            new SqlParameter("@id", requisitionId),
+            new SqlParameter("@tenant", tenantId));
+        await database.ExecuteAsync(
+            """
+            INSERT dbo.ProcurementRequisitionSourcingReleases
+                (Id,TenantId,IsDeleted,PurchaseRequisitionId,ControlFingerprint)
+            VALUES (@id,@tenant,0,@requisition,@fingerprint);
+            """,
+            new SqlParameter("@id", releaseId),
+            new SqlParameter("@tenant", tenantId),
+            new SqlParameter("@requisition", requisitionId),
+            new SqlParameter("@fingerprint", fingerprint));
+
+        foreach (var sourcingCase in new[]
+                 {
+                     (sourcingCaseId, 1, fingerprint),
+                     (replacementCaseId, 1, fingerprint),
+                     (mismatchedCaseId, 0, fingerprint)
+                 })
+        {
+            await database.ExecuteAsync(
+                """
+                INSERT dbo.ProcurementSourcingCases
+                    (Id,TenantId,IsDeleted,Status,PurchaseRequisitionId,SourcingReleaseId,
+                     SelectedMethod,EstimatedValue,CurrencyCode,SourceControlFingerprint)
+                VALUES (@id,@tenant,0,1,@requisition,@release,@method,30000,'GHS',@fingerprint);
+                """,
+                new SqlParameter("@id", sourcingCase.Item1),
+                new SqlParameter("@tenant", tenantId),
+                new SqlParameter("@requisition", requisitionId),
+                new SqlParameter("@release", releaseId),
+                new SqlParameter("@method", sourcingCase.Item2),
+                new SqlParameter("@fingerprint", sourcingCase.Item3));
+        }
+
+        foreach (var id in new[] { tenderId, mismatchedTenderId })
+        {
+            await database.ExecuteAsync(
+                """
+                INSERT dbo.Tenders
+                    (Id,TenantId,SourcePurchaseRequisitionId,SourcingReleaseId,SourcingCaseId,
+                     EstimatedValue,Currency,TenderType)
+                VALUES (@id,@tenant,@requisition,@release,NULL,30000,'GHS','ITB');
+                """,
+                new SqlParameter("@id", id),
+                new SqlParameter("@tenant", tenantId),
+                new SqlParameter("@requisition", requisitionId),
+                new SqlParameter("@release", releaseId));
+        }
+
+        await database.ExecuteAsync(
+            "UPDATE dbo.Tenders SET SourcingCaseId=@case WHERE Id=@id;",
+            new SqlParameter("@case", sourcingCaseId),
+            new SqlParameter("@id", tenderId));
+
+        var replacement = await Assert.ThrowsAsync<SqlException>(() =>
+            database.ExecuteAsync(
+                "UPDATE dbo.Tenders SET SourcingCaseId=@case WHERE Id=@id;",
+                new SqlParameter("@case", replacementCaseId),
+                new SqlParameter("@id", tenderId)));
+        replacement.Number.Should().Be(51070);
+
+        var removal = await Assert.ThrowsAsync<SqlException>(() =>
+            database.ExecuteAsync(
+                "UPDATE dbo.Tenders SET SourcingCaseId=NULL WHERE Id=@id;",
+                new SqlParameter("@id", tenderId)));
+        removal.Number.Should().Be(51070);
+
+        var invalidRecovery = await Assert.ThrowsAsync<SqlException>(() =>
+            database.ExecuteAsync(
+                "UPDATE dbo.Tenders SET SourcingCaseId=@case WHERE Id=@id;",
+                new SqlParameter("@case", mismatchedCaseId),
+                new SqlParameter("@id", mismatchedTenderId)));
+        invalidRecovery.Number.Should().Be(51070);
+    }
+
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
     public async Task ReservationPromotesAndUtilizesExactlyOnceWithoutCrossTenantOrContractDoubleCount()
     {
         await using var database = await DisposableSqlDatabase.CreateAsync(string.Empty);
@@ -2239,5 +2339,25 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         (Id uniqueidentifier PRIMARY KEY DEFAULT NEWID(),VendorInvoiceId uniqueidentifier NOT NULL,
          PurchaseOrderItemId uniqueidentifier NOT NULL,Quantity decimal(18,4) NOT NULL,
          UnitPrice decimal(18,4) NOT NULL);
+        """;
+
+    private const string TenderLineageRecoverySchemaSql =
+        """
+        CREATE TABLE dbo.PurchaseRequisitions
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,IsDeleted bit NOT NULL,
+         Status nvarchar(50) NOT NULL,TotalAmount decimal(18,2) NULL,Currency nvarchar(10) NULL);
+        CREATE TABLE dbo.ProcurementRequisitionSourcingReleases
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,IsDeleted bit NOT NULL,
+         PurchaseRequisitionId uniqueidentifier NOT NULL,ControlFingerprint nvarchar(64) NOT NULL);
+        CREATE TABLE dbo.ProcurementSourcingCases
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,IsDeleted bit NOT NULL,
+         Status int NOT NULL,PurchaseRequisitionId uniqueidentifier NOT NULL,SourcingReleaseId uniqueidentifier NOT NULL,
+         SelectedMethod int NOT NULL,EstimatedValue decimal(18,2) NULL,CurrencyCode nvarchar(10) NULL,
+         SourceControlFingerprint nvarchar(64) NOT NULL);
+        CREATE TABLE dbo.Tenders
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,
+         SourcePurchaseRequisitionId uniqueidentifier NULL,SourcingReleaseId uniqueidentifier NULL,
+         SourcingCaseId uniqueidentifier NULL,EstimatedValue decimal(18,2) NULL,
+         Currency nvarchar(10) NULL,TenderType nvarchar(50) NOT NULL);
         """;
 }
