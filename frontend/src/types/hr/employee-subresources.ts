@@ -456,12 +456,36 @@ export interface EmployeeContract {
   workingHoursPerWeek: number;
   vacationDaysPerYear: number;
   sickDaysPerYear: number;
+  /**
+   * The probation term and the date it was passed.
+   *
+   * ⚠ Both were settable on create and update and readable NOWHERE until 2026-09-01, so the edit
+   * form hardcoded them blank. Instrument 03 cannot see this class of gap: it scans Create/Update
+   * DTOs, not read ones.
+   */
+  probationPeriodDays?: number | null;
+  confirmationDate?: string | null;
+  /** The currency the salary is in. A salary was previously shown as a bare number. */
+  currencyCode?: string | null;
+  /** Full time, part time, shift, flexi, remote, hybrid — not the same axis as employmentType. */
+  workSchedule?: WorkArrangementType | null;
   terms?: string | null;
+  specialConditions?: string | null;
+  notes?: string | null;
   isActive: boolean;
   contractPath?: string | null;
   terminationDate?: string | null;
   terminationReason?: string | null;
 }
+
+/** HREnums.cs `WorkArrangementType` — 1..6. */
+export type WorkArrangementType =
+  | 'FullTime'
+  | 'PartTime'
+  | 'Shift'
+  | 'Flexi'
+  | 'Remote'
+  | 'Hybrid';
 
 export interface CreateEmployeeContractRequest {
   employeeId: string;

@@ -19,7 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useQuery } from '@tanstack/react-query';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { employeeService } from '@/services/hr/employee.service';
 import {
   GENDER_OPTIONS,
   MARITAL_STATUS_OPTIONS,
@@ -259,6 +261,20 @@ export function EmployeeForm({
   const locationId = form.watch('locationId');
   const managerId = form.watch('managerId') || null;
   const selectedPosition = positions.find((p) => p.id === positionId);
+
+  // Whoever holds the position this one reports to — offered as the manager, rather than leaving
+  // a free search over 1,507 people to guess at a line the org chart already knows.
+  const [managerLabel, setManagerLabel] = useState<string | null>(initialManagerLabel ?? null);
+  const reportsToPositionId = selectedPosition?.reportsToPositionId ?? null;
+  const supervisors = useQuery({
+    queryKey: ['hr', 'employees', 'by-position', reportsToPositionId],
+    queryFn: () => employeeService.searchPaged({ positionId: reportsToPositionId as string }, 1, 10),
+    enabled: !!reportsToPositionId,
+  });
+  const supervisorOptions = (supervisors.data?.items ?? []).map((e: any) => ({
+    id: e.id as string,
+    label: (e.displayName || e.fullName || `${e.firstName ?? ''} ${e.lastName ?? ''}`).trim(),
+  }));
 
   // Org level name derived from the position (its DTO carries the level id, but
   // the level name isn't always populated — resolve it against the levels list).
@@ -507,10 +523,61 @@ export function EmployeeForm({
               <Field label="Manager">
                 <EmployeePicker
                   value={managerId}
-                  initialLabel={initialManagerLabel}
-                  onChange={(id) => form.setValue('managerId', id ?? '')}
+                  // Driven by state, not the prop, so clicking a suggested supervisor updates the
+                  // picker's own label instead of leaving it showing the previous manager.
+                  initialLabel={managerLabel}
+                  onChange={(id, label) => {
+                    form.setValue('managerId', id ?? '');
+                    setManagerLabel(label);
+                  }}
                   placeholder="Search for a manager…"
                 />
+                {/*
+                  ⚠ The reporting line was recorded and ignored. `EmployeePosition.ReportsToPositionId`
+                  is populated on 121 of 174 positions and drives the organogram, while this picker
+                  was a free search over 1,507 people — so the org chart and the manager on the
+                  employee record could disagree with nothing to notice it.
+
+                  Suggested, not enforced: a manager is not always the holder of the supervising
+                  post (acting arrangements, matrix reporting), so the free search stays.
+                */}
+                {selectedPosition?.reportsToPositionId && (
+                  <div className="mt-2 rounded-md border bg-muted/40 p-2 text-sm">
+                    <p className="text-muted-foreground">
+                      This position reports to{' '}
+                      <span className="font-medium text-foreground">
+                        {selectedPosition.reportsToPositionTitle ?? 'another position'}
+                      </span>
+                      .
+                    </p>
+                    {supervisors.isLoading ? (
+                      <p className="mt-1 text-xs text-muted-foreground">Finding who holds it…</p>
+                    ) : supervisorOptions.length === 0 ? (
+                      // A vacant supervising post is worth saying out loud — it is why the
+                      // suggestion is empty, and it is a real fact about the org chart.
+                      <p className="mt-1 text-xs text-amber-600">
+                        Nobody currently holds that position, so there is no one to suggest.
+                      </p>
+                    ) : (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {supervisorOptions.map((sup) => (
+                          <Button
+                            key={sup.id}
+                            type="button"
+                            variant={managerId === sup.id ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => {
+                              form.setValue('managerId', sup.id);
+                              setManagerLabel(sup.label);
+                            }}
+                          >
+                            {sup.label}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </Field>
             </div>
             <div className={GRID3}>

@@ -912,6 +912,37 @@ public class EmployeeContractDetailDto
     public int WorkingHoursPerWeek { get; set; }
     public int VacationDaysPerYear { get; set; }
     public int SickDaysPerYear { get; set; }
+
+    /// <summary>The probation term, and the date it was passed.</summary>
+    /// <remarks>
+    /// ⚠ Both were SETTABLE on create and update and readable nowhere — measured 2026-09-01, the
+    /// contract response carried neither. A probation term could be recorded and then never seen
+    /// again, which is why nobody noticed it could also be rewritten after confirmation.
+    /// Instrument 03 cannot see this class of gap: it scans Create/Update DTOs, not read ones.
+    /// </remarks>
+    public int? ProbationPeriodDays { get; set; }
+    public DateOnly? ConfirmationDate { get; set; }
+
+    /// <summary>The currency the salary is expressed in. Defaults to GHS on the entity.</summary>
+    /// <remarks>
+    /// ⚠ A salary was exposed with NO currency at all, so every figure on every contract screen
+    /// was implicitly GHS whether or not it was. Added 2026-09-01 (lane 3d).
+    /// </remarks>
+    public string CurrencyCode { get; set; } = "GHS";
+
+    /// <summary>Full time, part time, shift, flexi, remote or hybrid.</summary>
+    /// <remarks>
+    /// ⚠ A different axis from <c>EmploymentType</c>, which says permanent vs contract. Both sit
+    /// on the entity; only the latter was reachable.
+    /// </remarks>
+    public WorkArrangementType WorkSchedule { get; set; } = WorkArrangementType.FullTime;
+
+    /// <summary>Conditions particular to this contract, longer-form than <c>Terms</c>.</summary>
+    public string? SpecialConditions { get; set; }
+
+    /// <summary>Internal remarks about the contract record itself.</summary>
+    public string? Notes { get; set; }
+
     public string? Terms { get; set; }
     public bool IsActive { get; set; }
     public string? ContractPath { get; set; }
@@ -954,6 +985,17 @@ public class CreateEmployeeContractDetailDto
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
 
+    [MaxLength(10)]
+    public string CurrencyCode { get; set; } = "GHS";
+
+    public WorkArrangementType WorkSchedule { get; set; } = WorkArrangementType.FullTime;
+
+    [MaxLength(2000)]
+    public string? SpecialConditions { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
     [MaxLength(1000)]
     public string? Terms { get; set; }
 
@@ -995,6 +1037,17 @@ public class UpdateEmployeeContractDetailDto
     public int? SickDaysPerYear { get; set; }
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
+
+    [MaxLength(10)]
+    public string? CurrencyCode { get; set; }
+
+    public WorkArrangementType? WorkSchedule { get; set; }
+
+    [MaxLength(2000)]
+    public string? SpecialConditions { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
     public string? Terms { get; set; }
     public bool? IsActive { get; set; }
     public string? ContractPath { get; set; }

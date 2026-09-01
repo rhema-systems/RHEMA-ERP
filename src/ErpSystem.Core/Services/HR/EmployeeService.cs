@@ -1420,6 +1420,11 @@ public class EmployeeService : IEmployeeService
 
         ValidateContractTaxRules(dto.TaxTreatmentType, dto.WithholdingTaxRate);
 
+        // ⚠ The same gate the guarantor amount goes through. A salary currency is money's unit;
+        // an unvalidated one lets "XYZ" onto a contract and every figure derived from it. 3a
+        // established the pattern against Finance's master — not a second HR-side list.
+        await _currencies.RequireKnownCurrencyAsync(dto.CurrencyCode, cancellationToken, optional: true);
+
         var repo = _unitOfWork.Repository<EmployeeContractDetail>();
         var entity = new EmployeeContractDetail
         {
@@ -1440,6 +1445,10 @@ public class EmployeeService : IEmployeeService
             SickDaysPerYear = dto.SickDaysPerYear,
             ProbationPeriodDays = dto.ProbationPeriodDays,
             ConfirmationDate = dto.ConfirmationDate,
+            CurrencyCode = dto.CurrencyCode,
+            WorkSchedule = dto.WorkSchedule,
+            SpecialConditions = dto.SpecialConditions,
+            Notes = dto.Notes,
             Terms = dto.Terms,
             IsActive = dto.IsActive,
             ContractPath = dto.ContractPath,
@@ -1452,6 +1461,28 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Refuses a change to a contract's probation terms once the employee has been confirmed.
+    /// </summary>
+    /// <remarks>
+    /// <para>Only the two probation fields are gated. Salary, hours and leave are ordinary terms
+    /// that change over an employment; the probation term and the date it was passed are a record
+    /// of something that already happened, and a probation letter has been issued against them.</para>
+    ///
+    /// <para>⚠ In the service, not on the screen — the D-03 lesson. A client-side check protects
+    /// one form; an import, another screen or a direct call would still rewrite it.</para>
+    /// </remarks>
+    private async Task RequireUnconfirmedProbationAsync(EmployeeContractDetail contract, CancellationToken cancellationToken)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(contract.EmployeeId);
+        if (employee == null || employee.ConfirmationDate == null) return;
+
+        throw new InvalidOperationException(
+            $"This employee was confirmed on {employee.ConfirmationDate:yyyy-MM-dd}, so the probation term "
+            + "on their contract can no longer be changed. Correct the confirmation through the probation "
+            + "record, which is what issued the letter.");
     }
 
     public async Task<EmployeeContractDetailDto> UpdateContractAsync(UpdateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default)
@@ -1473,8 +1504,29 @@ public class EmployeeService : IEmployeeService
         if (dto.WorkingHoursPerWeek.HasValue) entity.WorkingHoursPerWeek = dto.WorkingHoursPerWeek.Value;
         if (dto.VacationDaysPerYear.HasValue) entity.VacationDaysPerYear = dto.VacationDaysPerYear.Value;
         if (dto.SickDaysPerYear.HasValue) entity.SickDaysPerYear = dto.SickDaysPerYear.Value;
+        // ⚠ Ledger lane 3d. Probation terms stayed editable after the employee was confirmed:
+        // the term could be stretched, or the confirmation date moved, on a contract whose probation
+        // had already been decided and a letter issued against it. The same shape as D-03, where an
+        // APPROVED job description's content could still be rewritten.
+        //
+        // The rule keys off the EMPLOYEE, not the contract. Confirmation is recorded by
+        // ProbationService.MarkEmployeeConfirmed, which sets Employee.ConfirmationDate and moves
+        // StaffStatus off Probation; EmployeeContractDetail.ConfirmationDate is a separate,
+        // hand-typed copy that nothing else writes. Guarding the contract's own copy against
+        // itself would let the real confirmation be contradicted.
+        if (dto.ProbationPeriodDays.HasValue || dto.ConfirmationDate.HasValue)
+            await RequireUnconfirmedProbationAsync(entity, cancellationToken);
+
         if (dto.ProbationPeriodDays.HasValue) entity.ProbationPeriodDays = dto.ProbationPeriodDays;
         if (dto.ConfirmationDate.HasValue) entity.ConfirmationDate = dto.ConfirmationDate;
+        if (dto.CurrencyCode != null)
+        {
+            await _currencies.RequireKnownCurrencyAsync(dto.CurrencyCode, cancellationToken, optional: true);
+            entity.CurrencyCode = dto.CurrencyCode;
+        }
+        if (dto.WorkSchedule.HasValue) entity.WorkSchedule = dto.WorkSchedule.Value;
+        if (dto.SpecialConditions != null) entity.SpecialConditions = dto.SpecialConditions;
+        if (dto.Notes != null) entity.Notes = dto.Notes;
         if (dto.Terms != null) entity.Terms = dto.Terms;
         if (dto.IsActive.HasValue) entity.IsActive = dto.IsActive.Value;
         if (dto.ContractPath != null) entity.ContractPath = dto.ContractPath;
