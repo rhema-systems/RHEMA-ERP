@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Finance.Fiscal;
 using ErpSystem.Api.Services.Finance.MultiCurrency;
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
@@ -22,6 +23,76 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FxFunctionalCurrencyGovernanceTests
 {
+    [Theory]
+    [InlineData(52, 13, true)]
+    [InlineData(52, 26, true)]
+    [InlineData(52, 39, true)]
+    [InlineData(52, 52, true)]
+    [InlineData(53, 52, false)]
+    [InlineData(53, 53, true)]
+    [InlineData(52, 12, false)]
+    public void WeeklyFiscalCalendar_ShouldRecognizeControlledQuarterBoundaries(
+        int fiscalYearPeriodCount,
+        int periodNumber,
+        bool expected)
+    {
+        FiscalCalendarBoundaryPolicy.IsQuarterEnd(
+                PeriodType.Weekly,
+                periodNumber,
+                fiscalYearPeriodCount)
+            .Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task QuarterEndRate_ShouldAcceptConfiguredWeeklyQuarterBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearName = "FY2026 52-week",
+            FiscalYearCode = "FY2026-W",
+            Year = 2026,
+            FiscalYearType = "52-53 Week",
+            StartDate = new DateTime(2026, 1, 1),
+            EndDate = new DateTime(2026, 12, 30),
+            TotalDays = 364,
+            NumberOfPeriods = 52
+        };
+        db.FiscalYears.Add(fiscalYear);
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = fiscalYear.Id,
+            PeriodName = "Week 13",
+            PeriodCode = "FY2026-W13",
+            PeriodNumber = 13,
+            PeriodType = PeriodType.Weekly,
+            StartDate = new DateTime(2026, 3, 26),
+            EndDate = new DateTime(2026, 4, 1),
+            PeriodDays = 7
+        });
+        await db.SaveChangesAsync();
+
+        var rate = await CreateExchangeRateService(db, tenantId).CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 15m,
+            EffectiveDate = new DateTime(2026, 4, 1),
+            RateType = ExchangeRateType.QuarterEnd.ToString(),
+            RateSource = "Manual"
+        });
+
+        rate.RateType.Should().Be(ExchangeRateType.QuarterEnd.ToString());
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]

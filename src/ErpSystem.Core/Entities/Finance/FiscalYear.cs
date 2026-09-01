@@ -6,8 +6,10 @@ namespace ErpSystem.Core.Entities.Finance;
 
 /// <summary>
 /// Fiscal Year entity for annual financial period management and year-end controls.
-/// Parent entity to FiscalPeriod, supports multiple overlapping fiscal years for different
-/// reporting frameworks (e.g., calendar year for IFRS, July-June for local tax reporting).
+/// Parent entity to FiscalPeriod. A tenant has one authoritative, non-overlapping fiscal
+/// calendar because posting-period resolution is not currently scoped by accounting book or
+/// reporting framework. Secondary reporting calendars require an explicit calendar/book
+/// dimension before overlapping date ranges can be supported safely.
 /// 
 /// PATTERN: Fiscal Year Management Workflow
 /// =========================================

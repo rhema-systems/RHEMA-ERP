@@ -104,10 +104,16 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalYearDto> CreateFiscalYearAsync(CreateFiscalYearDto dto, CancellationToken cancellationToken = default)
         {
+            var startDate = dto.StartDate.Date;
+            var endDate = dto.EndDate.Date;
+            if (endDate < startDate)
+                throw new InvalidOperationException("Fiscal year end date must be on or after its start date.");
+
             var overlapping = await _unitOfWork.Repository<FiscalYear>()
                 .GetQueryable(fy => fy.TenantId == TenantId
-                    && ((dto.StartDate >= fy.StartDate && dto.StartDate <= fy.EndDate)
-                        || (dto.EndDate >= fy.StartDate && dto.EndDate <= fy.EndDate)))
+                    && !fy.IsDeleted
+                    && startDate <= fy.EndDate
+                    && endDate >= fy.StartDate)
                 .AnyAsync(cancellationToken);
 
             if (overlapping)
@@ -122,9 +128,9 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 FiscalYearName = dto.FiscalYearName,
                 Year = dto.Year,
                 FiscalYearType = dto.FiscalYearType,
-                StartDate = dto.StartDate.Date,
-                EndDate = dto.EndDate.Date,
-                TotalDays = (dto.EndDate - dto.StartDate).Days + 1,
+                StartDate = startDate,
+                EndDate = endDate,
+                TotalDays = (endDate - startDate).Days + 1,
                 NumberOfPeriods = dto.NumberOfPeriods,
                 Status = "Future",
                 IsActive = true, // Default to true as property missing in DTO
@@ -140,7 +146,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             // Generate periods based on type
             var periodType = dto.PeriodType;
-            var currentDate = dto.StartDate.Date;
+            var currentDate = startDate;
             int maxPeriods = dto.NumberOfPeriods;
 
             // Safety check for daily/weekly if user put wrong number
@@ -152,7 +158,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             
             int periodNumber = 1;
 
-            while (currentDate <= dto.EndDate.Date && periodNumber <= maxPeriods)
+            while (currentDate <= endDate && periodNumber <= maxPeriods)
             {
                 DateTime periodStart = currentDate;
                 DateTime periodEnd;
@@ -194,8 +200,8 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 }
 
                 // Cap at fiscal year end
-                if (periodEnd > dto.EndDate.Date)
-                    periodEnd = dto.EndDate.Date;
+                if (periodEnd > endDate)
+                    periodEnd = endDate;
 
                 // Create period
                 var period = new FiscalPeriod

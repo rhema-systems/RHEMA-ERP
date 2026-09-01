@@ -12,6 +12,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.Fiscal;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.MultiCurrency
@@ -710,13 +711,25 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             if (rateType == ExchangeRateType.QuarterEnd)
             {
-                var isFiscalQuarterEnd = await _unitOfWork.Repository<FiscalPeriod>()
+                var matchingPeriods = await _unitOfWork.Repository<FiscalPeriod>()
                     .GetQueryable(period => period.TenantId == TenantId
                         && !period.IsDeleted
                         && period.EndDate.Date == date)
-                    .AnyAsync(period => period.PeriodType == PeriodType.Quarterly
-                        || (period.PeriodType == PeriodType.Monthly && period.PeriodNumber % 3 == 0),
-                        cancellationToken);
+                    .Select(period => new { period.FiscalYearId, period.PeriodType, period.PeriodNumber })
+                    .ToListAsync(cancellationToken);
+
+                var fiscalYearIds = matchingPeriods.Select(period => period.FiscalYearId).Distinct().ToList();
+                var fiscalYearPeriodCounts = fiscalYearIds.Count == 0
+                    ? new Dictionary<Guid, int>()
+                    : await _unitOfWork.Repository<FiscalYear>()
+                        .GetQueryable(year => year.TenantId == TenantId
+                            && !year.IsDeleted
+                            && fiscalYearIds.Contains(year.Id))
+                        .ToDictionaryAsync(year => year.Id, year => year.NumberOfPeriods, cancellationToken);
+
+                var isFiscalQuarterEnd = matchingPeriods.Any(period =>
+                    fiscalYearPeriodCounts.TryGetValue(period.FiscalYearId, out var periodCount)
+                    && FiscalCalendarBoundaryPolicy.IsQuarterEnd(period.PeriodType, period.PeriodNumber, periodCount));
                 if (!isFiscalQuarterEnd)
                 {
                     throw new InvalidOperationException(
