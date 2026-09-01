@@ -3002,11 +3002,12 @@ public sealed class ControlledOpeningBalancePostingTests
             Id = Guid.NewGuid(), TenantId = tenantId, SupplierCode = $"SUP-{tenantId:N}"[..12],
             Name = "TDC cutover supplier", IsActive = true, Status = "Active", TaxId = "TDC-SUP-TIN"
         };
-        var customer = new Customer
+        var customer = new BusinessPartner
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, CustomerCode = $"CUS-{tenantId:N}"[..12],
-            CustomerName = "TDC cutover customer", ReferenceNumber = $"CUS-{tenantId:N}"[..18],
-            Status = "Active", IsActive = true, CurrencyCode = "GHS"
+            Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = $"CUS-{tenantId:N}"[..12],
+            CustomerAccountNumber = $"AR-{tenantId:N}"[..12], PartnerName = "TDC cutover customer",
+            PartnerType = "Customer", RegistrationStatus = "Active", ApprovalStatus = "Approved",
+            IsActive = true, Currency = "GHS"
         };
         var withholdingTax = new Tax
         {
@@ -3016,7 +3017,7 @@ public sealed class ControlledOpeningBalancePostingTests
             TaxPayableAccountId = whtPayable.Id, TaxReceivableAccountId = whtReceivable.Id
         };
         db.Suppliers.Add(supplier);
-        db.Set<Customer>().Add(customer);
+        db.BusinessPartners.Add(customer);
         db.Taxes.Add(withholdingTax);
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -3288,7 +3289,7 @@ public sealed class ControlledOpeningBalancePostingTests
         Account WhtPayable,
         Account WhtReceivable,
         Supplier Supplier,
-        Customer Customer,
+        BusinessPartner Customer,
         Tax WithholdingTax);
     private sealed record FixedAssetOpeningFixture(
         FixedAsset Asset,

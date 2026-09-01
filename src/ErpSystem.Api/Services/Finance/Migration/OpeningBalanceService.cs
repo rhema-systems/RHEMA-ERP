@@ -670,8 +670,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var customer = await _db.Set<Customer>().AsNoTracking().FirstOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.Id == dto.CustomerId && !item.IsDeleted, cancellationToken)
+        var customer = await FindActiveCustomerPartnerAsync(dto.CustomerId, cancellationToken)
             ?? throw new InvalidOperationException("Customer was not found for the current tenant.");
         var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken);
         var advanceAccountId = context.Settings.CustomerAdvanceAccountId
@@ -744,7 +743,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var customer = await _db.Set<Customer>().AsNoTracking().FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == dto.CustomerId && !item.IsDeleted, cancellationToken)
+        var customer = await FindActiveCustomerPartnerAsync(dto.CustomerId, cancellationToken)
             ?? throw new InvalidOperationException("Customer was not found for the current tenant.");
         var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken, requireFunctionalCurrency: true);
         await ValidateWithholdingConfigurationAsync(dto.TaxId, dto.WithholdingTaxAccountId, useReceivableAccount: true, cancellationToken);
@@ -769,6 +768,20 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         payment.OpeningBalanceBatchId = batch.Id;
         await _db.SaveChangesAsync(cancellationToken);
         return batch;
+    }
+
+    private Task<BusinessPartner?> FindActiveCustomerPartnerAsync(
+        Guid customerId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        return _db.BusinessPartners.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId &&
+            item.Id == customerId &&
+            !item.IsDeleted &&
+            item.IsActive &&
+            (item.PartnerType == "Customer" || item.PartnerType == "Both"),
+            cancellationToken);
     }
 
     private async Task<OpeningBalanceBatchDto> CreateSpecializedBatchAsync(
