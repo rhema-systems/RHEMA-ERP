@@ -2368,7 +2368,15 @@ WHERE [Id] = {delta.AccountId}
             if (existing.Id != dimensionSetId || existing.CombinationHash != combinationHash)
                 throw new InvalidOperationException("Finance dimension-set identity collision detected.");
             EnsureSetItemsMatch(existing, resolvedItems);
-            return ToValidatedDimensionSet(existing, requiresInsert: false);
+            // Canonical sets intentionally store only reusable definition/value membership.
+            // Keep the effective account-rule evidence resolved for this posting so the exact
+            // rule version is frozen on the transaction-specific snapshot below.
+            return new ValidatedDimensionSet(
+                existing.Id,
+                existing.CombinationHash,
+                existing.DisplayValue,
+                resolvedItems,
+                RequiresInsert: false);
         }
 
         return new ValidatedDimensionSet(dimensionSetId, combinationHash, displayValue, resolvedItems, true);

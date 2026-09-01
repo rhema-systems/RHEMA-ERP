@@ -191,10 +191,19 @@ from the original receipt; bank, customer-charge and expense lines resolve their
 Both routes have tenant-scoped readiness providers and require stable, frozen evidence before a
 future promotion to `Enforced`.
 
-Reconciliation adjustments, fixed-asset settlement and payment paths produced by another module
-remain later dimension-expansion candidates. They require their own bounded route or additive
-Finance adapter/contract, consumer tests and governed certification; sharing an underlying Finance
-service does not certify them implicitly.
+Finance-owned bank reconciliation adjustments use the dedicated
+`finance.cash.bank-reconciliation-adjustments` route in `CaptureOptional`. The bank leg and offset
+leg have separate deterministic source-line identities, resolve their own account rules and freeze
+their canonical combination, rule version and exchange-rate evidence on the exact source and
+posting lines. Because this high-control action approves and posts immediately, an account rule
+marked `Required` must be satisfied before posting even during optional capture; dimensions governed
+by `Optional` rules remain optional. Historical adjustment rows without the trusted route provenance
+remain legacy evidence and are not silently certified.
+
+Fixed-asset settlement and payment paths produced by another module remain separate
+dimension-expansion candidates. They require their own route identity, additive Finance
+adapter/contract, consumer tests and governed certification; sharing an underlying Finance service
+does not certify them implicitly.
 
 ## Acceptance criteria
 

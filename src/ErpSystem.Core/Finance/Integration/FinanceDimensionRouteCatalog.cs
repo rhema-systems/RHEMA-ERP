@@ -17,7 +17,8 @@ public enum FinanceDimensionRouteId
     FinanceCashReceipt = 41,
     FinanceCashBankTransfer = 42,
     FinanceBankDeposit = 43,
-    FinanceReturnedCheque = 44
+    FinanceReturnedCheque = 44,
+    FinanceBankReconciliationAdjustment = 45
 }
 
 public enum FinanceDimensionCertificationState
@@ -226,7 +227,20 @@ public static class FinanceDimensionRouteCatalog
             SupportsDocumentDefaults: true,
             RequiresReadinessProvider: true,
             "Finance / Cash Management",
-            "Finance-owned returned customer cheques. Reopened principal and discounts retain the exact frozen receipt-allocation combinations; bank and charge lines resolve their own account rules.")
+            "Finance-owned returned customer cheques. Reopened principal and discounts retain the exact frozen receipt-allocation combinations; bank and charge lines resolve their own account rules."),
+        new(
+            FinanceDimensionRouteId.FinanceBankReconciliationAdjustment,
+            "Finance",
+            "CASHBANK",
+            "finance.cash.bank-reconciliation-adjustments",
+            "BankReconciliationAdjustment",
+            "1.0",
+            FinanceDimensionGrain.SourceDocumentLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Cash Management",
+            "Finance-owned bank-only reconciliation adjustments. The bank and offset legs are independent stable source lines; ordinary cash routes remain separate.")
     ];
 
     public static FinanceDimensionRouteDefinition GetRequired(FinanceDimensionRouteId id) =>

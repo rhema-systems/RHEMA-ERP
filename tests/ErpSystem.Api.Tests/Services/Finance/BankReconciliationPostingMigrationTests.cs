@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -420,6 +421,198 @@ public sealed class BankReconciliationPostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceDimensions-ReconciliationAdjustments")]
+    [Trait("Category", "CashBank")]
+    public async Task ReconciliationAdjustment_ShouldFreezeExactBankAndOffsetDimensionEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-DIM", 100m);
+        var bankCharge = SeedAccount(db, tenantId, "6250", AccountType.Expense);
+        var definition = new FinanceDimensionDefinition
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "DEPT", Name = "Department",
+            Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true
+        };
+        var treasury = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "TREAS", Name = "Treasury", EffectiveDate = new DateTime(2025, 1, 1),
+            IsActive = true
+        };
+        var operations = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "OPS", Name = "Operations", EffectiveDate = new DateTime(2025, 1, 1),
+            IsActive = true
+        };
+        db.FinanceDimensionDefinitions.Add(definition);
+        db.FinanceDimensionValues.AddRange(treasury, operations);
+        db.FinanceDimensionAccountRules.AddRange(
+            new FinanceDimensionAccountRule
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, RuleFamilyId = Guid.NewGuid(), RuleVersion = 1,
+                AccountId = setup.BankGlAccount.Id,
+                FinanceDimensionDefinitionId = definition.Id,
+                RuleType = "Fixed", DefaultDimensionValueId = treasury.Id,
+                RouteId = FinanceDimensionRouteId.FinanceBankReconciliationAdjustment,
+                SourceModule = "CASHBANK", SourceDocumentType = "BankReconciliationAdjustment",
+                PostingAction = "Post", EffectiveDate = new DateTime(2025, 1, 1), IsActive = true
+            },
+            new FinanceDimensionAccountRule
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, RuleFamilyId = Guid.NewGuid(), RuleVersion = 1,
+                AccountId = bankCharge.Id,
+                FinanceDimensionDefinitionId = definition.Id,
+                RuleType = "Required",
+                RouteId = FinanceDimensionRouteId.FinanceBankReconciliationAdjustment,
+                SourceModule = "CASHBANK", SourceDocumentType = "BankReconciliationAdjustment",
+                PostingAction = "Post", EffectiveDate = new DateTime(2025, 1, 1), IsActive = true
+            });
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(
+            db, tenantId, documentPrefix: "ADJ-DIM", withDimensions: true);
+        var reconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 90m
+        });
+
+        var adjustment = await service.CreateAndPostAdjustmentAsync(
+            reconciliation.Id,
+            new CreateReconciliationAdjustmentDto
+            {
+                AdjustmentType = ReconciliationAdjustmentType.BankCharge,
+                TransactionDate = new DateTime(2026, 7, 6),
+                Amount = 10m,
+                OffsetAccountId = bankCharge.Id,
+                IdempotencyKey = "DIM-BCHG-001",
+                FinanceDimensions = new FinanceSourceDocumentDimensionInputDto
+                {
+                    Lines =
+                    [
+                        new FinanceSourceLineDimensionInputDto
+                        {
+                            SourceLineId = Guid.NewGuid(),
+                            AccountId = setup.BankGlAccount.Id,
+                            Dimensions = []
+                        },
+                        new FinanceSourceLineDimensionInputDto
+                        {
+                            SourceLineId = Guid.NewGuid(),
+                            AccountId = bankCharge.Id,
+                            Dimensions =
+                            [
+                                new FinancePostingDimensionValueDto
+                                {
+                                    DimensionCode = "DEPT", ValueCode = "OPS"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            });
+
+        adjustment.FinanceDimensions.Should().NotBeNull();
+        adjustment.Currency.Should().Be("GHS");
+        adjustment.BaseAmount.Should().Be(adjustment.Amount);
+        adjustment.ExchangeRate.Should().Be(1m);
+        adjustment.ExchangeRateId.Should().BeNull();
+        adjustment.ExchangeRateSource.Should().Be("Functional currency");
+        adjustment.ExchangeRateDate.Should().Be(new DateTime(2026, 7, 6));
+        adjustment.ExchangeRateQuoteSide.Should().Be(ExchangeRateQuoteSide.Mid.ToString());
+        adjustment.FinanceDimensions!.CertificationState.Should()
+            .Be(FinanceDimensionCertificationState.CaptureOptional);
+        adjustment.FinanceDimensions.Lines.Should().HaveCount(2)
+            .And.OnlyContain(line => line.IsFrozen);
+        var bankLineId = FinanceReconciliationDimensionIdentity.BankLine(
+            adjustment.CashTransactionId);
+        var offsetLineId = FinanceReconciliationDimensionIdentity.OffsetLine(
+            adjustment.CashTransactionId);
+        adjustment.FinanceDimensions.Lines.Single(line => line.SourceLineId == bankLineId)
+            .Values.Should().ContainSingle(value => value.DimensionCode == "DEPT"
+                && value.ValueCode == "TREAS" && value.IsReadOnly);
+        adjustment.FinanceDimensions.Lines.Single(line => line.SourceLineId == offsetLineId)
+            .Values.Should().ContainSingle(value => value.DimensionCode == "DEPT"
+                && value.ValueCode == "OPS");
+
+        var journal = await db.JournalEntries
+            .Include(item => item.Transactions)
+                .ThenInclude(line => line.FinanceDimensionSnapshot)!
+                    .ThenInclude(snapshot => snapshot!.Items)
+            .SingleAsync(item => item.Id == adjustment.JournalEntryId);
+        journal.SourceDocumentType.Should().Be("BankReconciliationAdjustment");
+        journal.Transactions.Should().OnlyContain(line =>
+            line.FinanceDimensionSetId.HasValue
+            && line.FinanceDimensionSnapshotId.HasValue);
+        journal.Transactions.Single(line => line.SourceDocumentLineId == bankLineId)
+            .AccountId.Should().Be(setup.BankGlAccount.Id);
+        journal.Transactions.Single(line => line.SourceDocumentLineId == offsetLineId)
+            .AccountId.Should().Be(bankCharge.Id);
+
+        var frozenAssignments = await db.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Include(item => item.FinanceDimensionSnapshot)!
+                .ThenInclude(snapshot => snapshot!.Items)
+            .Where(item => item.SourceDocumentId == adjustment.CashTransactionId
+                && item.SourceLineId.HasValue)
+            .ToDictionaryAsync(item => item.SourceLineId!.Value);
+        foreach (var sourceLineId in new[] { bankLineId, offsetLineId })
+        {
+            var sourceEvidence = frozenAssignments[sourceLineId].FinanceDimensionSnapshot!.Items
+                .Select(DimensionEvidence)
+                .ToArray();
+            var postingEvidence = journal.Transactions
+                .Single(line => line.SourceDocumentLineId == sourceLineId)
+                .FinanceDimensionSnapshot!.Items
+                .Select(DimensionEvidence)
+                .ToArray();
+            postingEvidence.Should().BeEquivalentTo(sourceEvidence);
+        }
+
+        var duplicate = await service.CreateAndPostAdjustmentAsync(
+            reconciliation.Id,
+            new CreateReconciliationAdjustmentDto
+            {
+                AdjustmentType = ReconciliationAdjustmentType.BankCharge,
+                TransactionDate = new DateTime(2026, 7, 6),
+                Amount = 10m,
+                OffsetAccountId = bankCharge.Id,
+                IdempotencyKey = "DIM-BCHG-001"
+            });
+        duplicate.WasDuplicate.Should().BeTrue();
+        duplicate.CashTransactionId.Should().Be(adjustment.CashTransactionId);
+        duplicate.FinanceDimensions!.Lines.Select(line => line.SourceLineId)
+            .Should().BeEquivalentTo(new[] { bankLineId, offsetLineId });
+        duplicate.FinanceDimensions.Lines.Should().OnlyContain(line => line.IsFrozen);
+
+        var readiness = await new FinanceReconciliationAdjustmentDimensionReadinessProvider(db)
+            .EvaluateAsync(
+                tenantId,
+                FinanceDimensionRouteCatalog.GetRequired(
+                    FinanceDimensionRouteId.FinanceBankReconciliationAdjustment));
+        readiness.Blockers.Should().BeEmpty();
+    }
+
+    private static object DimensionEvidence(FinanceDimensionSnapshotItem item) => new
+    {
+        item.FinanceDimensionDefinitionId,
+        item.FinanceDimensionValueId,
+        item.DimensionCodeSnapshot,
+        item.DimensionNameSnapshot,
+        item.DimensionValueCodeSnapshot,
+        item.DimensionValueNameSnapshot,
+        item.FinanceDimensionAccountRuleId,
+        item.RuleFamilyIdSnapshot,
+        item.RuleVersionSnapshot,
+        item.RuleTypeSnapshot,
+        item.RuleEffectiveDateSnapshot,
+        item.RuleExpiryDateSnapshot
+    };
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
     public async Task InterestIncomeAdjustment_ShouldPostThroughFinancePostingEngine()
@@ -735,7 +928,8 @@ public sealed class BankReconciliationPostingMigrationTests
     private static BankReconciliationService CreateReconciliationService(
         ApplicationDbContext db,
         Guid tenantId,
-        string documentPrefix = "BRC")
+        string documentPrefix = "BRC",
+        bool withDimensions = false)
     {
         var currentUser = CreateCurrentUserService(tenantId);
         var auditService = new FinanceAuditService(
@@ -745,7 +939,17 @@ public sealed class BankReconciliationPostingMigrationTests
             {
                 HttpContext = new DefaultHttpContext { TraceIdentifier = "trace-bank-reconciliation" }
             });
-        var cashService = CreateCashTransactionService(db, currentUser.Object, auditService, documentPrefix);
+        IFinanceSourceDimensionService? sourceDimensions = null;
+        if (withDimensions)
+        {
+            sourceDimensions = new FinanceSourceDimensionService(
+                db,
+                currentUser.Object,
+                new FinanceSourceDimensionAssignmentStore(db, currentUser.Object),
+                new FinanceDimensionAdministrationService(db, currentUser.Object));
+        }
+        var cashService = CreateCashTransactionService(
+            db, currentUser.Object, auditService, documentPrefix, sourceDimensions);
         var workflow = new Mock<IWorkflowService>();
         workflow.Setup(x => x.StartApprovalWorkflowAsync("BankReconciliation", It.IsAny<Guid>()))
             .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
@@ -767,7 +971,8 @@ public sealed class BankReconciliationPostingMigrationTests
         ApplicationDbContext db,
         ICurrentUserService currentUser,
         IFinanceAuditService auditService,
-        string documentPrefix)
+        string documentPrefix,
+        IFinanceSourceDimensionService? sourceDimensions = null)
     {
         var postingEngine = new FinancePostingEngine(
             db,
@@ -799,7 +1004,8 @@ public sealed class BankReconciliationPostingMigrationTests
             accessScope.Object,
             new FinanceReversalPolicyService(db, currentUser),
             postingEngine,
-            auditService);
+            auditService,
+            sourceDimensions: sourceDimensions);
     }
 
     private static Mock<IFinanceAccessScopeService> CreateUnrestrictedFinanceAccessScope()

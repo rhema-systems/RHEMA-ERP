@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
@@ -24,6 +25,9 @@ public interface ICashTransactionService
     Task<IEnumerable<CashTransactionDto>> GetUnreconciledAsync(Guid bankAccountId);
     Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto);
     Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto);
+    Task<CashTransactionDto> CreateReceiptForProducerAsync(CreateCashReceiptDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> CreatePaymentForProducerAsync(CreateCashPaymentDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<FinanceSourceDocumentDimensionDto?> ValidateDimensionsForProducerAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
     Task<BankTransferPreviewDto> PreviewTransferAsync(CreateBankTransferDto dto, CancellationToken cancellationToken = default);
     Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(CreateBankTransferDto dto);
     Task<CashTransactionDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default);
@@ -32,6 +36,7 @@ public interface ICashTransactionService
     Task<CashTransactionDto> ReturnAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
     Task<CashTransactionDto> CancelAsync(Guid id, string reason, CancellationToken cancellationToken = default);
     Task<CashTransactionDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> PostForProducerAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
     Task<CashTransactionTraceDto?> GetTraceAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CashTransactionDto> ReverseAsync(Guid id, ReverseCashTransactionDto dto, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id);

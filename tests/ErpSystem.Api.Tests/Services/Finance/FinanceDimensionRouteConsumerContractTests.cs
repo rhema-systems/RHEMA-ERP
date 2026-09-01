@@ -107,4 +107,32 @@ public sealed class FinanceDimensionRouteConsumerContractTests
         FinanceBankingDimensionIdentity.ReturnedChequeExpenseLine(returnedChequeId)
             .Should().NotBe(FinanceBankingDimensionIdentity.ReturnedChequeCustomerLine(returnedChequeId));
     }
+
+    [Fact]
+    public void ReconciliationAdjustmentsUseACompiledFinanceOnlyRouteAndTrustedCashAdapter()
+    {
+        var route = FinanceDimensionRouteCatalog.GetRequired(
+            FinanceDimensionRouteId.FinanceBankReconciliationAdjustment);
+
+        route.ProducerModule.Should().Be("Finance");
+        route.PostingSourceModule.Should().Be("CASHBANK");
+        route.SourceRoute.Should().Be("finance.cash.bank-reconciliation-adjustments");
+        route.DocumentType.Should().Be("BankReconciliationAdjustment");
+        route.Grain.Should().Be(FinanceDimensionGrain.SourceDocumentLine);
+        route.DefaultState.Should().Be(FinanceDimensionCertificationState.CaptureOptional);
+        route.RequiresReadinessProvider.Should().BeTrue();
+
+        typeof(ICashTransactionService).GetMethods().Should().Contain(method =>
+            method.Name == nameof(ICashTransactionService.CreatePaymentForProducerAsync)
+            && method.GetParameters().Any(parameter =>
+                parameter.ParameterType == typeof(FinancePostingProducerContext)));
+        typeof(CreateReconciliationAdjustmentDto).GetProperty("FinanceDimensions")!.PropertyType
+            .Should().Be(typeof(FinanceSourceDocumentDimensionInputDto));
+
+        var transactionId = Guid.NewGuid();
+        FinanceReconciliationDimensionIdentity.BankLine(transactionId)
+            .Should().Be(FinanceReconciliationDimensionIdentity.BankLine(transactionId));
+        FinanceReconciliationDimensionIdentity.OffsetLine(transactionId)
+            .Should().NotBe(FinanceReconciliationDimensionIdentity.BankLine(transactionId));
+    }
 }
