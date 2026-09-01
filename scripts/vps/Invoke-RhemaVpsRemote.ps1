@@ -512,6 +512,21 @@ BEGIN
        OR OBJECT_ID(N'dbo.TR_PurchaseOrders_GovernedCommitment', N'TR') IS NULL
         INSERT @R VALUES(N'Atomic PO budget commitment trigger prerequisites', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260901033000_AllowGovernedTenderLineageRecovery')
+BEGIN
+    IF OBJECT_ID(N'dbo.Tenders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementRequisitionSourcingReleases', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.PurchaseRequisitions', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementSourcingCases', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.Tenders', N'SourcePurchaseRequisitionId') IS NULL
+       OR COL_LENGTH(N'dbo.Tenders', N'SourcingReleaseId') IS NULL
+       OR COL_LENGTH(N'dbo.Tenders', N'SourcingCaseId') IS NULL
+       OR OBJECT_DEFINITION(
+            OBJECT_ID(N'dbo.TR_Tenders_SourcingReleaseGuard', N'TR')) IS NULL
+        INSERT @R VALUES(N'Governed tender lineage recovery prerequisites', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -709,6 +724,10 @@ function Invoke-Preflight {
     # prerequisite probe prevents a partially applied FR-PR-005 baseline from
     # reaching migration startup without the immutable ledger it must enforce.
     Write-Output 'GUARD_COVERAGE|20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment'
+    # This migration only replaces the tender sourcing-release guard. It does
+    # not update stored tenders; the schema probe above verifies every shared
+    # lineage owner and the installed trigger baseline before replacement.
+    Write-Output 'GUARD_COVERAGE|20260901033000_AllowGovernedTenderLineageRecovery'
     # Civil Engineering migrations create new governed tables. The document-register migration
     # idempotently inserts only a missing tenant metadata template; existing Project, Workflow
     # and central-DMS records are not rewritten. All THROW statements live in trigger bodies.
