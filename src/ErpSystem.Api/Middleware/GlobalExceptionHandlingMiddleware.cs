@@ -49,6 +49,19 @@ public class GlobalExceptionHandlingMiddleware
 
         switch (exception)
         {
+            case BusinessRuleException businessRuleEx:
+                response.Title = businessRuleEx.StatusCode switch
+                {
+                    StatusCodes.Status404NotFound => "Not Found",
+                    StatusCodes.Status409Conflict => "Conflict",
+                    StatusCodes.Status403Forbidden => "Forbidden",
+                    _ => "Request could not be completed"
+                };
+                response.Code = businessRuleEx.Code;
+                response.Status = businessRuleEx.StatusCode;
+                response.Detail = businessRuleEx.Message;
+                break;
+
             case ValidationException validationEx:
                 response.Title = "Validation Error";
                 response.Code = "VALIDATION_ERROR";
@@ -189,7 +202,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException => "Warning",
+                ValidationException or BusinessRuleException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
@@ -290,6 +303,7 @@ public class GlobalExceptionHandlingMiddleware
         switch (exception)
         {
             case ValidationException:
+            case BusinessRuleException:
             case UnauthorizedException:
             case ForbiddenException:
             case UnauthorizedAccessException:

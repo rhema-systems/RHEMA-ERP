@@ -47,10 +47,20 @@ import * as performanceBondService from '@/services/performanceBondService';
 import { type PerformanceBondRequestDto } from '@/services/performanceBondService';
 import { format } from 'date-fns';
 import NegotiationInviteDialog from '@/components/procurement/awards/NegotiationInviteDialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { canDecideTenderAward, isFinalTenderAward } from '@/lib/tender-award-lifecycle';
 
 export default function AwardDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canAdministerTender = hasPermission('procurement.tender.administer');
+  const canApproveAward = hasPermission('procurement.tender.approve');
+  const canCreatePurchaseOrder = hasPermission('procurement.purchase-order.create');
+  const canManageContract = hasPermission('procurement.contract.manage');
+  const canApproveContract = hasPermission('procurement.contract.approve');
   const awardId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const performanceBondFileRef = useRef<HTMLInputElement>(null);
 
@@ -59,6 +69,11 @@ export default function AwardDetailPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [awardRejectionReason, setAwardRejectionReason] = useState('');
+  const [decidingAward, setDecidingAward] = useState(false);
 
   // Notification state
   const [sendingNotification, setSendingNotification] = useState(false);
@@ -101,9 +116,61 @@ export default function AwardDetailPage() {
       }
     } catch (error) {
       console.error('Error loading award:', error);
-      toast.error('Failed to load award details');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load award details'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApproveAward = async () => {
+    if (!canDecideTenderAward(award?.status, canApproveAward)) {
+      toast.error('Tender approval permission is required for a pending recommendation');
+      return false;
+    }
+
+    try {
+      setDecidingAward(true);
+      const updatedAward = await tenderAwardService.approveAward(awardId, {
+        notes: decisionNotes.trim() || undefined,
+      });
+      setAward(updatedAward);
+      setDecisionNotes('');
+      toast.success('Award recommendation approved');
+      return true;
+    } catch (error) {
+      console.error('Error approving award recommendation:', error);
+      toast.error(getProcurementProblemMessage(error, 'Failed to approve award recommendation'));
+      return false;
+    } finally {
+      setDecidingAward(false);
+    }
+  };
+
+  const handleRejectAward = async () => {
+    if (!awardRejectionReason.trim()) {
+      toast.error('Please provide a rejection reason');
+      return false;
+    }
+    if (!canDecideTenderAward(award?.status, canApproveAward)) {
+      toast.error('Tender approval permission is required for a pending recommendation');
+      return false;
+    }
+
+    try {
+      setDecidingAward(true);
+      const updatedAward = await tenderAwardService.rejectAward(awardId, {
+        reason: awardRejectionReason.trim(),
+      });
+      setAward(updatedAward);
+      setAwardRejectionReason('');
+      toast.success('Award recommendation rejected');
+      return true;
+    } catch (error) {
+      console.error('Error rejecting award recommendation:', error);
+      toast.error(getProcurementProblemMessage(error, 'Failed to reject award recommendation'));
+      return false;
+    } finally {
+      setDecidingAward(false);
     }
   };
 
@@ -125,7 +192,7 @@ export default function AwardDetailPage() {
       await loadAward();
     } catch (error) {
       console.error('Error cancelling award:', error);
-      toast.error('Failed to cancel award');
+      toast.error(getProcurementProblemMessage(error, 'Failed to cancel award'));
     } finally {
       setCancelling(false);
     }
@@ -163,7 +230,7 @@ export default function AwardDetailPage() {
       setShowNotificationDialog(false);
     } catch (error) {
       console.error('Error sending notifications:', error);
-      toast.error('Failed to send notifications');
+      toast.error(getProcurementProblemMessage(error, 'Failed to send notifications'));
     } finally {
       setSendingNotification(false);
     }
@@ -171,6 +238,14 @@ export default function AwardDetailPage() {
 
   const handleCreatePO = async () => {
     if (!award) return;
+    if (poType === 'PO' && !canCreatePurchaseOrder) {
+      toast.error('Purchase order creation permission is required');
+      return;
+    }
+    if (poType === 'Contract' && !canManageContract) {
+      toast.error('Contract management permission is required');
+      return;
+    }
 
     try {
       setCreatingPO(true);
@@ -211,7 +286,7 @@ export default function AwardDetailPage() {
       router.push(`/procurement/purchase-orders/${result.purchaseOrderId}`);
     } catch (error: any) {
       console.error('Error creating PO:', error);
-      toast.error(error.message || `Failed to create ${poType}`);
+      toast.error(getProcurementProblemMessage(error, `Failed to create ${poType}`));
     } finally {
       setCreatingPO(false);
     }
@@ -261,7 +336,7 @@ export default function AwardDetailPage() {
       setPerformanceBondFile(null);
     } catch (error: any) {
       console.error('Error sending performance bond request:', error);
-      toast.error(error.message || 'Failed to send performance bond request');
+      toast.error(getProcurementProblemMessage(error, 'Failed to send performance bond request'));
     } finally {
       setSendingPerformanceBondRequest(false);
     }
@@ -276,7 +351,7 @@ export default function AwardDetailPage() {
       performanceBondService.triggerFileDownload(blob, performanceBondRequest.submittedFileName || 'performance-bond.pdf');
     } catch (error: any) {
       console.error('Error downloading submitted bond:', error);
-      toast.error(error.message || 'Failed to download document');
+      toast.error(getProcurementProblemMessage(error, 'Failed to download document'));
     }
   };
 
@@ -299,7 +374,7 @@ export default function AwardDetailPage() {
       setShowPerformanceBondDialog(false);
     } catch (error: any) {
       console.error('Error reviewing bond:', error);
-      toast.error(error.message || 'Failed to review performance bond');
+      toast.error(getProcurementProblemMessage(error, 'Failed to review performance bond'));
     } finally {
       setReviewingBond(false);
     }
@@ -333,7 +408,9 @@ export default function AwardDetailPage() {
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
+      'PendingApproval': { variant: 'outline', className: 'bg-amber-100 text-amber-800 border-amber-200' },
       'Awarded': { variant: 'default', className: 'bg-green-100 text-green-800' },
+      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
       'Cancelled': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
     };
     
@@ -369,6 +446,9 @@ export default function AwardDetailPage() {
       </div>
     );
   }
+
+  const canDecideAward = canDecideTenderAward(award.status, canApproveAward);
+  const isAwardFinal = isFinalTenderAward(award.status);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -503,7 +583,7 @@ export default function AwardDetailPage() {
             <div>
               <Label className="text-gray-500 flex items-center gap-2">
                 <User className="h-4 w-4" />
-                Awarded By
+                {isAwardFinal ? 'Awarded By' : 'Recommended By'}
               </Label>
               <p className="font-medium">{award.awardedByName || 'N/A'}</p>
             </div>
@@ -522,8 +602,32 @@ export default function AwardDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Independent approval */}
+      {canDecideAward && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardHeader>
+            <CardTitle>Approval decision required</CardTitle>
+            <CardDescription>
+              Review this recommendation independently before finalizing the award.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-4">
+              <Button onClick={() => setShowApproveDialog(true)} className="bg-green-600 hover:bg-green-700">
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Approve Recommendation
+              </Button>
+              <Button variant="destructive" onClick={() => setShowRejectDialog(true)}>
+                <XCircle className="h-4 w-4 mr-2" />
+                Reject Recommendation
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Actions */}
-      {award.status === 'Awarded' && (
+      {isAwardFinal && (
         <Card>
           <CardHeader>
             <CardTitle>Actions</CardTitle>
@@ -532,42 +636,94 @@ export default function AwardDetailPage() {
           <CardContent>
             <div className="flex flex-wrap items-center gap-4">
               {/* Invite for Negotiation Button */}
-              <Button onClick={() => setShowNegotiationDialog(true)} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
+              {canAdministerTender && <Button onClick={() => setShowNegotiationDialog(true)} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
                 <Users className="h-4 w-4 mr-2" />
                 Invite for Negotiation
-              </Button>
+              </Button>}
 
               {/* Send Notification Button */}
-              <Button onClick={() => setShowNotificationDialog(true)} className="bg-blue-600 hover:bg-blue-700">
+              {canAdministerTender && <Button onClick={() => setShowNotificationDialog(true)} className="bg-blue-600 hover:bg-blue-700">
                 <Send className="h-4 w-4 mr-2" />
                 Send Notification
-              </Button>
+              </Button>}
 
               {/* Create PO/Contract Button */}
-              <Button onClick={() => setShowCreatePODialog(true)} className="bg-green-600 hover:bg-green-700">
+              {(canCreatePurchaseOrder || canManageContract) && <Button onClick={() => { setPOType(canCreatePurchaseOrder ? 'PO' : 'Contract'); setShowCreatePODialog(true); }} className="bg-green-600 hover:bg-green-700">
                 <ShoppingCart className="h-4 w-4 mr-2" />
                 Create PO / Contract
-              </Button>
+              </Button>}
 
               {/* Performance Bond Button */}
-              <Button onClick={() => setShowPerformanceBondDialog(true)} variant="outline" className="border-purple-300 text-purple-700 hover:bg-purple-50">
+              {(canManageContract || canApproveContract) && <Button onClick={() => setShowPerformanceBondDialog(true)} variant="outline" className="border-purple-300 text-purple-700 hover:bg-purple-50">
                 <Shield className="h-4 w-4 mr-2" />
                 Performance Bond
                 {getPerformanceBondStatusBadge() && <span className="ml-2">{getPerformanceBondStatusBadge()}</span>}
-              </Button>
+              </Button>}
 
               {/* Cancel Award Button */}
-              <Button
+              {canApproveAward && <Button
                 variant="destructive"
                 onClick={() => setShowCancelDialog(true)}
               >
                 <Ban className="h-4 w-4 mr-2" />
                 Cancel Award
-              </Button>
+              </Button>}
             </div>
           </CardContent>
         </Card>
       )}
+
+      <ConfirmationDialog
+        open={showApproveDialog}
+        onOpenChange={(open) => {
+          setShowApproveDialog(open);
+          if (!open) setDecisionNotes('');
+        }}
+        title="Approve Award Recommendation"
+        description="This finalizes the award and updates the tender and bid statuses."
+        confirmText={decidingAward ? 'Approving...' : 'Approve Recommendation'}
+        onConfirm={handleApproveAward}
+        isLoading={decidingAward}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="approvalNotes">Approval Notes (optional)</Label>
+          <Textarea
+            id="approvalNotes"
+            value={decisionNotes}
+            onChange={(event) => setDecisionNotes(event.target.value)}
+            placeholder="Add any notes for the approval record..."
+            rows={3}
+            disabled={decidingAward}
+          />
+        </div>
+      </ConfirmationDialog>
+
+      <ConfirmationDialog
+        open={showRejectDialog}
+        onOpenChange={(open) => {
+          setShowRejectDialog(open);
+          if (!open) setAwardRejectionReason('');
+        }}
+        title="Reject Award Recommendation"
+        description="The tender and bids remain evaluated so a corrected recommendation can be prepared."
+        confirmText={decidingAward ? 'Rejecting...' : 'Reject Recommendation'}
+        variant="destructive"
+        onConfirm={handleRejectAward}
+        isLoading={decidingAward}
+        confirmDisabled={!awardRejectionReason.trim()}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="awardRejectionReason">Rejection Reason *</Label>
+          <Textarea
+            id="awardRejectionReason"
+            value={awardRejectionReason}
+            onChange={(event) => setAwardRejectionReason(event.target.value)}
+            placeholder="Explain why this recommendation is being rejected..."
+            rows={4}
+            disabled={decidingAward}
+          />
+        </div>
+      </ConfirmationDialog>
 
       {/* Cancel Award Dialog */}
       {showCancelDialog && (
@@ -613,7 +769,7 @@ export default function AwardDetailPage() {
       )}
 
       {/* Performance Bond Section - Displayed when bond request exists */}
-      {performanceBondRequest && (
+      {isAwardFinal && performanceBondRequest && (
         <Card className={
           performanceBondRequest.status === 'Submitted' ? 'border-blue-300 bg-blue-50/50' :
           performanceBondRequest.status === 'Approved' ? 'border-green-300 bg-green-50/50' :
@@ -683,7 +839,7 @@ export default function AwardDetailPage() {
                 </div>
 
                 {/* Review Actions */}
-                <div className="border-t pt-4 space-y-3">
+                {canApproveContract && <div className="border-t pt-4 space-y-3">
                   <div className="space-y-2">
                     <Label>Rejection Reason (required if rejecting)</Label>
                     <Textarea
@@ -711,7 +867,7 @@ export default function AwardDetailPage() {
                       Reject
                     </Button>
                   </div>
-                </div>
+                </div>}
               </div>
             )}
 
@@ -771,7 +927,7 @@ export default function AwardDetailPage() {
       )}
 
       {/* Send Notification Dialog */}
-      <Dialog open={showNotificationDialog} onOpenChange={setShowNotificationDialog}>
+      <Dialog open={isAwardFinal && showNotificationDialog} onOpenChange={setShowNotificationDialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -856,7 +1012,7 @@ export default function AwardDetailPage() {
       </Dialog>
 
       {/* Create PO/Contract Dialog */}
-      <Dialog open={showCreatePODialog} onOpenChange={setShowCreatePODialog}>
+      <Dialog open={isAwardFinal && showCreatePODialog} onOpenChange={setShowCreatePODialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -872,22 +1028,22 @@ export default function AwardDetailPage() {
             <div className="space-y-3">
               <Label>Document Type</Label>
               <div className="flex gap-4">
-                <Button
+                {canCreatePurchaseOrder && <Button
                   variant={poType === 'PO' ? 'default' : 'outline'}
                   onClick={() => setPOType('PO')}
                   className={poType === 'PO' ? 'bg-green-600 hover:bg-green-700' : ''}
                 >
                   <ShoppingCart className="h-4 w-4 mr-2" />
                   Purchase Order
-                </Button>
-                <Button
+                </Button>}
+                {canManageContract && <Button
                   variant={poType === 'Contract' ? 'default' : 'outline'}
                   onClick={() => setPOType('Contract')}
                   className={poType === 'Contract' ? 'bg-green-600 hover:bg-green-700' : ''}
                 >
                   <FileCheck className="h-4 w-4 mr-2" />
                   Contract
-                </Button>
+                </Button>}
               </div>
             </div>
 
@@ -937,7 +1093,7 @@ export default function AwardDetailPage() {
       </Dialog>
 
       {/* Performance Bond Dialog - Different UI based on status */}
-      <Dialog open={showPerformanceBondDialog} onOpenChange={setShowPerformanceBondDialog}>
+      <Dialog open={isAwardFinal && showPerformanceBondDialog} onOpenChange={setShowPerformanceBondDialog}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1121,7 +1277,7 @@ export default function AwardDetailPage() {
             </Button>
 
             {/* Send request button - only when no request exists */}
-            {!performanceBondRequest && (
+            {!performanceBondRequest && canManageContract && (
               <Button
                 onClick={handleSendPerformanceBondRequest}
                 disabled={sendingPerformanceBondRequest || !performanceBondFile}
@@ -1142,7 +1298,7 @@ export default function AwardDetailPage() {
             )}
 
             {/* Review buttons - only when status is Submitted */}
-            {performanceBondRequest?.status === 'Submitted' && (
+            {performanceBondRequest?.status === 'Submitted' && canApproveContract && (
               <>
                 <Button
                   variant="destructive"
@@ -1167,7 +1323,7 @@ export default function AwardDetailPage() {
       </Dialog>
 
       {/* Negotiation Invite Dialog */}
-      {award && (
+      {isAwardFinal && canAdministerTender && (
         <NegotiationInviteDialog
           open={showNegotiationDialog}
           onOpenChange={setShowNegotiationDialog}
@@ -1175,7 +1331,7 @@ export default function AwardDetailPage() {
           tenderBidId={award.tenderBidId}
           businessPartnerName={award.businessPartnerName}
           onNegotiationComplete={(negotiatedAmount) => {
-            toast.success(`Negotiation completed. Negotiated amount: ${award.currency || 'ETB'} ${negotiatedAmount.toLocaleString()}`);
+            toast.success(`Negotiation completed. Negotiated amount: ${award.currency || 'GHS'} ${negotiatedAmount.toLocaleString()}. Independent award reapproval is now required.`);
             loadAward();
           }}
         />

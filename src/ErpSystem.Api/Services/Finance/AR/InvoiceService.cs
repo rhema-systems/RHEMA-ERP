@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +33,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IDocumentNumberingService _documentNumberingService;
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
+        private readonly IFinanceSourceDimensionService? _sourceDimensions;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
@@ -41,7 +43,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             ILogger<InvoiceService> logger,
             IDocumentNumberingService documentNumberingService,
             IFinancePostingEngine? financePostingEngine = null,
-            IFinanceAuditService? financeAuditService = null)
+            IFinanceAuditService? financeAuditService = null,
+            IFinanceSourceDimensionService? sourceDimensions = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -51,6 +54,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             _documentNumberingService = documentNumberingService;
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
+            _sourceDimensions = sourceDimensions;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -65,6 +69,27 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .FirstOrDefaultAsync(cancellationToken);
 
             return invoice == null ? null : MapToDto(invoice);
+        }
+
+        public async Task<InvoiceDto?> GetByIdAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default)
+        {
+            EnsureCustomerInvoiceRoute(producer);
+            var invoice = await LoadInvoiceWithLinesAsync(id, cancellationToken);
+            var result = MapToDto(invoice);
+            if (_sourceDimensions is not null)
+            {
+                result.FinanceDimensions = await _sourceDimensions.GetAsync(
+                    producer,
+                    invoice.Id,
+                    invoice.InvoiceDate,
+                    await BuildDimensionLineContextsAsync(invoice, cancellationToken),
+                    cancellationToken);
+            }
+
+            return result;
         }
 
         public async Task<InvoiceDto?> GetByInvoiceNumberAsync(string invoiceNumber, CancellationToken cancellationToken = default)
@@ -157,7 +182,21 @@ namespace ErpSystem.Api.Services.Finance.AR
             };
         }
 
-        public async Task<InvoiceDto> CreateAsync(InvoiceCreateDto dto, CancellationToken cancellationToken = default)
+        public Task<InvoiceDto> CreateAsync(
+            InvoiceCreateDto dto,
+            CancellationToken cancellationToken = default) =>
+            CreateCoreAsync(dto, null, cancellationToken);
+
+        public Task<InvoiceDto> CreateAsync(
+            InvoiceCreateDto dto,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            CreateCoreAsync(dto, EnsureCustomerInvoiceRoute(producer), cancellationToken);
+
+        private async Task<InvoiceDto> CreateCoreAsync(
+            InvoiceCreateDto dto,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
         {
             // Validate customer business partner exists
             var customer = await _unitOfWork.Repository<BusinessPartner>()
@@ -267,7 +306,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 var lineItem = new InvoiceLineItem
                 {
-                    Id = Guid.NewGuid(),
+                    Id = lineDto.Id is { } requestedLineId && requestedLineId != Guid.Empty
+                        ? requestedLineId
+                        : Guid.NewGuid(),
                     TenantId = TenantId,
                     InvoiceId = invoice.Id,
                     LineItemType = lineItemType,
@@ -340,15 +381,54 @@ namespace ErpSystem.Api.Services.Finance.AR
                 // Allow creation but might flag for approval in a real system
             }
 
-            await _unitOfWork.Repository<Invoice>().AddAsync(invoice);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (producer is not null)
+            {
+                if (_sourceDimensions is null)
+                    throw new InvalidOperationException("Finance source dimensions are not configured for the manual AR invoice route.");
+                await _unitOfWork.ExecuteInTransactionAsync(async token =>
+                {
+                    await _unitOfWork.Repository<Invoice>().AddAsync(invoice);
+                    await _unitOfWork.SaveChangesAsync(token);
+                    await _sourceDimensions.SynchronizeDraftAsync(
+                        producer,
+                        invoice.Id,
+                        invoice.InvoiceDate,
+                        await BuildDimensionLineContextsAsync(invoice, token),
+                        dto.FinanceDimensions,
+                        inheritDefaultForUnassignedLines: true,
+                        budgetReservationSourceDocumentType: null,
+                        "Customer invoice created.",
+                        token);
+                }, cancellationToken);
+            }
+            else
+            {
+                await _unitOfWork.Repository<Invoice>().AddAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
 
             _logger.LogInformation("Created invoice {InvoiceNumber} for customer business partner {CustomerId}", invoiceNumber, customer.Id);
 
-            return MapToDto(invoice);
+            return producer is null
+                ? MapToDto(invoice)
+                : await GetByIdAsync(invoice.Id, producer, cancellationToken) ?? MapToDto(invoice);
         }
 
-        public async Task<InvoiceDto> UpdateAsync(InvoiceUpdateDto dto, CancellationToken cancellationToken = default)
+        public Task<InvoiceDto> UpdateAsync(
+            InvoiceUpdateDto dto,
+            CancellationToken cancellationToken = default) =>
+            UpdateCoreAsync(dto, null, cancellationToken);
+
+        public Task<InvoiceDto> UpdateAsync(
+            InvoiceUpdateDto dto,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            UpdateCoreAsync(dto, EnsureCustomerInvoiceRoute(producer), cancellationToken);
+
+        private async Task<InvoiceDto> UpdateCoreAsync(
+            InvoiceUpdateDto dto,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == dto.Id)
@@ -361,9 +441,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice.JournalEntryId.HasValue)
                 throw new InvalidOperationException("Posted customer invoices cannot be updated. Use a reversal, credit note, or adjustment.");
 
-            // Only allow updates if invoice is in Draft status
-            if (invoice.Status != InvoiceStatus.Draft)
-                throw new InvalidOperationException("Only draft invoices can be updated.");
+            if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Rejected)
+                throw new InvalidOperationException("Only draft or rejected invoices can be updated.");
             
             // Fetch Tenant for Base Currency (needed for recalculation)
             var tenant = await _unitOfWork.Repository<Tenant>()
@@ -393,12 +472,22 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
-            // Remove existing line items
-            foreach (var existingLine in invoice.LineItems.ToList())
+            // Stable line identities are part of the source-dimension evidence contract. Existing
+            // lines are updated in place; only omitted lines are removed.
+            var existingLines = invoice.LineItems.Where(line => !line.IsDeleted)
+                .ToDictionary(line => line.Id);
+            var requestedExistingIds = dto.LineItems.Where(line => line.Id.HasValue)
+                .Select(line => line.Id!.Value)
+                .ToArray();
+            if (requestedExistingIds.Any(id => id == Guid.Empty)
+                || requestedExistingIds.Distinct().Count() != requestedExistingIds.Length
+                || requestedExistingIds.Any(id => !existingLines.ContainsKey(id)))
+                throw new InvalidOperationException("Customer invoice line identities are invalid or belong to another document.");
+            foreach (var existing in existingLines.Values.Where(line => !requestedExistingIds.Contains(line.Id)).ToList())
             {
-                await _unitOfWork.Repository<InvoiceLineItem>().DeleteAsync(existingLine);
+                await _unitOfWork.Repository<InvoiceLineItem>().DeleteAsync(existing);
+                invoice.LineItems.Remove(existing);
             }
-            invoice.LineItems.Clear();
 
             // Add updated line items
             decimal subtotal = 0;
@@ -439,31 +528,34 @@ namespace ErpSystem.Api.Services.Finance.AR
                     lineTax = taxResult.TotalTaxAmount;
                 }
 
-                // Parse LineItemType from string (mirrors CreateAsync logic)
-                var lineItem = new InvoiceLineItem
-                {
-                    Id = lineDto.Id ?? Guid.NewGuid(),
-                    TenantId = TenantId,
-                    InvoiceId = invoice.Id,
-                    LineItemType = lineItemType,
-                    ProductId = lineDto.ProductId,
-                    GLAccountId = lineDto.GLAccountId,
-                    Description = lineDto.Description,
-                    Quantity = lineDto.Quantity,
-                    UnitPrice = lineDto.UnitPrice,
-                    TaxCode = lineDto.TaxCode,
-                    TaxGroupId = effectiveTaxGroupId,
-                    TaxTreatment = lineDto.TaxTreatment,
-                    TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
-                    TaxAmount = lineTax,
-                    Unit = lineDto.Unit,
-                    DiscountPercentage = lineDto.DiscountPercentage,
-                    DiscountAmount = lineDiscount,
-                    CreatedAt = now,
-                    CreatedBy = UserName
-                };
-
-                invoice.LineItems.Add(lineItem);
+                var lineItem = lineDto.Id.HasValue
+                    ? existingLines[lineDto.Id.Value]
+                    : new InvoiceLineItem
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        InvoiceId = invoice.Id,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+                lineItem.LineItemType = lineItemType;
+                lineItem.ProductId = lineDto.ProductId;
+                lineItem.GLAccountId = lineDto.GLAccountId;
+                lineItem.Description = lineDto.Description;
+                lineItem.Quantity = lineDto.Quantity;
+                lineItem.UnitPrice = lineDto.UnitPrice;
+                lineItem.TaxCode = lineDto.TaxCode;
+                lineItem.TaxGroupId = effectiveTaxGroupId;
+                lineItem.TaxTreatment = lineDto.TaxTreatment;
+                lineItem.TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0;
+                lineItem.TaxAmount = lineTax;
+                lineItem.Unit = lineDto.Unit;
+                lineItem.DiscountPercentage = lineDto.DiscountPercentage;
+                lineItem.DiscountAmount = lineDiscount;
+                lineItem.UpdatedAt = now;
+                lineItem.UpdatedBy = UserName;
+                if (!lineDto.Id.HasValue)
+                    invoice.LineItems.Add(lineItem);
                 subtotal += lineNetAmount;
                 totalTax += lineTax;
             }
@@ -488,12 +580,37 @@ namespace ErpSystem.Api.Services.Finance.AR
                 invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
             }
 
-            await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (producer is not null)
+            {
+                if (_sourceDimensions is null)
+                    throw new InvalidOperationException("Finance source dimensions are not configured for the manual AR invoice route.");
+                await _unitOfWork.ExecuteInTransactionAsync(async token =>
+                {
+                    await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                    await _unitOfWork.SaveChangesAsync(token);
+                    await _sourceDimensions.SynchronizeDraftAsync(
+                        producer,
+                        invoice.Id,
+                        invoice.InvoiceDate,
+                        await BuildDimensionLineContextsAsync(invoice, token),
+                        dto.FinanceDimensions,
+                        inheritDefaultForUnassignedLines: true,
+                        budgetReservationSourceDocumentType: null,
+                        "Customer invoice draft changed.",
+                        token);
+                }, cancellationToken);
+            }
+            else
+            {
+                await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
 
             _logger.LogInformation("Updated invoice {InvoiceId}", invoice.Id);
 
-            return MapToDto(invoice);
+            return producer is null
+                ? MapToDto(invoice)
+                : await GetByIdAsync(invoice.Id, producer, cancellationToken) ?? MapToDto(invoice);
         }
 
         public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -517,7 +634,21 @@ namespace ErpSystem.Api.Services.Finance.AR
             _logger.LogInformation("Deleted invoice {InvoiceId}", id);
         }
 
-        public async Task<InvoiceDto> SendInvoiceAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<InvoiceDto> SendInvoiceAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            SendInvoiceCoreAsync(id, null, cancellationToken);
+
+        public Task<InvoiceDto> SendInvoiceAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            SendInvoiceCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken);
+
+        private async Task<InvoiceDto> SendInvoiceCoreAsync(
+            Guid id,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
@@ -527,10 +658,25 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
-            if (invoice.Status != InvoiceStatus.Draft)
-                throw new InvalidOperationException("Only draft invoices can be sent.");                 
+            if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.PendingApproval)
+                throw new InvalidOperationException("Only draft or fully approved pending invoices can be sent.");
+
+            if (producer is not null)
+            {
+                if (_sourceDimensions is null)
+                    throw new InvalidOperationException("Finance source dimensions are not configured for the manual AR invoice route.");
+                await _sourceDimensions.ValidateAndFreezeAsync(
+                    producer,
+                    invoice.Id,
+                    invoice.InvoiceDate,
+                    await BuildDimensionLineContextsAsync(invoice, cancellationToken),
+                    requireCurrentBudgetEvidence: false,
+                    cancellationToken);
+            }
 
             var now = DateTime.UtcNow;
+            invoice.Status = InvoiceStatus.Draft;
+            var previousStatus = invoice.Status;
             invoice.Status = InvoiceStatus.Sent;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
@@ -566,6 +712,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 postingRequest = await BuildArInvoicePostingRequestAsync(
                     invoice,
                     allowDraftTransition: true,
+                    producer,
                     cancellationToken);
             }
             catch (Exception ex)
@@ -605,7 +752,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     wasAlreadyLinked: false,
                     rollbackBeforeFailureAudit: () =>
                     {
-                        invoice.Status = InvoiceStatus.Draft;
+                        invoice.Status = previousStatus;
                         invoice.UpdatedAt = null;
                         invoice.UpdatedBy = null;
 
@@ -618,6 +765,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                         return Task.CompletedTask;
                     },
+                    producer,
                     cancellationToken);
 
                 _logger.LogInformation("Sent invoice {InvoiceNumber} and posted to GL through the finance posting engine", invoice.InvoiceNumber);
@@ -631,7 +779,21 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
         }
 
-        public async Task<InvoiceDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<InvoiceDto> PostAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            PostCoreAsync(id, null, cancellationToken);
+
+        public Task<InvoiceDto> PostAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            PostCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken);
+
+        private async Task<InvoiceDto> PostCoreAsync(
+            Guid id,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AR invoice posting.");
@@ -639,12 +801,26 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
             var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
 
+            if (producer is not null)
+            {
+                if (_sourceDimensions is null)
+                    throw new InvalidOperationException("Finance source dimensions are not configured for the manual AR invoice route.");
+                await _sourceDimensions.ValidateAndFreezeAsync(
+                    producer,
+                    invoice.Id,
+                    invoice.InvoiceDate,
+                    await BuildDimensionLineContextsAsync(invoice, cancellationToken),
+                    requireCurrentBudgetEvidence: false,
+                    cancellationToken);
+            }
+
             FinancePostingRequestDto postingRequest;
             try
             {
                 postingRequest = await BuildArInvoicePostingRequestAsync(
                     invoice,
                     allowDraftTransition: false,
+                    producer,
                     cancellationToken);
             }
             catch (Exception ex)
@@ -669,6 +845,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 postingRequest,
                 wasAlreadyLinked,
                 rollbackBeforeFailureAudit: null,
+                producer,
                 cancellationToken);
         }
 
@@ -799,9 +976,97 @@ namespace ErpSystem.Api.Services.Finance.AR
             return invoice;
         }
 
+        private Task<Invoice> LoadInvoiceWithLinesAsync(Guid id, CancellationToken cancellationToken) =>
+            LoadInvoiceForPostingAsync(id, cancellationToken);
+
+        private async Task<IReadOnlyList<FinanceSourceDocumentLineContext>> BuildDimensionLineContextsAsync(
+            Invoice invoice,
+            CancellationToken cancellationToken)
+        {
+            var lines = invoice.LineItems.Where(line => !line.IsDeleted)
+                .OrderBy(line => line.CreatedAt)
+                .ThenBy(line => line.Id)
+                .ToList();
+            if (lines.Count == 0)
+                return Array.Empty<FinanceSourceDocumentLineContext>();
+
+            if (invoice.IsOpeningBalance)
+            {
+                var settings = await GetFinanceSettingsAsync(cancellationToken);
+                var clearingAccountId = settings.MigrationClearingAccountId
+                    ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AR opening balance dimensions.");
+                return lines.Select(line => new FinanceSourceDocumentLineContext(line.Id, clearingAccountId)).ToArray();
+            }
+
+            return lines.Select(line => new FinanceSourceDocumentLineContext(
+                line.Id,
+                line.GLAccountId ?? throw new InvalidOperationException(
+                    $"No revenue account specified for AR line '{line.Description}'.")))
+                .ToArray();
+        }
+
+        private static FinancePostingProducerContext EnsureCustomerInvoiceRoute(
+            FinancePostingProducerContext producer)
+        {
+            ArgumentNullException.ThrowIfNull(producer);
+            if (producer.RouteId != FinanceDimensionRouteId.FinanceArCustomerInvoice)
+                throw new InvalidOperationException("The trusted producer context is not the Finance AR customer-invoice route.");
+            return producer;
+        }
+
+        private static void ApplySourceDimensions(
+            FinancePostingLineDto postingLine,
+            InvoiceLineItem sourceLine,
+            IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions)
+        {
+            postingLine.SourceDocumentLineId = sourceLine.Id;
+            postingLine.Dimensions = sourceDimensions.TryGetValue(sourceLine.Id, out var values)
+                ? values
+                : Array.Empty<FinancePostingDimensionValueDto>();
+        }
+
+        private static IReadOnlyDictionary<Guid, decimal> AllocateDocumentDiscount(
+            decimal documentDiscount,
+            IReadOnlyList<InvoiceLineItem> sourceLines)
+        {
+            var roundedDiscount = RoundMoney(documentDiscount);
+            if (roundedDiscount < 0m)
+                throw new InvalidOperationException("AR invoice document discount cannot be negative.");
+            if (roundedDiscount == 0m)
+                return new Dictionary<Guid, decimal>();
+
+            var eligible = sourceLines
+                .Select(line => new
+                {
+                    Line = line,
+                    Basis = RoundMoney(Math.Max(0m, (line.Quantity * line.UnitPrice) - line.DiscountAmount))
+                })
+                .Where(item => item.Basis > 0m)
+                .OrderBy(item => item.Line.CreatedAt)
+                .ThenBy(item => item.Line.Id)
+                .ToList();
+            var totalBasis = eligible.Sum(item => item.Basis);
+            if (eligible.Count == 0 || roundedDiscount > totalBasis)
+                throw new InvalidOperationException("AR invoice document discount exceeds the eligible source-line amount.");
+
+            var result = new Dictionary<Guid, decimal>();
+            var allocated = 0m;
+            for (var index = 0; index < eligible.Count; index++)
+            {
+                var amount = index == eligible.Count - 1
+                    ? roundedDiscount - allocated
+                    : RoundMoney(roundedDiscount * eligible[index].Basis / totalBasis);
+                result[eligible[index].Line.Id] = amount;
+                allocated += amount;
+            }
+
+            return result;
+        }
+
         private async Task<FinancePostingRequestDto> BuildArInvoicePostingRequestAsync(
             Invoice invoice,
             bool allowDraftTransition,
+            FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
             var tenantId = TenantId;
@@ -819,6 +1084,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .OrderBy(l => l.CreatedAt)
                 .ThenBy(l => l.Id)
                 .ToList();
+            var sourceLineDimensions = producer is not null && _sourceDimensions is not null
+                ? await _sourceDimensions.GetPostingDimensionsAsync(producer, invoice.Id, cancellationToken)
+                : new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>();
 
             if (activeLines.Count == 0)
                 throw new InvalidOperationException("AR invoice has no lines to post.");
@@ -851,11 +1119,21 @@ namespace ErpSystem.Api.Services.Finance.AR
                     functionalCurrency,
                     exchangeRate,
                     accountCache,
+                    sourceLineDimensions,
                     cancellationToken);
             }
 
             var postingLines = new List<FinancePostingLineDto>();
-            var documentDiscountAmount = RoundMoney(activeLines.Sum(l => l.DiscountAmount) + invoice.DiscountAmount);
+            var documentDiscountAllocations = AllocateDocumentDiscount(invoice.DiscountAmount, activeLines);
+            var hasDiscounts = activeLines.Any(line => RoundMoney(
+                line.DiscountAmount + documentDiscountAllocations.GetValueOrDefault(line.Id)) > 0m);
+            Guid? discountAccountId = null;
+            if (hasDiscounts)
+            {
+                discountAccountId = settings.DiscountAllowedAccountId
+                    ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
+                await ResolvePostingAccountAsync(discountAccountId.Value, "sales discounts allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+            }
             var lineNumber = 1;
             var permitsDisposalAdjustment = !activeLines.Any(line => line.Quantity * line.UnitPrice < 0m)
                 || await IsApprovedFixedAssetDisposalInvoiceAsync(
@@ -890,7 +1168,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         line.DiscountPercentage,
                         grossAmount,
                         permitsDisposalAdjustment);
-                    postingLines.Add(BuildPostingLine(
+                    var revenuePostingLine = BuildPostingLine(
                         revenueAccountId,
                         $"Asset-sale proceeds deduction - {invoice.InvoiceNumber} - {line.Description}",
                         debitTransactionAmount: Math.Abs(grossAmount),
@@ -901,11 +1179,13 @@ namespace ErpSystem.Api.Services.Finance.AR
                         invoice.InvoiceDate,
                         invoice.InvoiceNumber,
                         lineNumber++,
-                        "AR-FixedAssetDisposalAdjustment"));
+                        "AR-FixedAssetDisposalAdjustment");
+                    ApplySourceDimensions(revenuePostingLine, line, sourceLineDimensions);
+                    postingLines.Add(revenuePostingLine);
                 }
                 else
                 {
-                    postingLines.Add(BuildPostingLine(
+                    var revenuePostingLine = BuildPostingLine(
                         revenueAccountId,
                         $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
                         debitTransactionAmount: 0m,
@@ -916,7 +1196,29 @@ namespace ErpSystem.Api.Services.Finance.AR
                         invoice.InvoiceDate,
                         invoice.InvoiceNumber,
                         lineNumber++,
-                        ResolveLineTag(line)));
+                        ResolveLineTag(line));
+                    ApplySourceDimensions(revenuePostingLine, line, sourceLineDimensions);
+                    postingLines.Add(revenuePostingLine);
+                }
+
+                var sourceDiscountAmount = RoundMoney(
+                    line.DiscountAmount + documentDiscountAllocations.GetValueOrDefault(line.Id));
+                if (sourceDiscountAmount > 0m)
+                {
+                    var discountPostingLine = BuildPostingLine(
+                        discountAccountId!.Value,
+                        $"Sales discount - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: sourceDiscountAmount,
+                        creditTransactionAmount: 0m,
+                        invoiceCurrency,
+                        functionalCurrency,
+                        exchangeRate,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        "AR-Discount");
+                    ApplySourceDimensions(discountPostingLine, line, sourceLineDimensions);
+                    postingLines.Add(discountPostingLine);
                 }
 
                 if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
@@ -930,7 +1232,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     await ResolvePostingAccountAsync(inventoryAccountId, "inventory control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
                     var costAmount = RoundMoney(line.CostTotal.Value);
-                    postingLines.Add(BuildPostingLine(
+                    var cogsPostingLine = BuildPostingLine(
                         cogsAccountId,
                         $"COGS - {invoice.InvoiceNumber} - {line.Description}",
                         debitTransactionAmount: costAmount,
@@ -941,7 +1243,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                         invoice.InvoiceDate,
                         invoice.InvoiceNumber,
                         lineNumber++,
-                        "AR-COGS"));
+                        "AR-COGS");
+                    ApplySourceDimensions(cogsPostingLine, line, sourceLineDimensions);
+                    postingLines.Add(cogsPostingLine);
 
                     postingLines.Add(BuildPostingLine(
                         inventoryAccountId,
@@ -956,26 +1260,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                         lineNumber++,
                         "AR-Inventory"));
                 }
-            }
-
-            if (documentDiscountAmount > 0m)
-            {
-                var discountAccountId = settings.DiscountAllowedAccountId
-                    ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
-                await ResolvePostingAccountAsync(discountAccountId, "sales discounts allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
-
-                postingLines.Add(BuildPostingLine(
-                    discountAccountId,
-                    $"Sales discount - {invoice.InvoiceNumber}",
-                    debitTransactionAmount: documentDiscountAmount,
-                    creditTransactionAmount: 0m,
-                    invoiceCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    invoice.InvoiceDate,
-                    invoice.InvoiceNumber,
-                    lineNumber++,
-                    "AR-Discount"));
             }
 
             var taxSnapshotLines = new List<FinanceTaxCalculationSnapshotDto>();
@@ -1056,6 +1340,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             string functionalCurrency,
             decimal exchangeRate,
             Dictionary<Guid, Account> accountCache,
+            IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceLineDimensions,
             CancellationToken cancellationToken)
         {
             var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -1096,20 +1381,53 @@ namespace ErpSystem.Api.Services.Finance.AR
                     1,
                     "AR-Control",
                     rateSnapshot.ExchangeRateId,
-                    rateSnapshot.Source),
-                BuildPostingLine(
+                    rateSnapshot.Source)
+            };
+
+            var activeLines = invoice.LineItems.Where(line => !line.IsDeleted)
+                .OrderBy(line => line.CreatedAt)
+                .ThenBy(line => line.Id)
+                .ToList();
+            var documentDiscounts = AllocateDocumentDiscount(invoice.DiscountAmount, activeLines);
+            var sourceAmounts = activeLines
+                .Select(line => new
+                {
+                    Line = line,
+                    Amount = RoundMoney(
+                        (line.Quantity * line.UnitPrice)
+                        - line.DiscountAmount
+                        - documentDiscounts.GetValueOrDefault(line.Id)
+                        + line.TaxAmount)
+                })
+                .Where(item => item.Amount != 0m)
+                .ToList();
+            if (sourceAmounts.Any(item => item.Amount < 0m)
+                || RoundMoney(sourceAmounts.Sum(item => item.Amount)) != openingAmount)
+                throw new InvalidOperationException("AR opening-balance source lines do not reconcile to the invoice total.");
+
+            var allocatedFunctional = 0m;
+            for (var index = 0; index < sourceAmounts.Count; index++)
+            {
+                var source = sourceAmounts[index];
+                var functionalAmount = index == sourceAmounts.Count - 1
+                    ? functionalOpeningAmount - allocatedFunctional
+                    : ToFunctionalAmount(source.Amount, invoiceCurrency, functionalCurrency, exchangeRate);
+                var clearingLine = BuildPostingLine(
                     migrationClearingAccountId,
-                    $"Migration clearing - AR opening balance {invoice.InvoiceNumber}",
+                    $"Migration clearing - AR opening balance {invoice.InvoiceNumber} - {source.Line.Description}",
                     debitTransactionAmount: 0m,
-                    creditTransactionAmount: functionalOpeningAmount,
+                    creditTransactionAmount: functionalAmount,
                     functionalCurrency,
                     functionalCurrency,
                     1m,
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
-                    2,
-                    "AR-MigrationClearing")
-            };
+                    index + 2,
+                    "AR-MigrationClearing");
+                ApplySourceDimensions(clearingLine, source.Line, sourceLineDimensions);
+                postingLines.Add(clearingLine);
+                allocatedFunctional += functionalAmount;
+            }
 
             return new FinancePostingRequestDto
             {
@@ -1136,6 +1454,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingRequestDto postingRequest,
             bool wasAlreadyLinked,
             Func<Task>? rollbackBeforeFailureAudit,
+            FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
             if (_financePostingEngine == null)
@@ -1144,7 +1463,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingResultDto postingResult;
             try
             {
-                postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+                postingResult = producer is null
+                    ? await _financePostingEngine.PostAsync(postingRequest, cancellationToken)
+                    : await _financePostingEngine.PostAsync(postingRequest, producer, cancellationToken);
             }
             catch (Exception ex)
             {

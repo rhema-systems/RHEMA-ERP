@@ -39,7 +39,7 @@ public class ContractsController : ControllerBase
     /// Get all contracts with pagination
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult> GetContracts(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
@@ -63,7 +63,7 @@ public class ContractsController : ControllerBase
     /// Get contract by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<ContractDto>> GetContract(Guid id)
     {
         try
@@ -87,7 +87,7 @@ public class ContractsController : ControllerBase
     /// Get contract by award ID
     /// </summary>
     [HttpGet("by-award/{awardId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<ContractDto>> GetContractByAward(Guid awardId)
     {
         try
@@ -111,7 +111,7 @@ public class ContractsController : ControllerBase
     /// Get active contracts
     /// </summary>
     [HttpGet("active")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<ContractListDto>>> GetActiveContracts()
     {
         try
@@ -130,7 +130,7 @@ public class ContractsController : ControllerBase
     /// Get expiring contracts
     /// </summary>
     [HttpGet("expiring")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<ContractListDto>>> GetExpiringContracts([FromQuery] int daysThreshold = 30)
     {
         try
@@ -149,7 +149,7 @@ public class ContractsController : ControllerBase
     /// Create contract from award
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult<ContractDto>> CreateContract([FromBody] CreateContractDto dto)
     {
         try
@@ -164,6 +164,30 @@ public class ContractsController : ControllerBase
                 code = ex.Code,
                 message = ex.Message,
                 eligibility = ex.Result
+            });
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                title = ex.Code,
+                status = 422,
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = ex.Code,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, new
+            {
+                title = "Tender source recovery forbidden",
+                status = 403,
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = "TENDER_SOURCE_RECOVERY_FORBIDDEN",
+                correlationId = HttpContext.TraceIdentifier
             });
         }
         catch (InvalidOperationException ex)
@@ -181,7 +205,7 @@ public class ContractsController : ControllerBase
     /// Update contract
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult<ContractDto>> UpdateContract(Guid id, [FromBody] UpdateContractDto dto)
     {
         try
@@ -204,7 +228,7 @@ public class ContractsController : ControllerBase
     /// Delete contract
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult> DeleteContract(Guid id)
     {
         try
@@ -231,7 +255,7 @@ public class ContractsController : ControllerBase
     /// Update contract status
     /// </summary>
     [HttpPut("{id}/status")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public async Task<ActionResult<ContractDto>> UpdateStatus(Guid id, [FromBody] UpdateContractStatusDto dto)
     {
         try
@@ -254,7 +278,7 @@ public class ContractsController : ControllerBase
     /// Activate contract
     /// </summary>
     [HttpPost("{id}/activate")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public async Task<ActionResult<ContractDto>> ActivateContract(Guid id, [FromBody] UpdateContractStatusDto dto)
     {
         try
@@ -277,7 +301,7 @@ public class ContractsController : ControllerBase
     /// Complete contract
     /// </summary>
     [HttpPost("{id}/complete")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public async Task<ActionResult<ContractDto>> CompleteContract(Guid id)
     {
         try
@@ -300,7 +324,7 @@ public class ContractsController : ControllerBase
     /// Terminate contract
     /// </summary>
     [HttpPost("{id}/terminate")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public async Task<ActionResult<ContractDto>> TerminateContract(Guid id, [FromBody] TerminateContractRequest request)
     {
         try
@@ -327,7 +351,7 @@ public class ContractsController : ControllerBase
     /// Get milestones for a contract
     /// </summary>
     [HttpGet("{contractId}/milestones")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<ContractMilestoneDto>>> GetMilestones(Guid contractId)
     {
         try
@@ -346,7 +370,7 @@ public class ContractsController : ControllerBase
     /// Add milestone to contract
     /// </summary>
     [HttpPost("{contractId}/milestones")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult<ContractMilestoneDto>> AddMilestone(Guid contractId, [FromBody] CreateContractMilestoneDto dto)
     {
         try
@@ -369,7 +393,7 @@ public class ContractsController : ControllerBase
     /// Update milestone
     /// </summary>
     [HttpPut("milestones/{milestoneId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult<ContractMilestoneDto>> UpdateMilestone(Guid milestoneId, [FromBody] UpdateContractMilestoneDto dto)
     {
         try
@@ -392,7 +416,7 @@ public class ContractsController : ControllerBase
     /// Update milestone status
     /// </summary>
     [HttpPut("milestones/{milestoneId}/status")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult<ContractMilestoneDto>> UpdateMilestoneStatus(Guid milestoneId, [FromBody] UpdateMilestoneStatusDto dto)
     {
         try
@@ -415,7 +439,7 @@ public class ContractsController : ControllerBase
     /// Delete milestone
     /// </summary>
     [HttpDelete("milestones/{milestoneId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult> DeleteMilestone(Guid milestoneId)
     {
         try
@@ -442,7 +466,7 @@ public class ContractsController : ControllerBase
     /// Get amendments for a contract
     /// </summary>
     [HttpGet("{contractId}/amendments")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<ContractAmendmentDto>>> GetAmendments(Guid contractId)
     {
         try
@@ -461,7 +485,7 @@ public class ContractsController : ControllerBase
     /// Get pending amendments
     /// </summary>
     [HttpGet("amendments/pending")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<ContractAmendmentDto>>> GetPendingAmendments()
     {
         try
@@ -480,7 +504,7 @@ public class ContractsController : ControllerBase
     /// Create amendment
     /// </summary>
     [HttpPost("{contractId}/amendments")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult<ContractAmendmentDto>> CreateAmendment(Guid contractId, [FromBody] CreateContractAmendmentDto dto)
     {
         try
@@ -503,13 +527,23 @@ public class ContractsController : ControllerBase
     /// Process (approve/reject) amendment
     /// </summary>
     [HttpPost("amendments/{amendmentId}/process")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public async Task<ActionResult<ContractAmendmentDto>> ProcessAmendment(Guid amendmentId, [FromBody] ProcessAmendmentDto dto)
     {
         try
         {
             var amendment = await _contractService.ProcessAmendmentAsync(amendmentId, dto);
             return Ok(amendment);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Contract amendment approval forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -526,7 +560,7 @@ public class ContractsController : ControllerBase
     /// Delete amendment
     /// </summary>
     [HttpDelete("amendments/{amendmentId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult> DeleteAmendment(Guid amendmentId)
     {
         try
@@ -553,7 +587,7 @@ public class ContractsController : ControllerBase
     /// Get documents for a contract
     /// </summary>
     [HttpGet("{contractId}/documents")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<ContractDocumentDto>>> GetDocuments(Guid contractId)
     {
         try
@@ -572,7 +606,7 @@ public class ContractsController : ControllerBase
     /// Upload document to contract
     /// </summary>
     [HttpPost("{contractId}/documents")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     [RequestSizeLimit(20_000_000)] // 20MB limit
     public async Task<ActionResult<ContractDocumentDto>> UploadDocument(
         Guid contractId,
@@ -700,7 +734,7 @@ public class ContractsController : ControllerBase
     /// Delete document
     /// </summary>
     [HttpDelete("documents/{documentId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public async Task<ActionResult> DeleteDocument(Guid documentId)
     {
         try

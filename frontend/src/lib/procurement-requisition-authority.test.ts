@@ -50,11 +50,11 @@ describe('getAuthorityControlPresentation', () => {
     });
   });
 
-  it('shows fail-closed missing or ambiguous coverage', () => {
+  it('shows missing policy authority coverage as optional guidance', () => {
     expect(getAuthorityControlPresentation(readiness())).toMatchObject({
-      tone: 'blocked',
-      title: 'Approval authority blocked',
-      basisLabel: 'Hard stop',
+      tone: 'neutral',
+      title: 'Optional policy guidance not configured',
+      basisLabel: 'Advisory',
     });
   });
 

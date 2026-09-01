@@ -219,7 +219,7 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 .AsNoTracking()
                 .SingleOrDefaultAsync(cancellationToken);
         }
-        AddAwardChecks(purchaseOrder, awardDecision, checks);
+        AddAwardChecks(purchaseOrder, source, awardDecision, checks);
 
         await AddGhanepsCheckAsync(
             purchaseOrder, source, checks, cancellationToken);
@@ -270,8 +270,19 @@ public sealed class ProcurementPurchaseOrderComplianceService :
 
         try
         {
-            var readiness = await _budgetControl.GetReadinessAsync(
+            var exposure = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.SourceRequisitionId == purchaseOrder.SourceRequisitionId &&
+                    !item.IsDeleted &&
+                    item.Status != "Cancelled" &&
+                    item.Status != "Rejected")
+                .Select(item => (decimal?)item.TotalAmount)
+                .SumAsync(cancellationToken) ?? 0m;
+            var readiness = await _budgetControl.GetDownstreamReadinessAsync(
                 purchaseOrder.SourceRequisitionId.Value,
+                exposure,
+                purchaseOrder.Currency,
                 cancellationToken);
             var budgetReady = readiness.BudgetId.HasValue &&
                               readiness.BudgetId.Value != Guid.Empty &&
@@ -287,46 +298,57 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 readiness.BudgetId,
                 readiness.BudgetCode));
 
-            var exposure = await _unitOfWork.Repository<PurchaseOrder>()
-                .GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId &&
-                    item.SourceRequisitionId == purchaseOrder.SourceRequisitionId &&
-                    !item.IsDeleted &&
-                    item.Status != "Cancelled" &&
-                    item.Status != "Rejected")
-                .Select(item => (decimal?)item.TotalAmount)
-                .SumAsync(cancellationToken) ?? 0m;
             var currencyMatches = string.Equals(
                 readiness.Currency,
                 purchaseOrder.Currency,
                 StringComparison.OrdinalIgnoreCase);
-            var commitmentReady =
-                readiness.IsCompliant &&
-                string.Equals(
-                    readiness.CommitmentStatus,
-                    ProcurementBudgetCommitmentStatus.Reserved.ToString(),
-                    StringComparison.OrdinalIgnoreCase) &&
+            var hasActiveCommitment = string.Equals(
+                readiness.CommitmentStatus,
+                ProcurementBudgetCommitmentStatus.Reserved.ToString(),
+                StringComparison.OrdinalIgnoreCase);
+            var requiresActiveCommitment =
+                ProcurementPurchaseOrderComplianceRules
+                    .RequiresActiveBudgetCommitment(purchaseOrder.Status);
+            var activeCommitmentCoversExposure =
+                hasActiveCommitment &&
                 currencyMatches &&
                 ProcurementPurchaseOrderComplianceRules.IsBudgetExposureCovered(
                     readiness.RequestedAmount,
                     exposure);
+            var preApprovalBudgetAvailable =
+                !requiresActiveCommitment &&
+                readiness.IsCompliant &&
+                readiness.CanReserve &&
+                currencyMatches &&
+                readiness.AvailableAmount >= exposure;
+            var commitmentReady = activeCommitmentCoversExposure ||
+                                  preApprovalBudgetAvailable;
             checks.Add(Check(
                 "commitment",
                 "Budget commitment",
                 commitmentReady,
                 commitmentReady
-                    ? "PO_BUDGET_COMMITMENT_CURRENT"
+                    ? activeCommitmentCoversExposure
+                        ? "PO_BUDGET_COMMITMENT_CURRENT"
+                        : "PO_BUDGET_AVAILABILITY_CONFIRMED"
                     : "PO_BUDGET_COMMITMENT_INSUFFICIENT",
                 commitmentReady
-                    ? $"Active reservation {readiness.CommitmentReference} covers cumulative PO exposure {exposure:N2} of {readiness.RequestedAmount:N2} {readiness.Currency}."
-                    : $"The active reservation does not cover cumulative PO exposure {exposure:N2}, or its status/currency is no longer valid.",
+                    ? activeCommitmentCoversExposure
+                        ? $"Active reservation {readiness.CommitmentReference} covers cumulative PO exposure {exposure:N2} of {readiness.RequestedAmount:N2} {readiness.Currency}."
+                        : $"Approved budget availability covers cumulative PO exposure {exposure:N2} {readiness.Currency}; the Finance commitment will be created atomically on final PO approval."
+                    : requiresActiveCommitment
+                        ? $"The approved purchase order has no active reservation covering cumulative PO exposure {exposure:N2}, or its status/currency is no longer valid."
+                        : $"Approved budget availability does not cover cumulative PO exposure {exposure:N2}, or its currency is no longer valid.",
                 readiness.CommitmentId,
                 readiness.CommitmentReference,
                 details:
                 [
-                    $"Reserved: {readiness.RequestedAmount:N2} {readiness.Currency}",
+                    hasActiveCommitment
+                        ? $"Reserved: {readiness.RequestedAmount:N2} {readiness.Currency}"
+                        : "Commitment timing: final PO approval",
                     $"PO exposure: {exposure:N2} {purchaseOrder.Currency}"
-                ]));
+                ],
+                required: requiresActiveCommitment));
         }
         catch (Exception exception)
         {
@@ -339,9 +361,42 @@ public sealed class ProcurementPurchaseOrderComplianceService :
 
     private static void AddAwardChecks(
         PurchaseOrder purchaseOrder,
+        ProcurementPurchaseOrderSourceResolution? source,
         ProcurementAwardReadinessDecision? decision,
         ICollection<ProcurementPurchaseOrderComplianceCheckDto> checks)
     {
+        if (IsReleaseOnlyRfqAward(purchaseOrder, source))
+        {
+            checks.Add(Check(
+                "evaluation",
+                "Evaluation evidence",
+                true,
+                "PO_RFQ_DIRECT_EVALUATION_RETAINED",
+                "The submitted supplier quotation and selected RFQ award lines are retained in the immutable purchase-order source snapshot.",
+                source!.SourceId,
+                source.SourceReference,
+                source.SourceIntegrityHash));
+            checks.Add(Check(
+                "award",
+                "Award approval",
+                true,
+                "PO_RFQ_DIRECT_AWARD_RETAINED",
+                "The direct approved-requisition RFQ winner selection is retained; the resulting draft purchase order must still complete its configured independent approval workflow.",
+                source.SourceId,
+                source.SourceReference,
+                source.SourceIntegrityHash));
+            checks.Add(Check(
+                "sod",
+                "Award SOD",
+                true,
+                "PO_RFQ_DIRECT_PO_APPROVAL_REQUIRED",
+                "The direct RFQ award cannot self-approve the resulting purchase order; purchase-order maker-checker controls remain mandatory.",
+                source.SourceId,
+                source.SourceReference,
+                source.SourceIntegrityHash));
+            return;
+        }
+
         var groups = Deserialize<List<ProcurementAwardReadinessPrerequisiteGroupDto>>(
             decision?.PrerequisiteSnapshotJson) ?? [];
         var evaluationReady =
@@ -411,6 +466,24 @@ public sealed class ProcurementPurchaseOrderComplianceService :
             decision?.IntegrityHash));
     }
 
+    internal static bool IsReleaseOnlyRfqAward(
+        PurchaseOrder purchaseOrder,
+        ProcurementPurchaseOrderSourceResolution? source) =>
+        source is not null &&
+        source.SourceType == ProcurementPurchaseOrderSourceType.RfqAward &&
+        source.SourcingCaseId == Guid.Empty &&
+        source.AwardReadinessDecisionId == Guid.Empty &&
+        purchaseOrder.ProcurementSourceType == ProcurementPurchaseOrderSourceType.RfqAward &&
+        purchaseOrder.SourceRequisitionId == source.PurchaseRequisitionId &&
+        purchaseOrder.SourcingReleaseId == source.SourcingReleaseId &&
+        !purchaseOrder.SourcingCaseId.HasValue &&
+        !purchaseOrder.AwardReadinessDecisionId.HasValue &&
+        purchaseOrder.BusinessPartnerId == source.BusinessPartnerId &&
+        string.Equals(
+            purchaseOrder.SourceIntegrityHash,
+            source.SourceIntegrityHash,
+            StringComparison.OrdinalIgnoreCase);
+
     private async Task AddGhanepsCheckAsync(
         PurchaseOrder purchaseOrder,
         ProcurementPurchaseOrderSourceResolution? source,
@@ -419,9 +492,10 @@ public sealed class ProcurementPurchaseOrderComplianceService :
     {
         if (source is null)
         {
-            checks.Add(Check("ghaneps", "GHANEPS evidence", false,
-                "PO_GHANEPS_SOURCE_UNAVAILABLE",
-                "GHANEPS award evidence cannot be evaluated until source lineage passes."));
+            checks.Add(Check("ghaneps", "GHANEPS evidence", true,
+                "PO_GHANEPS_NOT_EVALUATED",
+                "GHANEPS traceability is not evaluated while the approved-source check is unresolved.",
+                required: false));
             return;
         }
 
@@ -431,9 +505,10 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 purchaseOrder, cancellationToken);
             if (route is null)
             {
-                checks.Add(Check("ghaneps", "GHANEPS evidence", false,
-                    "PO_GHANEPS_SOURCE_UNMAPPED",
-                    "The governed purchase-order source cannot be mapped to its GHANEPS source."));
+                checks.Add(Check("ghaneps", "GHANEPS evidence", true,
+                    "PO_GHANEPS_NOT_APPLICABLE",
+                    "No GHANEPS award-exchange route applies to this governed purchase-order source.",
+                    required: false));
                 return;
             }
 
@@ -444,7 +519,7 @@ public sealed class ProcurementPurchaseOrderComplianceService :
             checks.Add(Check(
                 "ghaneps",
                 "GHANEPS evidence",
-                result.IsCompliant,
+                !result.HasApplicableMapping || result.IsCompliant,
                 result.Code,
                 result.Message,
                 result.Mappings.Select(item => item.ExchangeEventId)
@@ -452,7 +527,16 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 result.SourceReference,
                 result.ConfigurationValueHash,
                 result.Mappings.Select(item =>
-                    $"{item.MappingKey}: {item.Message}")));
+                    $"{item.MappingKey}: {item.Message}"),
+                required: result.HasApplicableMapping));
+        }
+        catch (ProcurementGhanepsExchangeConflictException exception) when (
+            exception.Code == "GHANEPS_PROFILE_NOT_EFFECTIVE")
+        {
+            checks.Add(Check("ghaneps", "GHANEPS evidence", true,
+                "PO_GHANEPS_NOT_CONFIGURED",
+                "No effective GHANEPS award-exchange profile is configured; this optional traceability control does not block the purchase order.",
+                required: false));
         }
         catch (Exception exception)
         {
@@ -690,16 +774,8 @@ public sealed class ProcurementPurchaseOrderComplianceService :
     }
 
     internal static string SupplierCategoryCode(
-        ProcurementCategoryClass category) => category switch
-        {
-            ProcurementCategoryClass.Goods => "GOODS",
-            ProcurementCategoryClass.Works => "WORKS",
-            ProcurementCategoryClass.TechnicalServices => "TECHNICAL_SERVICES",
-            ProcurementCategoryClass.ConsultancyServices => "CONSULTANCY_SERVICES",
-            ProcurementCategoryClass.GeneralServices => "GENERAL_SERVICES",
-            _ => throw new ArgumentOutOfRangeException(nameof(category), category,
-                "The procurement category is not supported.")
-        };
+        ProcurementCategoryClass category) =>
+        ProcurementSupplierCategoryRegistry.CodeFor(category);
 
     private async Task EnsureCapabilityAsync(
         string permission,

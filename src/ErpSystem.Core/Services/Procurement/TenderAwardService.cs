@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -26,6 +27,7 @@ public class TenderAwardService : ITenderAwardService
     private readonly ILogger<TenderAwardService> _logger;
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IProcurementAwardReadinessService _awardReadiness;
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
     private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
@@ -45,6 +47,7 @@ public class TenderAwardService : ITenderAwardService
         ICurrentUserProvider currentUserProvider,
         IProcurementTenderControlService tenderControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IProcurementSourcingCaseService sourcingCases,
         IProcurementAwardReadinessService awardReadiness,
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
         IProcurementPurchaseOrderSodService purchaseOrderSod,
@@ -64,6 +67,7 @@ public class TenderAwardService : ITenderAwardService
         _currentUserProvider = currentUserProvider;
         _tenderControlService = tenderControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _sourcingCases = sourcingCases;
         _awardReadiness = awardReadiness;
         _purchaseOrderSources = purchaseOrderSources;
         _purchaseOrderSod = purchaseOrderSod;
@@ -112,11 +116,27 @@ public class TenderAwardService : ITenderAwardService
     {
         try
         {
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            if (bid == null) return null;
+            if (_currentUserProvider.IsExternalUser)
+            {
+                var isOwner = bid.BusinessPartner?.UserId == _currentUserProvider.UserId ||
+                              await _unitOfWork.Repository<BusinessPartnerUser>()
+                                  .GetQueryable(item =>
+                                      item.TenantId == _currentUserProvider.TenantId &&
+                                      item.BusinessPartnerId == bid.BusinessPartnerId &&
+                                      item.UserId == _currentUserProvider.UserId &&
+                                      item.IsActive && !item.IsDeleted)
+                                  .AnyAsync();
+                if (!isOwner)
+                    throw new UnauthorizedAccessException(
+                        "A supplier can view an award only for its own bid.");
+            }
+
             var award = await _awardRepository.GetByBidIdAsync(bidId);
             if (award == null) return null;
 
-            var bid = await _bidRepository.GetByIdAsync(bidId);
-            var tender = bid != null ? await _tenderRepository.GetByIdAsync(bid.TenderId) : null;
+            var tender = await _tenderRepository.GetByIdAsync(bid.TenderId);
 
             return MapToDto(award, bid, tender);
         }
@@ -242,92 +262,91 @@ public class TenderAwardService : ITenderAwardService
     {
         try
         {
-            var correlation = string.IsNullOrWhiteSpace(correlationId)
-                ? Guid.NewGuid().ToString("N")
-                : correlationId.Trim();
             await EnsureLegacyAwardAllowedAsync(tenderId);
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            if (tender.TenantId != _currentUserProvider.TenantId)
+                throw new UnauthorizedAccessException("The tender does not belong to the current tenant.");
+            if (!string.Equals(tender.Status, "Evaluated", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"An award recommendation requires an evaluated tender (current status: '{tender.Status}').");
 
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
             if (bid.TenderId != tenderId)
                 throw new InvalidOperationException(
                     "The selected bid does not belong to the tender being awarded.");
+            if (bid.TenantId != _currentUserProvider.TenantId ||
+                bid.TenantId != tender.TenantId)
+                throw new UnauthorizedAccessException(
+                    "The selected bid does not belong to the current tenant.");
+            if (!string.Equals(bid.Status, "Evaluated", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"An award recommendation requires an evaluated bid (current status: '{bid.Status}').");
+
+            await RecoverTenderSourceLineageAsync(
+                tender,
+                ProcurementTenderSourceRecoveryBoundary.AwardAdministration,
+                correlationId,
+                cancellationToken);
 
             // Check if award already exists for this tender
             var existingAward = await _awardRepository.GetByTenderIdAsync(tenderId);
-            if (existingAward != null)
+            var isRejectedResubmission = existingAward != null &&
+                string.Equals(existingAward.Status, "Rejected", StringComparison.OrdinalIgnoreCase);
+            if (existingAward != null && !isRejectedResubmission)
             {
                 throw new InvalidOperationException($"Award already exists for tender {tender.TenderNumber}");
             }
-            await _awardReadiness.EnsureAwardReadyAsync(
-                ProcurementAwardReadinessSourceType.Tender,
-                tenderId,
-                ProcurementAwardReadinessGateRequestFactory.Create(
-                    ProcurementAwardReadinessSourceType.Tender,
-                    tenderId,
-                    correlation,
-                    [bid.Id],
-                    [bid.BusinessPartnerId]),
-                correlation,
-                cancellationToken);
-
-            // Award is created with the bid amount as both original and awarded amount
-            // Negotiation happens AFTER award creation and will update these values
+            if (existingAward != null && existingAward.TenantId != tender.TenantId)
+                throw new UnauthorizedAccessException(
+                    "The existing award recommendation does not belong to the current tenant.");
+            // This creates an immutable recommendation for independent approval. The tender
+            // and bid are finalized only by ApproveAwardAsync after the readiness/SOD gates.
             var awardAmount = dto.AwardedAmount;
 
             _logger.LogInformation(
                 "Creating award for tender {TenderId}. Amount: {Amount}. Negotiation will update this if completed later.",
                 tenderId, awardAmount);
 
-            var award = new TenderAward
+            var now = DateTime.UtcNow;
+            var priorDecisionNotes = isRejectedResubmission ? existingAward!.Notes : null;
+            var award = existingAward ?? new TenderAward
             {
                 Id = Guid.NewGuid(),
                 TenantId = _currentUserProvider.TenantId,
-                TenderId = tenderId,
-                TenderBidId = dto.TenderBidId,
-                BusinessPartnerId = bid.BusinessPartnerId,
-                AwardDate = dto.AwardDate ?? DateTime.UtcNow,
-                OriginalBidAmount = awardAmount, // Will be preserved when negotiation updates AwardedAmount
-                AwardedAmount = awardAmount,
-                NegotiationId = null, // Will be set when negotiation is completed
-                IsNegotiated = false, // Will be set to true when negotiation is completed
-                Currency = dto.Currency ?? "USD",
-                AwardedById = _currentUserProvider.UserId,
-                AwardJustification = dto.AwardJustification,
-                Status = "Awarded",
-                Notes = dto.Notes,
-                CreatedAt = DateTime.UtcNow
+                TenderId = tenderId
             };
+            award.TenderBidId = dto.TenderBidId;
+            award.BusinessPartnerId = bid.BusinessPartnerId;
+            award.AwardDate = dto.AwardDate ?? now;
+            award.OriginalBidAmount = awardAmount;
+            award.AwardedAmount = awardAmount;
+            award.NegotiationId = null;
+            award.IsNegotiated = false;
+            award.Currency = NormalizeCurrency(dto.Currency, tender.Currency);
+            award.AwardedById = null;
+            award.AwardJustification = dto.AwardJustification;
+            award.Status = "PendingApproval";
+            award.Notes = isRejectedResubmission
+                ? $"{priorDecisionNotes}\nResubmitted: {dto.Notes ?? dto.AwardJustification}".Trim()
+                : dto.Notes;
+            award.CreatedAt = now;
+            award.CreatedById = _currentUserProvider.UserId;
+            award.UpdatedAt = isRejectedResubmission ? now : null;
+            award.LastModifiedById = isRejectedResubmission
+                ? _currentUserProvider.UserId
+                : null;
 
-            await _awardRepository.CreateAsync(award);
-
-            // Update tender status
-            tender.Status = "Awarded";
-            tender.AwardDate = award.AwardDate;
-            tender.AwardedById = _currentUserProvider.UserId;
-            await _tenderRepository.UpdateAsync(tender);
-
-            // Update bid status
-            bid.Status = "Awarded";
-            await _bidRepository.UpdateAsync(bid);
-
-            // Get all other bids that should be rejected
-            var allBids = await _bidRepository.GetByTenderIdAsync(tenderId);
-            var rejectedBids = allBids.Where(b => b.Id != dto.TenderBidId && (b.Status == "Evaluated" || b.Status == "Submitted" || b.Status == "Opened")).ToList();
-
-            // Update rejected bids' status to "Rejected"
-            foreach (var rejectedBid in rejectedBids)
-            {
-                rejectedBid.Status = "Rejected";
-                await _bidRepository.UpdateAsync(rejectedBid);
-            }
-
+            if (isRejectedResubmission)
+                await _awardRepository.UpdateAsync(award);
+            else
+                await _awardRepository.CreateAsync(award);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Created award {AwardId} for tender {TenderId}. Rejected {RejectedCount} other bids.",
-                award.Id, tenderId, rejectedBids.Count);
+            _logger.LogInformation(
+                "Created pending award recommendation {AwardId} for tender {TenderId}",
+                award.Id, tenderId);
 
             // NOTE: Award notification is NOT sent automatically here.
             // The workflow is: Award -> Negotiation -> Complete Negotiation -> Send Notification
@@ -341,6 +360,126 @@ public class TenderAwardService : ITenderAwardService
             _logger.LogError(ex, "Error creating award for tender {TenderId}", tenderId);
             throw;
         }
+    }
+
+    public async Task<TenderAwardDto> ApproveAwardAsync(
+        Guid id,
+        ApproveAwardDto dto,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var award = await _awardRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Award with ID {id} not found");
+        if (award.TenantId != _currentUserProvider.TenantId)
+            throw new UnauthorizedAccessException("The award does not belong to the current tenant.");
+        if (!string.Equals(award.Status, "PendingApproval", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Only a pending award recommendation can be approved (current status: '{award.Status}').");
+        if (award.CreatedById == _currentUserProvider.UserId)
+            throw new UnauthorizedAccessException(
+                "The award recommendation creator cannot approve the same award.");
+
+        await EnsureLegacyAwardAllowedAsync(award.TenderId);
+        var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
+            ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+        var bid = await _bidRepository.GetByIdAsync(award.TenderBidId)
+            ?? throw new InvalidOperationException($"Bid with ID {award.TenderBidId} not found");
+        if (tender.TenantId != award.TenantId || bid.TenantId != award.TenantId ||
+            bid.TenderId != tender.Id || bid.BusinessPartnerId != award.BusinessPartnerId)
+            throw new InvalidOperationException(
+                "The pending award's tender, bid, supplier, or tenant lineage is invalid.");
+        if (!string.Equals(tender.Status, "Evaluated", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(bid.Status, "Evaluated", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "The tender and recommended bid must remain evaluated until award approval.");
+
+        await RecoverTenderSourceLineageAsync(
+            tender,
+            ProcurementTenderSourceRecoveryBoundary.AwardApproval,
+            correlationId,
+            cancellationToken);
+
+        var correlation = string.IsNullOrWhiteSpace(correlationId)
+            ? Guid.NewGuid().ToString("N")
+            : correlationId.Trim();
+        await _awardReadiness.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            tender.Id,
+            ProcurementAwardReadinessGateRequestFactory.Create(
+                ProcurementAwardReadinessSourceType.Tender,
+                tender.Id,
+                correlation,
+                [bid.Id],
+                [bid.BusinessPartnerId]),
+            correlation,
+            cancellationToken);
+
+        var now = DateTime.UtcNow;
+        award.Status = "Awarded";
+        award.AwardDate = now;
+        award.AwardedById = _currentUserProvider.UserId;
+        award.LastModifiedById = _currentUserProvider.UserId;
+        award.UpdatedAt = now;
+        if (!string.IsNullOrWhiteSpace(dto.Notes))
+            award.Notes = string.IsNullOrWhiteSpace(award.Notes)
+                ? dto.Notes.Trim()
+                : $"{award.Notes}\nApproval: {dto.Notes.Trim()}";
+        await _awardRepository.UpdateAsync(award);
+
+        tender.Status = "Awarded";
+        tender.AwardDate = now;
+        tender.AwardedById = _currentUserProvider.UserId;
+        await _tenderRepository.UpdateAsync(tender);
+
+        bid.Status = "Awarded";
+        await _bidRepository.UpdateAsync(bid);
+        var allBids = await _bidRepository.GetByTenderIdAsync(tender.Id);
+        var rejectedBids = allBids.Where(other =>
+            other.Id != bid.Id &&
+            other.TenantId == award.TenantId &&
+            other.Status is "Evaluated" or "UnderEvaluation" or "Submitted" or "Opened");
+        foreach (var rejectedBid in rejectedBids)
+        {
+            rejectedBid.Status = "Rejected";
+            await _bidRepository.UpdateAsync(rejectedBid);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return MapToDto(award, bid, tender);
+    }
+
+    public async Task<TenderAwardDto> RejectAwardAsync(
+        Guid id,
+        RejectAwardDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var award = await _awardRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Award with ID {id} not found");
+        if (award.TenantId != _currentUserProvider.TenantId)
+            throw new UnauthorizedAccessException("The award does not belong to the current tenant.");
+        if (!string.Equals(award.Status, "PendingApproval", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Only a pending award recommendation can be rejected (current status: '{award.Status}').");
+        if (award.CreatedById == _currentUserProvider.UserId)
+            throw new UnauthorizedAccessException(
+                "The award recommendation creator cannot reject the same award.");
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException("An award rejection reason is required.");
+
+        var bid = await _bidRepository.GetByIdAsync(award.TenderBidId);
+        var tender = await _tenderRepository.GetByIdAsync(award.TenderId);
+        if (bid?.TenantId != award.TenantId || tender?.TenantId != award.TenantId)
+            throw new InvalidOperationException("The pending award's tenant lineage is invalid.");
+
+        award.Status = "Rejected";
+        award.LastModifiedById = _currentUserProvider.UserId;
+        award.UpdatedAt = DateTime.UtcNow;
+        award.Notes = string.IsNullOrWhiteSpace(award.Notes)
+            ? $"Rejected: {dto.Reason.Trim()}"
+            : $"{award.Notes}\nRejected: {dto.Reason.Trim()}";
+        await _awardRepository.UpdateAsync(award);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return MapToDto(award, bid, tender);
     }
 
     public async Task<TenderAwardDto> UpdateAwardAsync(Guid id, CreateAwardDto dto)
@@ -357,7 +496,7 @@ public class TenderAwardService : ITenderAwardService
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
             award.AwardedAmount = dto.AwardedAmount;
-            award.Currency = dto.Currency ?? "USD";
+            award.Currency = NormalizeCurrency(dto.Currency, tender.Currency);
             award.AwardDate = dto.AwardDate ?? award.AwardDate;
             award.AwardJustification = dto.AwardJustification;
             award.Notes = dto.Notes;
@@ -425,7 +564,26 @@ public class TenderAwardService : ITenderAwardService
     {
         try
         {
-            await _notificationService.SendAwardNotificationAsync(dto.AwardId);
+            var award = await _awardRepository.GetByIdAsync(dto.AwardId)
+                ?? throw new InvalidOperationException($"Award with ID {dto.AwardId} not found");
+            if (award.TenantId != _currentUserProvider.TenantId)
+                throw new UnauthorizedAccessException(
+                    "The award does not belong to the current tenant.");
+            if (award.TenderId != tenderId)
+                throw new InvalidOperationException(
+                    "The notification award does not belong to the selected tender.");
+            if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    "Award notifications can be sent only for an independently approved award.");
+            var tender = await _tenderRepository.GetByIdAsync(tenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            var bid = await _bidRepository.GetByIdAsync(award.TenderBidId)
+                ?? throw new InvalidOperationException($"Bid with ID {award.TenderBidId} not found");
+            if (tender.TenantId != award.TenantId || bid.TenantId != award.TenantId ||
+                bid.TenderId != tender.Id || bid.BusinessPartnerId != award.BusinessPartnerId)
+                throw new InvalidOperationException("The award notification lineage is invalid.");
+
+            await _notificationService.SendAwardNotificationAsync(award.Id);
 
             _logger.LogInformation("Sent award notifications for tender {TenderId}", tenderId);
         }
@@ -434,6 +592,38 @@ public class TenderAwardService : ITenderAwardService
             _logger.LogError(ex, "Error sending award notifications for tender {TenderId}", tenderId);
             throw;
         }
+    }
+
+    public async Task<AwardNotificationDto> GenerateAwardNotificationAsync(Guid id)
+    {
+        var award = await _awardRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Award with ID {id} not found");
+        if (award.TenantId != _currentUserProvider.TenantId)
+            throw new UnauthorizedAccessException(
+                "The award does not belong to the current tenant.");
+        if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "An award notification can be generated only after independent approval.");
+        var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
+            ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+        var bid = await _bidRepository.GetByIdAsync(award.TenderBidId)
+            ?? throw new InvalidOperationException($"Bid with ID {award.TenderBidId} not found");
+        if (tender.TenantId != award.TenantId || bid.TenantId != award.TenantId ||
+            bid.TenderId != tender.Id || bid.BusinessPartnerId != award.BusinessPartnerId)
+            throw new InvalidOperationException("The award notification lineage is invalid.");
+
+        return new AwardNotificationDto
+        {
+            AwardId = award.Id,
+            TenderId = tender.Id,
+            TenderNumber = tender.TenderNumber,
+            TenderTitle = tender.Title,
+            BusinessPartnerId = award.BusinessPartnerId,
+            BusinessPartnerName = bid.BusinessPartner?.PartnerName ?? string.Empty,
+            AwardAmount = award.AwardedAmount,
+            AwardDate = award.AwardDate,
+            NotificationDate = DateTime.UtcNow
+        };
     }
 
     public async Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardAsync(CreatePurchaseOrderFromAwardDto dto)
@@ -458,6 +648,21 @@ public class TenderAwardService : ITenderAwardService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            if (award.TenantId != _currentUserProvider.TenantId ||
+                tender.TenantId != award.TenantId ||
+                bid.TenantId != award.TenantId ||
+                bid.TenderId != tender.Id ||
+                bid.BusinessPartnerId != award.BusinessPartnerId)
+            {
+                throw new InvalidOperationException(
+                    "The award, tender, bid, supplier, or tenant lineage is invalid.");
+            }
+            if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(award.Status, "ContractSigned", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"A purchase order requires a finalized tender award (current status: '{award.Status}').");
+            }
             if (dto.ContractId.HasValue)
             {
                 var contract = await _unitOfWork.Repository<Contract>()
@@ -475,6 +680,11 @@ public class TenderAwardService : ITenderAwardService
                 }
             }
             var sourceCorrelationId = Guid.NewGuid().ToString("N");
+            await RecoverTenderSourceLineageAsync(
+                tender,
+                ProcurementTenderSourceRecoveryBoundary.PurchaseOrderCreation,
+                sourceCorrelationId,
+                CancellationToken.None);
             var sourceType = dto.ContractId.HasValue
                 ? ProcurementPurchaseOrderSourceType.Contract
                 : ProcurementPurchaseOrderSourceType.TenderAward;
@@ -537,7 +747,7 @@ public class TenderAwardService : ITenderAwardService
                 approvedSource,
                 sourceOrderLines,
                 award.AwardedAmount,
-                award.Currency ?? tender.Currency ?? "USD",
+                approvedSource.CurrencyCode,
                 sourceCorrelationId);
 
             // Generate PO number
@@ -562,7 +772,7 @@ public class TenderAwardService : ITenderAwardService
                 ShippingCost = 0,
                 DiscountAmount = 0,
                 TotalAmount = award.AwardedAmount,
-                Currency = award.Currency ?? "USD",
+                Currency = approvedSource.CurrencyCode,
                 ExchangeRate = 1,
                 
                 // Terms
@@ -606,7 +816,7 @@ public class TenderAwardService : ITenderAwardService
                 approvedSource,
                 sourceOrderLines,
                 award.AwardedAmount,
-                award.Currency ?? tender.Currency ?? "USD",
+                approvedSource.CurrencyCode,
                 purchaseOrder.Id,
                 sourceCorrelationId);
 
@@ -756,6 +966,51 @@ public class TenderAwardService : ITenderAwardService
             CreatedById = award.CreatedById,
             CreatedAt = award.CreatedAt
         };
+    }
+
+    private static string NormalizeCurrency(string? preferred, string? fallback) =>
+        !string.IsNullOrWhiteSpace(preferred)
+            ? preferred.Trim().ToUpperInvariant()
+            : !string.IsNullOrWhiteSpace(fallback)
+                ? fallback.Trim().ToUpperInvariant()
+                : "GHS";
+
+    private async Task RecoverTenderSourceLineageAsync(
+        Tender tender,
+        ProcurementTenderSourceRecoveryBoundary boundary,
+        string? correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue)
+            return;
+
+        var gate = await _sourcingCases.RecoverTenderSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            tender.SourcingReleaseId,
+            tender.Id,
+            tender.TenderNumber,
+            string.IsNullOrWhiteSpace(correlationId)
+                ? Guid.NewGuid().ToString("N")
+                : correlationId.Trim(),
+            boundary,
+            cancellationToken);
+        if (tender.SourcingCaseId.HasValue &&
+            tender.SourcingCaseId != gate.SourcingCaseId)
+        {
+            throw new ProcurementRequisitionSourcingValidationException(
+                "SOURCING_CASE_LINEAGE_MISMATCH",
+                "The tender does not match the sourcing case that owns its current immutable release.");
+        }
+
+        if (tender.SourcingReleaseId == gate.SourcingReleaseId &&
+            tender.SourcingCaseId == gate.SourcingCaseId)
+            return;
+
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        tender.UpdatedAt = DateTime.UtcNow;
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private async Task EnsureLegacyAwardAllowedAsync(Guid tenderId)

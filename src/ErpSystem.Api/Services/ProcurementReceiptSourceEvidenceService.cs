@@ -26,7 +26,8 @@ public sealed class ProcurementReceiptSourceEvidenceService(
     ILogger<ProcurementReceiptSourceEvidenceService> logger) :
     IProcurementReceiptSourceEvidenceService
 {
-    private const string ReadPermission = "procurement.inventory.read";
+    private const string RecordsReadPermission = "procurement.records.read";
+    private const string InventoryReadPermission = "procurement.inventory.read";
     private const string ManagePermission = "procurement.inventory.receive";
     private const string FinanceReadPermission = "Finance.Read";
     private const string TemplateCode = "TDC-PROC-RECEIPT-SOURCE";
@@ -381,7 +382,9 @@ public sealed class ProcurementReceiptSourceEvidenceService(
             throw new ProcurementReceiptSourceEvidenceAuthorizationException(
                 "External users cannot access internal receipt evidence.");
         if (IsAdministrator()) return;
-        if (await CanUseAsync(ReadPermission, receipt, token) || await CanUseAsync(FinanceReadPermission, receipt, token)) return;
+        if (await CanUseAsync(RecordsReadPermission, receipt, token) ||
+            await CanUseAsync(InventoryReadPermission, receipt, token) ||
+            await CanUseAsync(FinanceReadPermission, receipt, token)) return;
         throw new ProcurementReceiptSourceEvidenceAuthorizationException(
             "The current user is not permitted to view receipt evidence.");
     }
@@ -393,7 +396,7 @@ public sealed class ProcurementReceiptSourceEvidenceService(
             throw new ProcurementReceiptSourceEvidenceAuthorizationException(
                 "External users cannot administer internal receipt evidence.");
         if (IsAdministrator()) return;
-        var decision = await access.EnforceCapabilityAsync(Capability(permission, receipt),
+        var decision = await access.EnforceCapabilityAsync(await CapabilityAsync(permission, receipt, token),
             Guid.NewGuid().ToString("N"), token);
         if (!decision.Allowed) throw new ProcurementReceiptSourceEvidenceAuthorizationException(decision.Message);
     }
@@ -403,22 +406,44 @@ public sealed class ProcurementReceiptSourceEvidenceService(
         if (currentUser.IsExternalUser) return false;
         try
         {
-            return (await access.CheckCapabilityAsync(Capability(permission, receipt),
+            return (await access.CheckCapabilityAsync(await CapabilityAsync(permission, receipt, token),
                 Guid.NewGuid().ToString("N"), token)).Allowed;
         }
         catch (ProcurementAccessAuthorizationException) { return false; }
         catch (ProcurementAccessValidationException) { return false; }
     }
 
-    private ProcurementAccessCapabilityRequest Capability(string permission, PurchaseOrderReceipt receipt) => new()
+    private async Task<ProcurementAccessCapabilityRequest> CapabilityAsync(
+        string permission,
+        PurchaseOrderReceipt receipt,
+        CancellationToken token)
     {
-        PermissionCode = permission,
-        WarehouseId = receipt.PurchaseOrder.DeliveryWarehouseId ?? receipt.Items
+        var warehouseId = receipt.PurchaseOrder.DeliveryWarehouseId ?? receipt.Items
             .Select(item => item.PurchaseOrderItem.WarehouseId)
-            .FirstOrDefault(item => item.HasValue && item.Value != Guid.Empty),
-        SourceType = "ProcurementReceiptSourceEvidence",
-        SourceReference = receipt.ReceiptNumber
-    };
+            .FirstOrDefault(item => item.HasValue && item.Value != Guid.Empty);
+        if (!warehouseId.HasValue || warehouseId.Value == Guid.Empty)
+        {
+            var locationIds = receipt.Items
+                .Select(item => item.LocationId)
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToList();
+            warehouseId = await db.WarehouseLocations.AsNoTracking()
+                .Where(item => item.TenantId == currentUser.TenantId &&
+                               locationIds.Contains(item.Id) && !item.IsDeleted)
+                .OrderBy(item => item.Id)
+                .Select(item => (Guid?)item.WarehouseId)
+                .FirstOrDefaultAsync(token);
+        }
+
+        return new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = permission,
+            WarehouseId = warehouseId,
+            SourceType = "ProcurementReceiptSourceEvidence",
+            SourceReference = receipt.ReceiptNumber
+        };
+    }
 
     private async Task SafeDeleteDocumentAsync(Guid documentRecordId, CancellationToken token)
     {

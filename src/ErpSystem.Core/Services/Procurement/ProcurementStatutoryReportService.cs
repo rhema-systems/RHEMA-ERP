@@ -3,6 +3,7 @@ using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
@@ -108,6 +109,10 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
                 await ExecuteCommitmentRegisterAsync(definition, filters, request, cancellationToken),
             ProcurementStatutoryReportCatalogue.CertificateTrackingCode =>
                 await ExecuteCertificateTrackingAsync(definition, filters, request, cancellationToken),
+            ProcurementStatutoryReportCatalogue.ExceptionRegisterCode =>
+                await ExecuteExceptionRegisterAsync(definition, filters, request, cancellationToken),
+            ProcurementStatutoryReportCatalogue.ProcurementToPaymentCode =>
+                await ExecuteProcurementToPaymentAsync(definition, filters, request, cancellationToken),
             _ => throw new InvalidOperationException("The procurement system report is not implemented.")
         };
     }
@@ -220,6 +225,11 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
         var tenders = Query<Tender>();
         var amendments = Query<ContractAmendment>();
         var milestones = Query<ContractMilestone>();
+        var purchaseOrders = Query<PurchaseOrder>();
+        var invoices = Query<VendorInvoice>();
+        var certificates = Query<ProjectPaymentCertificate>();
+        var requisitions = Query<PurchaseRequisition>();
+        var projects = Query<Project>();
         var query =
             from contract in contracts
             join partner in partners on contract.BusinessPartnerId equals partner.Id
@@ -234,10 +244,37 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
                 SupplierCode = partner.PartnerCode,
                 SupplierName = partner.PartnerName,
                 TenderNumber = tender.TenderNumber,
+                ProjectCode = projects.Where(project => requisitions.Any(requisition =>
+                        requisition.Id == tender.SourcePurchaseRequisitionId && requisition.ProjectId == project.Id))
+                    .Select(project => project.ProjectCode).FirstOrDefault(),
+                ProjectName = projects.Where(project => requisitions.Any(requisition =>
+                        requisition.Id == tender.SourcePurchaseRequisitionId && requisition.ProjectId == project.Id))
+                    .Select(project => project.Title).FirstOrDefault(),
                 Currency = contract.Currency,
                 ContractValue = contract.ContractValue,
+                ApprovalDate = contract.ActivatedAt ?? contract.SignedDate,
+                RetentionPercentage = contract.RetentionPercentage,
+                ApprovedVariationCount = amendments.Count(item => item.ContractId == contract.Id && item.Status == "Approved"),
                 ApprovedAmendmentValue = amendments.Where(item => item.ContractId == contract.Id && item.Status == "Approved")
                     .Sum(item => (decimal?)item.ValueChange) ?? 0m,
+                CertificateCount = certificates.Count(item => item.ContractId == contract.Id &&
+                    item.Status != ProjectPaymentCertificateStatuses.Draft &&
+                    item.Status != ProjectPaymentCertificateStatuses.Cancelled),
+                CertifiedAmount = certificates.Where(item => item.ContractId == contract.Id &&
+                        item.Status != ProjectPaymentCertificateStatuses.Draft &&
+                        item.Status != ProjectPaymentCertificateStatuses.Cancelled)
+                    .Sum(item => (decimal?)item.NetCertifiedAmount) ?? 0m,
+                InvoiceCount = invoices.Count(invoice => invoice.PurchaseOrderId.HasValue &&
+                    purchaseOrders.Any(order => order.Id == invoice.PurchaseOrderId.Value && order.ContractId == contract.Id) &&
+                    invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected),
+                InvoicedAmount = invoices.Where(invoice => invoice.PurchaseOrderId.HasValue &&
+                        purchaseOrders.Any(order => order.Id == invoice.PurchaseOrderId.Value && order.ContractId == contract.Id) &&
+                        invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected)
+                    .Sum(invoice => (decimal?)invoice.TotalAmount) ?? 0m,
+                PaidAmount = invoices.Where(invoice => invoice.PurchaseOrderId.HasValue &&
+                        purchaseOrders.Any(order => order.Id == invoice.PurchaseOrderId.Value && order.ContractId == contract.Id) &&
+                        invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected)
+                    .Sum(invoice => (decimal?)invoice.PaidAmount) ?? 0m,
                 EffectiveDate = contract.StartDate ?? contract.CreatedAt,
                 StartDate = contract.StartDate,
                 EndDate = contract.EndDate,
@@ -253,8 +290,13 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
         return await PageAsync(query, definition, request, filters, item => Row(
             ("ContractNumber", item.ContractNumber), ("ContractTitle", item.ContractTitle), ("ContractType", item.ContractType),
             ("Status", item.Status), ("SupplierCode", item.SupplierCode), ("SupplierName", item.SupplierName),
-            ("TenderNumber", item.TenderNumber), ("Currency", item.Currency), ("ContractValue", item.ContractValue),
+            ("TenderNumber", item.TenderNumber), ("ProjectCode", item.ProjectCode), ("ProjectName", item.ProjectName),
+            ("Currency", item.Currency), ("ContractValue", item.ContractValue), ("ApprovalDate", item.ApprovalDate),
+            ("RetentionPercentage", item.RetentionPercentage), ("ApprovedVariationCount", item.ApprovedVariationCount),
             ("ApprovedAmendmentValue", item.ApprovedAmendmentValue), ("StartDate", item.StartDate),
+            ("CertificateCount", item.CertificateCount), ("CertifiedAmount", item.CertifiedAmount),
+            ("InvoiceCount", item.InvoiceCount), ("InvoicedAmount", item.InvoicedAmount),
+            ("PaidAmount", item.PaidAmount), ("Balance", item.Balance),
             ("EndDate", item.EndDate), ("SignedDate", item.SignedDate),
             ("CompletedMilestones", item.CompletedMilestones), ("TotalMilestones", item.TotalMilestones)), cancellationToken);
     }
@@ -563,6 +605,8 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
                 Status = commitment.Status,
                 Currency = commitment.Currency,
                 ReservedAmount = commitment.ReservedAmount,
+                FormallyCommittedAmount = commitment.FormallyCommittedAmount,
+                UtilizedAmount = commitment.UtilizedAmount,
                 BudgetAvailableBefore = commitment.BudgetAvailableBefore,
                 BudgetAvailableAfter = commitment.BudgetAvailableAfter,
                 ReservedAt = commitment.ReservedAtUtc,
@@ -587,6 +631,8 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
             ("ReservationReference", item.ReservationReference), ("RequisitionNumber", item.RequisitionNumber),
             ("BudgetCode", item.BudgetCode), ("FiscalYear", item.FiscalYear), ("Status", item.Status.ToString()),
             ("Currency", item.Currency), ("ReservedAmount", item.ReservedAmount),
+            ("OutstandingReservedAmount", item.OutstandingReservedAmount),
+            ("FormallyCommittedAmount", item.FormallyCommittedAmount), ("UtilizedAmount", item.UtilizedAmount),
             ("BudgetAvailableBefore", item.BudgetAvailableBefore), ("BudgetAvailableAfter", item.BudgetAvailableAfter),
             ("ReservedAt", item.ReservedAt), ("ReservedBy", item.ReservedBy), ("ConsumedAt", item.ConsumedAt),
             ("ReleasedAt", item.ReleasedAt), ("ReleaseReason", item.ReleaseReason), ("IsOverride", item.IsOverride),
@@ -662,6 +708,135 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
             ("ApHandoffAt", item.ApHandoffAt), ("PaymentStatus", item.PaymentStatus),
             ("PaymentDueDate", item.PaymentDueDate), ("VendorInvoiceLinked", item.VendorInvoiceLinked),
             ("DocumentGenerated", item.DocumentGenerated)), cancellationToken);
+    }
+
+    private async Task<ReportResultDto> ExecuteExceptionRegisterAsync(
+        ProcurementSystemReportDefinition definition, ReportFilters filters, ExecuteReportDto request,
+        CancellationToken cancellationToken)
+    {
+        var controls = Query<ProcurementExceptionalSourcingControl>();
+        var tenders = Query<Tender>();
+        var sourcingCases = Query<ProcurementSourcingCase>();
+        var query =
+            from control in controls
+            join tender in tenders on control.TenderId equals tender.Id
+            join sourcingCase in sourcingCases on control.SourcingCaseId equals sourcingCase.Id
+            select new ExceptionRegisterRow
+            {
+                TenderNumber = tender.TenderNumber,
+                SourcingReference = sourcingCase.CaseNumber,
+                Method = control.Method,
+                Status = control.Status,
+                Justification = control.Justification,
+                ExceptionRuleCode = control.ExceptionRuleCode,
+                AuthorityRouteReference = control.AuthorityRouteReference,
+                JustificationEvidenceReference = control.JustificationEvidenceReference,
+                SupplierSelectionEvidenceReference = control.SupplierSelectionEvidenceReference,
+                PreparedAt = control.PreparedAtUtc,
+                SubmittedAt = control.SubmittedForApprovalAtUtc,
+                ApprovedAt = control.ApprovedAtUtc,
+                ManagingDirectorApprovalRequired = control.ManagingDirectorApprovalRequired,
+                ManagingDirectorApprovalReference = control.ManagingDirectorApprovalReference,
+                PpaApprovalRequired = control.PpaApprovalRequired,
+                PpaApprovalReference = control.PpaApprovalReference,
+                AwardReference = control.AwardReference,
+                ContractReference = control.ContractReference,
+                ExceptionReportReference = control.ExceptionReportReference,
+                PostAwardFilingReference = control.PostAwardFilingReference,
+                FiledAt = control.FiledAtUtc
+            };
+        query = ApplyDate(query, filters, item => item.PreparedAt);
+        if (!string.IsNullOrWhiteSpace(filters.Status) &&
+            Enum.TryParse<ProcurementExceptionalSourcingControlStatus>(filters.Status, true, out var status))
+            query = query.Where(item => item.Status == status);
+        query = query.OrderByDescending(item => item.PreparedAt).ThenBy(item => item.TenderNumber);
+        return await PageAsync(query, definition, request, filters, item => Row(
+            ("TenderNumber", item.TenderNumber), ("SourcingReference", item.SourcingReference),
+            ("Method", item.Method.ToString()), ("Status", item.Status.ToString()),
+            ("Justification", item.Justification), ("ExceptionRuleCode", item.ExceptionRuleCode),
+            ("AuthorityRouteReference", item.AuthorityRouteReference),
+            ("JustificationEvidenceReference", item.JustificationEvidenceReference),
+            ("SupplierSelectionEvidenceReference", item.SupplierSelectionEvidenceReference),
+            ("PreparedAt", item.PreparedAt), ("SubmittedAt", item.SubmittedAt), ("ApprovedAt", item.ApprovedAt),
+            ("ManagingDirectorApprovalRequired", item.ManagingDirectorApprovalRequired),
+            ("ManagingDirectorApprovalReference", item.ManagingDirectorApprovalReference),
+            ("PpaApprovalRequired", item.PpaApprovalRequired), ("PpaApprovalReference", item.PpaApprovalReference),
+            ("AwardReference", item.AwardReference), ("ContractReference", item.ContractReference),
+            ("ExceptionReportReference", item.ExceptionReportReference),
+            ("PostAwardFilingReference", item.PostAwardFilingReference), ("FiledAt", item.FiledAt)), cancellationToken);
+    }
+
+    private async Task<ReportResultDto> ExecuteProcurementToPaymentAsync(
+        ProcurementSystemReportDefinition definition, ReportFilters filters, ExecuteReportDto request,
+        CancellationToken cancellationToken)
+    {
+        var purchaseOrders = Query<PurchaseOrder>();
+        var partners = Query<BusinessPartner>();
+        var requisitions = Query<PurchaseRequisition>();
+        var receipts = Query<PurchaseOrderReceipt>();
+        var receiptItems = Query<PurchaseOrderReceiptItem>();
+        var invoices = Query<VendorInvoice>();
+        var allocations = Query<VendorPaymentAllocation>();
+        var payments = Query<VendorPayment>();
+        var query =
+            from order in purchaseOrders
+            join partner in partners on order.BusinessPartnerId equals partner.Id
+            join requisition in requisitions on order.SourceRequisitionId equals (Guid?)requisition.Id into requisitionJoin
+            from requisition in requisitionJoin.DefaultIfEmpty()
+            select new ProcurementToPaymentRow
+            {
+                BusinessPartnerId = order.BusinessPartnerId,
+                RequisitionNumber = requisition == null ? order.SourceRequisitionNumber : requisition.RequisitionNumber,
+                RequisitionStatus = requisition == null ? null : requisition.Status,
+                OrderId = order.Id,
+                OrderNumber = order.OrderNumber,
+                OrderDate = order.OrderDate,
+                OrderStatus = order.Status,
+                SupplierName = partner.PartnerName,
+                Currency = order.Currency,
+                OrderAmount = order.TotalAmount,
+                ReceiptCount = receipts.Count(receipt => receipt.PurchaseOrderId == order.Id),
+                AcceptedQuantity = receiptItems.Where(receiptItem => receipts.Any(receipt =>
+                        receipt.Id == receiptItem.ReceiptId && receipt.PurchaseOrderId == order.Id))
+                    .Sum(receiptItem => (decimal?)receiptItem.AcceptedQuantity) ?? 0m,
+                InvoiceCount = invoices.Count(invoice => invoice.PurchaseOrderId == order.Id &&
+                    invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected),
+                InvoiceAmount = invoices.Where(invoice => invoice.PurchaseOrderId == order.Id &&
+                        invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected)
+                    .Sum(invoice => (decimal?)invoice.TotalAmount) ?? 0m,
+                MatchedInvoiceCount = invoices.Count(invoice => invoice.PurchaseOrderId == order.Id &&
+                    invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected &&
+                    invoice.MatchingType == InvoiceMatchingType.ThreeWay &&
+                    invoice.MatchingStatus == InvoiceMatchingStatus.ThreeWayMatched),
+                PaidAmount = allocations.Where(allocation => !allocation.IsReversal &&
+                        invoices.Any(invoice => invoice.Id == allocation.VendorInvoiceId && invoice.PurchaseOrderId == order.Id &&
+                            invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected) &&
+                        payments.Any(payment => payment.Id == allocation.VendorPaymentId &&
+                            (payment.Status == VendorPaymentStatus.Processed ||
+                             payment.Status == VendorPaymentStatus.Cleared ||
+                             payment.Status == VendorPaymentStatus.Reconciled)))
+                    .Sum(allocation => (decimal?)allocation.AllocatedAmount) ?? 0m,
+                LatestPaymentAt = allocations.Where(allocation => !allocation.IsReversal &&
+                        invoices.Any(invoice => invoice.Id == allocation.VendorInvoiceId && invoice.PurchaseOrderId == order.Id &&
+                            invoice.Status != VendorInvoiceStatus.Voided && invoice.Status != VendorInvoiceStatus.Rejected) &&
+                        payments.Any(payment => payment.Id == allocation.VendorPaymentId &&
+                            (payment.Status == VendorPaymentStatus.Processed ||
+                             payment.Status == VendorPaymentStatus.Cleared ||
+                             payment.Status == VendorPaymentStatus.Reconciled)))
+                    .Max(allocation => (DateTime?)allocation.AllocationDate)
+            };
+        query = ApplyDate(query, filters, item => item.OrderDate);
+        if (!string.IsNullOrWhiteSpace(filters.Status)) query = query.Where(item => item.OrderStatus == filters.Status);
+        if (filters.SupplierId.HasValue) query = query.Where(item => item.BusinessPartnerId == filters.SupplierId.Value);
+        query = query.OrderByDescending(item => item.OrderDate).ThenBy(item => item.OrderNumber);
+        return await PageAsync(query, definition, request, filters, item => Row(
+            ("RequisitionNumber", item.RequisitionNumber), ("RequisitionStatus", item.RequisitionStatus),
+            ("OrderNumber", item.OrderNumber), ("OrderDate", item.OrderDate), ("OrderStatus", item.OrderStatus),
+            ("SupplierName", item.SupplierName), ("Currency", item.Currency), ("OrderAmount", item.OrderAmount),
+            ("ReceiptCount", item.ReceiptCount), ("AcceptedQuantity", item.AcceptedQuantity),
+            ("InvoiceCount", item.InvoiceCount), ("InvoiceAmount", item.InvoiceAmount),
+            ("MatchedInvoiceCount", item.MatchedInvoiceCount), ("PaidAmount", item.PaidAmount),
+            ("OutstandingAmount", item.OutstandingAmount), ("LatestPaymentAt", item.LatestPaymentAt)), cancellationToken);
     }
 
     private IQueryable<T> Query<T>() where T : TenantEntity
@@ -884,9 +1059,20 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
         public string SupplierCode { get; set; } = string.Empty;
         public string SupplierName { get; set; } = string.Empty;
         public string TenderNumber { get; set; } = string.Empty;
+        public string? ProjectCode { get; set; }
+        public string? ProjectName { get; set; }
         public string Currency { get; set; } = string.Empty;
         public decimal ContractValue { get; set; }
+        public DateTime? ApprovalDate { get; set; }
+        public decimal RetentionPercentage { get; set; }
+        public int ApprovedVariationCount { get; set; }
         public decimal ApprovedAmendmentValue { get; set; }
+        public int CertificateCount { get; set; }
+        public decimal CertifiedAmount { get; set; }
+        public int InvoiceCount { get; set; }
+        public decimal InvoicedAmount { get; set; }
+        public decimal PaidAmount { get; set; }
+        public decimal Balance => Math.Max(0m, ContractValue + ApprovedAmendmentValue - PaidAmount);
         public DateTime EffectiveDate { get; set; }
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
@@ -1032,6 +1218,9 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
         public ProcurementBudgetCommitmentStatus Status { get; set; }
         public string Currency { get; set; } = string.Empty;
         public decimal ReservedAmount { get; set; }
+        public decimal OutstandingReservedAmount => Math.Max(0m, ReservedAmount - FormallyCommittedAmount);
+        public decimal FormallyCommittedAmount { get; set; }
+        public decimal UtilizedAmount { get; set; }
         public decimal BudgetAvailableBefore { get; set; }
         public decimal BudgetAvailableAfter { get; set; }
         public DateTime ReservedAt { get; set; }
@@ -1072,5 +1261,52 @@ public sealed class ProcurementStatutoryReportService : IProcurementStatutoryRep
         public DateTime? PaymentDueDate { get; set; }
         public bool VendorInvoiceLinked { get; set; }
         public bool DocumentGenerated { get; set; }
+    }
+
+    private sealed class ExceptionRegisterRow
+    {
+        public string TenderNumber { get; set; } = string.Empty;
+        public string SourcingReference { get; set; } = string.Empty;
+        public ProcurementMethodType Method { get; set; }
+        public ProcurementExceptionalSourcingControlStatus Status { get; set; }
+        public string Justification { get; set; } = string.Empty;
+        public string ExceptionRuleCode { get; set; } = string.Empty;
+        public string AuthorityRouteReference { get; set; } = string.Empty;
+        public string JustificationEvidenceReference { get; set; } = string.Empty;
+        public string SupplierSelectionEvidenceReference { get; set; } = string.Empty;
+        public DateTime PreparedAt { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+        public bool ManagingDirectorApprovalRequired { get; set; }
+        public string? ManagingDirectorApprovalReference { get; set; }
+        public bool PpaApprovalRequired { get; set; }
+        public string? PpaApprovalReference { get; set; }
+        public string? AwardReference { get; set; }
+        public string? ContractReference { get; set; }
+        public string? ExceptionReportReference { get; set; }
+        public string? PostAwardFilingReference { get; set; }
+        public DateTime? FiledAt { get; set; }
+    }
+
+    private sealed class ProcurementToPaymentRow
+    {
+        public Guid BusinessPartnerId { get; set; }
+        public string? RequisitionNumber { get; set; }
+        public string? RequisitionStatus { get; set; }
+        public Guid OrderId { get; set; }
+        public string OrderNumber { get; set; } = string.Empty;
+        public DateTime OrderDate { get; set; }
+        public string OrderStatus { get; set; } = string.Empty;
+        public string SupplierName { get; set; } = string.Empty;
+        public string Currency { get; set; } = string.Empty;
+        public decimal OrderAmount { get; set; }
+        public int ReceiptCount { get; set; }
+        public decimal AcceptedQuantity { get; set; }
+        public int InvoiceCount { get; set; }
+        public decimal InvoiceAmount { get; set; }
+        public int MatchedInvoiceCount { get; set; }
+        public decimal PaidAmount { get; set; }
+        public decimal OutstandingAmount => Math.Max(0m, InvoiceAmount - PaidAmount);
+        public DateTime? LatestPaymentAt { get; set; }
     }
 }

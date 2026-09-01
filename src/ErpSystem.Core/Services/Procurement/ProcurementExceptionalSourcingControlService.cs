@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -109,7 +110,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             BoardApprovalRequired = lineage.BoardRequired,
             ManagingDirectorApprovalRequired = lineage.ManagingDirectorRequired,
             PpaApprovalRequired = lineage.PpaRequired,
-            JustificationRequired = lineage.ExceptionRule.JustificationRequired,
+            JustificationRequired = lineage.MethodRule.JustificationRequired,
             EvidenceRequired = lineage.ExceptionRule.EvidenceRequired,
             PostAwardFilingRequired = lineage.ExceptionRule.PostAwardFilingRequired,
             EvidenceRequirements = lineage.EvidenceRules.Select(rule => new ProcurementExceptionalEvidenceRequirementDto
@@ -140,7 +141,10 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         if (await Controls.ExistsAsync(item => item.TenantId == _currentUser.TenantId && item.TenderId == tenderId && !item.IsDeleted))
             throw Conflict("EXCEPTIONAL_CONTROL_EXISTS", "The controlled noncompetitive sourcing record already exists.");
         var lineage = await RevalidateAsync(tender, null, correlation, cancellationToken);
-        if (lineage.ExceptionRule.JustificationRequired)
+        if (!lineage.Case.AuthorityRouteId.HasValue || string.IsNullOrWhiteSpace(lineage.Case.AuthorityRouteReference))
+            throw Validation("EXCEPTIONAL_ADVANCED_AUTHORITY_ROUTE_REQUIRED",
+                "This exceptional statutory-control stage requires an advanced authority route. The sourcing case remains valid for the standard approved-PR tender workflow.");
+        if (lineage.MethodRule.JustificationRequired)
         {
             Require(request.Justification, "EXCEPTIONAL_JUSTIFICATION_REQUIRED", "The configured sourcing rule requires a detailed justification.");
             Require(request.JustificationEvidenceReference, "EXCEPTIONAL_JUSTIFICATION_EVIDENCE_REQUIRED", "The configured sourcing rule requires justification evidence.");
@@ -196,7 +200,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         {
             Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, TenderId = tender.Id,
             SourcingCaseId = lineage.Case.Id, MethodRuleId = lineage.MethodRule.Id,
-            ExceptionRuleId = lineage.ExceptionRule.Id, AuthorityRouteId = lineage.Case.AuthorityRouteId,
+            ExceptionRuleId = lineage.ExceptionRule.Id, AuthorityRouteId = lineage.Case.AuthorityRouteId.Value,
             Method = lineage.Case.SelectedMethod, MethodRuleCode = lineage.MethodRule.RuleCode,
             ExceptionRuleCode = lineage.ExceptionRule.RuleCode,
             AuthorityRouteReference = lineage.Case.AuthorityRouteReference,
@@ -724,9 +728,9 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             if (exceptionRule.PostAwardFilingRequired)
                 throw Validation("PETTY_PURCHASE_POLICY_INVALID", "DEC-005 petty-purchase controls cannot require the DEC-006 post-award filing lifecycle.");
         }
-        else if (!exceptionRule.JustificationRequired || !exceptionRule.EvidenceRequired || !exceptionRule.PostAwardFilingRequired)
+        else if (!exceptionRule.EvidenceRequired || !exceptionRule.PostAwardFilingRequired)
         {
-            throw Validation("EXCEPTIONAL_POLICY_INCOMPLETE", "The DEC-006 exception rule must require justification, verified evidence, approval, and post-award filing.");
+            throw Validation("EXCEPTIONAL_POLICY_INCOMPLETE", "The DEC-006 exception rule must require verified evidence, approval, and post-award filing. Sourcing justification is governed by the matched Method rule.");
         }
         var workflowDefinitionId = exceptionRule.WorkflowDefinitionId ?? methodRule.WorkflowDefinitionId;
         if (!workflowDefinitionId.HasValue)
@@ -769,7 +773,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private async Task EnsureCapabilityAsync(string permissionCode, string reference, string correlationId, CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permissionCode, SourceType = SourceType, SourceReference = reference
@@ -906,9 +910,9 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
-        throw new ProcurementExceptionalSourcingAuthorizationException("A TDC procurement or tenant-administration role is required.");
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
+        throw new ProcurementExceptionalSourcingAuthorizationException("The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -931,7 +935,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         if (!current.SequenceEqual(parsed)) throw Conflict("EXCEPTIONAL_VERSION_CONFLICT", "The statutory record changed. Reload before continuing.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static bool IsExceptional(ProcurementMethodType method) =>
         method is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase;

@@ -925,8 +925,9 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.Roles.Any(role => role is "SuperAdmin" or "TenantAdmin"))
-            throw new ProcurementAccessAuthorizationException("Procurement access administration requires SuperAdmin or TenantAdmin.");
+        // All access-administration endpoints require procurement.access.manage.
+        // Do not reject the TDC ICT Administrator after the permission handler has
+        // authorized the request merely because it lacks a legacy generic role.
     }
 
     private void EnsureAuthenticatedTenant()

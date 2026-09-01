@@ -26,6 +26,8 @@ import {
   type ContractActivationOverview,
   type ContractDocumentDto,
 } from '@/services/contractService';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 interface ContractActivationGateProps {
   contractId: string;
@@ -75,6 +77,9 @@ export function ContractActivationGate({
   documents,
   onContractChanged,
 }: ContractActivationGateProps) {
+  const { hasPermission } = useAuth();
+  const canManageContract = hasPermission('procurement.contract.manage');
+  const canApproveContract = hasPermission('procurement.contract.approve');
   const [overview, setOverview] = useState<ContractActivationOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -128,6 +133,10 @@ export function ContractActivationGate({
   };
 
   const submit = async () => {
+    if (!canManageContract) {
+      toast.error('Contract management permission is required');
+      return;
+    }
     if (!overview || !reason.trim() || !allEvidenceSelected) return;
     setBusy(true);
     try {
@@ -155,13 +164,17 @@ export function ContractActivationGate({
       setSelectedDocuments({});
       await refreshAfterMutation();
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : 'Activation submission failed.');
+      toast.error(getProcurementProblemMessage(submitError, 'Activation submission failed.'));
     } finally {
       setBusy(false);
     }
   };
 
   const decide = async (approved: boolean) => {
+    if (!canApproveContract) {
+      toast.error('Contract approval permission is required');
+      return;
+    }
     if (!current || !decisionComment.trim()) return;
     setBusy(true);
     try {
@@ -175,13 +188,17 @@ export function ContractActivationGate({
       setDecisionComment('');
       await refreshAfterMutation();
     } catch (decisionError) {
-      toast.error(decisionError instanceof Error ? decisionError.message : 'Activation decision failed.');
+      toast.error(getProcurementProblemMessage(decisionError, 'Activation decision failed.'));
     } finally {
       setBusy(false);
     }
   };
 
   const activate = async () => {
+    if (!canApproveContract) {
+      toast.error('Contract approval permission is required');
+      return;
+    }
     if (!current || !contractorSignatory.trim() || !activationComment.trim()) return;
     setBusy(true);
     try {
@@ -196,7 +213,7 @@ export function ContractActivationGate({
       setActivationComment('');
       await refreshAfterMutation();
     } catch (activationError) {
-      toast.error(activationError instanceof Error ? activationError.message : 'Contract activation failed.');
+      toast.error(getProcurementProblemMessage(activationError, 'Contract activation failed.'));
       await load();
     } finally {
       setBusy(false);
@@ -283,7 +300,7 @@ export function ContractActivationGate({
         </CardContent>
       </Card>
 
-      {overview.canSubmit && (
+      {overview.canSubmit && canManageContract && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -370,7 +387,7 @@ export function ContractActivationGate({
               <p><span className="text-muted-foreground">Policy:</span> v{current.policyVersion}</p>
               <p><span className="text-muted-foreground">Readiness:</span> #{current.awardReadinessSequence}</p>
             </div>
-            {overview.canDecide && (
+            {overview.canDecide && canApproveContract && (
               <div className="space-y-3 rounded-lg border p-4">
                 <Label htmlFor="activation-decision">Independent decision comment</Label>
                 <Textarea
@@ -393,7 +410,7 @@ export function ContractActivationGate({
                 </div>
               </div>
             )}
-            {overview.canActivate && (
+            {overview.canActivate && canApproveContract && (
               <div className="grid gap-3 rounded-lg border border-emerald-200 p-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="contractor-signatory">Contractor signatory</Label>

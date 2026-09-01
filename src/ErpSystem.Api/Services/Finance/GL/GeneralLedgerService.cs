@@ -950,6 +950,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(t => t.JournalEntry)
                 .Include(t => t.FinanceDimensionSet)
                 .ThenInclude(set => set!.Items)
+                .Include(t => t.FinanceDimensionSnapshot)
+                .ThenInclude(snapshot => snapshot!.Items)
                 .Where(t =>
                     t.TenantId == tenantId &&
                     !t.IsDeleted &&
@@ -1745,15 +1747,27 @@ namespace ErpSystem.Api.Services.Finance.GL
                         IsReversed = transaction.IsReversed,
                         SegmentString = transaction.SegmentString,
                         FinanceDimensionSetId = transaction.FinanceDimensionSetId,
-                        FinanceDimensionDisplay = transaction.FinanceDimensionSet?.DisplayValue,
-                        Dimensions = transaction.FinanceDimensionSet?.Items
+                        FinanceDimensionDisplay = transaction.FinanceDimensionSnapshot?.DisplayValueSnapshot
+                            ?? transaction.FinanceDimensionSet?.DisplayValue,
+                        Dimensions = transaction.FinanceDimensionSnapshot?.Items
                             .OrderBy(item => item.DimensionCodeSnapshot)
                             .Select(item => new FinanceDimensionAssignmentDto
                             {
                                 DefinitionId = item.FinanceDimensionDefinitionId,
                                 ValueId = item.FinanceDimensionValueId,
                                 DimensionCode = item.DimensionCodeSnapshot,
-                                DimensionName = item.DimensionCodeSnapshot,
+                                DimensionName = item.DimensionNameSnapshot,
+                                ValueCode = item.DimensionValueCodeSnapshot,
+                                ValueName = item.DimensionValueNameSnapshot
+                            }).ToList()
+                            ?? transaction.FinanceDimensionSet?.Items
+                            .OrderBy(item => item.DimensionCodeSnapshot)
+                            .Select(item => new FinanceDimensionAssignmentDto
+                            {
+                                DefinitionId = item.FinanceDimensionDefinitionId,
+                                ValueId = item.FinanceDimensionValueId,
+                                DimensionCode = item.DimensionCodeSnapshot,
+                                DimensionName = item.DimensionNameSnapshot,
                                 ValueCode = item.DimensionValueCodeSnapshot,
                                 ValueName = item.DimensionValueNameSnapshot
                             })

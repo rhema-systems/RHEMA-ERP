@@ -242,8 +242,41 @@ public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
     public decimal? ContractRemainingValue { get; set; }
     public decimal? ContractUtilizationPercent { get; set; }
 
+    public PurchaseOrderBudgetCommitmentDto? BudgetCommitment { get; set; }
+
     public List<PurchaseOrderItemDto> Items { get; set; } = new();
     public List<PurchaseOrderReceiptDto> Receipts { get; set; } = new();
+}
+
+public sealed class PurchaseOrderBudgetCommitmentDto
+{
+    public Guid CommitmentId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string ReservationStatus { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal ReservedAmount { get; set; }
+    public decimal FormallyCommittedAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public int ReservationSequence { get; set; }
+    public List<PurchaseOrderBudgetCommitmentHistoryDto> History { get; set; } = new();
+}
+
+public sealed class PurchaseOrderBudgetCommitmentHistoryDto
+{
+    public int Sequence { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Event { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public string? BeforeSnapshotJson { get; set; }
+    public string? AfterSnapshotJson { get; set; }
+    public decimal? ReservedBalanceAfter { get; set; }
+    public decimal? CommittedBalanceAfter { get; set; }
+    public decimal? AvailableBalanceAfter { get; set; }
 }
 
 /// <summary>
@@ -459,6 +492,28 @@ public class ReceivePurchaseOrderItemDto
     public decimal RejectedQuantity { get; set; }
     public Guid? WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// Explicit receiver consent to create and link a controlled stock item
+    /// when the approved purchase-order line has no InventoryItemId. The
+    /// server derives the item name, UOM, supplier, cost and source lineage
+    /// from the governed purchase-order line; it never trusts client-supplied
+    /// descriptive master data.
+    /// </summary>
+    public bool CreateInventoryItemIfMissing { get; set; }
+
+    /// <summary>
+    /// Required active inventory category when a missing item must be created.
+    /// </summary>
+    public Guid? InventoryCategoryId { get; set; }
+
+    /// <summary>
+    /// Optional tenant-unique item code proposed by the receiver. When omitted,
+    /// the server generates a stable code from the PO and line identifiers.
+    /// </summary>
+    [MaxLength(100)]
+    public string? ProposedItemCode { get; set; }
+
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public DateTime? ExpirationDate { get; set; }
@@ -486,8 +541,11 @@ public class PurchaseRequisitionSummaryDto
     public string Priority { get; set; } = string.Empty;
     public string? Department { get; set; }
     public decimal TotalAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
     public string? SourcePlanNumber { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
+    public List<Guid> SourcePlanItemIds { get; set; } = new();
     public string? SourcePlanItemDescription { get; set; }
     public string? BudgetCode { get; set; }
     public ProcurementCategoryClass? ProcurementCategory { get; set; }
@@ -524,6 +582,7 @@ public class PurchaseRequisitionItemDto
     public Guid Id { get; set; }
     public Guid RequisitionId { get; set; }
     public Guid? InventoryItemId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public string ItemDescription { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public string UnitOfMeasure { get; set; } = string.Empty;
@@ -555,6 +614,14 @@ public class CreatePurchaseRequisitionDto
     /// retained as the display snapshot for legacy reporting only.
     /// </summary>
     public Guid? DepartmentId { get; set; }
+
+    /// <summary>
+    /// Requested transaction currency for an unlinked requisition. When a
+    /// governed budget is selected, the budget currency remains authoritative.
+    /// </summary>
+    [StringLength(3, MinimumLength = 3)]
+    public string? Currency { get; set; }
+
     public string? CostCenter { get; set; }
     public string? Justification { get; set; }
     public string? Notes { get; set; }
@@ -576,6 +643,7 @@ public sealed class UpdatePurchaseRequisitionDto : CreatePurchaseRequisitionDto
 public sealed class SavePurchaseRequisitionLinkageRequest
 {
     public Guid? SourcePlanItemId { get; set; }
+    public List<Guid> SourcePlanItemIds { get; set; } = new();
     public Guid? BudgetId { get; set; }
     public ProcurementCategoryClass? ProcurementCategory { get; set; }
 
@@ -638,10 +706,22 @@ public sealed class PurchaseRequisitionLinkageOptionDto
     public string Name { get; set; } = string.Empty;
     public string? Status { get; set; }
     public Guid? ParentId { get; set; }
+    public Guid? LinkedBudgetId { get; set; }
     public string? ParentReference { get; set; }
     public string? Category { get; set; }
     public decimal? Amount { get; set; }
     public string? Currency { get; set; }
+    public Guid? BudgetId { get; set; }
+    public string? BudgetCode { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public string? DepartmentName { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public decimal? Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal? UnitPrice { get; set; }
+    public DateTime? RequiredDate { get; set; }
+    public string? Specifications { get; set; }
+    public Guid? PreferredSupplierId { get; set; }
 }
 
 public sealed class PurchaseRequisitionNamedOptionDto
@@ -750,6 +830,7 @@ public sealed class PurchaseRequisitionBudgetReadinessDto
     public decimal AllocatedAmount { get; set; }
     public decimal UtilizedAmount { get; set; }
     public decimal CommittedAmount { get; set; }
+    public decimal ReservedAmount { get; set; }
     public decimal AvailableAmount { get; set; }
     public decimal ShortfallAmount { get; set; }
     public Guid? CommitmentId { get; set; }
@@ -870,6 +951,7 @@ public sealed class PurchaseRequisitionAuthorityRouteHistoryDto
 public class CreatePurchaseRequisitionItemDto
 {
     public Guid? InventoryItemId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
 
     [Required]
     public string ItemDescription { get; set; } = string.Empty;

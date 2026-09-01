@@ -109,6 +109,66 @@ public sealed class ProcurementAwardReadinessServiceTests
             .Where(exception => exception.Code == "TENDER_NOT_FOUND");
     }
 
+    [Fact]
+    public async Task MissingDec011ConfigurationIsAdvisoryAtTenderAwardReadiness()
+    {
+        await using var fixture = new Fixture();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("optional-dec-011"),
+            "optional-dec-011");
+
+        var supplier = result.Suppliers.Should().ContainSingle().Subject;
+        supplier.Errors.Should().NotContain(item =>
+            item.Contains("DEC-011", StringComparison.OrdinalIgnoreCase));
+        supplier.Warnings.Should().ContainSingle(item =>
+            item.Contains("No effective DEC-011", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MissingOptionalAwardVerificationChecklistDoesNotBlockTenderReadiness()
+    {
+        await using var fixture = new Fixture();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("optional-award-verification"),
+            "optional-award-verification");
+
+        result.PrerequisiteGroups
+            .SelectMany(group => group.Items)
+            .Should().Contain(item =>
+                item.Code == "AWARD_VERIFICATION_NOT_CONFIGURED" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.NotApplicable);
+        result.BlockedReasons.Should().NotContain(item =>
+            item.Contains("AWARD_VERIFICATION", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SodPreflightRequiresReadPermissionRatherThanAwardApproval()
+    {
+        await using var fixture = new Fixture();
+
+        _ = await fixture.Service.GetEvaluatorAwardApproverSodStatusAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            "read-only-preflight");
+
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.records.read"),
+            "read-only-preflight",
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.tender.approve"),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly UnitOfWork _unitOfWork;
@@ -207,8 +267,8 @@ public sealed class ProcurementAwardReadinessServiceTests
                 .Returns(["TDC_HEAD_OF_PROCUREMENT"]);
             _current.Setup(item => item.HasRole(It.IsAny<string>()))
                 .Returns(false);
-            var access = new Mock<IProcurementAccessControlService>();
-            access.Setup(item => item.EnforceCapabilityAsync(
+            Access = new Mock<IProcurementAccessControlService>();
+            Access.Setup(item => item.EnforceCapabilityAsync(
                     It.IsAny<ProcurementAccessCapabilityRequest>(),
                     It.IsAny<string>(),
                     It.IsAny<CancellationToken>()))
@@ -234,7 +294,7 @@ public sealed class ProcurementAwardReadinessServiceTests
             Service = new ProcurementAwardReadinessService(
                 _unitOfWork,
                 _current.Object,
-                access.Object,
+                Access.Object,
                 sod.Object,
                 events.Object);
         }
@@ -247,6 +307,7 @@ public sealed class ProcurementAwardReadinessServiceTests
         public TenderBid Bid { get; }
         public TenderEvaluation Evaluation { get; }
         public BusinessPartner Partner { get; }
+        public Mock<IProcurementAccessControlService> Access { get; }
         public ProcurementAwardReadinessService Service { get; }
 
         public EvaluateProcurementAwardReadinessRequest Request(string key) => new()

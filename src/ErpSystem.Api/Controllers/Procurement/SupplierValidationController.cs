@@ -205,10 +205,6 @@ public class SupplierValidationController : ControllerBase
             _currentUser.UserId == Guid.Empty || _currentUser.IsExternalUser)
             throw new SupplierEligibilityAuthorizationException(
                 "Internal supplier-management access is required.");
-        if (_currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin") ||
-            _currentUser.HasRole("Administrator"))
-            return;
-
         var review = await _accessControl.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = "procurement.supplier.review",

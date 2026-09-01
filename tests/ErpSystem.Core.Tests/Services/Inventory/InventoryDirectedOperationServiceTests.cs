@@ -352,6 +352,66 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Generic_administrator_role_does_not_bypass_directed_task_assignment()
+    {
+        var (warehouse, item, reserve, pick) = await SeedBinsAsync();
+        var otherUser = await AddActiveUserAsync("assigned.operator@test.local");
+        var task = NewDirectedTask(warehouse, item, reserve.Id, pick.Id,
+            InventoryDirectedTaskType.Replenishment, "InventoryLocationReplenishment",
+            Guid.NewGuid(), Guid.NewGuid(), 2m);
+        task.AssignedToUserId = otherUser.Id;
+        await _context.AddAsync(task);
+        await _context.SaveChangesAsync();
+        _currentUser.Setup(value => value.HasRole(It.IsAny<string>())).Returns(true);
+        _access.Setup(value => value.CheckCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.inventory.master-data.manage"),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+
+        var action = () => _service.CancelTaskAsync(task.Id, new CancelInventoryDirectedTaskRequest
+        {
+            RowVersion = Convert.ToBase64String(task.RowVersion),
+            Reason = "Attempted administrator override."
+        }, "corr-generic-admin");
+
+        await action.Should().ThrowAsync<InventoryDirectedOperationAuthorizationException>()
+            .WithMessage("*inventory supervisory permission*");
+        _currentUser.Verify(value => value.HasRole(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Scoped_operation_and_inventory_supervisory_permissions_allow_assignment_override()
+    {
+        var (warehouse, item, reserve, pick) = await SeedBinsAsync();
+        var otherUser = await AddActiveUserAsync("assigned.supervised@test.local");
+        var task = NewDirectedTask(warehouse, item, reserve.Id, pick.Id,
+            InventoryDirectedTaskType.Replenishment, "InventoryLocationReplenishment",
+            Guid.NewGuid(), Guid.NewGuid(), 2m);
+        task.AssignedToUserId = otherUser.Id;
+        await _context.AddAsync(task);
+        await _context.SaveChangesAsync();
+
+        var result = await _service.CancelTaskAsync(task.Id, new CancelInventoryDirectedTaskRequest
+        {
+            RowVersion = Convert.ToBase64String(task.RowVersion),
+            Reason = "Stores supervisor cancelled the stale assignment."
+        }, "corr-tdc-supervisor");
+
+        result.Status.Should().Be(InventoryDirectedTaskStatus.Cancelled);
+        _access.Verify(value => value.CheckCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.transfer" &&
+                request.WarehouseId == warehouse.Id),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        _access.Verify(value => value.CheckCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.master-data.manage" &&
+                request.SourceReference == task.TaskNumber),
+            "corr-tdc-supervisor", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public void Ef_model_has_tenant_replay_source_and_concurrency_controls()
     {
         var entity = _context.Model.FindEntityType(typeof(InventoryDirectedTask))!;
@@ -438,6 +498,18 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
         IntegrityHash = new string('c', 64),
         RowVersion = new byte[] { 1 }
     };
+
+    private async Task<ApplicationUser> AddActiveUserAsync(string username)
+    {
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, UserName = username,
+            FirstName = "Assigned", LastName = "Operator", IsActive = true
+        };
+        await _context.AddAsync(user);
+        await _context.SaveChangesAsync();
+        return user;
+    }
 
     public Task InitializeAsync() => Task.CompletedTask;
     public async Task DisposeAsync()

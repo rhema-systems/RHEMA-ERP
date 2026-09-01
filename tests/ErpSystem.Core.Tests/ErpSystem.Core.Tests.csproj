@@ -33,6 +33,7 @@
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
     <Compile Include="Services\Crm\**\*.cs" />
+    <Compile Include="Services\Deployment\**\*.cs" />
     <Compile Include="Services\Procurement\**\*.cs" />
     <Compile Include="Services\Projects\**\*.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
@@ -54,6 +55,7 @@
     <Compile Include="Services\Inventory\InventoryScanningServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryItemProfileServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryStatutoryReportServiceTests.cs" />
+    <Compile Include="Services\Inventory\InventoryStoresArchitectureSqlServerIntegrationTests.cs" />
     <Compile Include="Services\Inventory\E2E010ProjectMaterialLifecycleTests.cs" />
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.cs" />
   </ItemGroup>

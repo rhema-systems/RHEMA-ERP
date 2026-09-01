@@ -148,9 +148,11 @@ const editorFromOrder = (order: PurchaseOrderDetailDto): EditorState => ({
 export function PurchaseOrderAmendmentWorkspace({
   order,
   onApplied,
+  editorRequestToken = 0,
 }: {
   order: PurchaseOrderDetailDto;
   onApplied?: () => Promise<void> | void;
+  editorRequestToken?: number;
 }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('procurement.purchase-order.create');
@@ -201,6 +203,12 @@ export function PurchaseOrderAmendmentWorkspace({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (editorRequestToken > 0 && overview?.canCreateAmendment) {
+      setShowEditor(true);
+    }
+  }, [editorRequestToken, overview?.canCreateAmendment]);
 
   const proposedTotal = useMemo(() => {
     const subtotal = editor.items.reduce(
@@ -805,9 +813,6 @@ export function PurchaseOrderAmendmentWorkspace({
               </Card>
             ))
           )}
-          <p className="text-xs text-muted-foreground">
-            Audit decisions: {overview.decisionKeys.join(' · ')}
-          </p>
         </CardContent>
       </Card>
 

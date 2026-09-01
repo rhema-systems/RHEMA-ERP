@@ -44,25 +44,63 @@ public sealed class ProcurementRequisitionSubmissionControlServiceTests
     }
 
     [Fact]
-    public async Task MissingAppAndExceptionBlocksSubmissionAndRecordsDeniedDecision()
+    public async Task MultipleLinePlanItemsFromTheSamePublishedPlanShareItsSubmissionTrace()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedAppPath();
+        var secondPlanItem = new ProcurementPlanItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementPlanId = references.Plan.Id,
+            ItemDescription = "Operational accessories", ItemCategory = "Goods",
+            EstimatedQuantity = 4, EstimatedUnitPrice = 125, EstimatedTotalCost = 500,
+            Status = "Approved", Currency = "GHS"
+        };
+        fixture.Context.ProcurementPlanItems.Add(secondPlanItem);
+        var requisition = fixture.NewRequisition(references.Plan, references.PlanItem);
+        requisition.SourcePlanItemDescription = "2 approved plan items";
+        requisition.TotalAmount = 1000m;
+        requisition.Items.Single().SourcePlanItemId = references.PlanItem.Id;
+        requisition.Items.Add(new PurchaseRequisitionItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, RequisitionId = requisition.Id,
+            SourcePlanItemId = secondPlanItem.Id, ItemDescription = secondPlanItem.ItemDescription,
+            Quantity = 4m, UnitOfMeasure = "EA", EstimatedUnitPrice = 125m,
+            LineTotal = 500m, Specifications = "Approved accessory specification",
+            Status = "Pending", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        });
+        fixture.Context.Add(requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.EnforceAsync(requisition, "trace-multi-line-app");
+
+        readiness.CanSubmit.Should().BeTrue();
+        readiness.Basis.Should().Be("AcknowledgedAPP");
+        readiness.DecisionCode.Should().Be("PR_APP_ACKNOWLEDGED");
+        readiness.AppAcknowledgementReference.Should().Be(references.Submission.AcknowledgementReference);
+    }
+
+    [Fact]
+    public async Task MissingAppAndExceptionAllowsConfiguredWorkflowAndRecordsTraceabilityDecision()
     {
         await using var fixture = new Fixture();
         var requisition = fixture.NewRequisition();
         fixture.Context.Add(requisition);
         await fixture.Context.SaveChangesAsync();
 
-        var action = () => fixture.Service.EnforceAsync(requisition, "trace-blocked");
+        var readiness = await fixture.Service.EnforceAsync(requisition, "trace-ready");
 
-        var exception = await action.Should().ThrowAsync<ProcurementRequisitionSubmissionBlockedException>();
-        exception.Which.Readiness.CanSubmit.Should().BeFalse();
-        exception.Which.Readiness.DecisionCode.Should().Be("PR_APP_OR_EXCEPTION_REQUIRED");
-        exception.Which.Readiness.RequiredActions.Should().HaveCount(2);
+        readiness.CanSubmit.Should().BeTrue();
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.DecisionCode.Should().Be("PR_SUBMISSION_READY");
+        readiness.Basis.Should().Be("ConfiguredApprovalWorkflow");
+        readiness.RequiredActions.Should().BeEmpty();
         var history = await fixture.Service.GetHistoryAsync(requisition.Id);
-        history.Should().ContainSingle(item => item.Action == "SubmissionGateBlocked" && item.Result == "Denied" && item.IntegrityHash.Length == 64);
+        history.Should().ContainSingle(item => item.Action == "SubmissionGateAllowed" && item.Result == "Allowed" && item.IntegrityHash.Length == 64);
     }
 
     [Fact]
-    public async Task NewerRejectedAppAttemptOverridesEarlierAcknowledgement()
+    public async Task NewerRejectedAppAttemptIsRetainedForTraceabilityWithoutBlockingSubmission()
     {
         await using var fixture = new Fixture();
         var references = fixture.SeedAppPath();
@@ -83,8 +121,9 @@ public sealed class ProcurementRequisitionSubmissionControlServiceTests
 
         var readiness = await fixture.Service.GetReadinessAsync(requisition.Id);
 
-        readiness.CanSubmit.Should().BeFalse();
-        readiness.DecisionCode.Should().Be("PR_APP_ACKNOWLEDGEMENT_REQUIRED");
+        readiness.CanSubmit.Should().BeTrue();
+        readiness.DecisionCode.Should().Be("PR_SUBMISSION_READY");
+        readiness.Basis.Should().Be("ConfiguredApprovalWorkflow");
         readiness.AppSubmissionAttemptNumber.Should().Be(2);
         readiness.AppSubmissionStatus.Should().Be("Rejected");
     }
@@ -229,15 +268,30 @@ public sealed class ProcurementRequisitionSubmissionControlServiceTests
         public Mock<IProcurementAccessControlService> Access { get; }
         public ProcurementRequisitionSubmissionControlService Service { get; }
 
-        public PurchaseRequisition NewRequisition(ProcurementPlan? plan = null, ProcurementPlanItem? item = null) => new()
+        public PurchaseRequisition NewRequisition(ProcurementPlan? plan = null, ProcurementPlanItem? item = null)
         {
-            Id = Guid.NewGuid(), TenantId = TenantId,
-            RequisitionNumber = $"PR-2026-{Random.Shared.Next(1000, 9999)}",
-            RequestedById = UserId, Status = "Draft", ProcurementCategory = ProcurementCategoryClass.Goods,
-            SourcePlanId = plan?.Id, SourcePlanItemId = item?.Id,
-            SourcePlanNumber = plan?.PlanNumber, SourcePlanItemDescription = item?.ItemDescription,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
-        };
+            var requisition = new PurchaseRequisition
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId,
+                RequisitionNumber = $"PR-2026-{Random.Shared.Next(1000, 9999)}",
+                RequestedById = UserId, Status = "Draft", ProcurementCategory = ProcurementCategoryClass.Goods,
+                Department = "Information Technology", RequiredDate = DateTime.UtcNow.Date.AddDays(30),
+                Justification = "Approved operational requirement", BudgetId = Guid.NewGuid(),
+                Currency = "GHS", TotalAmount = 500m,
+                SourcePlanId = plan?.Id, SourcePlanItemId = item?.Id,
+                SourcePlanNumber = plan?.PlanNumber, SourcePlanItemDescription = item?.ItemDescription,
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+            };
+            requisition.Items.Add(new PurchaseRequisitionItem
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, RequisitionId = requisition.Id,
+                ItemDescription = item?.ItemDescription ?? "Operational equipment",
+                Quantity = 1m, UnitOfMeasure = "EA", EstimatedUnitPrice = 500m,
+                LineTotal = 500m, Specifications = "Business-approved minimum specification",
+                Status = "Pending", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+            });
+            return requisition;
+        }
 
         public AppReferences SeedAppPath()
         {

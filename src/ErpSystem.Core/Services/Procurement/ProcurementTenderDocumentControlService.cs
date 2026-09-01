@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -2360,7 +2361,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (_currentUser.IsExternalUser)
             throw new ProcurementTenderDocumentControlAuthorizationException(
                 "Supplier portal users cannot perform internal tender-document control actions.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -2377,11 +2378,11 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (_currentUser.IsExternalUser)
             throw new ProcurementTenderDocumentControlAuthorizationException(
                 "Supplier portal users cannot access internal tender-document control administration.");
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementTenderDocumentControlAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -3309,8 +3310,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         return ComputeHash(raw);
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string ActorName =>
         Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName)

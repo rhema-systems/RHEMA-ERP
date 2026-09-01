@@ -110,6 +110,47 @@ public sealed class ProcurementTenderControlServiceTests
     }
 
     [Fact]
+    public async Task ManualPaymentPendingVerificationBlocksFormalOpeningAndIsAudited()
+    {
+        await using var fixture = new Fixture();
+        await fixture.PublishAsync();
+        await fixture.IssueDocumentsAsync();
+        var fee = new TenderFee
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.CurrentTenantId,
+            TenderId = fixture.Tender.Id, FeeType = "SubmissionFee",
+            Amount = 100m, Currency = "GHS", PaymentMethod = "BankTransfer",
+            IsMandatory = true
+        };
+        fixture.Context.Add(fee);
+        fixture.Context.Add(new TenderPayment
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.CurrentTenantId,
+            TenderFeeId = fee.Id, BusinessPartnerId = fixture.Bids[0].BusinessPartnerId,
+            PaymentReference = "BANK-PENDING-001", TransactionId = "BANK-PENDING-001",
+            PaymentProof = "BANK-PENDING-001", Amount = fee.Amount, Currency = fee.Currency,
+            PaymentMethod = fee.PaymentMethod, Status = "Pending", PaymentDate = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Service.RecordSubmissionAsync(
+            fixture.Bids[0], fixture.Tender.SubmissionDeadline!.Value.AddMinutes(-3), "pending-payment");
+        await fixture.AddSecondOnTimeReceiptAsync();
+        await fixture.MoveDeadlineToPastAsync();
+
+        var action = () => fixture.Service.CompleteOpeningAsync(
+            fixture.Tender.Id, fixture.OpeningRequest(), "opening-payment-pending");
+
+        await action.Should().ThrowAsync<ProcurementTenderControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_BID_PAYMENT_VERIFICATION_PENDING");
+        fixture.ControlEvents.Verify(service => service.RecordAsync(
+            It.Is<ProcurementControlEventWriteRequest>(request =>
+                request.Action == "TenderOpeningPaymentAdmissionDenied" &&
+                request.Result == ProcurementControlEventResult.Denied),
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Bids[0].Status.Should().Be("Submitted");
+    }
+
+    [Fact]
     public async Task FinancialEvaluatorMustBeSeparatedAndRowVersionMustMatch()
     {
         await using var fixture = new Fixture();
@@ -139,6 +180,23 @@ public sealed class ProcurementTenderControlServiceTests
             It.Is<ProcurementSodGuardRequest>(request =>
                 request.ControlCode == "SOD-TENDER-TECHNICAL-FINANCIAL-EVALUATOR"),
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.QualityBasedSelection, true)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection, true)]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, false)]
+    public async Task TenderWithoutControlUsesSourcingCaseMethodForFinancialConcealment(
+        ProcurementMethodType method,
+        bool expected)
+    {
+        await using var fixture = new Fixture(method);
+
+        var concealed = await fixture.Service.ShouldConcealFinancialProposalAsync(
+            fixture.Tender.Id,
+            fixture.Bids[0].Id);
+
+        concealed.Should().Be(expected);
     }
 
     [Fact]

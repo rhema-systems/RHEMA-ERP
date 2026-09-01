@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -303,6 +304,55 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
 
     [Fact]
     [Trait("Batch", "E2E-012")]
+    public async Task Completion_requires_tenant_owned_current_published_clean_stock_taking_evidence()
+    {
+        var created = await _counts.CreateAsync(new CreatePhysicalCountDto
+        {
+            WarehouseId = _warehouseId,
+            LocationId = _locationId,
+            CountType = CountType.CycleCount,
+            ABCClass = "A",
+            Notes = "Central-DMS evidence boundary."
+        }, _initiatorId);
+        await SetRowVersionsAsync(created.Id);
+        _currentUser.Switch(_counterId, "cycle.counter");
+        await _counts.StartCountAsync(created.Id, _counterId);
+        var line = (await LoadCountAsync(created.Id)).Items.Single();
+        await _counts.RecordCountItemAsync(new RecordCountItemDto
+        {
+            PhysicalCountItemId = line.Id,
+            CountedQuantity = 10m,
+            RowVersion = Convert.ToBase64String(_lineRowVersion),
+            IdempotencyKey = "count-evidence-line"
+        }, _counterId);
+
+        await AttachCountEvidenceAsync(created.Id, Guid.NewGuid(), FileVirusScanStatus.Clean);
+        var crossTenant = async () => await _counts.CompleteCountAsync(created.Id, _counterId);
+        await crossTenant.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*current published, clean central-DMS stock-taking evidence*");
+
+        var evidence = await AttachCountEvidenceAsync(created.Id, _tenantId, FileVirusScanStatus.Infected);
+        var infected = async () => await _counts.CompleteCountAsync(created.Id, _counterId);
+        await infected.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*current published, clean central-DMS stock-taking evidence*");
+
+        var upload = await _context.Set<FileUploadRecord>().SingleAsync(value => value.Id == evidence.UploadId);
+        upload.VirusScanStatus = FileVirusScanStatus.Clean;
+        upload.ScannedAtUtc = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        (await _counts.CompleteCountAsync(created.Id, _counterId)).Should().BeTrue();
+        var detail = await _counts.GetByIdAsync(created.Id);
+        detail!.Status.Should().Be("PendingStoresApproval");
+        detail.Evidence.Should().ContainSingle(value =>
+            value.CentralDocumentRecordId == evidence.RecordId &&
+            value.CentralDocumentVersionId == evidence.VersionId &&
+            value.FileUploadRecordId == evidence.UploadId);
+    }
+
+    [Fact]
+    [Trait("Batch", "E2E-012")]
     public async Task Abc_blind_count_recount_dual_approval_and_audit_attestation_reconcile_to_finance_posting()
     {
         var created = await _counts.CreateAsync(new CreatePhysicalCountDto
@@ -340,6 +390,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         var blindList = (await _counts.GetAllAsync()).Single(value => value.Id == created.Id);
         blindList.ItemsWithVariance.Should().Be(0);
         blindList.TotalVarianceValue.Should().Be(0m);
+        var countEvidence = await AttachCleanCountEvidenceAsync(created.Id);
         await _counts.CompleteCountAsync(created.Id, _counterId);
         var recountRequired = await LoadCountAsync(created.Id);
         recountRequired.Status.Should().Be("RecountRequired");
@@ -366,6 +417,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         recounted.StockAdjustmentId.Should().Be(_adjustment!.Id);
         _createdAdjustment.Should().NotBeNull();
         _createdAdjustment!.ReasonCode.Should().Be(StockAdjustmentReasonCodes.CycleCount);
+        _createdAdjustment.Evidence.Should().ContainSingle().Which.CentralDocumentVersionId.Should().Be(countEvidence.VersionId);
         _createdAdjustment.Items.Should().ContainSingle().Which.Should().Match<CreateStockAdjustmentItemDto>(value =>
             value.InventoryItemId == _itemId && value.LocationId == _locationId &&
             value.AdjustmentQuantity == -2m && value.UnitCost == 10m);
@@ -449,6 +501,10 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         _adjustments.Verify(service => service.SubmitAsync(It.IsAny<Guid>(), _recountUserId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
         _adjustments.Verify(service => service.DecideAsync(It.IsAny<Guid>(), _storesApproverId, It.IsAny<DecideStockAdjustmentRequest>()), Times.Once);
         _adjustments.Verify(service => service.PostAsync(It.IsAny<Guid>(), _financeApproverId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
+        var detail = await _counts.GetByIdAsync(created.Id);
+        detail!.Evidence.Should().ContainSingle(value =>
+            value.CentralDocumentVersionId == countEvidence.VersionId &&
+            value.FileUploadRecordId == countEvidence.UploadId);
     }
 
     [Fact]
@@ -482,6 +538,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         var concealedList = (await _counts.GetAllAsync()).Single(value => value.Id == created.Id);
         concealedList.ItemsWithVariance.Should().Be(0);
         concealedList.TotalVarianceValue.Should().Be(0m);
+        await AttachCleanCountEvidenceAsync(created.Id);
         await _counts.CompleteCountAsync(created.Id, _counterId);
 
         _currentUser.Switch(_recountUserId, "cycle.recounter");
@@ -595,6 +652,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
                 IdempotencyKey = key
             }, _counterId);
         }
+        await AttachCleanCountEvidenceAsync(created.Id);
         await _counts.CompleteCountAsync(created.Id, _counterId);
         (await LoadCountAsync(created.Id)).TotalVarianceQuantity.Should().Be(0m);
 
@@ -750,6 +808,72 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             .SingleAsync(value => value.Id == countId);
     }
 
+    private Task<CountEvidenceIds> AttachCleanCountEvidenceAsync(Guid countId) =>
+        AttachCountEvidenceAsync(countId, _tenantId, FileVirusScanStatus.Clean);
+
+    private async Task<CountEvidenceIds> AttachCountEvidenceAsync(
+        Guid countId,
+        Guid tenantId,
+        FileVirusScanStatus scanStatus)
+    {
+        var recordId = Guid.NewGuid();
+        var versionId = Guid.NewGuid();
+        var uploadId = Guid.NewGuid();
+        var documentReference = $"COUNT-EVIDENCE-{recordId:N}";
+        await _context.AddRangeAsync(
+            new FileUploadRecord
+            {
+                Id = uploadId,
+                TenantId = tenantId,
+                Category = "inventory-stock-taking-evidence",
+                FilePath = $"protected/{uploadId:N}.pdf",
+                StoredFileName = $"{uploadId:N}.pdf",
+                OriginalFileName = "signed-stock-count-sheet.pdf",
+                ContentType = "application/pdf",
+                FileSize = 1024,
+                StorageProvider = "TestDms",
+                UploadedByUserId = _counterId,
+                VirusScanStatus = scanStatus,
+                ScannedAtUtc = DateTime.UtcNow
+            },
+            new CentralDocumentRecord
+            {
+                Id = recordId,
+                TenantId = tenantId,
+                DocumentReference = documentReference,
+                Title = "Signed physical stock count sheet",
+                SourceModule = "Inventory",
+                SourceLabel = "Physical stock-taking evidence",
+                SourceEntityType = "PhysicalCount",
+                SourceRecordId = countId,
+                SourceRecordReference = countId.ToString(),
+                RepositoryStatus = "Linked",
+                CurrentVersion = "v1.0",
+                VersionStatus = "Published",
+                LifecycleStatus = "Active",
+                PublishedAt = DateTime.UtcNow,
+                PublishedById = _counterId
+            },
+            new CentralDocumentVersion
+            {
+                Id = versionId,
+                TenantId = tenantId,
+                DocumentRecordId = recordId,
+                VersionNumber = "v1.0",
+                Status = "Published",
+                FileName = "signed-stock-count-sheet.pdf",
+                ContentType = "application/pdf",
+                FileSize = 1024,
+                FileUploadRecordId = uploadId,
+                CreatedByUserId = _counterId,
+                PublishedAt = DateTime.UtcNow,
+                PublishedById = _counterId
+            });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        return new CountEvidenceIds(recordId, versionId, uploadId);
+    }
+
     private ProcurementAccessCapabilityDecisionDto Allowed(ProcurementAccessCapabilityRequest request, string correlationId) => new()
     {
         Allowed = true,
@@ -778,11 +902,14 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         EmailConfirmed = true
     };
 
+    private sealed record CountEvidenceIds(Guid RecordId, Guid VersionId, Guid UploadId);
+
     private sealed class MutableCurrentUser(Guid tenantId, Guid userId, string username) : ICurrentUserService
     {
         public Guid ActorId { get; private set; } = userId;
         public string? UserId => ActorId.ToString();
         public string? UserName { get; private set; } = username;
+        public string FullName => UserName ?? username;
         public string? Email => $"{UserName}@e2e.local";
         public Guid? TenantId { get; } = tenantId;
         public Guid? EmployeeId => null;

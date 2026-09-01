@@ -69,10 +69,13 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { projectService } from '@/services/projectService';
 import { ReportResult, reportsService } from '@/services/reports';
-import { ReportModuleNavigator } from './ReportModuleNavigator';
+import {
+  ReportModuleNavigator,
+  type ReportModuleNavigationItem,
+} from './ReportModuleNavigator';
 
 type CatalogueMode =
-  'procurement' | 'inventory' | 'compliance' | 'quantity-survey';
+  'procurement' | 'inventory' | 'compliance' | 'quantity-survey' | 'civil-engineering';
 type ExportFormat = 'pdf' | 'xlsx' | 'csv';
 
 export interface CatalogueItem {
@@ -347,6 +350,30 @@ export const quantitySurveyCatalogue: CatalogueItem[] = [
     icon: ClipboardCheck,
   },
   {
+    code: 'retention-register',
+    title: 'Retention Register',
+    description:
+      'Reconcile retention held, released and outstanding by certificate and Works contract.',
+    group: 'Valuations and certificates',
+    icon: Scale,
+  },
+  {
+    code: 'cost-to-complete',
+    title: 'Cost-to-Complete Report',
+    description:
+      'Compare budget, actual cost, commitments, forecast and the projected final position.',
+    group: 'Cost plans and BoQs',
+    icon: BarChart3,
+  },
+  {
+    code: 'contract-balance',
+    title: 'Contract Balance Report',
+    description:
+      'Reconcile the original and revised contract against variations, certificates and retention.',
+    group: 'Changes and closeout',
+    icon: FileSpreadsheet,
+  },
+  {
     code: 'variation-log',
     title: 'Variation Log',
     description:
@@ -361,6 +388,124 @@ export const quantitySurveyCatalogue: CatalogueItem[] = [
       'Reconcile final accounts to contract, BoQ, variations, claims, retention and payments.',
     group: 'Changes and closeout',
     icon: FileCheck2,
+  },
+  {
+    code: 'audit-trail',
+    title: 'Quantity Survey Audit Trail',
+    description:
+      'Review project-scoped creation, change, workflow, approval, posting and reversal history.',
+    group: 'Controls and audit',
+    icon: History,
+  },
+];
+
+export const civilEngineeringCatalogue: CatalogueItem[] = [
+  {
+    code: 'design-backlog',
+    title: 'Design Backlog',
+    description: 'Reconcile governed design cases and versioned engineering documents.',
+    group: 'Design and drafting',
+    icon: FileSpreadsheet,
+  },
+  {
+    code: 'field-task-register',
+    title: 'Field Task Register',
+    description: 'Track Civil assignments, drafting workload, feedback, completion and overdue tasks.',
+    group: 'Design and drafting',
+    icon: ClipboardCheck,
+  },
+  {
+    code: 'supervision-controls',
+    title: 'Supervision Controls',
+    description: 'Reconcile RFIs, instructions, weekly reports, test evidence and IPC endorsements.',
+    group: 'Supervision and quality',
+    icon: ShieldCheck,
+  },
+  {
+    code: 'maintenance-complaints',
+    title: 'Maintenance and Complaints',
+    description: 'Trace Civil intake, assessment, costing, owner execution and completion controls.',
+    group: 'Maintenance delivery',
+    icon: Building2,
+  },
+  {
+    code: 'permitting-watch',
+    title: 'Permitting Watch',
+    description: 'Track development approval files, handoffs, engineering reviews and HOD decisions.',
+    group: 'Permitting and approvals',
+    icon: BookOpenCheck,
+  },
+  {
+    code: 'completion-handover',
+    title: 'Completion and Handover Register',
+    description:
+      'Reconcile inspection, snag, handover, as-built, closeout and authoritative asset-history links.',
+    group: 'Completion and handover',
+    icon: FileCheck2,
+  },
+  {
+    code: 'engineering-work-register',
+    title: 'Engineering Work Register',
+    description:
+      'Register governed Civil design, maintenance, complaint and execution work for the selected project.',
+    group: 'Architecture-required outputs',
+    icon: FileSpreadsheet,
+  },
+  {
+    code: 'inspection-report',
+    title: 'Inspection Report',
+    description:
+      'Review governed inspections, outcomes, corrective actions, evidence and closure status.',
+    group: 'Architecture-required outputs',
+    icon: ClipboardCheck,
+  },
+  {
+    code: 'site-instruction-log',
+    title: 'Site Instruction Log',
+    description:
+      'Review governed site instructions, issue status, contractor responses and retained evidence.',
+    group: 'Architecture-required outputs',
+    icon: BookOpenCheck,
+  },
+  {
+    code: 'progress-report',
+    title: 'Progress Report',
+    description:
+      'Review governed progress, milestone, delay, recovery and overdue exposure.',
+    group: 'Architecture-required outputs',
+    icon: BarChart3,
+  },
+  {
+    code: 'defect-report',
+    title: 'Defect Report',
+    description:
+      'Review snags, defects, corrective actions, due dates, reinspections and closure evidence.',
+    group: 'Architecture-required outputs',
+    icon: AlertTriangle,
+  },
+  {
+    code: 'completion-certificate-report',
+    title: 'Completion Certificate Report',
+    description:
+      'Review completion, handover, closeout, as-built and approval evidence.',
+    group: 'Architecture-required outputs',
+    icon: FileCheck2,
+  },
+  {
+    code: 'project-dashboard',
+    title: 'Project Dashboard',
+    description:
+      'Summarise Civil design, field, supervision, maintenance, permitting and closeout exposure.',
+    group: 'Architecture-required outputs',
+    icon: BarChart3,
+  },
+  {
+    code: 'engineering-audit-trail',
+    title: 'Engineering Audit Trail',
+    description:
+      'Review tenant- and project-scoped Civil Engineering actions from the shared immutable audit log.',
+    group: 'Architecture-required outputs',
+    icon: History,
   },
 ];
 
@@ -436,32 +581,40 @@ export function StatutoryReportCataloguePage({
   const isInventory = mode === 'inventory';
   const isCompliance = mode === 'compliance';
   const isQuantitySurvey = mode === 'quantity-survey';
+  const isCivilEngineering = mode === 'civil-engineering';
+  const isProjectScopedReports = isQuantitySurvey || isCivilEngineering;
   const catalogue = isInventory
     ? inventoryCatalogue
     : isCompliance
       ? complianceCatalogue
       : isQuantitySurvey
         ? quantitySurveyCatalogue
-        : procurementCatalogue;
+        : isCivilEngineering
+          ? civilEngineeringCatalogue
+          : procurementCatalogue;
   const moduleName = isInventory
     ? 'Inventory'
     : isCompliance
       ? 'Audit & Compliance'
       : isQuantitySurvey
         ? 'Quantity Survey'
-        : 'Procurement';
+        : isCivilEngineering
+          ? 'Civil Engineering'
+          : 'Procurement';
   const modulePath = isInventory
     ? '/reports/inventory'
     : isCompliance
       ? '/reports/audit-compliance'
       : isQuantitySurvey
         ? '/reports/quantity-survey'
-        : '/reports/purchasing';
+        : isCivilEngineering
+          ? '/reports/civil-engineering'
+          : '/reports/purchasing';
   const catalogueItem = reportCode
     ? catalogue.find((item) => item.code === reportCode)
     : undefined;
   const selectedCode = reportCode ?? '';
-  const showStatus = isQuantitySurvey
+  const showStatus = isProjectScopedReports
     ? false
     : isInventory
       ? inventoryStatusReports.has(selectedCode)
@@ -486,10 +639,14 @@ export function StatutoryReportCataloguePage({
   const isAdministrator = hasAnyRole(['SuperAdmin', 'TenantAdmin']);
   const readPermission = isQuantitySurvey
     ? 'quantity-survey.reports.read'
-    : 'procurement.reports.read';
+    : isCivilEngineering
+      ? 'civil-engineering.reports.read'
+      : 'procurement.reports.read';
   const exportPermission = isQuantitySurvey
     ? 'quantity-survey.reports.export'
-    : 'procurement.reports.export';
+    : isCivilEngineering
+      ? 'civil-engineering.reports.export'
+      : 'procurement.reports.export';
   const canRead = isAdministrator || hasPermission(readPermission);
   const canExport = isAdministrator || hasPermission(exportPermission);
   const [mounted, setMounted] = useState(false);
@@ -523,6 +680,26 @@ export function StatutoryReportCataloguePage({
       ),
     [catalogue, reportsQuery.data]
   );
+  const navigatorItems: Array<
+    ReportModuleNavigationItem & Pick<CatalogueItem, 'description'>
+  > = [
+    ...(isQuantitySurvey
+      ? [
+          {
+            code: 'dashboard',
+            title: 'QS Cost Dashboard',
+            description: 'Authority-scoped cost control dashboard.',
+            group: 'Cost control',
+            icon: BarChart3,
+            available: true,
+          },
+        ]
+      : []),
+    ...catalogue.map((item) => ({
+      ...item,
+      available: reports.some((report) => report.tags?.includes(item.code)),
+    })),
+  ];
   const suppliersQuery = useQuery({
     queryKey: ['business-partners', 'report-filter'],
     queryFn: () => businessPartnerService.getAllPartnersForDropdown(),
@@ -554,9 +731,9 @@ export function StatutoryReportCataloguePage({
     staleTime: 5 * 60 * 1000,
   });
   const projectsQuery = useQuery({
-    queryKey: ['projects', 'quantity-survey-report-filter'],
+    queryKey: ['projects', mode, 'report-filter'],
     queryFn: () => projectService.getProjects({ page: 1, pageSize: 500 }),
-    enabled: canRead && isQuantitySurvey,
+    enabled: canRead && isProjectScopedReports,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -597,7 +774,7 @@ export function StatutoryReportCataloguePage({
       ...(showExpiryThreshold && expiryWarningDays
         ? { expiryWarningDays: Number(expiryWarningDays) }
         : {}),
-      ...(isQuantitySurvey && projectId ? { projectId } : {}),
+      ...(isProjectScopedReports && projectId ? { projectId } : {}),
     }),
     [
       categoryId,
@@ -622,6 +799,8 @@ export function StatutoryReportCataloguePage({
       supplierId,
       warehouseId,
       isQuantitySurvey,
+      isCivilEngineering,
+      isProjectScopedReports,
       projectId,
     ]
   );
@@ -653,11 +832,10 @@ export function StatutoryReportCataloguePage({
   });
 
   const runReport = (targetPage = 1) => {
-    if (isQuantitySurvey && !projectId) {
+    if (isProjectScopedReports && !projectId) {
       toast({
         title: 'Select a project',
-        description:
-          'Quantity Survey reports are restricted to an assigned project.',
+        description: `${moduleName} reports are restricted to an assigned project.`,
         variant: 'destructive',
       });
       return;
@@ -881,26 +1059,7 @@ export function StatutoryReportCataloguePage({
           moduleName={moduleName}
           modulePath={modulePath}
           activeReportCode={selectedCode}
-          items={[
-            ...(isQuantitySurvey
-              ? [
-                  {
-                    code: 'dashboard',
-                    title: 'QS Cost Dashboard',
-                    description: 'Authority-scoped cost control dashboard.',
-                    group: 'Cost control',
-                    icon: BarChart3,
-                    available: true,
-                  },
-                ]
-              : []),
-            ...catalogue.map((item) => ({
-              ...item,
-              available: reports.some((report) =>
-                report.tags?.includes(item.code)
-              ),
-            })),
-          ]}
+          items={navigatorItems}
         />
         <div className="min-w-0">
           <h1 className="truncate text-xl font-semibold tracking-tight">
@@ -927,7 +1086,7 @@ export function StatutoryReportCataloguePage({
               <div className="flex h-9 shrink-0 items-center gap-1.5 px-1 text-sm font-medium">
                 <SlidersHorizontal className="h-4 w-4" /> Filters:
               </div>
-              {isQuantitySurvey && (
+              {isProjectScopedReports && (
                 <div className="min-w-64 flex-[2] space-y-1">
                   <Label className="text-xs">Project</Label>
                   <Select value={projectId} onValueChange={setProjectId}>
@@ -1146,7 +1305,7 @@ export function StatutoryReportCataloguePage({
                 className="h-9 shrink-0"
                 onClick={() => runReport(1)}
                 disabled={
-                  executeMutation.isPending || (isQuantitySurvey && !projectId)
+                  executeMutation.isPending || (isProjectScopedReports && !projectId)
                 }
               >
                 {executeMutation.isPending ? (
@@ -1166,7 +1325,7 @@ export function StatutoryReportCataloguePage({
                       disabled={
                         !!exporting ||
                         executeMutation.isPending ||
-                        (isQuantitySurvey && !projectId)
+                        (isProjectScopedReports && !projectId)
                       }
                     >
                       {exporting ? (

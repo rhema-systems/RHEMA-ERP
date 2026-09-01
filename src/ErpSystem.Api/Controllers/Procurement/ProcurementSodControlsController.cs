@@ -16,13 +16,13 @@ public sealed class ProcurementSodControlsController : ControllerBase
     public ProcurementSodControlsController(IProcurementSodGuardService service) => _service = service;
 
     [HttpGet("coverage")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = "procurement.audit.read")]
     [ProducesResponseType(typeof(ProcurementSodCoverageDto), StatusCodes.Status200OK)]
     public Task<IActionResult> GetCoverage([FromQuery] DateTime? atUtc = null, CancellationToken cancellationToken = default) =>
         ExecuteAsync(async () => Ok(await _service.GetCoverageAsync(atUtc ?? DateTime.UtcNow, cancellationToken)));
 
     [HttpPost("policies/{policySetId:guid}/apply-required")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = "procurement.access.manage")]
     [ProducesResponseType(typeof(ProcurementSodProvisionResultDto), StatusCodes.Status200OK)]
     public Task<IActionResult> ApplyRequired(
         Guid policySetId,
@@ -51,7 +51,7 @@ public sealed class ProcurementSodControlsController : ControllerBase
         });
 
     [HttpGet("blocked-attempts")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = "procurement.audit.read")]
     [ProducesResponseType(typeof(IReadOnlyList<ProcurementSodBypassAuditDto>), StatusCodes.Status200OK)]
     public Task<IActionResult> GetBlockedAttempts(
         [FromQuery] int take = 50,

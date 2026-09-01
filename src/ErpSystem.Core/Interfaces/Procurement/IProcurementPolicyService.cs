@@ -6,6 +6,7 @@ namespace ErpSystem.Core.Interfaces.Procurement;
 public interface IProcurementPolicyService
 {
     Task<ProcurementConfigurationPagedResult<ProcurementPolicySetSummaryDto>> GetPolicySetsAsync(ProcurementPolicySetListRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProcurementPolicyRoleOptionDto>> GetRoleOptionsAsync(Guid? workflowDefinitionId = null, CancellationToken cancellationToken = default);
     Task<ProcurementPolicySetDto> GetPolicySetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ProcurementPolicySetDto?> GetEffectivePolicySetAsync(string code, DateTime atUtc, CancellationToken cancellationToken = default);
     Task<ProcurementPolicySetDto> CreatePolicySetAsync(CreateProcurementPolicySetRequest request, string correlationId, CancellationToken cancellationToken = default);

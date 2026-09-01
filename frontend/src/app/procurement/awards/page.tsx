@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import * as tenderAwardService from '@/services/tenderAwardService';
 import { type TenderAwardDto } from '@/services/tenderAwardService';
 import { format } from 'date-fns';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 export default function AwardsPage() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export default function AwardsPage() {
       setTotalCount(data.totalCount);
     } catch (error) {
       console.error('Error loading awards:', error);
-      toast.error('Failed to load awards');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load awards'));
     } finally {
       setLoading(false);
     }
@@ -57,7 +58,9 @@ export default function AwardsPage() {
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
+      'PendingApproval': { variant: 'outline', className: 'bg-amber-100 text-amber-800 border-amber-200' },
       'Awarded': { variant: 'default', className: 'bg-green-100 text-green-800' },
+      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
       'Cancelled': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
     };
     
@@ -115,11 +118,11 @@ export default function AwardsPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Cancelled</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">Pending Approval</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-red-600">
-              {awards.filter(a => a.status === 'Cancelled').length}
+            <p className="text-2xl font-bold text-amber-600">
+              {awards.filter(a => a.status === 'PendingApproval').length}
             </p>
           </CardContent>
         </Card>
@@ -160,7 +163,9 @@ export default function AwardsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
                 <SelectItem value="Awarded">Awarded</SelectItem>
+                <SelectItem value="Rejected">Rejected</SelectItem>
                 <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>

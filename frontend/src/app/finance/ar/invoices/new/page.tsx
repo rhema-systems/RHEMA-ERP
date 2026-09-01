@@ -59,8 +59,11 @@ import { format, addDays } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const lineItemSchema = z.object({
+    sourceLineId: z.string().uuid(),
     lineItemType: z.enum(['Product', 'GLAccount']).default('Product'),
     productId: z.string().optional(),
     glAccountId: z.string().optional(),
@@ -104,6 +107,9 @@ export default function NewInvoicePage() {
     const [customerSearch, setCustomerSearch] = useState('');
     const [glAccountOpenIndex, setGlAccountOpenIndex] = useState<number | null>(null);
     const [glAccountSearch, setGlAccountSearch] = useState('');
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Fetch customers for the dropdown
     const { data: customersData, isLoading: customersLoading } = useQuery({
@@ -185,7 +191,7 @@ export default function NewInvoicePage() {
             isOpeningBalance: defaultOpeningBalance,
             notes: '',
             lineItems: [
-                { lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }
+                { sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }
             ],
         },
     });
@@ -439,6 +445,7 @@ export default function NewInvoicePage() {
                 discountAmount: Number(data.discountAmount) || 0,
                 isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
+                    id: item.sourceLineId,
                     lineItemType: item.lineItemType,
                     productId: item.productId,
                     glAccountId: item.glAccountId,
@@ -447,7 +454,21 @@ export default function NewInvoicePage() {
                     unitPrice: Number(item.unitPrice),
                     discountPercentage: Number(item.discountPercentage),
                     taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId)
-                }))
+                })),
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: data.lineItems.flatMap(item => {
+                        const accountId = !isOpeningBalance && item.lineItemType === 'GLAccount'
+                            ? item.glAccountId
+                            : undefined;
+                        return accountId ? [{
+                            sourceLineId: item.sourceLineId,
+                            accountId,
+                            dimensions: toFinancePostingDimensionValues(lineDimensionValues[item.sourceLineId] || {}),
+                        }] : [];
+                    }),
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
 
             toast({
@@ -808,11 +829,47 @@ export default function NewInvoicePage() {
                     </CardContent>
                 </Card>
 
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Finance coding dimensions</CardTitle>
+                        <CardDescription>
+                            Defaults are convenient; each revenue line remains authoritative.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <SourceDocumentDimensionPanel
+                            context={{
+                                sourceModule: 'AR',
+                                sourceDocumentType: 'CustomerInvoice',
+                                postingAction: 'Post',
+                                sourceRoute: 'finance.ar.customer-invoices.manual',
+                                contractVersion: '1.0',
+                            }}
+                            effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
+                            lines={watchLineItems.map((item) => ({
+                                id: item.sourceLineId,
+                                accountId: !watchIsOpeningBalance && item.lineItemType === 'GLAccount'
+                                    ? item.glAccountId
+                                    : undefined,
+                                accountLabel: item.description || undefined,
+                            }))}
+                            defaultValues={defaultDimensionValues}
+                            lineValues={lineDimensionValues}
+                            onDefaultValuesChange={(values) => {
+                                setDefaultDimensionValues(values);
+                                setApplyDefaultToAll(false);
+                            }}
+                            onLineValuesChange={setLineDimensionValues}
+                            onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        />
+                    </CardContent>
+                </Card>
+
                 {/* Line Items Card */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>

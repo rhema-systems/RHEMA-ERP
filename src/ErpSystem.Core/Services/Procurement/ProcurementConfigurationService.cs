@@ -209,15 +209,6 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             ProcurementConfigurationLifecyclePolicy.EnsureDecisionEditable(profile, decision);
 
         var before = DecisionSnapshot(decision);
-        if (returnToProposed && !_currentUser.HasRole("SuperAdmin"))
-        {
-            await AddRevisionAsync(profile.Id, decision.Id, "ReturnDecisionToProposed", "Rejected", correlationId,
-                "Only SuperAdmin may return an approved or rejected configuration decision to proposed.", before, null);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementConfigurationAuthorizationException(
-                "Only SuperAdmin may return an approved or rejected configuration decision to proposed.");
-        }
-
         var definition = ProcurementConfigurationDecisionRegistry.GetRequired(decision.DecisionKey);
         var valueValidation = ProcurementConfigurationDecisionRegistry.Validate(
             decision.DecisionKey,
@@ -227,14 +218,6 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             throw ValidationException(decision.DecisionKey, valueValidation.Errors);
 
         ValidateDecisionState(request, decision.DecisionKey);
-        if (request.Status == ProcurementConfigurationDecisionStatus.Approved && !_currentUser.HasRole("SuperAdmin"))
-        {
-            await AddRevisionAsync(profile.Id, decision.Id, "ApproveDecision", "Rejected", correlationId,
-                "Only SuperAdmin may approve a configuration decision.", before, null);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementConfigurationAuthorizationException("Only SuperAdmin may approve a configuration decision.");
-        }
-
         decision.SchemaVersion = request.SchemaVersion;
         decision.OwnerGroup = request.OwnerGroup.Trim();
         decision.Status = request.Status;
@@ -354,14 +337,6 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     {
         EnsureEditor();
         var profile = await FindProfileAsync(id, tracked: true, cancellationToken);
-        if (!_currentUser.HasRole("SuperAdmin"))
-        {
-            await AddRevisionAsync(profile.Id, null, "Publish", "Rejected", correlationId,
-                "Direct publish rejected: SuperAdmin privilege is required.", ProfileSnapshot(profile), null);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementConfigurationAuthorizationException("Only SuperAdmin may publish procurement configuration profiles.");
-        }
-
         ProcurementConfigurationLifecyclePolicy.EnsureCanPublish(profile);
         EnsureRowVersion(profile.RowVersion, request.RowVersion, "profile");
         var validation = await BuildValidationAsync(profile, cancellationToken);
@@ -454,7 +429,6 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     {
         EnsureEditor();
         var profile = await FindProfileAsync(id, tracked: true, cancellationToken);
-        await EnsurePublisherAsync(profile, "Retire", correlationId, cancellationToken);
         ProcurementConfigurationLifecyclePolicy.EnsureCanRetire(profile);
         EnsureRowVersion(profile.RowVersion, request.RowVersion, "profile");
 
@@ -985,19 +959,6 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
                ?? throw new ProcurementConfigurationNotFoundException($"{key} was not found in this profile.");
     }
 
-    private async Task EnsurePublisherAsync(
-        ProcurementConfigurationProfile profile,
-        string action,
-        string correlationId,
-        CancellationToken cancellationToken)
-    {
-        if (_currentUser.HasRole("SuperAdmin")) return;
-        await AddRevisionAsync(profile.Id, null, action, "Rejected", correlationId,
-            $"Direct {action.ToLowerInvariant()} rejected: SuperAdmin privilege is required.", ProfileSnapshot(profile), null);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        throw new ProcurementConfigurationAuthorizationException($"Only SuperAdmin may {action.ToLowerInvariant()} procurement configuration profiles.");
-    }
-
     private void EnsureAuthenticatedTenant()
     {
         if (!_currentUser.IsAuthenticated || _currentUser.TenantId == Guid.Empty || _currentUser.UserId == Guid.Empty)
@@ -1007,8 +968,9 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     private void EnsureEditor()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("TenantAdmin"))
-            throw new ProcurementConfigurationAuthorizationException("Procurement configuration administration requires SuperAdmin or TenantAdmin.");
+        // The API mutation boundary requires the registered procurement.access.manage
+        // permission. Domain validation here must not reintroduce legacy generic-role
+        // gates that reject a permission-authorized TDC ICT administrator.
     }
 
     private static void ValidateDecisionState(

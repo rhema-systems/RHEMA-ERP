@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Notifications;
@@ -6,7 +7,6 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
-using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -212,13 +212,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         else if (registration.CreatedById.HasValue &&
                  registration.CreatedById.Value != userId)
         {
-            if (!_currentUserProvider.Roles.Contains("Admin") &&
-                !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
-            {
-                _logger.LogWarning("User {UserId} attempted to update registration {RegistrationId} owned by {OwnerId}",
-                    userId, id, registration.CreatedById);
-                throw new InvalidOperationException($"You do not have permission to update this registration");
-            }
+            await EnsureInternalCapabilityAsync(
+                "procurement.supplier.manage",
+                registration,
+                userId,
+                $"supplier-registration-update-{registration.Id:N}");
         }
 
         if (registration.Status != "Draft" && registration.Status != "MoreInfoRequired")
@@ -520,71 +518,116 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
     public async Task ApproveRegistrationAsync(Guid id, Guid approvedById, string? notes = null)
     {
-        var registration = await _registrationRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Registration with ID {id} not found");
-        await EnsureInternalCapabilityAsync(
-            "procurement.supplier.approve", registration, approvedById,
-            $"supplier-registration-approve-{id:N}");
-        if (registration.Status != "Submitted" && registration.Status != "UnderReview")
-        {
-            throw new InvalidOperationException($"Cannot approve registration in {registration.Status} status");
-        }
+        BusinessPartnerDetailDto? businessPartner = null;
+        Entities.Procurement.BusinessPartnerRegistration? registration = null;
 
-        // Check if all uploaded documents are verified
-        var documents = await _documentRepository.GetByRegistrationIdAsync(id);
-        var uploadedDocuments = documents.Where(d => !d.IsDeleted).ToList();
-
-        if (uploadedDocuments.Any())
+        // Supplier creation, copied evidence, category assignment and the terminal
+        // application state are one unit. Some legacy repositories flush while
+        // creating children, so the caller-owned transaction is essential: a
+        // later failure must not leave an orphan supplier behind.
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            var unverifiedDocuments = uploadedDocuments.Where(d => !d.IsVerified && !d.IsRejected).ToList();
-            if (unverifiedDocuments.Any())
+            await _unitOfWork.BeginTransactionAsync();
+            try
             {
-                var unverifiedDocNames = string.Join(", ", unverifiedDocuments.Select(d => d.DocumentName));
-                throw new InvalidOperationException($"Cannot approve registration. The following documents must be verified or rejected first: {unverifiedDocNames}");
-            }
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"supplier-registration-approval:{id:N}");
 
-            var rejectedDocuments = uploadedDocuments.Where(d => d.IsRejected).ToList();
-            if (rejectedDocuments.Any())
+                registration = await _registrationRepository.GetByIdAsync(id)
+                    ?? throw new InvalidOperationException($"Registration with ID {id} not found");
+                await EnsureInternalCapabilityAsync(
+                    "procurement.supplier.approve", registration, approvedById,
+                    $"supplier-registration-approve-{id:N}");
+
+                if (registration.Status == "Approved" && registration.BusinessPartnerId.HasValue)
+                {
+                    _logger.LogInformation(
+                        "Registration {RegistrationId} is already approved as business partner {BusinessPartnerId}; treating the repeated approval as complete",
+                        id,
+                        registration.BusinessPartnerId);
+                    await _unitOfWork.CommitAsync();
+                    return;
+                }
+
+                if (registration.Status != "Submitted" && registration.Status != "UnderReview")
+                {
+                    throw new InvalidOperationException($"Cannot approve registration in {registration.Status} status");
+                }
+
+                var documents = await _documentRepository.GetByRegistrationIdAsync(id);
+                var uploadedDocuments = documents.Where(d => !d.IsDeleted).ToList();
+                var unverifiedDocuments = uploadedDocuments
+                    .Where(d => !d.IsVerified && !d.IsRejected).ToList();
+                if (unverifiedDocuments.Any())
+                {
+                    var unverifiedDocNames = string.Join(", ", unverifiedDocuments.Select(d => d.DocumentName));
+                    throw new InvalidOperationException($"Cannot approve registration. The following documents must be verified or rejected first: {unverifiedDocNames}");
+                }
+
+                var rejectedDocuments = uploadedDocuments.Where(d => d.IsRejected).ToList();
+                if (rejectedDocuments.Any())
+                {
+                    var rejectedDocNames = string.Join(", ", rejectedDocuments.Select(d => d.DocumentName));
+                    throw new InvalidOperationException($"Cannot approve registration. The following documents have been rejected: {rejectedDocNames}. Please request the applicant to re-upload these documents.");
+                }
+
+                _logger.LogInformation(
+                    "Starting approval process for registration {RegistrationId} by user {UserId}",
+                    id,
+                    approvedById);
+
+                businessPartner = await ConvertToBusinessPartnerAsync(id, approvedById);
+                var oldStatus = registration.Status;
+                registration.Status = "Approved";
+                registration.ApprovedDate = DateTime.UtcNow;
+                registration.ApprovedById = approvedById;
+                registration.BusinessPartnerId = businessPartner.Id;
+                registration.UpdatedAt = DateTime.UtcNow;
+
+                // The registration was loaded tracked. Calling Update on the root
+                // recursively marked newly added category/document children as
+                // existing rows and caused the zero-row concurrency exception.
+                var history = new Entities.Procurement.BusinessPartnerRegistrationStatusHistory
+                {
+                    Id = Guid.NewGuid(),
+                    RegistrationId = id,
+                    FromStatus = oldStatus,
+                    ToStatus = "Approved",
+                    ChangedById = approvedById,
+                    ChangedAt = DateTime.UtcNow,
+                    Notes = notes ?? "Registration approved and converted to business partner",
+                    CreatedAt = DateTime.UtcNow
+                };
+                await _statusHistoryRepository.CreateAsync(history);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitAsync();
+            }
+            catch
             {
-                var rejectedDocNames = string.Join(", ", rejectedDocuments.Select(d => d.DocumentName));
-                throw new InvalidOperationException($"Cannot approve registration. The following documents have been rejected: {rejectedDocNames}. Please request the applicant to re-upload these documents.");
+                try
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+                catch (InvalidOperationException)
+                {
+                    // Commit/Save may already have released the transaction.
+                }
+                _unitOfWork.ClearTrackedChanges();
+                throw;
             }
-        }
+        });
 
-        _logger.LogInformation("Starting approval process for registration {RegistrationId} by user {UserId}", id, approvedById);
+        // A repeated request that observed an already-completed approval has no
+        // further work and must not publish duplicate events or notifications.
+        if (businessPartner is null)
+            return;
 
-        // Convert to business partner (this creates BP, contacts, financials, documents and saves them)
-        var businessPartner = await ConvertToBusinessPartnerAsync(id, approvedById);
+        _logger.LogInformation(
+            "Business partner {PartnerCode} and registration {RegistrationId} approved atomically",
+            businessPartner.PartnerCode,
+            id);
 
-        _logger.LogInformation("Business partner {PartnerCode} created successfully from registration {RegistrationId}",
-            businessPartner.PartnerCode, id);
-
-        // Update registration status manually instead of using UpdateStatusAsync to maintain Unit of Work
-        var oldStatus = registration.Status;
-        registration.Status = "Approved";
-        registration.ApprovedDate = DateTime.UtcNow;
-        registration.ApprovedById = approvedById;
-        registration.BusinessPartnerId = businessPartner.Id;
-        registration.UpdatedAt = DateTime.UtcNow;
-
-        await _registrationRepository.UpdateAsync(registration);
-
-        // Create status history entry
-        var history = new Entities.Procurement.BusinessPartnerRegistrationStatusHistory
-        {
-            Id = Guid.NewGuid(),
-            RegistrationId = id,
-            FromStatus = oldStatus,
-            ToStatus = "Approved",
-            ChangedById = approvedById,
-            ChangedAt = DateTime.UtcNow,
-            Notes = notes ?? "Registration approved and converted to business partner",
-            CreatedAt = DateTime.UtcNow
-        };
-        await _statusHistoryRepository.CreateAsync(history);
-
-        // Persist the terminal application state before the token hard-stop verifies
-        // it across tables. The token transition itself remains separately atomic.
-        await _unitOfWork.SaveChangesAsync();
+        // Token expiry remains independently retry-safe after the approval commit.
         if (_onboardingTokenService != null)
         {
             await _onboardingTokenService.ExpireForTerminalRegistrationAsync(
@@ -593,13 +636,6 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 approvedById,
                 $"registration-approved-{id:N}");
         }
-
-        // Save all changes using Unit of Work (business partner, contacts, documents, financials, registration update, status history)
-        _logger.LogInformation("Saving all changes for registration {RegistrationId} approval...", id);
-        await _unitOfWork.SaveChangesAsync();
-
-        _logger.LogInformation("Registration {RegistrationId} approved successfully. Status updated to Approved, BusinessPartnerId: {BusinessPartnerId}",
-            id, businessPartner.Id);
 
         // Publish events for admin-configurable notification topics (best-effort).
         try
@@ -1441,7 +1477,53 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             CreatedById = approvedById
         };
 
+        // The public registration category is the supplier's initial controlled
+        // procurement classification. Keep this in the same approval unit of
+        // work so an approved supplier can never be created without the category
+        // later required by PR/RFQ/PO eligibility checks.
+        Entities.Procurement.BusinessPartnerCategory? categoryAssignment = null;
+        if (registration.RegistrationCategory.HasValue)
+        {
+            var categoryCode = ProcurementSupplierCategoryRegistry.CodeFor(
+                registration.RegistrationCategory.Value);
+            var category = await _unitOfWork.Repository<Entities.Procurement.PartnerCategory>()
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == registration.TenantId &&
+                    item.CategoryCode == categoryCode &&
+                    item.IsActive &&
+                    !item.IsDeleted)
+                ?? throw new InvalidOperationException(
+                    $"The supplier registration category {categoryCode} is not configured for this tenant. Run the procurement baseline setup before approving the application.");
+
+            categoryAssignment = new Entities.Procurement.BusinessPartnerCategory
+            {
+                Id = Guid.NewGuid(),
+                BusinessPartnerId = partner.Id,
+                CategoryId = category.Id,
+                Category = category,
+                BusinessPartner = partner,
+                IsPrimary = true
+            };
+            // Add the relationship to the new aggregate before the first flush.
+            // EF now sees both rows as Added and cannot misclassify the client-keyed
+            // join as an existing row that requires an UPDATE.
+            partner.Categories.Add(categoryAssignment);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Registration {RegistrationId} has no registration category; no initial partner category was assigned",
+                registrationId);
+        }
+
         var createdPartner = await _partnerRepository.CreateAsync(partner);
+        if (categoryAssignment is not null)
+        {
+            _logger.LogInformation(
+                "Assigned onboarding category {CategoryCode} to approved business partner {PartnerCode}",
+                categoryAssignment.Category.CategoryCode,
+                createdPartner.PartnerCode);
+        }
 
         // Create primary contact if contact person data exists
         if (!string.IsNullOrEmpty(additionalData.ContactPersonName))
@@ -2358,8 +2440,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new ProcurementAccessAuthorizationException(
                 "The supplier registration belongs to a different tenant.");
         }
-        if (_currentUserProvider.HasRole(Constants.Roles.SuperAdmin) ||
-            _currentUserProvider.HasRole("TenantAdmin"))
+        if (_currentUserProvider.HasRole(Constants.Roles.SuperAdmin))
         {
             return;
         }

@@ -135,9 +135,7 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             .GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted &&
                 item.Status == UserTenantStatus.Active &&
                 (item.ExpiresAt == null || item.ExpiresAt > DateTime.UtcNow) && item.User.IsActive)
-            .OrderByDescending(item => item.User.UserRoles.Any(role => role.Role.Name == "SuperAdmin"))
-            .ThenByDescending(item => item.User.UserRoles.Any(role => role.Role.Name == "TenantAdmin"))
-            .ThenBy(item => item.User.UserName)
+            .OrderBy(item => item.User.UserName)
             .Select(item => item.UserId)
             .FirstOrDefaultAsync(cancellationToken);
         if (systemActorId == Guid.Empty)
@@ -585,8 +583,9 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.Roles.Any(role => role is "SuperAdmin" or "TenantAdmin" or "TDC_INTERNAL_AUDIT"))
-            throw new ProcurementControlEventAuthorizationException("Control-event history requires SuperAdmin, TenantAdmin, or TDC Internal Audit.");
+        // History and integrity endpoints require procurement.audit.read. Keeping
+        // a second role allow-list here would reject other permission-bearing TDC
+        // oversight roles such as Head of Procurement and Finance Reviewer.
     }
 
     private void EnsureAuthenticatedTenant()

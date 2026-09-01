@@ -160,39 +160,20 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
-    public async Task TenantAdministratorCannotApproveOrPublishAndBothBypassesAreAudited()
+    public async Task PermissionAuthorizedConfigurationActorReachesPublicationValidationWithoutLegacyRoleRejection()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-3");
-        var decision = created.Decisions.Single(item => item.DecisionKey == "DEC-001");
-        using var document = JsonDocument.Parse(ProcurementConfigurationDecisionRegistryTests.ValidDec001Json);
-
-        await fixture.Service.Invoking(service => service.SaveDecisionAsync(created.Id, "DEC-001",
-                new SaveProcurementConfigurationDecisionRequest
-                {
-                    SchemaVersion = 1,
-                    OwnerGroup = decision.OwnerGroup,
-                    Status = ProcurementConfigurationDecisionStatus.Approved,
-                    ApprovalStatus = ProcurementConfigurationApprovalStatus.Approved,
-                    Value = document.RootElement.Clone(),
-                    DecisionDate = DateTime.UtcNow,
-                    ApprovalReference = "MINUTE-001",
-                    RowVersion = decision.RowVersion
-                }, "approve-3"))
-            .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
 
         await fixture.Service.Invoking(service => service.PublishProfileAsync(created.Id,
                 new ProcurementConfigurationLifecycleRequest { RowVersion = created.RowVersion }, "publish-3"))
-            .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
-
-        (await fixture.Service.GetProfileAsync(created.Id)).Decisions.Single(item => item.DecisionKey == "DEC-001")
-            .Status.Should().Be(ProcurementConfigurationDecisionStatus.Draft);
+            .Should().ThrowAsync<ProcurementConfigurationValidationException>();
 
         var rejected = await fixture.Context.ProcurementConfigurationRevisions
             .Where(item => item.ProfileId == created.Id && item.Result == "Rejected")
             .Select(item => item.Action)
             .ToListAsync();
-        rejected.Should().Contain(new[] { "ApproveDecision", "Publish" });
+        rejected.Should().Contain("Publish");
     }
 
     [Fact]
@@ -380,9 +361,9 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
-    public async Task OnlySuperAdministratorCanReturnApprovedDecisionToProposed_ForGovernedRework()
+    public async Task PermissionAuthorizedConfigurationActorCanApproveAndReturnDecisionForGovernedRework()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var profile = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-rework");
         var decision = profile.Decisions.Single(item => item.DecisionKey == "DEC-001");
         await fixture.Service.LinkEvidenceAsync(profile.Id, decision.DecisionKey,
@@ -409,28 +390,6 @@ public sealed class ProcurementConfigurationServiceTests
 
         approved.EvidenceStatus.Should().Be(ProcurementConfigurationEvidenceStatus.Verified);
 
-        fixture.SetRoles("TenantAdmin");
-        await fixture.Service.Invoking(service => service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
-                new SaveProcurementConfigurationDecisionRequest
-                {
-                    SchemaVersion = approved.SchemaVersion,
-                    OwnerGroup = approved.OwnerGroup,
-                    Status = ProcurementConfigurationDecisionStatus.Proposed,
-                    ApprovalStatus = ProcurementConfigurationApprovalStatus.Pending,
-                    Value = approved.Value,
-                    DecisionDate = approved.DecisionDate,
-                    ApprovalReference = approved.ApprovalReference,
-                    RowVersion = approved.RowVersion,
-                    Reason = "Unauthorized rework attempt"
-                }, "return-rework-rejected"))
-            .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
-        (await fixture.Context.ProcurementConfigurationRevisions
-            .AnyAsync(item => item.ProfileId == profile.Id &&
-                              item.Action == "ReturnDecisionToProposed" &&
-                              item.Result == "Rejected"))
-            .Should().BeTrue();
-
-        fixture.SetRoles("SuperAdmin");
         approved = (await fixture.Service.GetProfileAsync(profile.Id)).Decisions.Single(item => item.DecisionKey == "DEC-001");
         var returned = await fixture.Service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
             new SaveProcurementConfigurationDecisionRequest
@@ -483,8 +442,7 @@ public sealed class ProcurementConfigurationServiceTests
                     Reason = "Attach governed test evidence"
                 }, $"evidence-{definition.DecisionKey}");
             current = (await service.GetProfileAsync(profileId)).Decisions.Single(item => item.DecisionKey == definition.DecisionKey);
-            await service.SaveDecisionAsync(profileId, definition.DecisionKey,
-                new SaveProcurementConfigurationDecisionRequest
+            var request = new SaveProcurementConfigurationDecisionRequest
                 {
                     SchemaVersion = definition.SchemaVersion,
                     OwnerGroup = definition.OwnerGroup,
@@ -496,7 +454,18 @@ public sealed class ProcurementConfigurationServiceTests
                     SourceLineage = "TDC-0001 automated publication fixture",
                     RowVersion = current.RowVersion,
                     Reason = "Approve governed test decision"
-                }, $"approve-{definition.DecisionKey}");
+                };
+            try
+            {
+                await service.SaveDecisionAsync(profileId, definition.DecisionKey,
+                    request, $"approve-{definition.DecisionKey}");
+            }
+            catch (ProcurementConfigurationValidationException exception)
+            {
+                var details = string.Join("; ", exception.Validation.Errors.Select(error => error.Message));
+                throw new InvalidOperationException(
+                    $"Fixture value for {definition.DecisionKey} is invalid: {details}", exception);
+            }
         }
     }
 
@@ -510,7 +479,7 @@ public sealed class ProcurementConfigurationServiceTests
             "DEC-004" => new ProcurementAuthorityStageDecisionValueDto { AuthorityOrCommittee = "Entity Tender Committee", RoleType = "Committee", Quorum = 3, EvidenceRequirements = new() { "Signed minutes" }, MinimumAmount = 0, MaximumAmount = 100000, ApplicableCategories = new() { ProcurementCategoryClass.Goods }, Sequence = 1, StageGroup = "Approval", EscalationAuthority = "Managing Director" },
             "DEC-005" => new ProcurementPettyPurchaseDecisionValueDto { PettyThreshold = 5000, CurrencyCode = "GHS", WaiverEligible = false, JustificationRequired = true, EvidenceRequirements = new() { "Receipt" }, ApproverRole = "Finance Manager", ExpiryDate = to },
             "DEC-006" => new ProcurementExceptionPrerequisiteDecisionValueDto { Method = ProcurementMethodType.SingleSource, Prerequisites = new() { "Statutory justification" }, ApprovalAuthority = "PPA", MandatoryEvidenceChecklist = new() { "Approval letter" }, FilingReference = "PPA filing", ExpiryDate = to },
-            "DEC-007" => new ProcurementSupplierFeeDecisionValueDto { FeeType = "Registration", Amount = 100, CurrencyCode = "GHS", TaxPercent = 0, PaymentChannels = new() { "Bank" }, ReceiptNumberFormat = "FEE-{YYYY}-{####}", ExemptionRule = "Written approval", RefundRule = "No refund after review", RenewalRule = "Annual renewal" },
+            "DEC-007" => new ProcurementSupplierFeeDecisionValueDto { FeeType = "Registration", Amount = 100, CurrencyCode = "GHS", TaxPercent = 0, PaymentChannels = new() { "Bank" }, RevenueAccountId = Guid.NewGuid(), ReceiptNumberFormat = "FEE-{YYYY}-{####}", ExemptionRule = "Written approval", RefundRule = "No refund after review", RenewalRule = "Annual renewal" },
             "DEC-008" => new ProcurementSignatureDecisionValueDto { DocumentType = "PurchaseOrder", SignatureMode = ProcurementSignatureMode.ElectronicOrManualEvidence, SignatoryRoles = new() { "Managing Director" }, SigningOrder = 1, VerificationRule = "Validate shared signature evidence", EvidenceRequirements = new() { "Signed document" } },
             "DEC-009" => new ProcurementGhanepsDecisionValueDto { ProfileCode = "TDC-GHANEPS", FileTemplateMappings = new() { "Plan=APP" }, Frequency = "Daily", Owner = "Procurement ICT", AcknowledgementRule = "Record acknowledgement", ReconciliationRule = "Daily exception reconciliation" },
             "DEC-010" => new ProcurementNegativeStockDecisionValueDto { DefaultPolicy = ProcurementNegativeStockPolicy.Prohibited, EmergencyOverrideEligible = false, OverridePermission = "Inventory.EmergencyOverride", EvidenceRequirements = new() { "Emergency authority" }, OverrideDurationHours = 1, AuditRequired = true },

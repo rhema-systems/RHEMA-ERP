@@ -17,6 +17,8 @@ import * as tenderBidService from '@/services/tenderBidService';
 import { evaluationTemplateService, type EvaluationTemplate, type EvaluationTemplateCriterion } from '@/services/evaluationTemplateService';
 import { type CreateEvaluationDto } from '@/services/tenderEvaluationService';
 import { type TenderBidDetailDto } from '@/services/tenderBidService';
+import { createEvaluationIdempotencyKey } from '@/lib/procurement-evaluation-committee';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -63,6 +65,8 @@ function CreateEvaluationContent() {
   const [overallComments, setOverallComments] = useState('');
   const [isRecommended, setIsRecommended] = useState(false);
   const [recommendation, setRecommendation] = useState('');
+  const [submissionSignature, setSubmissionSignature] = useState('');
+  const [submissionEvidence, setSubmissionEvidence] = useState('');
 
   useEffect(() => {
     if (bidId) {
@@ -179,8 +183,6 @@ function CreateEvaluationContent() {
   const handleSaveDraft = async () => {
     try {
       setSaving(true);
-      const totalScore = calculateTotalScore();
-
       const data: CreateEvaluationDto = {
         tenderBidId: bidId,
         evaluationCriteriaJson: buildEvaluationCriteriaJson(),
@@ -196,17 +198,20 @@ function CreateEvaluationContent() {
       router.push(`/procurement/evaluations/${evaluation.id}`);
     } catch (error) {
       console.error('Error creating evaluation:', error);
-      toast.error('Failed to create evaluation');
+      toast.error(getProcurementProblemMessage(error, 'Failed to create evaluation'));
     } finally {
       setSaving(false);
     }
   };
 
   const handleSubmit = async () => {
+    if (!submissionSignature.trim() || !submissionEvidence.trim()) {
+      toast.error('Evaluator signature and score-sheet evidence references are required');
+      return;
+    }
+
     try {
       setSaving(true);
-      const totalScore = calculateTotalScore();
-
       const data: CreateEvaluationDto = {
         tenderBidId: bidId,
         evaluationCriteriaJson: buildEvaluationCriteriaJson(),
@@ -218,11 +223,22 @@ function CreateEvaluationContent() {
       };
 
       const evaluation = await tenderEvaluationService.createEvaluation(data);
-      toast.success('Evaluation submitted successfully');
-      router.push(`/procurement/bids/${bidId}`);
+      try {
+        await tenderEvaluationService.submitEvaluation(evaluation.id, {
+          confirmSubmission: true,
+          signatureReference: submissionSignature.trim(),
+          evidenceReference: submissionEvidence.trim(),
+          idempotencyKey: createEvaluationIdempotencyKey('create-score-submit'),
+        });
+        toast.success('Evaluation submitted and locked successfully');
+        router.push('/procurement/evaluations');
+      } catch (submitError) {
+        toast.error(`Draft saved, but submission was blocked: ${getProcurementProblemMessage(submitError, 'Failed to submit evaluation')}`);
+        router.push(`/procurement/evaluations/${evaluation.id}`);
+      }
     } catch (error) {
       console.error('Error submitting evaluation:', error);
-      toast.error('Failed to submit evaluation');
+      toast.error(getProcurementProblemMessage(error, 'Failed to create evaluation'));
     } finally {
       setSaving(false);
     }
@@ -481,6 +497,25 @@ function CreateEvaluationContent() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Signed score-sheet lock</CardTitle>
+          <CardDescription>
+            Submission records the evaluator signature and evidence reference, then locks the exact score snapshot.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="submissionSignature">Evaluator signature reference *</Label>
+            <Input id="submissionSignature" value={submissionSignature} onChange={(event) => setSubmissionSignature(event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="submissionEvidence">Score-sheet evidence reference *</Label>
+            <Input id="submissionEvidence" value={submissionEvidence} onChange={(event) => setSubmissionEvidence(event.target.value)} />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Actions */}
       <div className="flex items-center justify-end gap-4">
         <Button
@@ -500,10 +535,10 @@ function CreateEvaluationContent() {
         </Button>
         <Button
           onClick={handleSubmit}
-          disabled={saving}
+          disabled={saving || !submissionSignature.trim() || !submissionEvidence.trim()}
         >
           <Send className="h-4 w-4 mr-2" />
-          {saving ? 'Submitting...' : 'Submit Evaluation'}
+          {saving ? 'Submitting...' : 'Submit and lock evaluation'}
         </Button>
       </div>
     </div>

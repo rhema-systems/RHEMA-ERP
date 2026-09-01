@@ -1,12 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_REQUISITION_LINKAGE,
+  applyPlanItemToRequisitionLinkage,
+  deriveRequisitionLinkageFromPlanItem,
+  formatRequisitionMoney,
+  getRequisitionCurrency,
   normalizeRequisitionLinkage,
   toEditableRequisitionLinkage,
   validateExceptionLinkage,
 } from './procurement-requisition-linkage';
 
 describe('purchase requisition linkage helpers', () => {
+  it('inherits budget and category from the selected approved plan item without a cost centre', () => {
+    const result = applyPlanItemToRequisitionLinkage({
+      requisitionType: 'StockReplenishment',
+      budgetId: 'browser-budget',
+      costCenter: 'browser-cost-centre',
+    }, {
+      id: 'plan-item',
+      code: 'APP-2026-01',
+      name: 'Wireless Keyboard',
+      budgetId: 'approved-budget',
+      departmentId: 'it-department',
+      category: 'Goods',
+    });
+
+    expect(result).toEqual({
+      requisitionType: 'StockReplenishment',
+      sourcePlanItemId: 'plan-item',
+      budgetId: 'approved-budget',
+      procurementCategory: 'Goods',
+      costCenter: undefined,
+    });
+  });
+
   it('keeps every supported linkage field in the save contract', () => {
     const result = normalizeRequisitionLinkage({
       sourcePlanItemId: ' plan-item ',
@@ -89,5 +116,62 @@ describe('purchase requisition linkage helpers', () => {
       specificationTemplateId: 'template',
     }));
     expect(editable).not.toHaveProperty('sourcePlanNumber');
+  });
+
+  it('uses the plan item explicit linked budget instead of inferring it from a plan parent', () => {
+    const result = deriveRequisitionLinkageFromPlanItem(
+      { ...EMPTY_REQUISITION_LINKAGE },
+      'item-1',
+      {
+        planItems: [{
+          id: 'item-1',
+          code: 'PP-2026-001',
+          name: 'Office furniture',
+          parentId: 'plan-1',
+          linkedBudgetId: 'budget-1',
+          category: 'Goods',
+          currency: 'GHS',
+        }],
+        budgets: [{
+          id: 'budget-1',
+          code: 'PB-2026-001',
+          name: 'Administration budget',
+          parentId: 'plan-1',
+          currency: 'GHS',
+        }],
+        projects: [],
+        specificationTemplates: [],
+        approvedExceptionRules: [],
+        approvedExceptionWorkflows: [],
+        categories: [],
+        requestTypes: [],
+        costCenters: [],
+      }
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      sourcePlanItemId: 'item-1',
+      budgetId: 'budget-1',
+      procurementCategory: 'Goods',
+    }));
+  });
+
+  it('uses the linked currency or the controlled Finance base currency', () => {
+    const options = {
+      planItems: [],
+      budgets: [{ id: 'budget-1', code: 'PB-1', name: 'Budget', currency: 'EUR' }],
+      projects: [],
+      specificationTemplates: [],
+      approvedExceptionRules: [],
+      approvedExceptionWorkflows: [],
+      categories: [],
+      requestTypes: [],
+      costCenters: [],
+    };
+
+    expect(getRequisitionCurrency({ ...EMPTY_REQUISITION_LINKAGE, budgetId: 'budget-1' }, options)).toBe('EUR');
+    expect(getRequisitionCurrency({ ...EMPTY_REQUISITION_LINKAGE }, options, 'GHS')).toBe('GHS');
+    expect(getRequisitionCurrency({ ...EMPTY_REQUISITION_LINKAGE })).toBe('XXX');
+    expect(formatRequisitionMoney(4900, 'GHS')).toContain('GHS');
   });
 });

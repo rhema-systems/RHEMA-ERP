@@ -58,10 +58,37 @@ public partial class ProjectService
         "resourcemanager"
     ];
 
+    public async Task<bool> HasProjectAccessAsync(Guid projectId)
+    {
+        if (projectId == Guid.Empty)
+        {
+            return false;
+        }
+
+        try
+        {
+            await GetProjectForOperationAsync(projectId, ProjectAccessOperation.View);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.StartsWith("Project with ID ", StringComparison.Ordinal) &&
+            exception.Message.EndsWith(" not found", StringComparison.Ordinal))
+        {
+            return false;
+        }
+    }
+
     private async Task<Project> GetProjectForOperationAsync(Guid projectId, ProjectAccessOperation operation)
     {
-        var project = await _projectRepository.GetByIdAsync(projectId)
-            ?? throw new InvalidOperationException($"Project with ID {projectId} not found");
+        var project = await _projectRepository.GetByIdAsync(projectId);
+        if (project is null || project.IsDeleted || project.TenantId != _currentUserProvider.TenantId)
+        {
+            throw new InvalidOperationException($"Project with ID {projectId} not found");
+        }
 
         await EnsureProjectAccessAsync(project, operation);
         return project;
@@ -241,7 +268,9 @@ public partial class ProjectService
             || project.SponsorId == _currentUserProvider.UserId
             || project.CreatedById == _currentUserProvider.UserId;
 
-    private static bool IsManagementProjectRole(string? role) => ManagementProjectRoles.Contains(NormalizeProjectRole(role));
+    private static bool IsManagementProjectRole(string? role)
+        => ManagementProjectRoles.Contains(NormalizeProjectRole(role))
+            || CivilEngineeringAccessControlRegistry.IsManagementProjectRole(role);
 
     private static bool IsFinancialProjectRole(string? role)
     {
@@ -252,13 +281,15 @@ public partial class ProjectService
     private static bool IsGovernanceProjectRole(string? role)
     {
         var normalized = NormalizeProjectRole(role);
-        return GovernanceProjectRoles.Contains(normalized) || ManagementProjectRoles.Contains(normalized);
+        return GovernanceProjectRoles.Contains(normalized) || IsManagementProjectRole(role);
     }
 
     private static bool IsExecutionProjectRole(string? role)
     {
         var normalized = NormalizeProjectRole(role);
-        return ExecutionProjectRoles.Contains(normalized) || ManagementProjectRoles.Contains(normalized);
+        return ExecutionProjectRoles.Contains(normalized)
+            || IsManagementProjectRole(role)
+            || CivilEngineeringAccessControlRegistry.IsExecutionProjectRole(role);
     }
 
     private static string NormalizeProjectRole(string? role)

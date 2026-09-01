@@ -226,7 +226,7 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
     }
 
     // Missing methods referenced in controller
-    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<PurchaseRequisition>> GetRequisitionsAsync(int page, int pageSize, string? search = null, string? status = null, string? priority = null, DateTime? startDate = null, DateTime? endDate = null, string? department = null)
+    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<PurchaseRequisition>> GetRequisitionsAsync(int page, int pageSize, string? search = null, string? status = null, string? priority = null, DateTime? startDate = null, DateTime? endDate = null, string? department = null, Guid? sourcePlanId = null)
     {
         var query = _dbSet.Where(pr => !pr.IsDeleted)
             .Include(pr => pr.RequestedBy)
@@ -255,6 +255,11 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
         if (!string.IsNullOrWhiteSpace(department))
         {
             query = query.Where(pr => pr.Department == department);
+        }
+
+        if (sourcePlanId.HasValue)
+        {
+            query = query.Where(pr => pr.SourcePlanId == sourcePlanId.Value);
         }
 
         if (startDate.HasValue)

@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using ErpSystem.Shared;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Controllers.QuantitySurvey;
@@ -16,7 +17,8 @@ public sealed class QuantitySurveyTenderBoqSubmissionSecurityTests
     {
         typeof(ExternalTenderBoqSubmissionsController)
             .GetCustomAttribute<AuthorizeAttribute>()
-            .Should().NotBeNull();
+            .Should().Match<AuthorizeAttribute>(attribute =>
+                attribute.Roles == Constants.Roles.ExternalUser);
     }
 
     [Theory]

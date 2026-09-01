@@ -197,6 +197,83 @@ public sealed class ProcurementSupplierEvidencePackServiceTests
     }
 
     [Fact]
+    public async Task ApprovedSupplierOwnerCanReadEvidenceCreatedByApplicantIdentity()
+    {
+        await using var fixture = new Fixture();
+        var partner = new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            PartnerCode = "SUP-OWNER",
+            PartnerName = "Approved Supplier",
+            PartnerType = "Supplier",
+            UserId = fixture.UserId
+        };
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationNumber = "REG-APPROVED-OWNER",
+            ApplicantName = partner.PartnerName,
+            PartnerType = "Supplier",
+            RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods,
+            Status = "Approved",
+            CreatedById = Guid.NewGuid(),
+            BusinessPartnerId = partner.Id
+        };
+        fixture.Context.AddRange(partner, registration);
+        await fixture.Context.SaveChangesAsync();
+        fixture.SetExternal(true);
+
+        var readiness = await fixture.Service.GetRegistrationReadinessAsync(registration.Id);
+
+        readiness.RegistrationId.Should().Be(registration.Id);
+    }
+
+    [Fact]
+    public async Task ActiveSupplierDelegateCanReadLinkedApprovedRegistrationEvidence()
+    {
+        await using var fixture = new Fixture();
+        var partner = new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            PartnerCode = "SUP-DELEGATE",
+            PartnerName = "Delegated Supplier",
+            PartnerType = "Supplier",
+            UserId = Guid.NewGuid()
+        };
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationNumber = "REG-APPROVED-DELEGATE",
+            ApplicantName = partner.PartnerName,
+            PartnerType = "Supplier",
+            RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods,
+            Status = "Approved",
+            CreatedById = Guid.NewGuid(),
+            BusinessPartnerId = partner.Id
+        };
+        var delegatedUser = new BusinessPartnerUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            BusinessPartnerId = partner.Id,
+            UserId = fixture.UserId,
+            Role = "User",
+            IsActive = true
+        };
+        fixture.Context.AddRange(partner, registration, delegatedUser);
+        await fixture.Context.SaveChangesAsync();
+        fixture.SetExternal(true);
+
+        var readiness = await fixture.Service.GetRegistrationReadinessAsync(registration.Id);
+
+        readiness.RegistrationId.Should().Be(registration.Id);
+    }
+
+    [Fact]
     public async Task ExternalApplicantBindingUsesTenantSystemAuditPrincipal()
     {
         await using var fixture = new Fixture();
@@ -324,12 +401,23 @@ public sealed class ProcurementSupplierEvidencePackServiceTests
             current.SetupGet(item => item.Username).Returns("supplier-controls@tdc.test");
             current.SetupGet(item => item.FullName).Returns("Supplier Controls");
             current.SetupGet(item => item.Roles).Returns(() =>
-                _external ? ["External"] : ["TenantAdmin"]);
+                _external ? ["External"] : ["TDC_PROCUREMENT_OFFICER"]);
             current.Setup(item => item.HasRole(It.IsAny<string>()))
-                .Returns((string role) => !_external && role == "TenantAdmin");
+                .Returns((string role) => !_external &&
+                    string.Equals(role, "TDC_PROCUREMENT_OFFICER",
+                        StringComparison.OrdinalIgnoreCase));
 
             _unitOfWork = new UnitOfWork(Context);
             var access = new Mock<IProcurementAccessControlService>();
+            access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Message = "Allowed"
+                });
             var sod = new Mock<IProcurementSodGuardService>();
             sod.Setup(item => item.EnforceAsync(
                     It.IsAny<ProcurementSodGuardRequest>(),

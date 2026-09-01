@@ -28,7 +28,7 @@ public static class ProcurementWorksCloseoutRules
             [ProcurementWorksCloseoutActionType.FinalAccount] =
                 ["approved-final-account", "final-account-reconciliation"],
             [ProcurementWorksCloseoutActionType.Closeout] =
-                ["closeout-certificate", "records-archive-confirmation", "lessons-and-handover"]
+                ["closeout-certificate", "as-built-drawing-current-version", "records-archive-confirmation", "lessons-and-handover"]
         };
 
     public static IReadOnlyDictionary<ProcurementWorksCloseoutActionType, IReadOnlyList<string>>

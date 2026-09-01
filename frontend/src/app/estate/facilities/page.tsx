@@ -11,6 +11,7 @@ import {
   CreditCard,
   Database,
   FileText,
+  Home,
   Loader2,
   MessageSquare,
   Wrench,
@@ -53,6 +54,13 @@ const accentClasses: Record<string, string> = {
   violet: 'text-violet-700 dark:text-violet-300',
 };
 
+const propertyOperationsEntityTypes = new Set([
+  'EstateFacilityPropertySite',
+  'EstateFacilityLease',
+  'EstateFacilityBillingServiceCharge',
+  'EstateFacilityDocument',
+]);
+
 export default function EstateFacilitiesPage() {
   const router = useRouter();
   const [procedures, setProcedures] =
@@ -93,31 +101,56 @@ export default function EstateFacilitiesPage() {
     router.push(`/estate/facilities/${encodeURIComponent(entityType)}`);
   };
 
+  const operationalProcedures = React.useMemo(
+    () =>
+      procedures.filter(
+        (procedure) => !propertyOperationsEntityTypes.has(procedure.entityType)
+      ),
+    [procedures]
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
           <Badge variant="outline" className="w-fit">
-            Estate facilities
+            Estate / Corporate Services
           </Badge>
           <div>
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-              Facilities Management
+              Facilities & Corporate Services
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Estate-owned service operations for maintenance, complaints,
-              providers, field teams, operational assets, and facilities
-              documents.
+              Estate-owned service operations for maintenance intake,
+              complaints, providers, field teams, and operating assets.
+              Property transactions, leases, occupancy, billing, and property
+              records remain in Property Management.
             </p>
           </div>
         </div>
-        <Button asChild>
-          <Link href="/estate/facilities/dashboard">
-            <BarChart3 className="mr-2 h-4 w-4" />
-            Dashboard
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild>
+            <Link href="/estate/property-management">
+              <Home className="mr-2 h-4 w-4" />
+              Property Management
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/estate/facilities/dashboard">
+              <BarChart3 className="mr-2 h-4 w-4" />
+              Dashboard
+            </Link>
+          </Button>
+        </div>
       </div>
+
+      <Card className="border-border bg-card text-card-foreground">
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          This area owns maintenance intake, complaints, service providers,
+          corporate office support teams, cleaning duties, and facilities
+          assets. Each operation appears here once.
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {!isLoading && loadError ? (
@@ -137,7 +170,7 @@ export default function EstateFacilitiesPage() {
         ) : null}
 
         {!isLoading &&
-          procedures.map((procedure) => {
+          operationalProcedures.map((procedure) => {
             const Icon = procedureIcons[procedure.icon] || FileText;
             const accent = accentClasses[procedure.accent] || 'text-primary';
 

@@ -9,6 +9,10 @@ const required = (name: string): string => {
 test('INV-REQ-FU-002 renders the governed work-order reservation read-back', async ({ browser }) => {
   test.setTimeout(3 * 60_000);
   const api = process.env.E2E_API_URL?.trim() || 'http://127.0.0.1:5000';
+  const workOrderId = required('INV_FU002_WORK_ORDER_ID');
+  const itemCode = required('INV_FU002_ITEM_CODE');
+  const expectedUsage = required('INV_FU002_EXPECTED_USAGE');
+  const tenantCode = process.env.INV_FU002_TENANT_CODE?.trim() || 'DEFAULT';
   const context = await browser.newContext({
     baseURL: process.env.E2E_BASE_URL?.trim() || 'http://127.0.0.1:3001',
   });
@@ -43,7 +47,7 @@ test('INV-REQ-FU-002 renders the governed work-order reservation read-back', asy
     data: {
       username: required('INV_FU002_USERNAME'),
       password: required('INV_FU002_PASSWORD'),
-      tenantCode: 'DEFAULT',
+      tenantCode,
       rememberMe: false,
     },
   });
@@ -61,11 +65,20 @@ test('INV-REQ-FU-002 renders the governed work-order reservation read-back', asy
     { token: login.token!, refreshToken: login.refreshToken },
   );
 
-  await page.goto('/maintenance/work-orders?id=7ce63ea7-d555-4ad9-ad36-bc30edb8a366');
+  const detailResponse = await context.request.get(`${api}/api/maintenance/work-orders/${workOrderId}`, {
+    headers: { Authorization: `Bearer ${login.token}` },
+  });
+  const detailBody = await detailResponse.text();
+  expect(detailResponse.status(), detailBody).toBe(200);
+  const detail = JSON.parse(detailBody) as { id?: string; parts?: Array<{ itemCode?: string; status?: string }> };
+  expect(detail.id?.toLowerCase()).toBe(workOrderId.toLowerCase());
+  expect(detail.parts?.some(part => part.itemCode === itemCode && part.status === 'Returned')).toBe(true);
+
+  await page.goto(`/maintenance/work-orders?id=${encodeURIComponent(workOrderId)}`);
   await expect(page.getByRole('heading', { name: 'Work Order Details' })).toBeVisible({ timeout: 90_000 });
   await page.getByRole('tab', { name: 'Parts' }).click();
-  const acceptedRow = page.getByRole('row').filter({ hasText: 'FILTER-AIR-001' }).filter({ hasText: 'Returned' });
-  await expect(acceptedRow).toContainText('1 / 3', { timeout: 30_000 });
+  const acceptedRow = page.getByRole('row').filter({ hasText: itemCode }).filter({ hasText: 'Returned' });
+  await expect(acceptedRow).toContainText(expectedUsage, { timeout: 30_000 });
   await expect(acceptedRow).toContainText('Returned');
   expect(materialErrors, materialErrors.join('\n')).toEqual([]);
 

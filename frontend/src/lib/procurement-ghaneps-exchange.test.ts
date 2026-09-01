@@ -19,6 +19,7 @@ import type {
 } from '@/types/procurement-ghaneps-exchange';
 
 export const ghanepsOptions = (): ProcurementGhanepsExchangeOptions => ({
+  isConfigured: true,
   sourceType: 'Tender',
   sourceId: 'tender-1',
   sourceReference: 'TDR-001',

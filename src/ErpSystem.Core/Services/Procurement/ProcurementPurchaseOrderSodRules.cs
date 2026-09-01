@@ -48,7 +48,7 @@ public static class ProcurementPurchaseOrderSodRules
         NormalizeReceiptAction(receiptAction) switch
         {
             ApproveReceiptInspection or CloseReceiptInspection =>
-                "procurement.purchase-order.approve",
+                "procurement.inventory.receive",
             _ => "procurement.inventory.receive"
         };
 

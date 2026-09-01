@@ -329,6 +329,51 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     }
 
     [Fact]
+    public void Controlled_adjustments_accept_inventory_held_fixed_assets_but_opening_stock_remains_stock_item_only()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "StockAdjustmentService.cs")).Replace("\r\n", "\n");
+        var repository = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Data", "Repositories", "Inventory",
+            "StockAdjustmentRepositories.cs"));
+        var buildStart = source.IndexOf("private async Task BuildLinesAsync", StringComparison.Ordinal);
+        var buildEnd = source.IndexOf("private async Task RequireAccessAsync", buildStart, StringComparison.Ordinal);
+        var draftLineBuilder = source[buildStart..buildEnd];
+        var postStart = source.IndexOf("private async Task ApplyAdjustmentLineAsync", StringComparison.Ordinal);
+        var postEnd = source.IndexOf("private async Task PersistLifecycleStateBeforeActionAsync", postStart, StringComparison.Ordinal);
+        var posting = source[postStart..postEnd];
+        var openingStart = source.IndexOf("private async Task RevalidateOpeningStockAsync", StringComparison.Ordinal);
+        var openingEnd = source.IndexOf("private async Task ApplyAdjustmentLineAsync", openingStart, StringComparison.Ordinal);
+        var opening = source[openingStart..openingEnd];
+
+        source.Should().Contain("itemType is ItemType.StockItem or ItemType.FixedAsset");
+        source.Should().Contain("var reference = Normalize(dto.Reference, 50)",
+            "ordinary adjustment references must respect the persisted 50-character column");
+        source.Should().Contain("adjustment.Reference = Normalize(dto.Reference, 50)",
+            "adjustment updates must respect the persisted 50-character column");
+        source.Should().NotContain("adjustment = await mutation(adjustment);\n                await _adjustmentRepository.UpdateAsync(adjustment);",
+            "an idempotent lifecycle replay must not advance the adjustment row version");
+        draftLineBuilder.Should().Contain("IsStockedInventoryItem(inventoryItem.ItemType)");
+        posting.Should().Contain("IsStockedInventoryItem(inventoryItem.ItemType)");
+        opening.Should().Contain("item.ItemType != ItemType.StockItem",
+            "the dedicated opening-stock schedule is intentionally limited to stock items");
+        repository.Should().Contain(".IgnoreQueryFilters()",
+            "soft-deleted immutable adjustment numbers still occupy the non-filtered unique index");
+        repository.Should().Contain("sa.TenantId == tenantId && sa.AdjustmentNumber.StartsWith",
+            "number generation must include deleted numbers without crossing tenant boundaries");
+        var financePosting = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api", "Services", "Finance",
+            "InventoryAdjustmentFinancePostingService.cs"));
+        financePosting.Should().Contain("var expenseAccount = expense");
+        financePosting.Should().Contain("var recoveryAccount = recovery");
+        financePosting.Should().NotContain("Guid? expense = !isOpeningStock",
+            "a positive adjustment must not require an unused expense account and vice versa");
+        var requisitionService = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryRequisitionService.cs")).Replace("\r\n", "\n");
+        requisitionService.Should().Contain("Flush the governed parent first inside this");
+        requisitionService.Should().Contain("await _unitOfWork.SaveChangesAsync(cancellationToken);\n                await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Acknowledged",
+            "the append-only action trigger must see the durable Acknowledged parent status");
+    }
+
+    [Fact]
     public void Return_voucher_lists_page_until_the_authorized_limit_is_filled()
     {
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
@@ -343,6 +388,20 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     }
 
     [Fact]
+    public void Inventory_requisition_lists_reuse_authorization_decisions_for_the_same_stores_scope()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryRequisitionService.cs"));
+        var start = source.IndexOf("private async Task<IReadOnlyList<InventoryRequisition>> ApplyReadScopeAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private async Task<bool> CanReadRequisitionAsync", start, StringComparison.Ordinal);
+        var readScope = source[start..end];
+
+        readScope.Should().Contain("Dictionary<(Guid WarehouseId, Guid? LocationId), bool>");
+        readScope.Should().Contain("scopeDecisions.TryGetValue(scope, out var allowed)");
+        readScope.Should().Contain("scopeDecisions.Add(scope, allowed)");
+    }
+
+    [Fact]
     public void Controlled_returns_validate_bins_by_effective_inventory_warehouse()
     {
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
@@ -353,6 +412,21 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
 
         validation.Should().Contain("location.InventoryWarehouseId != warehouseId");
         validation.Should().NotContain("location.WarehouseId != warehouseId");
+    }
+
+    [Fact]
+    public void Return_and_adjustment_evidence_require_a_clean_central_dms_upload()
+    {
+        var root = FindRepositoryRoot();
+        var returnSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryReturnControlService.cs"));
+        var adjustmentSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Inventory",
+            "StockAdjustmentService.cs"));
+
+        returnSource.Should().Contain("x.VirusScanStatus == FileVirusScanStatus.Clean");
+        returnSource.Should().Contain("INV_RETURN_EVIDENCE_NOT_CLEAN");
+        adjustmentSource.Should().Contain("x.VirusScanStatus == FileVirusScanStatus.Clean");
+        adjustmentSource.Should().Contain("successful clean malware scan");
     }
 
     [Fact]

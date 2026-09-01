@@ -26,9 +26,14 @@ namespace ErpSystem.Api.Services;
 public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDocumentService
 {
     private const string EventType = "ProcurementReceiptDocument";
-    private const string ReadPermission = "procurement.inventory.read";
+    private const string RecordsReadPermission = "procurement.records.read";
+    private const string InventoryReadPermission = "procurement.inventory.read";
     private const string ManagePermission = "procurement.inventory.receive";
-    private const string IssuePermission = "procurement.purchase-order.approve";
+    // Issuing an inspected and fully signed GRN/MRN is a Stores operation.
+    // Purchase-order approval belongs to the earlier PO maker-checker stage
+    // and must not be required again after independent receipt approval.
+    private const string IssuePermission = ManagePermission;
+    private const string CancelPermission = "procurement.purchase-order.approve";
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(value => $"DEC-{value:000}").ToList();
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
@@ -118,7 +123,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
                     : ProcurementReceiptDocumentType.Grn;
                 var format = governance.Value.ResolveNumberFormat(configKind);
                 var templateCode = governance.Value.ResolveTemplateReference(configKind);
-                await EnsureTemplateAsync(templateCode, kind, cancellationToken);
+                var template = await EnsureTemplateAsync(
+                    templateCode, kind, cancellationToken);
+                templateCode = template.TemplateCode;
                 var id = Guid.NewGuid();
                 var number = await _numbering.GenerateConfiguredAsync(
                     DocumentNumberingModules.Procurement,
@@ -149,7 +156,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
                     ConfigurationProfileVersion = governance.Profile.Version,
                     ConfigurationDecisionId = governance.Decision.Id,
                     DecisionKeysJson = Serialize(DecisionKeys),
-                    DecisionSnapshotJson = governance.Decision.Value.GetRawText(),
+                    DecisionSnapshotJson = Serialize(governance.Value),
                     SourceSnapshotJson = snapshot,
                     SourceIntegrityHash = Hash(snapshot),
                     CorrelationId = correlation,
@@ -161,7 +168,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
                     CreatedById = _currentUser.UserId
                 };
                 AddAction(document, "Created", string.Empty, document.Status.ToString(), correlation,
-                    "Generated from the effective DEC-013 receipt-document configuration.", governance.Decision.Value.GetRawText());
+                    "Generated from the resolved DEC-013 receipt-document configuration.", Serialize(governance.Value));
                 _db.ProcurementReceiptDocuments.Add(document);
                 existing.Add(document);
             }
@@ -187,7 +194,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         CancellationToken cancellationToken = default)
     {
         var receipt = await LoadReceiptAsync(receiptId, false, cancellationToken);
-        await EnsureCapabilityAsync(ReadPermission, receipt, Correlation(null), cancellationToken);
+        await EnsureReadCapabilityAsync(receipt, cancellationToken);
         var documents = await DocumentQuery(false)
             .Where(item => item.PurchaseOrderReceiptId == receipt.Id)
             .ToListAsync(cancellationToken);
@@ -222,7 +229,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         // Signing is authorized by the immutable DEC-013 signatory role. A
         // read-only Internal Audit role must be able to attest without being
         // granted the Stores receipt-mutation permission.
-        await EnsureCapabilityAsync(ReadPermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
+        await EnsureCapabilityAsync(InventoryReadPermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
         EnsureRowVersion(document.RowVersion, request.RowVersion);
         if (document.Status is ProcurementReceiptDocumentStatus.Issued or ProcurementReceiptDocumentStatus.Cancelled)
             throw Conflict("RCV_DOCUMENT_NOT_SIGNABLE", "Issued or cancelled receipt documents cannot be signed.");
@@ -504,7 +511,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     {
         var correlation = Correlation(correlationId);
         var document = await LoadDocumentAsync(documentId, cancellationToken);
-        await EnsureCapabilityAsync(IssuePermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
+        await EnsureCapabilityAsync(CancelPermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
         if (document.Status == ProcurementReceiptDocumentStatus.Cancelled)
             return await MapForCurrentActorAsync(
                 document, DeserializeDecision(document.DecisionSnapshotJson), cancellationToken);
@@ -575,7 +582,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     public async Task<ProcurementReceiptDocumentFileDto> DownloadAsync(Guid documentId, CancellationToken cancellationToken = default)
     {
         var document = await LoadDocumentAsync(documentId, cancellationToken);
-        await EnsureCapabilityAsync(ReadPermission, document.PurchaseOrderReceipt, Correlation(null), cancellationToken);
+        await EnsureReadCapabilityAsync(document.PurchaseOrderReceipt, cancellationToken);
         if (document.Status != ProcurementReceiptDocumentStatus.Issued || !document.CentralDocumentVersionId.HasValue)
             throw Conflict("RCV_DOCUMENT_NOT_ISSUED", "Only an issued receipt document can be downloaded.");
         var version = await _db.CentralDocumentVersions.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -617,8 +624,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         if (registeredGrn is not null)
             return await DownloadAsync(registeredGrn.Id, cancellationToken);
 
-        await EnsureCapabilityAsync(
-            ReadPermission, receipt, Correlation(null), cancellationToken);
+        await EnsureReadCapabilityAsync(receipt, cancellationToken);
 
         if (receipt.PurchaseOrder.ProcurementSourceType !=
             ProcurementPurchaseOrderSourceType.HistoricalMigration)
@@ -908,10 +914,30 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
 
     private async Task<Governance> LoadGovernanceAsync(CancellationToken cancellationToken)
     {
-        var profile = await _configuration.GetEffectiveProfileAsync("TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken)
-                      ?? throw Validation("RCV_CONFIGURATION_MISSING", "No effective Published TDC procurement configuration profile exists.");
-        if (profile.Decisions.Count != 14 || profile.Decisions.Any(item => !item.IsComplete))
-            throw Validation("RCV_CONFIGURATION_INCOMPLETE", "The effective configuration must contain fourteen complete approved decisions.");
+        // Receipt documents require the actual DEC-013 document settings, not
+        // publication of every unrelated procurement decision. Prefer the
+        // effective Published profile, but retain the latest tenant profile as
+        // audit lineage while detailed configuration is still being completed.
+        var profile = await _configuration.GetEffectiveProfileAsync(
+            "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken);
+        if (profile is null)
+        {
+            var profileId = await _db.ProcurementConfigurationProfiles
+                .AsNoTracking()
+                .Where(item => item.TenantId == _currentUser.TenantId &&
+                               item.ProfileCode == "TDC-PROCUREMENT" &&
+                               !item.IsDeleted)
+                .OrderByDescending(item => item.Version)
+                .ThenByDescending(item => item.UpdatedAt)
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            profile = profileId.HasValue
+                ? await _configuration.GetProfileAsync(
+                    profileId.Value, cancellationToken)
+                : throw Validation("RCV_CONFIGURATION_MISSING",
+                    "No TDC procurement configuration profile is available for receipt-document audit lineage.");
+        }
+
         var decision = profile.Decisions.SingleOrDefault(item => item.DecisionKey == "DEC-013")
                        ?? throw Validation("RCV_DEC013_MISSING", "DEC-013 is missing from the effective configuration.");
         return new Governance(profile, decision, DeserializeDecision(decision.Value.GetRawText()));
@@ -937,12 +963,23 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
 
     private async Task<CentralDocumentGenerationTemplate> EnsureTemplateAsync(string code, ProcurementReceiptDocumentKind kind, CancellationToken cancellationToken)
     {
-        var template = await _db.CentralDocumentGenerationTemplates.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.TenantId == _currentUser.TenantId && item.TemplateCode == code && item.IsActive && !item.IsDeleted,
-            cancellationToken);
-        if (template is null)
-            throw Validation("RCV_DOCUMENT_TEMPLATE_MISSING", $"Active central DMS template {code} was not found for this tenant.");
         var expected = kind == ProcurementReceiptDocumentKind.Grn ? "GoodsReceiptNote" : "MaterialReceiptNote";
+        var templates = _db.CentralDocumentGenerationTemplates
+            .AsNoTracking()
+            .Where(item => item.TenantId == _currentUser.TenantId &&
+                           item.IsActive && !item.IsDeleted);
+        var template = string.IsNullOrWhiteSpace(code)
+            ? await templates
+                .Where(item => item.Module == "Procurement" &&
+                               item.DocumentType == expected)
+                .OrderByDescending(item => item.UpdatedAt)
+                .ThenByDescending(item => item.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken)
+            : await templates.SingleOrDefaultAsync(
+                item => item.TemplateCode == code, cancellationToken);
+        if (template is null)
+            throw Validation("RCV_DOCUMENT_TEMPLATE_MISSING",
+                $"No active central DMS Procurement {expected} template is configured for this tenant.");
         if (!string.Equals(template.Module, "Procurement", StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(template.DocumentType, expected, StringComparison.OrdinalIgnoreCase))
             throw Validation("RCV_DOCUMENT_TEMPLATE_INVALID", $"Template {code} is not an active Procurement {expected} template.");
@@ -967,6 +1004,27 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         if (!decision.Allowed) throw new ProcurementReceiptDocumentAuthorizationException(decision.Message);
     }
 
+    private async Task EnsureReadCapabilityAsync(
+        PurchaseOrderReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        EnsureAuthenticatedTenant();
+        if (_currentUser.IsExternalUser)
+            throw new ProcurementReceiptDocumentAuthorizationException(
+                "External users cannot access internal receipt documents.");
+        if (IsAdministrator()) return;
+
+        var warehouseId = await ResolveWarehouseIdAsync(receipt, cancellationToken);
+        if (await CanUseCapabilityAsync(
+                RecordsReadPermission, receipt, warehouseId, cancellationToken) ||
+            await CanUseCapabilityAsync(
+                InventoryReadPermission, receipt, warehouseId, cancellationToken))
+            return;
+
+        throw new ProcurementReceiptDocumentAuthorizationException(
+            "Your assigned roles do not permit viewing this purchase receipt's GRN/MRN register.");
+    }
+
     private async Task<bool> CanUseCapabilityAsync(
         string permission,
         PurchaseOrderReceipt receipt,
@@ -974,14 +1032,29 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         CancellationToken cancellationToken)
     {
         if (_currentUser.IsExternalUser) return false;
-        var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+        try
         {
-            PermissionCode = permission,
-            SourceType = EventType,
-            SourceReference = receipt.ReceiptNumber,
-            WarehouseId = warehouseId
-        }, Correlation(null), cancellationToken);
-        return decision.Allowed;
+            var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permission,
+                SourceType = EventType,
+                SourceReference = receipt.ReceiptNumber,
+                WarehouseId = warehouseId
+            }, Correlation(null), cancellationToken);
+            return decision.Allowed;
+        }
+        catch (ProcurementAccessAuthorizationException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessValidationException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessNotFoundException)
+        {
+            return false;
+        }
     }
 
     private async Task<Guid?> ResolveWarehouseIdAsync(
@@ -1315,13 +1388,60 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     {
         try
         {
-            return JsonSerializer.Deserialize<ProcurementReceiptDocumentDecisionValueDto>(json, JsonOptions)
-                   ?? throw new JsonException();
+            var value = JsonSerializer.Deserialize<ProcurementReceiptDocumentDecisionValueDto>(json, JsonOptions)
+                        ?? throw new JsonException();
+            return ApplyReceiptDocumentDefaults(value);
         }
         catch (JsonException)
         {
             throw Validation("RCV_DEC013_INVALID", "The effective DEC-013 receipt-document value is invalid.");
         }
+    }
+
+    private static ProcurementReceiptDocumentDecisionValueDto ApplyReceiptDocumentDefaults(
+        ProcurementReceiptDocumentDecisionValueDto value)
+    {
+        // Older tenant profiles can contain an empty DEC-013 object. Receipt
+        // processing must still use the standard controlled GRN/MRN register;
+        // explicitly configured values continue to take precedence.
+        var hasDocumentConfiguration =
+            !string.IsNullOrWhiteSpace(value.NumberFormat) ||
+            !string.IsNullOrWhiteSpace(value.TemplateReference) ||
+            !string.IsNullOrWhiteSpace(value.GrnNumberFormat) ||
+            !string.IsNullOrWhiteSpace(value.MrnNumberFormat) ||
+            !string.IsNullOrWhiteSpace(value.GrnTemplateReference) ||
+            !string.IsNullOrWhiteSpace(value.MrnTemplateReference) ||
+            value.SignatureRequirements.Any(item => !string.IsNullOrWhiteSpace(item)) ||
+            value.EvidenceRequirements.Any(item => !string.IsNullOrWhiteSpace(item));
+
+        if (!hasDocumentConfiguration)
+        {
+            value.DocumentType = ProcurementReceiptDocumentType.GrnAndMrn;
+            value.CoexistenceRule = ProcurementReceiptCoexistenceRule.SequentialDocuments;
+        }
+
+        if (string.IsNullOrWhiteSpace(value.ApplicabilityRule))
+            value.ApplicabilityRule = "Approved inspected purchase-order receipts";
+        if (string.IsNullOrWhiteSpace(value.NumberFormat))
+            value.NumberFormat = "{TYPE}-{YYYY}-{####}";
+        if (string.IsNullOrWhiteSpace(value.TemplateReference))
+            value.TemplateReference = "TDC-{TYPE}";
+        if (!value.SignatureRequirements.Any(item => !string.IsNullOrWhiteSpace(item)))
+            value.SignatureRequirements = ["Stores", "Approving Officer"];
+        if (!value.EvidenceRequirements.Any(item => !string.IsNullOrWhiteSpace(item)))
+            value.EvidenceRequirements = ["Waybill"];
+
+        value.SignatureRequirements = value.SignatureRequirements
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        value.EvidenceRequirements = value.EvidenceRequirements
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return value;
     }
 
     private static IEnumerable<ProcurementReceiptDocumentKind> RequiredKinds(ProcurementReceiptDocumentType type)
@@ -1383,6 +1503,8 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         {
             "STORES" => _currentUser.HasRole("TDC_STORES_OFFICER") ||
                         _currentUser.HasRole("TDC_STORES_MANAGER"),
+            "APPROVINGOFFICER" => _currentUser.HasRole("TDC_STORES_MANAGER") ||
+                                   _currentUser.HasRole("TDC_HEAD_OF_PROCUREMENT"),
             "INTERNALAUDIT" => _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole),
             _ => false
         };

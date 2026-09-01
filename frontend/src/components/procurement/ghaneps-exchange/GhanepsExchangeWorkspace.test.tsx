@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   },
   options: {
     data: {
+      isConfigured: true,
+      configurationMessage: undefined as string | undefined,
       sourceType: 'Tender',
       sourceId: 'tender-1',
       sourceReference: 'TDR-001',
@@ -134,6 +136,8 @@ describe('GHANEPS exchange workspace fail-closed states', () => {
     mocks.hasPermission.mockReturnValue(false);
     mocks.overview.isLoading = false;
     mocks.options.isLoading = false;
+    mocks.options.data.isConfigured = true;
+    mocks.options.data.configurationMessage = undefined;
     mocks.status.isLoading = false;
     mocks.history.isLoading = false;
     mocks.options.data.mappings = [
@@ -170,15 +174,20 @@ describe('GHANEPS exchange workspace fail-closed states', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('fails closed when no exact DEC-009 mapping is effective', () => {
+  it('shows an advisory when GHANEPS is not configured', () => {
+    mocks.options.data.isConfigured = false;
+    mocks.options.data.configurationMessage =
+      'GHANEPS exchange is optional and has not been configured for this tenant.';
     mocks.options.data.mappings = [];
 
     render(
       <GhanepsExchangeWorkspace sourceType="Tender" sourceId="tender-1" />
     );
 
-    expect(screen.getByTestId('ghaneps-exchange-conflict')).toHaveTextContent(
-      'No exact Published/effective DEC-009 profile and mapping could be verified.'
+    expect(
+      screen.getByTestId('ghaneps-exchange-not-configured')
+    ).toHaveTextContent(
+      'GHANEPS exchange is optional and has not been configured for this tenant.'
     );
     expect(
       screen.queryByTestId('mock-ghaneps-register')

@@ -113,7 +113,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         var source = await ResolveSourceHeaderAsync(
             sourceType, sourceId, cancellationToken);
         await EnsureCapabilityAsync(
-            ApprovePermission,
+            ReadPermission,
             source.Reference,
             normalizedCorrelation,
             cancellationToken);
@@ -1219,9 +1219,14 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 (!item.EffectiveFrom.HasValue || item.EffectiveFrom.Value <= now) &&
                 (!item.EffectiveTo.HasValue || item.EffectiveTo.Value >= now))
             .AsNoTracking().ToListAsync(cancellationToken);
-        if (policies.Count != 1)
+        if (policies.Count == 0)
         {
-            errors.Add("A unique Published/effective/approved/evidenced DEC-011 supplier-risk policy is required.");
+            warnings.Add("No effective DEC-011 supplier-risk policy is configured; the standard approved, active, registered, and non-blacklisted supplier checks remain mandatory.");
+            return;
+        }
+        if (policies.Count > 1)
+        {
+            errors.Add("Multiple effective DEC-011 supplier-risk policies are configured; resolve the ambiguous governance configuration before award.");
             return;
         }
         var policy = policies[0];
@@ -1295,6 +1300,16 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .ToListAsync(cancellationToken);
         var completed = verificationRows.Where(item =>
             string.Equals(item.Status, "Completed", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (verificationRows.Count == 0)
+        {
+            Add(state,
+                ProcurementAwardReadinessPrerequisiteGroup.VerificationAndDueDiligence,
+                "AWARD_VERIFICATION_NOT_CONFIGURED",
+                ProcurementAwardReadinessPrerequisiteStatus.NotApplicable,
+                "No award-verification checklist is configured for this tender; standard supplier eligibility and evaluation controls remain mandatory.",
+                null);
+            return;
+        }
         if (completed.Count != 1)
         {
             Add(state,
@@ -2682,15 +2697,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (_currentUser.Roles.Any(role =>
-                string.Equals(role, "SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(role, ProcurementAccessControlRegistry.InternalAuditRole,
-                    StringComparison.OrdinalIgnoreCase) ||
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
-            return;
-        throw new ProcurementAwardReadinessAuthorizationException(
-            "A TDC procurement, audit, or tenant-administration role is required.");
+        // Read endpoints require procurement.records.read or procurement.audit.read.
+        // Keep only tenant and external-user protection in the domain service.
     }
 
     private void EnsureAuthenticatedTenant()

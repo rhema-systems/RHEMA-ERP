@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -40,6 +41,14 @@ public sealed class ProcurementAccessControlSeeder
     {
         if (tenantId == Guid.Empty) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
         await EnsureIdentityAccessModelAsync(cancellationToken);
+        var supplierCategories = await EnsureCanonicalSupplierCategoriesAsync(
+            tenantId,
+            actorUserId,
+            cancellationToken);
+        await ReconcileApprovedSupplierCategoriesAsync(
+            tenantId,
+            supplierCategories,
+            cancellationToken);
 
         var now = DateTime.UtcNow;
         foreach (var template in ProcurementAccessControlRegistry.Committees)
@@ -70,8 +79,14 @@ public sealed class ProcurementAccessControlSeeder
 
         foreach (var template in ProcurementAccessControlRegistry.Workflows)
         {
+            // Workflow entity types are shared across Finance, Inventory and Procurement.
+            // Prefer the TDC code where it exists, but reuse the already-governed entity
+            // type when another module owns the canonical code for the same business name
+            // (for example, Finance's SupplierReturn). Creating a second entity type with
+            // the same tenant/name violates the central workflow uniqueness constraint.
             var entityType = await _context.WorkflowEntityTypes.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
-                item.TenantId == tenantId && !item.IsDeleted && item.Code == template.EntityTypeCode,
+                item.TenantId == tenantId && !item.IsDeleted &&
+                (item.Code == template.EntityTypeCode || item.Name == template.EntityTypeName),
                 cancellationToken);
             if (entityType is null)
             {
@@ -92,10 +107,29 @@ public sealed class ProcurementAccessControlSeeder
                 await _context.SaveChangesAsync(cancellationToken);
             }
 
-            var definitionExists = await _context.WorkflowDefinitions.IgnoreQueryFilters().AnyAsync(item =>
-                item.TenantId == tenantId && !item.IsDeleted && item.Name == template.Name,
-                cancellationToken);
-            if (definitionExists) continue;
+            var existingDefinition = await _context.WorkflowDefinitions
+                .IgnoreQueryFilters()
+                .Include(item => item.Steps)
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.Name == template.Name)
+                .OrderByDescending(item => item.Version)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existingDefinition is not null)
+            {
+                if (existingDefinition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft &&
+                    EnsureApprovalStepConfiguration(
+                        existingDefinition,
+                        template.ApprovalRoleCode))
+                {
+                    existingDefinition.UpdatedAt = now;
+                    existingDefinition.UpdatedBy = "System";
+                    existingDefinition.LastModifiedById = actorUserId;
+                    await _context.SaveChangesAsync(cancellationToken);
+                }
+                continue;
+            }
 
             var definitionId = Guid.NewGuid();
             var submittedId = Guid.NewGuid();
@@ -137,6 +171,216 @@ public sealed class ProcurementAccessControlSeeder
         }
 
         _logger.LogInformation("Ensured TDC access, committee, and Draft workflow templates for tenant {TenantId}", tenantId);
+    }
+
+    /// <summary>
+    /// Enables the standard role-based PO approval route only in environments where
+    /// development/UAT data seeding has been explicitly enabled. Existing published
+    /// tenant workflows always take precedence and are never replaced.
+    /// </summary>
+    public async Task EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var template = ProcurementAccessControlRegistry.Workflows.Single(item =>
+            item.Code == "TDC_PURCHASE_ORDER");
+        var tenantIds = await _context.Tenants.AsNoTracking()
+            .Where(item => !item.IsDeleted)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var tenantId in tenantIds)
+        {
+            var entityType = await _context.WorkflowEntityTypes
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.Code == template.EntityTypeCode,
+                    cancellationToken);
+            if (entityType is null)
+            {
+                _logger.LogWarning(
+                    "Cannot publish the UAT PO workflow because entity type {EntityType} is missing for tenant {TenantId}",
+                    template.EntityTypeCode,
+                    tenantId);
+                continue;
+            }
+
+            var hasPublishedWorkflow = await _context.WorkflowDefinitions
+                .IgnoreQueryFilters()
+                .AnyAsync(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.EntityTypeId == entityType.Id &&
+                    item.IsActive &&
+                    item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published,
+                    cancellationToken);
+            if (hasPublishedWorkflow)
+                continue;
+
+            var definition = await _context.WorkflowDefinitions
+                .IgnoreQueryFilters()
+                .Include(item => item.Steps)
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.EntityTypeId == entityType.Id &&
+                    item.Name == template.Name &&
+                    item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft)
+                .OrderByDescending(item => item.Version)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (definition is null)
+            {
+                _logger.LogWarning(
+                    "Cannot publish the UAT PO workflow because the standard Draft template is missing for tenant {TenantId}",
+                    tenantId);
+                continue;
+            }
+
+            EnsureApprovalStepConfiguration(definition, template.ApprovalRoleCode);
+            var now = DateTime.UtcNow;
+            definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+            definition.IsActive = true;
+            definition.PublishedAt = now;
+            definition.PublishedById ??= definition.CreatedById;
+            definition.ChangeSummary =
+                "Published UAT baseline: PO makers submit and TDC Head of Procurement approves independently.";
+            definition.UpdatedAt = now;
+            definition.UpdatedBy = "System";
+            definition.LastModifiedById = definition.PublishedById;
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Published the standard UAT Purchase Order approval workflow for tenant {TenantId}",
+                tenantId);
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<ProcurementSupplierRegistrationCategory, PartnerCategory>>
+        EnsureCanonicalSupplierCategoriesAsync(
+            Guid tenantId,
+            Guid? actorUserId,
+            CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var categoryCodes = ProcurementSupplierCategoryRegistry.Definitions
+            .Select(item => item.Code)
+            .ToArray();
+        var existing = await _context.PartnerCategories
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId && categoryCodes.Contains(item.CategoryCode))
+            .ToListAsync(cancellationToken);
+        var byCode = existing.ToDictionary(item => item.CategoryCode, StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<ProcurementSupplierRegistrationCategory, PartnerCategory>();
+
+        foreach (var definition in ProcurementSupplierCategoryRegistry.Definitions)
+        {
+            if (!byCode.TryGetValue(definition.Code, out var category))
+            {
+                category = new PartnerCategory
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    CategoryCode = definition.Code,
+                    CategoryName = definition.Name,
+                    CategoryType = "Supplier",
+                    Description = definition.Description,
+                    IsActive = true,
+                    CreatedAt = now,
+                    CreatedBy = "System",
+                    CreatedById = actorUserId
+                };
+                _context.PartnerCategories.Add(category);
+            }
+            else
+            {
+                category.IsActive = true;
+                category.IsDeleted = false;
+                category.DeletedAt = null;
+                category.DeletedBy = null;
+                category.UpdatedAt = now;
+                category.UpdatedBy = "System";
+                category.LastModifiedById = actorUserId;
+            }
+
+            result[definition.RegistrationCategory] = category;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return result;
+    }
+
+    private async Task ReconcileApprovedSupplierCategoriesAsync(
+        Guid tenantId,
+        IReadOnlyDictionary<ProcurementSupplierRegistrationCategory, PartnerCategory> categories,
+        CancellationToken cancellationToken)
+    {
+        var registrations = await _context.BusinessPartnerRegistrations
+            .IgnoreQueryFilters()
+            .Where(item =>
+                item.TenantId == tenantId &&
+                !item.IsDeleted &&
+                item.Status == "Approved" &&
+                item.BusinessPartnerId.HasValue &&
+                item.RegistrationCategory.HasValue)
+            .Select(item => new
+            {
+                BusinessPartnerId = item.BusinessPartnerId!.Value,
+                RegistrationCategory = item.RegistrationCategory!.Value
+            })
+            .ToListAsync(cancellationToken);
+        if (registrations.Count == 0)
+            return;
+
+        var partnerIds = registrations.Select(item => item.BusinessPartnerId).Distinct().ToArray();
+        var validPartnerIds = (await _context.BusinessPartners
+                .IgnoreQueryFilters()
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    partnerIds.Contains(item.Id))
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var existingAssignments = await _context.BusinessPartnerCategories
+            .Where(item => partnerIds.Contains(item.BusinessPartnerId))
+            .Select(item => new { item.BusinessPartnerId, item.CategoryId })
+            .ToListAsync(cancellationToken);
+        var assignmentKeys = existingAssignments
+            .Select(item => (item.BusinessPartnerId, item.CategoryId))
+            .ToHashSet();
+        var partnersWithCategories = existingAssignments
+            .Select(item => item.BusinessPartnerId)
+            .ToHashSet();
+        var added = 0;
+
+        foreach (var registration in registrations)
+        {
+            if (!validPartnerIds.Contains(registration.BusinessPartnerId) ||
+                !categories.TryGetValue(registration.RegistrationCategory, out var category) ||
+                assignmentKeys.Contains((registration.BusinessPartnerId, category.Id)))
+                continue;
+
+            _context.BusinessPartnerCategories.Add(new BusinessPartnerCategory
+            {
+                Id = Guid.NewGuid(),
+                BusinessPartnerId = registration.BusinessPartnerId,
+                CategoryId = category.Id,
+                IsPrimary = !partnersWithCategories.Contains(registration.BusinessPartnerId)
+            });
+            assignmentKeys.Add((registration.BusinessPartnerId, category.Id));
+            partnersWithCategories.Add(registration.BusinessPartnerId);
+            added++;
+        }
+
+        if (added == 0)
+            return;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation(
+            "Reconciled {Count} approved supplier onboarding category assignments for tenant {TenantId}",
+            added,
+            tenantId);
     }
 
     private async Task EnsureIdentityAccessModelAsync(CancellationToken cancellationToken)
@@ -227,10 +471,75 @@ public sealed class ProcurementAccessControlSeeder
         RequiredRole = requiredRole,
         AssignmentType = requiredRole is null ? "System" : "Role",
         AssignmentConfiguration = requiredRole is null ? null : JsonSerializer.Serialize(new { role = requiredRole }),
+        Configuration = stepType == WorkflowStepType.Approval && requiredRole is not null
+            ? CreateApprovalStepConfiguration(requiredRole)
+            : null,
         CreatedAt = now,
         CreatedBy = "System",
         CreatedById = actorUserId
     };
+
+    private static bool EnsureApprovalStepConfiguration(
+        WorkflowDefinition definition,
+        string approvalRoleCode)
+    {
+        var approvalStep = definition.Steps
+            .OrderBy(item => item.Order)
+            .FirstOrDefault(item => item.StepType == WorkflowStepType.Approval);
+        if (approvalStep is null || HasConfiguredApprover(approvalStep.Configuration))
+            return false;
+
+        approvalStep.RequiredRole = approvalRoleCode;
+        approvalStep.AssignmentType = "Role";
+        approvalStep.AssignmentConfiguration = JsonSerializer.Serialize(new
+        {
+            role = approvalRoleCode
+        });
+        approvalStep.Configuration = CreateApprovalStepConfiguration(approvalRoleCode);
+        return true;
+    }
+
+    private static bool HasConfiguredApprover(string? configuration)
+    {
+        if (string.IsNullOrWhiteSpace(configuration))
+            return false;
+
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(
+                    configuration,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?
+                .ApprovalConfig?.ApproverRules.Any() == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string CreateApprovalStepConfiguration(string approvalRoleCode) =>
+        JsonSerializer.Serialize(new WorkflowStepConfigurationDto
+        {
+            ApprovalConfig = new WorkflowApprovalConfigDto
+            {
+                ApprovalType = WorkflowApprovalType.Single,
+                ActivationMode = WorkflowApprovalActivationMode.Parallel,
+                MinApprovalsRequired = 1,
+                PreventInitiatorApproval = true,
+                RequireDistinctApprovers = true,
+                RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
+                ApproverRules =
+                [
+                    new WorkflowAssignmentRuleDto
+                    {
+                        ApprovalGroup = 1,
+                        AssignmentType = WorkflowAssignmentType.Role,
+                        Role = approvalRoleCode,
+                        Priority = 100
+                    }
+                ]
+            }
+        });
 
     private static WorkflowTransition CreateTransition(
         Guid definitionId, Guid tenantId, Guid fromStepId, Guid toStepId, string name, int priority,

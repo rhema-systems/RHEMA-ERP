@@ -133,15 +133,15 @@ public sealed class ProcurementControlEventServiceTests
     }
 
     [Fact]
-    public async Task ReaderRoleIsRequiredForQueryButNotForInternalWriterContract()
+    public async Task AuthenticatedActorCanQueryAfterAuditPermissionIsEnforcedAtApiBoundary()
     {
         await using var fixture = new Fixture();
         fixture.SetRoles("TDC_STORES_OFFICER");
         await fixture.Service.RecordAsync(Request("event-writer"));
 
-        var query = () => fixture.Service.GetSummaryAsync();
+        var summary = await fixture.Service.GetSummaryAsync();
 
-        await query.Should().ThrowAsync<ProcurementControlEventAuthorizationException>();
+        summary.TotalCount.Should().Be(1);
     }
 
     [Fact]

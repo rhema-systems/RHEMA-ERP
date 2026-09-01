@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using ErpSystem.Api.Services.Finance;
@@ -52,6 +53,8 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+        private static readonly FinancePostingProducerContext DimensionProducer =
+            new(FinanceDimensionRouteId.FinanceApVendorInvoice);
 
         private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
         {
@@ -76,7 +79,7 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}")]
         public async Task<ActionResult<VendorInvoiceDto>> GetById(Guid id)
         {
-            var invoice = await _invoiceService.GetByIdAsync(id);
+            var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
             return invoice == null ? NotFound() : Ok(invoice);
         }
 
@@ -311,7 +314,7 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
-                var invoice = await _invoiceService.CreateAsync(dto);
+                var invoice = await _invoiceService.CreateAsync(dto, DimensionProducer);
                 return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, invoice);
             }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -324,7 +327,7 @@ namespace ErpSystem.Api.Controllers.Finance
             if (id != dto.Id) return BadRequest("ID mismatch");
             if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"))
                 return Forbid();
-            try { return Ok(await _invoiceService.UpdateAsync(dto)); }
+            try { return Ok(await _invoiceService.UpdateAsync(dto, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -346,7 +349,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AP.Invoices.SubmitForApproval", "Finance.AP.Invoices.Approve"))
                 return Forbid();
-            try { return Ok(await _invoiceService.SubmitForApprovalAsync(id)); }
+            try { return Ok(await _invoiceService.SubmitForApprovalAsync(id, DimensionProducer)); }
             catch (VendorInvoiceMatchControlException ex)
             {
                 return UnprocessableEntity(new { code = ex.Code, message = ex.Message });
@@ -360,7 +363,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Approve"))
                 return Forbid();
-            try { return Ok(await _invoiceService.ApproveAsync(id, comments)); }
+            try { return Ok(await _invoiceService.ApproveAsync(id, DimensionProducer, comments)); }
             catch (VendorInvoiceMatchControlException ex)
             {
                 return UnprocessableEntity(new { code = ex.Code, message = ex.Message });
@@ -374,7 +377,17 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync(FinancePermissions.PostApInvoices))
                 return Forbid();
-            try { return Ok(await _invoiceService.PostAsync(id)); }
+            try { return Ok(await _invoiceService.PostAsync(id, DimensionProducer)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Explicitly re-evaluates and reserves the current source-dimension budget cells.</summary>
+        [HttpPost("{id}/budget-refresh")]
+        public async Task<ActionResult<FinanceSourceDocumentDimensionDto>> RefreshBudget(Guid id)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            try { return Ok(await _invoiceService.RefreshBudgetAsync(id, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

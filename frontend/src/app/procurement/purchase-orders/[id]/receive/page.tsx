@@ -13,6 +13,14 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Table,
   TableBody,
   TableCell,
@@ -43,12 +51,26 @@ import {
   ReceivePurchaseOrderDto,
   ReceivePurchaseOrderItemDto
 } from '@/services/purchasingService';
-import { inventoryManagementService, WarehouseDto, WarehouseLocationDto } from '@/services/inventoryManagementService';
+import {
+  inventoryManagementService,
+  InventoryCategoryDto,
+  WarehouseDto,
+  WarehouseLocationDto,
+} from '@/services/inventoryManagementService';
 import { ReceiptSourceControlCard } from '@/components/procurement/ReceiptSourceControlCard';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 import { format } from 'date-fns';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
+import {
+  buildReceiptItemCode,
+  findNextPendingReceiptItemIndex,
+  hasControlledInventoryItem,
+  ReceiptMissingItemDecision,
+} from '@/lib/procurement-receipt-item';
 
 interface ReceiptItemFormData extends ReceivePurchaseOrderItemDto {
+  inventoryItemId?: string;
+  missingItemDecision: ReceiptMissingItemDecision;
   itemCode: string;
   itemName: string;
   orderedQuantity: number;
@@ -102,6 +124,8 @@ export default function ReceivePurchaseOrderPage() {
   // Reference data
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [warehouseLocationsByWarehouseId, setWarehouseLocationsByWarehouseId] = useState<Record<string, WarehouseLocationDto[]>>({});
+  const [inventoryCategories, setInventoryCategories] = useState<InventoryCategoryDto[]>([]);
+  const [missingItemDialogIndex, setMissingItemDialogIndex] = useState<number | null>(null);
 
   const normalizeGuid = (value?: string | null): string => (value || '').trim().toLowerCase();
 
@@ -146,14 +170,18 @@ export default function ReceivePurchaseOrderPage() {
   };
 
   const loadReceiptSourceReadiness = async (
-    purchaseOrderId = id
+    purchaseOrderId = id,
+    warehouseId?: string
   ): Promise<ProcurementReceiptSourceReadinessDto | null> => {
     if (!purchaseOrderId) return null;
     try {
       setReceiptSourceLoading(true);
       setReceiptSourceError(null);
       const readiness =
-        await purchasingService.getReceiptSourceReadiness(purchaseOrderId);
+        await purchasingService.getReceiptSourceReadiness(
+          purchaseOrderId,
+          normalizeGuid(warehouseId) || undefined
+        );
       setReceiptSourceReadiness(readiness);
       return readiness;
     } catch (error: any) {
@@ -173,7 +201,23 @@ export default function ReceivePurchaseOrderPage() {
       setLoading(true);
       const data = await purchasingService.getPurchaseOrderById(id);
       setOrder(data);
-      const sourceReadiness = await loadReceiptSourceReadiness(data.id);
+      let activeInventoryCategories: InventoryCategoryDto[] = [];
+      try {
+        activeInventoryCategories = (await inventoryManagementService.getInventoryCategories(true))
+          .filter(category => category.isActive)
+          .sort((left, right) => left.name.localeCompare(right.name));
+      } catch (error) {
+        console.error('Error loading inventory categories:', error);
+      }
+      setInventoryCategories(activeInventoryCategories);
+      const governedWarehouseId = normalizeGuid(
+        data.items.find(item => normalizeGuid(item.warehouseId))?.warehouseId ||
+        data.deliveryWarehouseId
+      );
+      const sourceReadiness = await loadReceiptSourceReadiness(
+        data.id,
+        governedWarehouseId || undefined
+      );
       const sourceLines = new Map(
         (sourceReadiness?.lines ?? []).map(line => [
           normalizeGuid(line.purchaseOrderItemId),
@@ -187,10 +231,21 @@ export default function ReceivePurchaseOrderPage() {
           const governedLine = sourceLines.get(normalizeGuid(item.id));
           const remainingQuantity =
             governedLine?.remainingQuantity ?? item.remainingQuantity;
+          const displayItemName =
+            item.itemName?.trim() ||
+            item.itemDescription?.trim() ||
+            'Unnamed purchase-order item';
+          const controlledInventoryItemExists =
+            hasControlledInventoryItem(item.inventoryItemId) &&
+            Boolean(item.itemName?.trim());
           return {
           purchaseOrderItemId: item.id,
-          itemCode: item.itemCode,
-          itemName: item.itemName,
+          inventoryItemId: item.inventoryItemId,
+          missingItemDecision: controlledInventoryItemExists
+            ? 'existing'
+            : 'pending',
+          itemCode: item.itemCode?.trim() || '-',
+          itemName: displayItemName,
           orderedQuantity: item.orderedQuantity,
           previouslyReceived:
             governedLine?.previouslyReceiptedQuantity ?? item.receivedQuantity,
@@ -211,12 +266,19 @@ export default function ReceivePurchaseOrderPage() {
           notes: '',
           rejectionReason: '',
           qualityStatus: 'Passed',
-          qualityNotes: ''
+          qualityNotes: '',
+          createInventoryItemIfMissing: false,
+          inventoryCategoryId:
+            activeInventoryCategories.length === 1
+              ? activeInventoryCategories[0].id
+              : undefined,
+          proposedItemCode: buildReceiptItemCode(data.orderNumber, displayItemName),
           };
         })
         .filter(item => item.remainingQuantity > 0);
       
       setReceiptItems(items);
+      setMissingItemDialogIndex(findNextPendingReceiptItemIndex(items));
       
       // Load all active warehouses so user can override PO-line warehouse at receiving.
       try {
@@ -401,6 +463,51 @@ export default function ReceivePurchaseOrderPage() {
     setReceiptItems(updatedItems);
   };
 
+  const openNextMissingItemDecision = (
+    items: ReceiptItemFormData[],
+    completedIndex: number
+  ) => {
+    setMissingItemDialogIndex(
+      findNextPendingReceiptItemIndex(items, completedIndex)
+    );
+  };
+
+  const confirmMissingItemCreation = () => {
+    if (missingItemDialogIndex === null) return;
+    const current = receiptItems[missingItemDialogIndex];
+    if (!current.inventoryCategoryId) {
+      toast.error('Select an inventory category for this item');
+      return;
+    }
+
+    const updatedItems = [...receiptItems];
+    updatedItems[missingItemDialogIndex] = {
+      ...current,
+      missingItemDecision: 'create',
+      createInventoryItemIfMissing: true,
+    };
+    setReceiptItems(updatedItems);
+    openNextMissingItemDecision(updatedItems, missingItemDialogIndex);
+  };
+
+  const skipMissingItem = () => {
+    if (missingItemDialogIndex === null) return;
+    const current = receiptItems[missingItemDialogIndex];
+    const updatedItems = [...receiptItems];
+    updatedItems[missingItemDialogIndex] = {
+      ...current,
+      missingItemDecision: 'skip',
+      createInventoryItemIfMissing: false,
+      inventoryCategoryId: undefined,
+      receivedQuantity: 0,
+      acceptedQuantity: 0,
+      rejectedQuantity: 0,
+      locationId: '',
+    };
+    setReceiptItems(updatedItems);
+    openNextMissingItemDecision(updatedItems, missingItemDialogIndex);
+  };
+
   const handleWarehouseChange = async (index: number, nextWarehouseIdRaw: string) => {
     const fallbackWarehouseId = getFallbackWarehouseId();
     const nextWarehouseId = nextWarehouseIdRaw === '__none__'
@@ -419,6 +526,7 @@ export default function ReceivePurchaseOrderPage() {
     setReceiptItems(updatedItems);
 
     await ensureWarehouseLocationsLoaded(nextWarehouseId);
+    await loadReceiptSourceReadiness(order?.id || id, nextWarehouseId);
   };
 
   const handleCreateReceipt = async () => {
@@ -442,6 +550,18 @@ export default function ReceivePurchaseOrderPage() {
     
     if (itemsToReceive.length === 0) {
       toast.error('Please enter received quantities for at least one item');
+      return;
+    }
+
+    const unresolvedMissingItemIndex = receiptItems.findIndex(
+      item =>
+        item.receivedQuantity > 0 &&
+        item.missingItemDecision !== 'existing' &&
+        item.missingItemDecision !== 'create'
+    );
+    if (unresolvedMissingItemIndex >= 0) {
+      setMissingItemDialogIndex(unresolvedMissingItemIndex);
+      toast.error('Confirm item creation before receiving this line');
       return;
     }
 
@@ -496,7 +616,10 @@ export default function ReceivePurchaseOrderPage() {
           notes: item.notes || undefined,
           rejectionReason: item.rejectionReason || undefined,
           qualityStatus: item.qualityStatus || undefined,
-          qualityNotes: item.qualityNotes || undefined
+          qualityNotes: item.qualityNotes || undefined,
+          createInventoryItemIfMissing: item.createInventoryItemIfMissing,
+          inventoryCategoryId: item.inventoryCategoryId || undefined,
+          proposedItemCode: item.proposedItemCode?.trim() || undefined,
         }))
       };
 
@@ -543,6 +666,9 @@ export default function ReceivePurchaseOrderPage() {
   const totalReceiving = receiptItems.reduce((sum, item) => sum + item.receivedQuantity, 0);
   const totalAccepted = receiptItems.reduce((sum, item) => sum + item.acceptedQuantity, 0);
   const totalRejected = receiptItems.reduce((sum, item) => sum + item.rejectedQuantity, 0);
+  const missingItemUnderReview = missingItemDialogIndex === null
+    ? null
+    : receiptItems[missingItemDialogIndex] ?? null;
 
   return (
     <div className="space-y-4">
@@ -592,7 +718,13 @@ export default function ReceivePurchaseOrderPage() {
         loading={receiptSourceLoading}
         error={receiptSourceError}
         onRetry={() => {
-          void loadReceiptSourceReadiness();
+          const selectedWarehouseId = receiptItems
+            .map(getEffectiveWarehouseId)
+            .find(Boolean);
+          void loadReceiptSourceReadiness(
+            order?.id || id,
+            selectedWarehouseId || undefined
+          );
         }}
       />
 
@@ -629,7 +761,7 @@ export default function ReceivePurchaseOrderPage() {
             <div>
               <Label className="text-muted-foreground">Total Amount</Label>
               <p className="font-medium mt-1">
-                ${order.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatProcurementMoney(order.totalAmount, order.currency)}
               </p>
             </div>
           </div>
@@ -755,6 +887,34 @@ export default function ReceivePurchaseOrderPage() {
                           Remaining: {item.remainingQuantity}
                         </CardDescription>
                       </div>
+                      {item.missingItemDecision !== 'existing' && (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={item.missingItemDecision === 'create' ? 'default' : 'outline'}
+                            className={
+                              item.missingItemDecision === 'create'
+                                ? 'bg-blue-600'
+                                : item.missingItemDecision === 'skip'
+                                  ? 'border-slate-300 text-slate-700'
+                                  : 'border-amber-300 bg-amber-50 text-amber-900'
+                            }
+                          >
+                            {item.missingItemDecision === 'create'
+                              ? 'Item will be created'
+                              : item.missingItemDecision === 'skip'
+                                ? 'Line excluded'
+                                : 'Item setup required'}
+                          </Badge>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setMissingItemDialogIndex(index)}
+                          >
+                            {item.missingItemDecision === 'pending' ? 'Review item' : 'Change decision'}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3 pt-3">
@@ -770,6 +930,7 @@ export default function ReceivePurchaseOrderPage() {
                           value={item.receivedQuantity}
                           onChange={(e) => handleReceivedQuantityChange(index, parseFloat(e.target.value) || 0)}
                           className="h-9"
+                          disabled={item.missingItemDecision === 'pending' || item.missingItemDecision === 'skip'}
                         />
                       </div>
                       
@@ -787,6 +948,7 @@ export default function ReceivePurchaseOrderPage() {
                           value={item.acceptedQuantity}
                           onChange={(e) => handleAcceptedQuantityChange(index, parseFloat(e.target.value) || 0)}
                           className="h-9"
+                          disabled={item.missingItemDecision === 'pending' || item.missingItemDecision === 'skip'}
                         />
                       </div>
                       
@@ -804,6 +966,7 @@ export default function ReceivePurchaseOrderPage() {
                           value={item.rejectedQuantity}
                           onChange={(e) => handleRejectedQuantityChange(index, parseFloat(e.target.value) || 0)}
                           className="h-9"
+                          disabled={item.missingItemDecision === 'pending' || item.missingItemDecision === 'skip'}
                         />
                       </div>
 
@@ -817,6 +980,7 @@ export default function ReceivePurchaseOrderPage() {
                         <Select
                           value={item.warehouseId || '__none__'}
                           onValueChange={(value) => handleWarehouseChange(index, value)}
+                          disabled={item.missingItemDecision === 'pending' || item.missingItemDecision === 'skip'}
                         >
                           <SelectTrigger className="h-9">
                             <SelectValue placeholder="Select warehouse" />
@@ -861,7 +1025,11 @@ export default function ReceivePurchaseOrderPage() {
                             }
                             setReceiptItems(updatedItems);
                           }}
-                          disabled={!getEffectiveWarehouseId(item)}
+                          disabled={
+                            !getEffectiveWarehouseId(item) ||
+                            item.missingItemDecision === 'pending' ||
+                            item.missingItemDecision === 'skip'
+                          }
                         >
                           <SelectTrigger className="h-9">
                             <SelectValue placeholder={getEffectiveWarehouseId(item) ? "Select location" : "Select warehouse first"} />
@@ -1054,6 +1222,110 @@ export default function ReceivePurchaseOrderPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog
+        open={missingItemUnderReview !== null}
+        onOpenChange={() => {
+          // A description-only PO line requires an explicit Create or Skip
+          // decision. Do not silently dismiss the governed decision.
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+              Inventory item not found
+            </DialogTitle>
+            <DialogDescription>
+              This purchase-order line is not linked to an item in Inventory.
+              Decide whether it should be created when this receipt is saved.
+            </DialogDescription>
+          </DialogHeader>
+
+          {missingItemUnderReview && missingItemDialogIndex !== null && (
+            <div className="space-y-4">
+              <div className="rounded-md border bg-muted/40 p-3">
+                <p className="font-medium">{missingItemUnderReview.itemName}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  PO line {missingItemDialogIndex + 1} · UOM {missingItemUnderReview.unitOfMeasure}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="receipt-new-item-code">Item code *</Label>
+                <Input
+                  id="receipt-new-item-code"
+                  maxLength={100}
+                  value={missingItemUnderReview.proposedItemCode || ''}
+                  onChange={(event) =>
+                    handleItemFieldChange(
+                      missingItemDialogIndex,
+                      'proposedItemCode',
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="receipt-new-item-category">Inventory category *</Label>
+                <Select
+                  value={missingItemUnderReview.inventoryCategoryId || undefined}
+                  onValueChange={(value) =>
+                    handleItemFieldChange(
+                      missingItemDialogIndex,
+                      'inventoryCategoryId',
+                      value
+                    )
+                  }
+                >
+                  <SelectTrigger id="receipt-new-item-category">
+                    <SelectValue placeholder="Select inventory category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inventoryCategories.map(category => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.code} - {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {inventoryCategories.length === 0 && (
+                  <p className="text-sm text-red-600">
+                    No active inventory categories are available. Ask Inventory Administration to configure one before receiving this line.
+                  </p>
+                )}
+              </div>
+
+              <p className="text-sm text-muted-foreground">
+                If you choose Create, select the warehouse and storage location on the line.
+                The item is created and linked in the same transaction as the receipt; stock increases only after inspection acceptance.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={skipMissingItem}>
+              Do not receive this line
+            </Button>
+            <Button
+              type="button"
+              onClick={confirmMissingItemCreation}
+              disabled={
+                !missingItemUnderReview?.inventoryCategoryId ||
+                !missingItemUnderReview?.proposedItemCode?.trim() ||
+                inventoryCategories.length === 0
+              }
+            >
+              Create item with receipt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

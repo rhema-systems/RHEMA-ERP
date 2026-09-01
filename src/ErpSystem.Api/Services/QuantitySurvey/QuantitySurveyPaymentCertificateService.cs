@@ -19,6 +19,7 @@ using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Documents;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Core.Services.Workflow;
@@ -31,13 +32,15 @@ public sealed class QuantitySurveyPaymentCertificateService(
     ApplicationDbContext db,
     ICurrentUserService currentUser,
     IProjectService projectService,
+    ICivilEngineeringIpcEndorsementService ipcEndorsements,
     IWorkflowIntegrationService workflow,
     IWorkflowStatusAdapterRegistry workflowAdapters,
     IVendorInvoiceService vendorInvoices,
     ITaxCalculationEngine taxEngine,
     IDocumentOutputService documentOutput,
     IControlledFileUploadService controlledFiles,
-    ICentralDocumentRepositoryFileService centralDocuments) : IQuantitySurveyPaymentCertificateService
+    ICentralDocumentRepositoryFileService centralDocuments,
+    IProcurementBudgetCommitmentLifecycleService budgetCommitments) : IQuantitySurveyPaymentCertificateService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -259,10 +262,11 @@ public sealed class QuantitySurveyPaymentCertificateService(
             request.MaterialReconciliationId, request.OtherDeductionsAmount, Notes = Normalize(request.Notes) });
         await MutateAsync(id, request.ClientRequestId, request.RowVersion, hash, correlationId,
             QuantitySurveyAuditEventMap.UpdatePaymentCertificate, async entity =>
-            {
-                if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
-                    throw Conflict("Only a Draft payment certificate can be amended.");
-                if (!entity.AdvanceRecoveryApplied && request.AdvanceRecoveryAmount != 0m)
+                {
+                    if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
+                        throw Conflict("Only a Draft payment certificate can be amended.");
+                    await ipcEndorsements.EnsureCertificateCanBeAmendedAsync(entity.Id, token);
+                    if (!entity.AdvanceRecoveryApplied && request.AdvanceRecoveryAmount != 0m)
                     throw Validation("Advance recovery is disabled by the frozen certificate policy.");
                 if (decimal.Round(request.AdvanceRecoveryAmount, 2) != entity.AdvanceRecoveryAmount)
                     throw Validation("Advance recovery is governed by the approved recovery agreement and cannot be typed or amended on the certificate.");
@@ -288,10 +292,11 @@ public sealed class QuantitySurveyPaymentCertificateService(
         var hash = Hash(new { Action = "Submit", reason });
         await MutateAsync(id, request.ClientRequestId, request.RowVersion, hash, correlationId,
             QuantitySurveyAuditEventMap.SubmitPaymentCertificate, async entity =>
-            {
-                if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
-                    throw Conflict("Only a Draft payment certificate can be submitted.");
-                await ValidateReadinessAsync(entity, token);
+                {
+                    if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
+                        throw Conflict("Only a Draft payment certificate can be submitted.");
+                    await ipcEndorsements.EnsureCertificateCanProceedAsync(entity.Id, token);
+                    await ValidateReadinessAsync(entity, token);
                 var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.PaymentCertificate,
                     entity.Id, entity.ApprovalWorkflowDefinitionId!.Value);
                 if (!result.ExecutionResult.Success)
@@ -323,13 +328,24 @@ public sealed class QuantitySurveyPaymentCertificateService(
         var reason = RequiredText(request.Reason, approve ? "Approval reason" : "Rejection reason");
         var action = approve ? "Approve" : "Reject";
         var hash = Hash(new { Action = action, reason });
-        await MutateAsync(id, request.ClientRequestId, request.RowVersion, hash, correlationId,
-            approve ? QuantitySurveyAuditEventMap.ApprovePaymentCertificate : QuantitySurveyAuditEventMap.RejectPaymentCertificate,
-            async entity =>
-            {
+        var current = await RequiredAsync(id, false, token);
+        await RequireProjectAsync(current.ProjectId);
+        var resumesCommittedApproval = approve &&
+            current.Status == ProjectPaymentCertificateStatuses.Approved &&
+            current.ApprovalStatus == "Approved";
+        if (!resumesCommittedApproval)
+        {
+            await MutateAsync(id, request.ClientRequestId, request.RowVersion, hash, correlationId,
+                approve ? QuantitySurveyAuditEventMap.ApprovePaymentCertificate : QuantitySurveyAuditEventMap.RejectPaymentCertificate,
+                async entity =>
+                {
                 if (entity.Status != ProjectPaymentCertificateStatuses.Issued || entity.ApprovalStatus != "Pending")
                     throw Conflict("The payment certificate must be Pending approval before this decision.");
-                if (approve) await ValidateReadinessAsync(entity, token);
+                if (approve)
+                {
+                    await ipcEndorsements.EnsureCertificateCanProceedAsync(entity.Id, token);
+                    await ValidateReadinessAsync(entity, token);
+                }
                 try { QuantitySurveyPaymentCertificateRules.RequireIndependentApprover(entity.PreparedById ?? Guid.Empty, entity.SubmittedById ?? Guid.Empty, UserId); }
                 catch (InvalidOperationException exception) { throw Conflict(exception.Message); }
                 var workflowStatus = await db.WorkflowInstances.AsNoTracking().Where(value => value.TenantId == TenantId &&
@@ -369,14 +385,47 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 entity.ApHandoffStatus = approve ? ProjectPaymentCertificateApHandoffStatuses.Ready : ProjectPaymentCertificateApHandoffStatuses.NotReady;
                 if (approve)
                 {
-                    // QS owns certification; Finance owns the resulting AP invoice and every
-                    // approval, posting, payment and reversal after it. Creating the draft AP
-                    // invoice inside this serializable approval transaction removes the former
-                    // manual handoff gap without introducing a second posting engine.
-                    await CreateApInvoiceAsync(entity, correlationId, token);
+                    if (!entity.ContractId.HasValue)
+                        throw Conflict("The approved payment certificate has no procurement contract lineage.");
+                    await budgetCommitments.UtilizeContractCertificateAsync(
+                        entity.ContractId.Value,
+                        entity.Id,
+                        entity.CertificateNumber ?? entity.Id.ToString("N"),
+                        entity.GrossCertifiedAmount,
+                        correlationId,
+                        token);
                 }
-            }, token);
-        return Map(await RequiredAsync(id, false, token));
+                }, token);
+        }
+        var completed = await RequiredAsync(id, false, token);
+        if (!approve || completed.Status != ProjectPaymentCertificateStatuses.Approved ||
+            completed.ApprovalStatus != "Approved")
+        {
+            return Map(completed);
+        }
+
+        // Finance accepts only an approved Works certificate with governed DMS evidence.
+        // Keep each durable boundary idempotent: approval and budget utilization commit first,
+        // then the controlled document is issued, and only then is the AP invoice created.
+        // A retry of the final approval resumes at the first incomplete boundary without
+        // repeating workflow approval or budget utilization.
+        if (!completed.CentralDocumentRecordId.HasValue || !completed.CentralDocumentVersionId.HasValue)
+        {
+            await RenderAsync(id, correlationId, token);
+            completed = await RequiredAsync(id, false, token);
+        }
+
+        if (!completed.VendorInvoiceId.HasValue)
+        {
+            return await HandoffToApAsync(id, new QuantitySurveyPaymentCertificateActionRequest
+            {
+                ClientRequestId = DerivedRequestId(request.ClientRequestId, "approved-certificate-ap-handoff"),
+                RowVersion = Convert.ToBase64String(completed.RowVersion),
+                Reason = "Automatic governed handoff of the approved and documented Works certificate to Finance AP."
+            }, correlationId, token);
+        }
+
+        return Map(completed);
     }
 
     public async Task<QuantitySurveyPaymentCertificateDto> HandoffToApAsync(Guid id,
@@ -528,6 +577,18 @@ public sealed class QuantitySurveyPaymentCertificateService(
             await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token);
             throw Conflict("The generated certificate failed its central integrity scan.");
         }
+        var metadataAccessProfile = await db.CentralDocumentMetadataTemplates.AsNoTracking()
+            .Where(value => value.TenantId == TenantId &&
+                value.Id == entity.CertificateMetadataTemplateId &&
+                value.TemplateCode == entity.CertificateMetadataTemplateCodeSnapshot &&
+                value.IsActive && value.PublishedAt.HasValue && !value.IsDeleted)
+            .Select(value => value.AccessProfile)
+            .SingleOrDefaultAsync(token);
+        if (string.IsNullOrWhiteSpace(metadataAccessProfile))
+        {
+            await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token);
+            throw Conflict("The frozen payment-certificate metadata template is no longer published and available.");
+        }
         CentralDocumentRepositoryLink document;
         try
         {
@@ -539,7 +600,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 SourceRecordId = entity.Id, SourceRecordReference = entity.CertificateNumber,
                 Title = entity.Title, DocumentType = "PaymentCertificate",
                 MetadataTemplateCode = entity.CertificateMetadataTemplateCodeSnapshot,
-                AccessProfile = "Module restricted", VersionStatus = "Approved", RequirePublishedGovernance = true,
+                AccessProfile = metadataAccessProfile, VersionStatus = "Approved", RequirePublishedGovernance = true,
                 ChangeSummary = "Approved QS payment certificate generated from frozen valuation and policy lineage.",
                 MetadataValues =
                 [
@@ -842,7 +903,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
 
     private async Task RequireProjectAsync(Guid projectId)
     {
-        if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null)
+        if (!await projectService.HasProjectAccessAsync(projectId))
             throw new UnauthorizedAccessException("You are not permitted to access this project.");
     }
 
@@ -971,6 +1032,16 @@ public sealed class QuantitySurveyPaymentCertificateService(
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string Correlation(string? value) => string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : value.Trim()[..Math.Min(100, value.Trim().Length)];
     private static string Hash(object value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOptions)))).ToLowerInvariant();
+    private static Guid DerivedRequestId(Guid sourceRequestId, string purpose)
+    {
+        var source = Encoding.UTF8.GetBytes($"{sourceRequestId:N}|{purpose}");
+        var hash = SHA256.HashData(source);
+        Span<byte> bytes = stackalloc byte[16];
+        hash.AsSpan(0, bytes.Length).CopyTo(bytes);
+        bytes[6] = (byte)((bytes[6] & 0x0F) | 0x40);
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
+        return new Guid(bytes);
+    }
     private static bool FixedEquals(string? left, string? right)
     {
         if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;

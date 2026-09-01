@@ -16,12 +16,19 @@ public class RfqDto
     public DateTime? SentAt { get; set; }
     public int SupplierCount { get; set; }
     public int QuoteCount { get; set; }
+    /// <summary>
+    /// Supplier-portal lifecycle for the current supplier. Internal RFQ listings leave this null.
+    /// </summary>
+    public string? SupplierStatus { get; set; }
+    public DateTime? SupplierStatusChangedAt { get; set; }
+    public int SupplierQuoteRevisionNumber { get; set; }
 }
 
 public class RfqDetailDto : RfqDto
 {
     public string? Description { get; set; }
     public string? ExternalRecipientEmails { get; set; }
+    public bool QuoteDetailsVisible { get; set; }
     public List<RfqItemDto> Items { get; set; } = new();
     public List<RfqInvitationDto> Suppliers { get; set; } = new();
     public List<RfqQuoteDto> Quotes { get; set; } = new();
@@ -49,6 +56,8 @@ public class RfqInvitationDto
     public string? PrimaryEmail { get; set; }
     public string Status { get; set; } = "Invited";
     public DateTime InvitedAt { get; set; }
+    public DateTime? OpenedAt { get; set; }
+    public DateTime? RespondedAt { get; set; }
 }
 
 public class RfqQuoteDto
@@ -59,9 +68,23 @@ public class RfqQuoteDto
     public string PartnerName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public DateTime? SubmittedAt { get; set; }
+    public int RevisionNumber { get; set; }
     public string? Notes { get; set; }
     public decimal TotalAmount { get; set; }
     public List<RfqQuoteItemDto> Items { get; set; } = new();
+    public List<RfqQuoteHistoryEntryDto> History { get; set; } = new();
+}
+
+public class RfqQuoteHistoryEntryDto
+{
+    public Guid Id { get; set; }
+    public int RevisionNumber { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string PerformedBy { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string? Description { get; set; }
 }
 
 public class RfqQuoteItemDto

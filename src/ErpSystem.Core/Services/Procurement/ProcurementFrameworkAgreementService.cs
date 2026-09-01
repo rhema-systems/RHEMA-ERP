@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -2078,7 +2079,7 @@ public sealed class ProcurementFrameworkAgreementService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementFrameworkAgreementAuthorizationException(
                 "External portal users cannot administer framework agreements.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -2096,13 +2097,11 @@ public sealed class ProcurementFrameworkAgreementService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementFrameworkAgreementAuthorizationException(
                 "External portal users cannot access framework administration.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementFrameworkAgreementAuthorizationException(
-            "A TDC procurement or internal-audit role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -2114,11 +2113,8 @@ public sealed class ProcurementFrameworkAgreementService :
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") ||
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task RecordEventAsync(
         ProcurementFrameworkAgreement agreement,

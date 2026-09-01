@@ -28,7 +28,17 @@ public interface IRfqService
     Task<RfqDetailDto?> GetSupplierRfqDetailAsync(Guid rfqId, Guid businessPartnerId, Guid tenantId);
 
     /// <summary>
-    /// Supplier portal: submit a quote (creates or replaces the supplier's quote).
+    /// Records the first supplier opening of a dispatched RFQ without downgrading later quote states.
+    /// </summary>
+    Task<RfqDetailDto?> RecordSupplierRfqOpenedAsync(
+        Guid rfqId,
+        Guid businessPartnerId,
+        Guid openedByUserId,
+        Guid tenantId);
+
+    /// <summary>
+    /// Supplier portal: submit a quote or revise the same quote and line records before the deadline.
+    /// Every submission is retained as an immutable audit snapshot.
     /// </summary>
     Task<RfqQuoteDto> SubmitQuoteAsync(Guid rfqId, Guid businessPartnerId, Guid submittedByUserId, Guid tenantId, SubmitRfqQuoteDto dto);
 

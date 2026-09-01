@@ -231,6 +231,19 @@ public class CentralDocumentGenerationTemplate : TenantEntity
 
     [StringLength(120)]
     public string? DefaultDispatchChannel { get; set; }
+
+    public Guid? TemplateFileUploadRecordId { get; set; }
+
+    [StringLength(500)]
+    public string? TemplateRepositoryPath { get; set; }
+
+    [StringLength(250)]
+    public string? TemplateFileName { get; set; }
+
+    [StringLength(200)]
+    public string? TemplateContentType { get; set; }
+
+    public long? TemplateFileSize { get; set; }
 }
 
 [Table("CentralDocumentAnnotationReviews")]

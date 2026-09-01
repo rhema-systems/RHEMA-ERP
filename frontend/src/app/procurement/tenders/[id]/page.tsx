@@ -35,10 +35,8 @@ import {
   XCircle,
   Send,
   Download,
-  AlertCircle,
   ClipboardList,
   MailCheck,
-  Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderService from '@/services/tenderService';
@@ -61,11 +59,18 @@ import TenderEvaluators from '@/components/procurement/tenders/TenderEvaluators'
 import QCBSEvaluationPanel from '@/components/procurement/tenders/QCBSEvaluationPanel';
 import { AwardVerificationResults } from '@/components/procurement/tenders/AwardVerificationResults';
 import { Calculator, Shield } from 'lucide-react';
+import { getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
+import { TenderHeaderControlActions } from '@/components/procurement/tenders/TenderHeaderControlActions';
+import { TenderRevisionsPanel } from '@/components/procurement/tenders/TenderRevisionsPanel';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 export default function TenderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { hasPermission } = useAuth();
+  const canAdministerTender = hasPermission('procurement.tender.administer');
   const tenderId = Array.isArray(params?.id)
     ? params.id[0]
     : (params?.id ?? '');
@@ -106,7 +111,7 @@ export default function TenderDetailPage() {
       setTender(data);
     } catch (error) {
       console.error('Error loading tender details:', error);
-      toast.error('Failed to load tender details');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load tender details'));
     } finally {
       setLoading(false);
     }
@@ -282,7 +287,7 @@ export default function TenderDetailPage() {
       await loadTenderDetails();
     } catch (error: any) {
       console.error('Error publishing tender:', error);
-      toast.error(error.message || 'Failed to publish tender');
+      toast.error(getProcurementProblemMessage(error, 'Failed to publish tender'));
     } finally {
       setPublishing(false);
     }
@@ -342,6 +347,8 @@ export default function TenderDetailPage() {
     );
   }
 
+  const publicationPresentation = getTenderPublicationPresentation(tender);
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
@@ -367,7 +374,7 @@ export default function TenderDetailPage() {
             </Badge>
           )}
 
-          {tender.status === 'Draft' && (
+          {tender.status === 'Draft' && canAdministerTender && (
             <Button
               variant="outline"
               onClick={() =>
@@ -379,17 +386,17 @@ export default function TenderDetailPage() {
             </Button>
           )}
 
-          {(tender.status === 'Draft' || tender.status === 'Submitted') && (
+          {((tender.status === 'Draft' && canAdministerTender) || tender.status === 'Submitted') && (
             <WorkflowApprovalActions {...workflow.actionProps} showStepBadge />
           )}
 
-          {tender.status === 'Approved' && (
+          {tender.status === 'Approved' && canAdministerTender && (
             <Button onClick={handlePublishClick}>
               <Send className="h-4 w-4 mr-2" />
               Publish Tender
             </Button>
           )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+          {canAdministerTender && ['Approved', 'Published', 'Awarded'].includes(tender.status) &&
             tender.sourcingCaseId &&
             tender.tenderType !== 'RFQ' && (
               <Button
@@ -404,30 +411,12 @@ export default function TenderDetailPage() {
                 Document Register
               </Button>
             )}
-          {tender.tenderType !== 'RFQ' && (
-            <Button
-              variant="outline"
-              onClick={() =>
-                router.push(
-                  `/procurement/tenders/${tenderId}/committee-controls`
-                )
-              }
-            >
-              <Users className="h-4 w-4 mr-2" />
-              Committee Controls
-            </Button>
-          )}
-          {tender.tenderType !== 'RFQ' && (
-            <Button
-              variant="outline"
-              onClick={() =>
-                router.push(`/procurement/tenders/${tenderId}/award-readiness`)
-              }
-            >
-              <Award className="h-4 w-4 mr-2" />
-              Award Readiness
-            </Button>
-          )}
+          <TenderHeaderControlActions
+            tenderId={tenderId}
+            tenderType={tender.tenderType}
+            sourcingCaseId={tender.sourcingCaseId}
+            sourcingMethod={tender.sourcingMethod}
+          />
           {tender.tenderType !== 'RFQ' && tender.status === 'Awarded' && (
             <Button
               variant="outline"
@@ -441,20 +430,8 @@ export default function TenderDetailPage() {
               Bidder Communications
             </Button>
           )}
-          {tender.tenderType !== 'RFQ' && (
-            <Button
-              variant="outline"
-              onClick={() =>
-                router.push(`/procurement/tenders/${tenderId}/ghaneps-exchange`)
-              }
-            >
-              <Share2 className="h-4 w-4 mr-2" />
-              GHANEPS Exchange
-            </Button>
-          )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
-            tender.sourcingCaseId &&
-            [1, 2, 7, 8].includes(tender.sourcingMethod ?? -1) && (
+          {canAdministerTender && ['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+            publicationPresentation.advancedControlLabel && (
               <Button
                 variant="outline"
                 onClick={() =>
@@ -462,14 +439,11 @@ export default function TenderDetailPage() {
                 }
               >
                 <Shield className="h-4 w-4 mr-2" />
-                {[7, 8].includes(tender.sourcingMethod ?? -1)
-                  ? 'QBS / QCBS Controls'
-                  : 'NCT / ICT Controls'}
+                {publicationPresentation.advancedControlLabel}
               </Button>
             )}
           {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
-            tender.sourcingCaseId &&
-            [3, 4, 5].includes(tender.sourcingMethod ?? -1) && (
+            publicationPresentation.exceptionalControlLabel && (
               <Button
                 variant="outline"
                 onClick={() =>
@@ -479,9 +453,7 @@ export default function TenderDetailPage() {
                 }
               >
                 <Shield className="h-4 w-4 mr-2" />
-                {tender.sourcingMethod === 5
-                  ? 'Petty Purchase Control'
-                  : 'Restricted / Single Source'}
+                {publicationPresentation.exceptionalControlLabel}
               </Button>
             )}
         </div>
@@ -543,7 +515,7 @@ export default function TenderDetailPage() {
         onValueChange={setActiveTab}
         className="space-y-4"
       >
-        <TabsList className="grid w-full grid-cols-12">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
             Overview
@@ -571,6 +543,10 @@ export default function TenderDetailPage() {
           <TabsTrigger value="clarifications">
             <MessageSquare className="h-4 w-4 mr-2" />
             Clarifications ({tender.clarifications?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="revisions">
+            <FileText className="h-4 w-4 mr-2" />
+            Amendments ({tender.revisions?.length || 0})
           </TabsTrigger>
           <TabsTrigger value="evaluators">
             <Users className="h-4 w-4 mr-2" />
@@ -1487,7 +1463,7 @@ export default function TenderDetailPage() {
                               )}
                             </div>
                           )}
-                        {clarification.status === 'Pending' && (
+                        {clarification.status === 'Pending' && canAdministerTender && (
                           <Button
                             size="sm"
                             onClick={() => {
@@ -1506,6 +1482,16 @@ export default function TenderDetailPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="revisions" className="space-y-4">
+          <TenderRevisionsPanel
+            tenderId={tenderId}
+            tenderStatus={tender.status}
+            currentSubmissionDeadline={tender.submissionDeadline}
+            revisions={tender.revisions || []}
+            onChanged={loadTenderDetails}
+          />
         </TabsContent>
 
         {/* Evaluators Tab */}
@@ -1650,17 +1636,16 @@ export default function TenderDetailPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Are you sure you want to publish this tender? Once published,
-                email and in-app notifications will be sent to all invited
-                suppliers.
+                Review the supplier audience and submission schedule before
+                publishing. Notifications will be sent to the configured
+                recipients.
               </p>
-              <div className="rounded-lg border bg-amber-50 border-amber-200 p-3">
+              <div className="rounded-lg border bg-blue-50 border-blue-200 p-3">
                 <div className="flex gap-2">
-                  <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-800">
-                    <strong>Important:</strong> After publishing, the tender
-                    will be visible to invited suppliers and they can start
-                    submitting bids.
+                  <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-blue-800">
+                    <strong>Supplier access:</strong>{' '}
+                    {publicationPresentation.supplierAccessMessage}
                   </p>
                 </div>
               </div>
@@ -1739,7 +1724,7 @@ export default function TenderDetailPage() {
             </div>
 
             <div className="rounded-lg border bg-white p-4 space-y-3">
-              <h4 className="font-semibold text-sm">Publication dates</h4>
+              <h4 className="font-semibold text-sm">Submission schedule</h4>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Submission deadline</Label>
@@ -1755,7 +1740,11 @@ export default function TenderDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Public opening</Label>
+                  <Label>
+                    {publicationPresentation.requiresControlledPublication
+                      ? 'Controlled bid opening'
+                      : 'Bid opening (optional)'}
+                  </Label>
                   <Input
                     type="datetime-local"
                     value={publishData.openingDate}
@@ -1770,14 +1759,15 @@ export default function TenderDetailPage() {
               </div>
             </div>
 
-            {tender?.tenderType !== 'RFQ' && (
+            {publicationPresentation.requiresControlledPublication && (
               <div className="rounded-lg border bg-white p-4 space-y-3">
                 <h4 className="font-semibold text-sm">
-                  NCT / ICT statutory advertisement
+                  {publicationPresentation.controlledPublicationHeading}
                 </h4>
                 <p className="text-xs text-muted-foreground">
-                  Required when the immutable sourcing case selected NCT or ICT.
-                  Bind the approved version, fee terms and deadlines in the{' '}
+                  Required by this tender&apos;s advanced immutable sourcing
+                  case. Bind the approved publication, version, fee terms and
+                  deadlines in the{' '}
                   <Button
                     type="button"
                     variant="link"
@@ -1795,7 +1785,9 @@ export default function TenderDetailPage() {
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Advertisement reference</Label>
+                    <Label>
+                      {publicationPresentation.publicationReferenceLabel}
+                    </Label>
                     <Input
                       value={publishData.advertisementReference}
                       onChange={(e) =>
@@ -1857,7 +1849,9 @@ export default function TenderDetailPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Advertisement evidence</Label>
+                    <Label>
+                      {publicationPresentation.publicationEvidenceLabel}
+                    </Label>
                     <Input
                       value={publishData.advertisementEvidenceReference}
                       onChange={(e) =>

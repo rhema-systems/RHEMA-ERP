@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { estatePropertyManagementService } from '@/services/estate-property-management.service';
+import type { EstateRentPenaltyStatus } from '@/services/estate-property-management.service';
 import {
   estateLandManagementService,
   EstateManagedAssetStatus,
@@ -54,6 +55,7 @@ export default function PropertyManagementDashboardPage() {
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [documents, setDocuments] = React.useState<CentralDocumentRecord[]>([]);
+  const [rentStatuses, setRentStatuses] = React.useState<EstateRentPenaltyStatus[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
@@ -61,12 +63,13 @@ export default function PropertyManagementDashboardPage() {
     setIsLoading(true);
     setLoadError(null);
 
-    const [procedureResult, caseResult, assetResult, documentResult] =
+    const [procedureResult, caseResult, assetResult, documentResult, rentStatusResult] =
       await Promise.allSettled([
         estatePropertyManagementService.getProcedures(),
         procedureCaseService.listModuleCases('PropertyManagement'),
         estateLandManagementService.getManagedAssets({ take: 500 }),
         documentManagementService.getRecords(),
+        estatePropertyManagementService.getRentPenaltyStatuses(),
       ]);
 
     setProcedures(
@@ -79,11 +82,15 @@ export default function PropertyManagementDashboardPage() {
         ? propertyDocuments(documentResult.value)
         : []
     );
+    setRentStatuses(
+      rentStatusResult.status === 'fulfilled' ? rentStatusResult.value : []
+    );
     if (
       procedureResult.status === 'rejected' ||
       caseResult.status === 'rejected' ||
       assetResult.status === 'rejected' ||
       documentResult.status === 'rejected'
+      || rentStatusResult.status === 'rejected'
     ) {
       setLoadError('Some property management dashboard data could not be loaded.');
     }
@@ -107,6 +114,17 @@ export default function PropertyManagementDashboardPage() {
       record.metadataCompleteness?.status !== 'Complete' ||
       record.repositoryStatus !== 'Linked'
   ).length;
+  const overdueRentAccounts = rentStatuses.filter((item) => item.isOverdue).length;
+  const activeRentAccounts = assets.filter((asset) => asset.rentBillingActivatedAt).length;
+  const today = new Date();
+  const ninetyDaysFromToday = new Date(today);
+  ninetyDaysFromToday.setDate(today.getDate() + 90);
+  const leasesNearingExpiry = assets.filter((asset) => {
+    if (!asset.dateOfTenancy || !asset.leaseTermYears) return false;
+    const expiry = new Date(asset.dateOfTenancy);
+    expiry.setFullYear(expiry.getFullYear() + asset.leaseTermYears);
+    return expiry >= today && expiry <= ninetyDaysFromToday;
+  }).length;
 
   const stageQueue = React.useMemo(() => {
     const counts = new Map<string, number>();
@@ -161,12 +179,15 @@ export default function PropertyManagementDashboardPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {[
           { label: 'Workspaces', value: procedures.length, icon: ClipboardList },
           { label: 'Open cases', value: openCases.length, icon: Home },
           { label: 'Available assets', value: availableAssets, icon: Building2 },
           { label: 'Portal listings', value: publishedListings, icon: FileText },
+          { label: 'Active rent accounts', value: activeRentAccounts, icon: Home },
+          { label: 'Overdue rent accounts', value: overdueRentAccounts, icon: FileText },
+          { label: 'Leases ending in 90 days', value: leasesNearingExpiry, icon: ClipboardList },
         ].map((item) => {
           const Icon = item.icon;
           return (

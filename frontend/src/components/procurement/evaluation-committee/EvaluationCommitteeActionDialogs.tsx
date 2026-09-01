@@ -30,6 +30,7 @@ import {
   validateCommitteeBinding,
   validateRecallRequest,
 } from '@/lib/procurement-evaluation-committee';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementEvaluationCommitteeService as service } from '@/services/procurement-evaluation-committee.service';
 import type {
   BindProcurementEvaluationCommitteeRequest,
@@ -152,9 +153,7 @@ export function EvaluationCommitteeActionDialogs({
       sourceId: readiness.sourceId,
       committeeTemplateId,
       purpose,
-      effectiveFromUtc: effectiveFrom
-        ? toUtc(effectiveFrom)
-        : effectiveFrom,
+      effectiveFromUtc: effectiveFrom ? toUtc(effectiveFrom) : effectiveFrom,
       effectiveToUtc: effectiveTo ? toUtc(effectiveTo) : undefined,
       requiredRoles: [],
       idempotencyKey: 'pending',
@@ -205,14 +204,12 @@ export function EvaluationCommitteeActionDialogs({
       });
     }
     if (action.type === 'meeting') {
-      if (!meetingChannel.trim()) return 'Meeting channel or venue is required.';
+      if (!meetingChannel.trim())
+        return 'Meeting channel or venue is required.';
       if (!evidenceReference.trim()) return 'Meeting evidence is required.';
       if (!scheduledAt || Number.isNaN(Date.parse(scheduledAt)))
         return 'Scheduled meeting time is invalid.';
-      if (
-        ['Remote', 'Hybrid'].includes(meetingMode) &&
-        !remoteEvidence.trim()
-      )
+      if (['Remote', 'Hybrid'].includes(meetingMode) && !remoteEvidence.trim())
         return 'Remote or hybrid meetings require a remote-session evidence reference.';
     }
     if (action.type === 'attendance') {
@@ -343,9 +340,10 @@ export function EvaluationCommitteeActionDialogs({
       await onCompleted();
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : 'The controlled committee action failed.'
+        getProcurementProblemMessage(
+          error,
+          'The controlled committee action failed.'
+        )
       );
     } finally {
       setBusy(false);
@@ -425,9 +423,10 @@ export function EvaluationCommitteeActionDialogs({
               <Alert>
                 <AlertTitle>Exact snapshot, shared administration</AlertTitle>
                 <AlertDescription>
-                  Membership is copied from the active committee managed in Access
-                  &amp; Committees. Subsequent acceptance, declaration, attendance,
-                  and scores are retained against this source and version.
+                  Membership is copied from the active committee managed in
+                  Access &amp; Committees. Subsequent acceptance, declaration,
+                  attendance, and scores are retained against this source and
+                  version.
                 </AlertDescription>
               </Alert>
             </>
@@ -450,7 +449,9 @@ export function EvaluationCommitteeActionDialogs({
                 <Field label="Acceptance signature reference *">
                   <Input
                     value={signatureReference}
-                    onChange={(event) => setSignatureReference(event.target.value)}
+                    onChange={(event) =>
+                      setSignatureReference(event.target.value)
+                    }
                   />
                 </Field>
               )}
@@ -510,7 +511,9 @@ export function EvaluationCommitteeActionDialogs({
               <Field label="Signature reference *">
                 <Input
                   value={signatureReference}
-                  onChange={(event) => setSignatureReference(event.target.value)}
+                  onChange={(event) =>
+                    setSignatureReference(event.target.value)
+                  }
                 />
               </Field>
               <EvidenceFields
@@ -612,7 +615,9 @@ export function EvaluationCommitteeActionDialogs({
               <Field label="Attendance signature reference *">
                 <Input
                   value={signatureReference}
-                  onChange={(event) => setSignatureReference(event.target.value)}
+                  onChange={(event) =>
+                    setSignatureReference(event.target.value)
+                  }
                 />
               </Field>
               <EvidenceFields
@@ -706,8 +711,8 @@ export function EvaluationCommitteeActionDialogs({
                 </AlertTitle>
                 <AlertDescription>
                   The locked score sheet remains immutable in both outcomes.
-                  Approval recalls the prior attempt and authorizes exactly one new
-                  attempt.
+                  Approval recalls the prior attempt and authorizes exactly one
+                  new attempt.
                 </AlertDescription>
               </Alert>
             </>

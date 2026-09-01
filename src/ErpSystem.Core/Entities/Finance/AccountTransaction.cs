@@ -36,6 +36,12 @@ public class AccountTransaction : BusinessEntity
     public Guid? FinanceDimensionSetId { get; set; }
 
     /// <summary>
+    /// Exact immutable dimension/rule evidence for this posting line.  The canonical set remains
+    /// useful for aggregation, but this snapshot is authoritative for historical display/audit.
+    /// </summary>
+    public Guid? FinanceDimensionSnapshotId { get; set; }
+
+    /// <summary>
     /// Transaction date (posting date to GL).
     /// Must fall within an open fiscal period.
     /// </summary>
@@ -271,6 +277,9 @@ public class AccountTransaction : BusinessEntity
 
     [ForeignKey(nameof(FinanceDimensionSetId))]
     public FinanceDimensionSet? FinanceDimensionSet { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSnapshotId))]
+    public FinanceDimensionSnapshot? FinanceDimensionSnapshot { get; set; }
 
     // ========================================================================
     // REVALUATION TRACKING (Section 3.2.5 - IAS 21 Currency Revaluation)

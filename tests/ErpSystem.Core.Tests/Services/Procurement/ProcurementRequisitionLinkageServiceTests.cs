@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
@@ -39,7 +40,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         saved.SourcePlanNumber.Should().Be(references.Plan.PlanNumber);
         saved.BudgetId.Should().Be(references.Budget.Id);
         saved.ProcurementCategory.Should().Be(ProcurementCategoryClass.Goods);
-        saved.CostCenter.Should().Be("CC-010");
+        saved.CostCenter.Should().Be("IT", "a planned requisition derives its cost centre from the plan department");
         saved.ProjectCode.Should().Be(references.Project.ProjectCode);
         saved.RequisitionType.Should().Be(PurchaseRequisitionType.ProjectPurchase);
         saved.SpecificationTemplateCode.Should().Be(references.Template.TemplateCode);
@@ -51,10 +52,113 @@ public sealed class ProcurementRequisitionLinkageServiceTests
     }
 
     [Fact]
+    public async Task CompatiblePlanItemsCanShareOneRequisitionAndRetainPrimaryHeaderLineage()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var secondPlanItem = new ProcurementPlanItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementPlanId = references.Plan.Id, ProcurementBudgetId = references.Budget.Id,
+            ItemDescription = "Laptop docking stations", ItemCategory = "Goods",
+            EstimatedQuantity = 10, EstimatedUnitPrice = 1000, EstimatedTotalCost = 10000,
+            Status = "Approved", Currency = "GHS"
+        };
+        fixture.Context.ProcurementPlanItems.Add(secondPlanItem);
+        await fixture.Context.SaveChangesAsync();
+        var requisition = fixture.NewRequisition();
+
+        await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            SourcePlanItemIds = [references.PlanItem.Id, secondPlanItem.Id],
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-multi-line-plan");
+
+        requisition.SourcePlanId.Should().Be(references.Plan.Id);
+        requisition.SourcePlanItemId.Should().Be(references.PlanItem.Id,
+            "the primary header reference remains available to legacy integrations");
+        requisition.SourcePlanItemDescription.Should().Be("2 approved plan items");
+        requisition.BudgetId.Should().Be(references.Budget.Id);
+        requisition.Currency.Should().Be("GHS");
+        requisition.ProcurementCategory.Should().Be(ProcurementCategoryClass.Goods);
+    }
+
+    [Fact]
+    public async Task PlanItemsFromDifferentBudgetsMustBeSplitIntoSeparateRequisitions()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var secondBudget = new ProcurementBudget
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, BudgetCode = "BUD-2026-02",
+            Title = "Second goods budget", DepartmentId = references.Plan.DepartmentId,
+            ProcurementPlanId = references.Plan.Id, FiscalYear = 2026, AllocatedAmount = 50000,
+            RemainingAmount = 50000, Currency = "GHS", Status = "Approved"
+        };
+        var secondPlanItem = new ProcurementPlanItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementPlanId = references.Plan.Id, ProcurementBudgetId = secondBudget.Id,
+            ItemDescription = "Network switches", ItemCategory = "Goods",
+            EstimatedQuantity = 2, EstimatedUnitPrice = 5000, EstimatedTotalCost = 10000,
+            Status = "Approved", Currency = "GHS"
+        };
+        fixture.Context.AddRange(secondBudget, secondPlanItem);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                SourcePlanItemIds = [references.PlanItem.Id, secondPlanItem.Id],
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            }, "trace-mixed-budget-plan-items");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageValidationException>()
+            .Where(exception => exception.Code == "PLAN_ITEMS_BUDGET_MISMATCH");
+    }
+
+    [Fact]
+    public async Task ExistingRequisitionLinePreventsDuplicatePlanItemRequisition()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var existing = fixture.NewRequisition();
+        existing.RequisitionNumber = "PR-2026-LINE-LINK";
+        existing.Items.Add(new PurchaseRequisitionItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            RequisitionId = existing.Id, SourcePlanItemId = references.PlanItem.Id,
+            ItemDescription = references.PlanItem.ItemDescription,
+            Quantity = references.PlanItem.EstimatedQuantity,
+            EstimatedUnitPrice = references.PlanItem.EstimatedUnitPrice,
+            LineTotal = references.PlanItem.EstimatedTotalCost
+        });
+        fixture.Context.PurchaseRequisitions.Add(existing);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                SourcePlanItemIds = [references.PlanItem.Id],
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            }, "trace-duplicate-plan-line");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_ITEM_REQUISITION_EXISTS" &&
+                                exception.Message.Contains(existing.RequisitionNumber));
+    }
+
+    [Fact]
     public async Task PlanItemAutomaticallyCarriesItsBudgetWithoutMakingLinkageMandatory()
     {
         await using var fixture = new Fixture();
         var references = fixture.SeedReferences();
+        references.PlanItem.ProcurementBudgetId = null;
+        references.Plan.BudgetId = references.Budget.Id;
+        await fixture.Context.SaveChangesAsync();
         var requisition = fixture.NewRequisition();
 
         await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
@@ -67,6 +171,114 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         requisition.Currency.Should().Be(references.Budget.Currency);
         requisition.SpecificationTemplateId.Should().BeNull();
         requisition.ApprovedExceptionRuleId.Should().BeNull();
+        requisition.CostCenter.Should().Be("IT");
+    }
+
+    [Fact]
+    public async Task FutureEffectiveApprovedBudgetCanBeLinkedWhileRequisitionRemainsDraft()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Budget.Status = "Approved";
+        references.Budget.EffectiveDate = DateTime.UtcNow.Date.AddDays(3);
+        await fixture.Context.SaveChangesAsync();
+        var requisition = fixture.NewRequisition();
+
+        await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-future-budget-draft");
+
+        requisition.Status.Should().Be("Draft");
+        requisition.BudgetId.Should().Be(references.Budget.Id);
+        requisition.BudgetCode.Should().Be(references.Budget.BudgetCode);
+        requisition.Currency.Should().Be(references.Budget.Currency);
+    }
+
+    [Fact]
+    public async Task ExpiredPlanBudgetCannotBeLinkedToANewDraft()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Budget.ExpiryDate = DateTime.UtcNow.AddMinutes(-1);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(
+            fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            },
+            "trace-expired-plan-budget");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_BUDGET_EXPIRED" &&
+                                exception.Message.Contains(references.Budget.BudgetCode));
+    }
+
+    [Fact]
+    public async Task UnapprovedPlanBudgetCannotBeLinkedToANewDraft()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Budget.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(
+            fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            },
+            "trace-unapproved-plan-budget");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_BUDGET_NOT_APPROVED" &&
+                                exception.Message.Contains(references.Budget.BudgetCode));
+    }
+
+    [Fact]
+    public async Task PlanItemPrefersDepartmentAccountingCodeForCostCenter()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Plan.Department.AccountCode = "CC-IT-001";
+        await fixture.Context.SaveChangesAsync();
+        var requisition = fixture.NewRequisition();
+
+        await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-plan-accounting-code");
+
+        requisition.CostCenter.Should().Be("CC-IT-001");
+    }
+
+    [Fact]
+    public async Task PlanItemCannotCreateAnotherLivePurchaseRequisition()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var existing = fixture.NewRequisition();
+        existing.RequisitionNumber = "PR-2026-EXISTING";
+        existing.SourcePlanId = references.Plan.Id;
+        existing.SourcePlanItemId = references.PlanItem.Id;
+        fixture.Context.PurchaseRequisitions.Add(existing);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(fixture.NewRequisition(), new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-duplicate-plan-item");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_ITEM_REQUISITION_EXISTS" &&
+                                exception.Message.Contains(existing.RequisitionNumber));
     }
 
     [Fact]
@@ -185,7 +397,13 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         options.SpecificationTemplates.Should().ContainSingle(item => item.Id == references.Template.Id);
         options.SpecificationTemplates.Should().NotContain(item => item.Code == "DRAFT");
         options.ApprovedExceptionWorkflows.Should().ContainSingle(item => item.Id == references.ExceptionWorkflow.Id);
-        options.PlanItems.Should().ContainSingle(item => item.Id == references.PlanItem.Id);
+        var planItem = options.PlanItems.Should().ContainSingle(item => item.Id == references.PlanItem.Id).Subject;
+        planItem.BudgetId.Should().Be(references.Budget.Id);
+        planItem.BudgetCode.Should().Be(references.Budget.BudgetCode);
+        planItem.Currency.Should().Be(references.Budget.Currency,
+            "the approved budget currency is authoritative even when a plan item contains a stale default");
+        planItem.DepartmentId.Should().Be(references.Plan.DepartmentId);
+        planItem.DepartmentName.Should().Be("Information Technology");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -248,10 +466,14 @@ public sealed class ProcurementRequisitionLinkageServiceTests
 
         public SeededReferences SeedReferences()
         {
+            var department = new Department
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, Code = "IT", Name = "Information Technology", IsActive = true
+            };
             var plan = new ProcurementPlan
             {
                 Id = Guid.NewGuid(), TenantId = TenantId, PlanNumber = "APP-2026-01", Title = "Annual plan",
-                DepartmentId = Guid.NewGuid(), FiscalYear = 2026, PlanStartDate = DateTime.UtcNow.Date,
+                DepartmentId = department.Id, FiscalYear = 2026, PlanStartDate = DateTime.UtcNow.Date,
                 PlanEndDate = DateTime.UtcNow.Date.AddYears(1), Status = "Active"
             };
             var budget = new ProcurementBudget
@@ -264,7 +486,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
             {
                 Id = Guid.NewGuid(), TenantId = TenantId, ProcurementPlanId = plan.Id, ProcurementBudgetId = budget.Id,
                 ItemDescription = "Enterprise laptops", ItemCategory = "Goods", EstimatedQuantity = 10,
-                EstimatedUnitPrice = 5000, EstimatedTotalCost = 50000, Status = "Approved", Currency = "GHS"
+                EstimatedUnitPrice = 5000, EstimatedTotalCost = 50000, Status = "Approved", Currency = "USD"
             };
             var project = new Project
             {
@@ -303,7 +525,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
                 EntityTypeId = entityType.Id, EntityId = Guid.NewGuid(), InitiatedById = UserId,
                 Status = WorkflowInstanceStatus.Completed, CompletedDate = DateTime.UtcNow.AddHours(-1)
             };
-            Context.AddRange(plan, budget, planItem, project, template, policy, exceptionRule, entityType, definition, workflow);
+            Context.AddRange(department, plan, budget, planItem, project, template, policy, exceptionRule, entityType, definition, workflow);
             Context.SaveChanges();
             return new SeededReferences(plan, planItem, budget, project, template, exceptionRule, workflow);
         }

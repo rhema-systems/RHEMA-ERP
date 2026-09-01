@@ -34,11 +34,9 @@ import {
   ghanepsSourceLabel,
   isGhanepsProfileFailClosed,
 } from '@/lib/procurement-ghaneps-exchange';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementGhanepsExchangeService as service } from '@/services/procurement-ghaneps-exchange.service';
 import type { ProcurementGhanepsSourceType } from '@/types/procurement-ghaneps-exchange';
-
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'The request could not be completed.';
 
 const errorStatus = (error: unknown) =>
   typeof error === 'object' && error !== null && 'status' in error
@@ -102,10 +100,7 @@ export function GhanepsExchangeWorkspace({
   const firstError =
     overview.error ?? options.error ?? status.error ?? history.error;
   const failed =
-    overview.isError ||
-    options.isError ||
-    status.isError ||
-    history.isError;
+    overview.isError || options.isError || status.isError || history.isError;
   const backHref = ghanepsBackHref(sourceType, sourceId);
   const sourceLabel = ghanepsSourceLabel(sourceType);
 
@@ -156,6 +151,15 @@ export function GhanepsExchangeWorkspace({
           )
         }
         conflict
+      />
+    );
+
+  if (!options.data.isConfigured)
+    return (
+      <NotConfigured
+        backHref={backHref}
+        sourceLabel={sourceLabel}
+        message={options.data.configurationMessage}
       />
     );
 
@@ -269,17 +273,6 @@ export function GhanepsExchangeWorkspace({
         </div>
       </div>
 
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Server-authoritative exchange boundary</AlertTitle>
-        <AlertDescription>
-          Source, status, event family, mapping, Published/effective DEC-009
-          lineage, checksums, retry limits, actor, tenant, SOD, notification,
-          shared evidence, and immutable audit are revalidated by the server.
-          This client sends no tenant identifier and cannot overwrite history.
-        </AlertDescription>
-      </Alert>
-
       <GhanepsExchangeRegister
         overview={overview.data}
         options={options.data}
@@ -304,6 +297,38 @@ export function GhanepsExchangeWorkspace({
   );
 }
 
+function NotConfigured({
+  backHref,
+  sourceLabel,
+  message,
+}: {
+  backHref: string;
+  sourceLabel: string;
+  message?: string;
+}) {
+  return (
+    <div
+      className="space-y-4 p-4 md:p-6"
+      data-testid="ghaneps-exchange-not-configured"
+    >
+      <Button asChild variant="ghost" size="sm">
+        <Link href={backHref}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Return to {sourceLabel.toLowerCase()}
+        </Link>
+      </Button>
+      <Alert>
+        <ShieldCheck className="h-4 w-4" />
+        <AlertTitle>GHANEPS exchange is not configured</AlertTitle>
+        <AlertDescription>
+          {message ??
+            'Tender processing can continue. Configure GHANEPS exchange only when the integration is required.'}
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+}
+
 function Unavailable({
   backHref,
   sourceLabel,
@@ -319,9 +344,7 @@ function Unavailable({
     <div
       className="space-y-4 p-4 md:p-6"
       data-testid={
-        conflict
-          ? 'ghaneps-exchange-conflict'
-          : 'ghaneps-exchange-unavailable'
+        conflict ? 'ghaneps-exchange-conflict' : 'ghaneps-exchange-unavailable'
       }
     >
       <Button asChild variant="ghost" size="sm">
@@ -338,9 +361,9 @@ function Unavailable({
             : 'GHANEPS exchange is unavailable'}
         </AlertTitle>
         <AlertDescription>
-          {errorMessage(error)} Access remains fail closed. Confirm one exact
-          Published/effective DEC-009 profile and mapping exists for this
-          source before retrying.
+          {getProcurementProblemMessage(error)} Access remains fail closed.
+          Confirm one exact Published/effective DEC-009 profile and mapping
+          exists for this source before retrying.
         </AlertDescription>
       </Alert>
     </div>

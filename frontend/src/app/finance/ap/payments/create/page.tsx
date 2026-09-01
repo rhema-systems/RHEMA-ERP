@@ -435,6 +435,20 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
+            if (isLinkedInvoicePayment && preselectedInvoiceId) {
+                const linkedAllocation = paymentAllocations.find(
+                    (allocation) => allocation.vendorInvoiceId === preselectedInvoiceId,
+                );
+                if (!linkedAllocation) {
+                    toast({
+                        title: 'Invoice allocation required',
+                        description: 'Use Schedule Payment only after the linked invoice is visible and payment-ready.',
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+            }
+
             const incompleteCrossCurrencyAllocation = paymentAllocations.find(allocation =>
                 allocation.allocatedAmount > 0 && (allocation.paymentCurrencyAmount ?? 0) <= 0);
             if (incompleteCrossCurrencyAllocation) {

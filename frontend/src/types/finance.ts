@@ -389,6 +389,7 @@ export interface AccountTransaction {
     financeDimensionSetId?: string;
     financeDimensionDisplayValue?: string;
     dimensions?: FinanceDimensionAssignment[];
+    dimensionSnapshot?: FinanceDimensionSnapshot;
 }
 
 export interface FinanceDimensionAssignment {
@@ -471,6 +472,9 @@ export interface FinanceDimensionAccountRule {
     sourceModule?: string;
     sourceDocumentType?: string;
     postingAction?: string;
+    routeId?: FinanceDimensionRouteId;
+    sourceRoute?: string;
+    contractVersion?: string;
     effectiveDate: string;
     expiryDate?: string;
     isActive: boolean;
@@ -484,9 +488,141 @@ export interface UpsertFinanceDimensionAccountRule {
     sourceModule?: string;
     sourceDocumentType?: string;
     postingAction?: string;
+    routeId?: FinanceDimensionRouteId;
     effectiveDate: string;
     expiryDate?: string;
     isActive: boolean;
+}
+
+export type FinanceDimensionRouteId =
+    | 'ManualJournalEntry'
+    | 'FinanceApVendorInvoice'
+    | 'FinanceApSupplierDebitNote'
+    | 'FinanceArCustomerInvoice'
+    | 'SalesCreditNote';
+
+export type FinanceDimensionCertificationState = 'LegacyReadOnly' | 'CaptureOptional' | 'Enforced';
+
+export interface FinanceDimensionSnapshotItem {
+    financeDimensionDefinitionId: string;
+    financeDimensionValueId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+    financeDimensionAccountRuleId?: string;
+    ruleFamilyId?: string;
+    ruleVersion?: number;
+    ruleType?: FinanceDimensionAccountRule['ruleType'];
+}
+
+export interface FinanceDimensionSnapshot {
+    id: string;
+    financeDimensionSetId: string;
+    combinationHash: string;
+    displayValue: string;
+    snapshotSource: string;
+    snapshotCapturedAt: string;
+    snapshotQuality: 'Exact' | 'Reconstructed' | string;
+    historicalNameReconstructed: boolean;
+    items: FinanceDimensionSnapshotItem[];
+}
+
+export interface FinanceSourceLineDimensionInput {
+    sourceLineId: string;
+    accountId: string;
+    dimensions: FinancePostingDimensionValue[];
+}
+
+export interface FinanceSourceDocumentDimensionInput {
+    defaultDimensions: FinancePostingDimensionValue[];
+    lines: FinanceSourceLineDimensionInput[];
+    applyDefaultToEligibleLines: boolean;
+}
+
+export interface FinanceSourceDimensionValue {
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+    ruleType?: FinanceDimensionAccountRule['ruleType'];
+    isReadOnly: boolean;
+}
+
+export interface FinanceSourceLineDimension {
+    sourceLineId: string;
+    accountId: string;
+    financeDimensionSetId?: string;
+    combinationHash?: string;
+    displayValue?: string;
+    isFrozen: boolean;
+    values: FinanceSourceDimensionValue[];
+    readinessWarnings: string[];
+}
+
+export interface FinanceSourceDocumentDimension {
+    routeId: FinanceDimensionRouteId;
+    certificationState: FinanceDimensionCertificationState;
+    sourceDocumentId: string;
+    defaultFinanceDimensionSetId?: string;
+    defaultValues: FinanceSourceDimensionValue[];
+    lines: FinanceSourceLineDimension[];
+    readinessWarnings: string[];
+    budgetEvidenceStatus: 'NotApplicable' | 'NotEvaluated' | 'Current' | 'Stale' | string;
+    budgetEvaluationHash?: string;
+    budgetEvidenceUpdatedAt?: string;
+}
+
+export interface FinanceDimensionRouteCertification {
+    routeId: FinanceDimensionRouteId;
+    producerModule: string;
+    sourceRoute: string;
+    documentType: string;
+    contractVersion: string;
+    grain: 'JournalLine' | 'SourceDocumentLine';
+    supportsDocumentDefaults: boolean;
+    owner: string;
+    notes: string;
+    state: FinanceDimensionCertificationState;
+    effectiveDate: string;
+    rowVersion?: string;
+    latestAssessmentId?: string;
+    latestBlockerCount?: number;
+    latestAssessmentExpiresAt?: string;
+}
+
+export interface FinanceDimensionReadinessBlocker {
+    code: string;
+    message: string;
+    lifecycleState?: string;
+    documentId?: string;
+    documentReference?: string;
+    documentLink?: string;
+    remediationStatus?: string;
+    dimensionIssue?: string;
+    fixedRuleDrift: boolean;
+    staleBudgetEvidence: boolean;
+    activeReservationState?: string;
+    details?: string;
+}
+
+export interface FinanceDimensionReadinessAssessment {
+    id: string;
+    routeId: FinanceDimensionRouteId;
+    producerModule: string;
+    sourceRoute: string;
+    documentType: string;
+    contractVersion: string;
+    currentState: FinanceDimensionCertificationState;
+    targetState: FinanceDimensionCertificationState;
+    blockerCount: number;
+    blockers: FinanceDimensionReadinessBlocker[];
+    blockerTotalsByLifecycle: Record<string, number>;
+    dataVersionWatermark: string;
+    evidenceHash: string;
+    assessedAt: string;
+    expiresAt: string;
+    isExpired: boolean;
 }
 
 /** @deprecated Use AccountTransaction instead */

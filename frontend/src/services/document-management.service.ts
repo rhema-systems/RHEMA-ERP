@@ -261,6 +261,14 @@ export interface CentralDocumentVersionQueueItem {
     | 'Returned'
     | 'Superseded'
     | string;
+  workflow?: {
+    id: string;
+    status: string;
+    currentStageIndex: number;
+    currentStageName: string;
+    currentAssignedRole?: string | null;
+    workflowInstanceId?: string | null;
+  } | null;
   document: CentralDocumentRecord;
   version: CentralDocumentVersion;
 }
@@ -422,6 +430,12 @@ export interface CentralDocumentGenerationTemplate {
   approvalRole?: string | null;
   signatureRole?: string | null;
   defaultDispatchChannel?: string | null;
+  templateFileUploadRecordId?: string | null;
+  templateRepositoryPath?: string | null;
+  templateFileName?: string | null;
+  templateContentType?: string | null;
+  templateFileSize?: number | null;
+  hasWordTemplate?: boolean;
   createdAt?: string;
   updatedAt?: string | null;
 }
@@ -465,12 +479,19 @@ export interface GeneratedCentralDocumentResult {
   version: CentralDocumentVersion;
   content: string;
   pdfUrl: string;
+  wordUrl?: string;
   dmsReference: string;
   sourceLabel: string;
 }
 
 export interface GeneratedDocumentWorkflowAction {
-  action: 'SubmitForApproval' | 'Approve' | 'Sign' | 'Dispatch' | 'Return' | string;
+  action:
+    | 'SubmitForApproval'
+    | 'Approve'
+    | 'Sign'
+    | 'Dispatch'
+    | 'Return'
+    | string;
   notes?: string;
   signatureRole?: string;
   dispatchChannel?: string;
@@ -555,17 +576,39 @@ class DocumentManagementService {
     return response.data;
   }
 
+  async uploadGenerationTemplateWordFile(
+    templateCode: string,
+    file: File
+  ): Promise<CentralDocumentGenerationTemplate> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiService.post<
+      ApiResponse<CentralDocumentGenerationTemplate>
+    >(
+      `/document-management/document-templates/${encodeURIComponent(
+        templateCode
+      )}/word-template`,
+      formData
+    );
+    return response.data;
+  }
+
   async updateGeneratedDocumentWorkflow(
     recordId: string,
     payload: GeneratedDocumentWorkflowAction
   ): Promise<GeneratedDocumentWorkflowResult> {
-    const response = await apiService.post<
+    const response = await rawApiService.request<
       ApiResponse<GeneratedDocumentWorkflowResult>
     >(
       `/document-management/generated-documents/${encodeURIComponent(
         recordId
       )}/workflow`,
-      payload
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        // PDF certificate signing can legitimately exceed the standard API timeout.
+        signal: new AbortController().signal,
+      }
     );
     return response.data;
   }

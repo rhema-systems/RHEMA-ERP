@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { PurchaseRequisitionBudgetReadinessDto } from '@/services/purchasingService';
-import { getBudgetControlPresentation } from './procurement-requisition-budget';
+import type {
+  PurchaseRequisitionBudgetControlHistoryDto,
+  PurchaseRequisitionBudgetReadinessDto,
+} from '@/services/purchasingService';
+import {
+  getBudgetControlPresentation,
+  getPurchaseRequisitionBudgetControlHistory,
+} from './procurement-requisition-budget';
 
 const readiness = (
   overrides: Partial<PurchaseRequisitionBudgetReadinessDto> = {}
@@ -32,15 +38,15 @@ describe('getBudgetControlPresentation', () => {
     });
   });
 
-  it('labels sufficient approved budget as ready for atomic reservation', () => {
+  it('labels sufficient approved budget as available without reserving it', () => {
     expect(getBudgetControlPresentation(readiness({
       isCompliant: true,
       canReserve: true,
       basis: 'ApprovedBudget'
     }))).toMatchObject({
       tone: 'ready',
-      title: 'Ready for atomic reservation',
-      basisLabel: 'Approved budget'
+      title: 'Approved budget is available',
+      basisLabel: 'Availability confirmed'
     });
   });
 
@@ -61,16 +67,41 @@ describe('getBudgetControlPresentation', () => {
     });
   });
 
-  it('shows an idempotent existing reservation as protected', () => {
+  it('distinguishes an existing downstream commitment from unreserved availability', () => {
     expect(getBudgetControlPresentation(readiness({
       isCompliant: true,
       canReserve: true,
       basis: 'ExistingCommitment',
-      commitmentStatus: 'Reserved'
+      commitmentStatus: 'Committed'
     }))).toMatchObject({
       tone: 'ready',
-      title: 'Budget commitment protected',
-      basisLabel: 'Active commitment'
+      title: 'Downstream budget commitment recorded',
+      basisLabel: 'Committed'
     });
+  });
+
+  it('retains downstream reservation events in the PR control history', () => {
+    const event = (
+      action: string
+    ): PurchaseRequisitionBudgetControlHistoryDto => ({
+      id: action,
+      action,
+      result: 'Allowed',
+      actorName: 'Finance Reviewer',
+      occurredAtUtc: '2026-08-29T10:00:00Z',
+      integrityHash: `hash-${action}`,
+    });
+
+    expect(
+      getPurchaseRequisitionBudgetControlHistory([
+        event('BudgetAvailabilityConfirmed'),
+        event('BudgetCommitmentReserved'),
+        event('BudgetReservationReused'),
+      ]).map((item) => item.action)
+    ).toEqual([
+      'BudgetAvailabilityConfirmed',
+      'BudgetCommitmentReserved',
+      'BudgetReservationReused',
+    ]);
   });
 });

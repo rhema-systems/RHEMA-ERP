@@ -34,11 +34,14 @@
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
     <Compile Include="Middleware\GlobalExceptionHandlingMiddlewareTests.cs" />
+    <Compile Include="Middleware\ExternalUserAccessMiddlewareTenderBidTests.cs" />
     <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
+    <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <!-- Supplier-return ownership is shared with Procurement/Inventory, but Finance must keep
@@ -59,6 +62,7 @@
     <Compile Include="Controllers\Procurement\ProcurementMasterDataChangesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementAppSubmissionsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementPlansFiscalYearsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementReferenceDataControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSpecificationTemplatesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseRequisitionLinkagesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseRequisitionSubmissionControlsControllerTests.cs" />
@@ -74,6 +78,7 @@
     <Compile Include="Controllers\Procurement\ProcurementTenderDocumentRegisterControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementTenderDocumentTemplatesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementEvaluationCommitteesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\EvaluationTemplatesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementAwardReadinessControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderAwardsAwardReadinessControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementBidderCommunicationsControllerTests.cs" />
@@ -93,8 +98,10 @@
     <Compile Include="Controllers\Procurement\ProcurementReceiptDocumentsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementReceiptSourceEvidenceControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrderReceiptIdempotencyTests.cs" />
+    <Compile Include="Controllers\Procurement\PurchaseOrderReceiptInventoryItemTests.cs" />
     <Compile Include="Controllers\Inventory\GoodsReceiptNotesSodControllerTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryTransferControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Inventory\InventoryDirectedOperationsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryReturnAdjustmentControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryProjectReservationControllerSecurityTests.cs" />
@@ -104,6 +111,7 @@
     <Compile Include="Controllers\Inventory\InventoryMobileScanningControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryDisposalsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemsProfileControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Inventory\WarehouseItemsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemIdentifiersControllerAuthorizationTests.cs" />
     <Compile Include="Controllers\Inventory\StockAdjustmentsOpeningStockControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />
@@ -111,15 +119,20 @@
     <Compile Include="Controllers\Procurement\SupplierApplicantLifecycleControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderPublicationContractControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderBidsOwnershipControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
+    <Compile Include="Controllers\Projects\ProjectsControllerCivilQuantitySurveyAuthorizationTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
+    <Compile Include="Controllers\Projects\CivilEngineering*.cs" />
     <Compile Include="Controllers\QuantitySurvey\**\*.cs" />
     <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
+    <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
@@ -128,6 +141,13 @@
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionAdministrationServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionCertificationServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionSourceInfrastructureMigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceDimensionAssignmentStoreTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceDimensionServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceDimensionsApArMigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionRouteConsumerContractTests.cs" />
+    <Compile Include="Services\Finance\FinanceOwnedSourceDimensionReadinessProviderTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionReportingFilterTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceAccessScopeServiceTests.cs" />
@@ -236,6 +256,9 @@
     <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
+    <Compile Include="Services\Documents\DmsGenerationTemplateMigrationCompatibilityTests.cs" />
+    <Compile Include="Services\DocumentManagement\DocumentTemplateWordBodyExtractorTests.cs" />
+    <Compile Include="Services\DocumentManagement\CentralDocumentPdfSigningServiceTests.cs" />
     <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />
     <Compile Include="Services\Workflow\WorkflowApproverEligibilityTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />

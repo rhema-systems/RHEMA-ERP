@@ -24,6 +24,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? FinanceDimensionSetId { get; set; }
         public string? FinanceDimensionDisplayValue { get; set; }
         public List<FinanceDimensionAssignmentDto> Dimensions { get; set; } = new();
+        public FinanceDimensionSnapshotDto? DimensionSnapshot { get; set; }
     }
 
     public class CreateAccountTransactionDto

@@ -906,6 +906,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         Guid assetId,
         UpdateEstateManagedAssetOccupancyDto request)
     {
+        if (request.ActualDate.HasValue
+            && request.ActualDate.Value.Date > DateTime.UtcNow.Date)
+        {
+            throw new InvalidOperationException("The actual handover date cannot be in the future.");
+        }
+
         var repository = _unitOfWork.Repository<EstateManagedAsset>();
         var asset = await repository.FirstOrDefaultAsync(item =>
             item.Id == assetId
@@ -925,6 +931,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
         var hasOccupant = asset.CustomerBusinessPartnerId.HasValue
             || !string.IsNullOrWhiteSpace(asset.LesseeName);
+        if (request.ReleaseOccupant == true
+            && request.Status != EstateManagedAssetStatus.Available)
+        {
+            throw new InvalidOperationException(
+                "An occupant can only be released when returning the asset to available status.");
+        }
+
         if (request.Status is EstateManagedAssetStatus.Reserved
                 or EstateManagedAssetStatus.Leased
                 or EstateManagedAssetStatus.Occupied
@@ -943,10 +956,20 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 "Record the signed agreement reference and agreement start or move-in date in Lease Management before marking this asset leased or occupied.");
         }
 
-        if (request.Status == EstateManagedAssetStatus.Available && hasOccupant)
+        if (request.Status == EstateManagedAssetStatus.Available
+            && hasOccupant
+            && request.ReleaseOccupant != true)
         {
             throw new InvalidOperationException(
                 "Release the lease or occupant link before marking this asset available.");
+        }
+
+        if (request.Status == EstateManagedAssetStatus.Available
+            && request.ReleaseOccupant == true
+            && !request.ActualDate.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Record the actual move-out date before releasing the occupant.");
         }
 
         if (request.Status == EstateManagedAssetStatus.LandBank
@@ -956,7 +979,48 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
 
         asset.Status = request.Status;
-        asset.Notes = TrimOrNull(request.Notes) ?? asset.Notes;
+        var requestedNotes = TrimOrNull(request.Notes);
+        if (request.Status == EstateManagedAssetStatus.Available
+            && request.ReleaseOccupant == true)
+        {
+            var releaseHistory = string.Join(
+                " | ",
+                new[]
+                {
+                    asset.Notes,
+                    requestedNotes,
+                    $"Occupancy released on {request.ActualDate!.Value:yyyy-MM-dd}; "
+                    + $"occupant: {asset.LesseeName ?? "not recorded"}; "
+                    + $"agreement: {asset.PropertyFileReference ?? "not recorded"}"
+                }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+            asset.Notes = releaseHistory;
+            asset.CustomerBusinessPartnerId = null;
+            asset.LesseeName = null;
+            asset.LesseeAddress = null;
+            asset.DateOfTenancy = null;
+            asset.RightOfEntryDate = null;
+            asset.LeaseTermYears = null;
+            asset.PropertyFileReference = null;
+            asset.RentBillingActivatedAt = null;
+            asset.NextRentBillingDate = null;
+            asset.AutoGenerateRentInvoices = false;
+        }
+        else
+        {
+            asset.Notes = requestedNotes ?? asset.Notes;
+        }
+
+        if (request.Status == EstateManagedAssetStatus.Occupied)
+        {
+            if (!request.ActualDate.HasValue)
+            {
+                throw new InvalidOperationException(
+                    "Record the actual possession date before marking this asset occupied.");
+            }
+
+            asset.RightOfEntryDate = request.ActualDate.Value.Date;
+        }
 
         if (request.Status == EstateManagedAssetStatus.Available)
         {
@@ -1749,6 +1813,18 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalListingPrice = asset.ExternalListingPrice,
         ExternalSalePrice = asset.ExternalSalePrice,
         ExternalMonthlyRent = asset.ExternalMonthlyRent,
+        RentBillingActivatedAt = asset.RentBillingActivatedAt,
+        NextRentBillingDate = asset.NextRentBillingDate,
+        LastRentInvoiceId = asset.LastRentInvoiceId,
+        LastRentInvoiceNumber = asset.LastRentInvoiceNumber,
+        AutoGenerateRentInvoices = asset.AutoGenerateRentInvoices,
+        RentGracePeriodDays = asset.RentGracePeriodDays,
+        RentPenaltyMethod = asset.RentPenaltyMethod,
+        RentPenaltyValue = asset.RentPenaltyValue,
+        RentPenaltyCapAmount = asset.RentPenaltyCapAmount,
+        LastRentPenaltyInvoiceId = asset.LastRentPenaltyInvoiceId,
+        LastRentPenaltyInvoiceNumber = asset.LastRentPenaltyInvoiceNumber,
+        LastRentPenaltySourceInvoiceId = asset.LastRentPenaltySourceInvoiceId,
         ExternalLeaseTermMonths = asset.ExternalLeaseTermMonths,
         ExternalListingCurrency = asset.ExternalListingCurrency,
         ExternalListingNotes = asset.ExternalListingNotes,

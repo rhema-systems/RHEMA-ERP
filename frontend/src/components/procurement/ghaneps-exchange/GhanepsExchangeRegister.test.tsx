@@ -12,6 +12,7 @@ import type {
 const options = (
   allowedActions: string[] = ['PrepareExport', 'RecordImport']
 ): ProcurementGhanepsExchangeOptions => ({
+  isConfigured: true,
   sourceType: 'Tender',
   sourceId: 'tender-1',
   sourceReference: 'TDR-001',

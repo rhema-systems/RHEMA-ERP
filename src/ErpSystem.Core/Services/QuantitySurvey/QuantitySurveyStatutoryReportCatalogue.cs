@@ -25,6 +25,10 @@ public static class QuantitySurveyStatutoryReportCatalogue
     public const string FinalAccountCode = "final-account";
     public const string ProjectCostStatusCode = "project-cost-status";
     public const string CertificateRegisterCode = "certificate-register";
+    public const string RetentionRegisterCode = "retention-register";
+    public const string CostToCompleteCode = "cost-to-complete";
+    public const string ContractBalanceCode = "contract-balance";
+    public const string AuditTrailCode = "audit-trail";
 
     public static IReadOnlyList<QuantitySurveySystemReportDefinition> Definitions { get; } =
     [
@@ -76,7 +80,31 @@ public static class QuantitySurveyStatutoryReportCatalogue
             C("RetentionHeld", "Retention held", "Decimal", "N2"), C("RetentionReleased", "Retention released", "Decimal", "N2"),
             C("AdvanceRecovery", "Advance recovery", "Decimal", "N2"), C("OtherDeductions", "Other deductions", "Decimal", "N2"),
             C("Tax", "Tax", "Decimal", "N2"), C("NetCertified", "Net certified", "Decimal", "N2"),
-            C("ApHandoffStatus", "AP handoff"), C("PaymentStatus", "Payment status"))
+            C("ApHandoffStatus", "AP handoff"), C("PaymentStatus", "Payment status")),
+        Definition(RetentionRegisterCode, "Retention Register",
+            "Retention held, released and outstanding by governed payment certificate and Works contract.",
+            C("CertificateNumber", "Certificate number"), C("ContractNumber", "Contract"),
+            C("IssueDate", "Issue date", "DateTime"), C("Status", "Status"), C("Currency", "Currency"),
+            C("RetentionHeld", "Retention held", "Decimal", "N2"),
+            C("RetentionReleased", "Retention released", "Decimal", "N2"),
+            C("RetentionBalance", "Retention balance", "Decimal", "N2"), C("PaymentStatus", "Payment status")),
+        Definition(CostToCompleteCode, "Cost-to-Complete Report",
+            "Approved budget, actual cost, commitment, forecast and projected final cost for the selected project.",
+            C("ProjectCode", "Project code"), C("Project", "Project"), C("Currency", "Currency"),
+            C("ApprovedBudget", "Approved budget", "Decimal", "N2"), C("ActualCost", "Actual cost", "Decimal", "N2"),
+            C("CommittedCost", "Committed cost", "Decimal", "N2"), C("CostToComplete", "Cost to complete", "Decimal", "N2"),
+            C("ProjectedFinalCost", "Projected final cost", "Decimal", "N2"), C("BudgetVariance", "Budget variance", "Decimal", "N2")),
+        Definition(ContractBalanceCode, "Contract Balance Report",
+            "Original and revised Works contract value reconciled to approved variations, certificates and remaining balance.",
+            C("ContractNumber", "Contract"), C("Supplier", "Supplier or contractor"), C("Currency", "Currency"),
+            C("OriginalContract", "Original contract", "Decimal", "N2"), C("ApprovedVariations", "Approved variations", "Decimal", "N2"),
+            C("RevisedContract", "Revised contract", "Decimal", "N2"), C("CertifiedToDate", "Certified to date", "Decimal", "N2"),
+            C("RetentionBalance", "Retention balance", "Decimal", "N2"), C("ContractBalance", "Contract balance", "Decimal", "N2")),
+        Definition(AuditTrailCode, "Quantity Survey Audit Trail",
+            "Project-scoped Quantity Survey creation, change, workflow, approval, rejection, posting and reversal history.",
+            C("Timestamp", "Date and time", "DateTime"), C("Username", "User"), C("Action", "Action"),
+            C("Resource", "Record type"), C("ResourceId", "Record reference"),
+            C("IpAddress", "IP address"), C("Correlation", "Correlation or change detail"))
     ];
 
     public static QuantitySurveySystemReportDefinition? Resolve(string? query)

@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 
 [ApiController]
 [Route("api/procurement/contract-operations")]
-[Authorize(Policy = "InternalOnly")]
+[Authorize]
 public sealed class ProcurementContractOperationsController : ControllerBase
 {
     private readonly IProcurementContractOperationsService _service;
@@ -19,6 +19,7 @@ public sealed class ProcurementContractOperationsController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> Search(
         [FromQuery] ProcurementContractOperationsSearchRequest request,
         CancellationToken cancellationToken) =>
@@ -26,6 +27,7 @@ public sealed class ProcurementContractOperationsController : ControllerBase
             request, CorrelationId, cancellationToken)));
 
     [HttpGet("{contractId:guid}")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> Get(
         Guid contractId,
         CancellationToken cancellationToken) =>
@@ -33,6 +35,7 @@ public sealed class ProcurementContractOperationsController : ControllerBase
             contractId, CorrelationId, cancellationToken)));
 
     [HttpPost("process-alerts")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> ProcessAlerts(
         [FromBody] ProcessProcurementContractOperationsAlertsRequest request,
         CancellationToken cancellationToken) =>

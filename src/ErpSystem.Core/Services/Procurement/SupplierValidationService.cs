@@ -458,7 +458,7 @@ public class SupplierValidationService : ISupplierValidationService
         else if (matches.Count == 0)
         {
             result.Warn("AVL_POLICY_UNPUBLISHED",
-                "No unique Published/effective evidenced DEC-011 AVL policy is available; production AVL values remain a release configuration gate.");
+                "No effective DEC-011 AVL policy is configured; standard approved, active, registered, non-suspended, and non-blacklisted supplier checks remain mandatory.");
         }
         else
         {
@@ -682,12 +682,12 @@ public class SupplierValidationService : ISupplierValidationService
         result.RiskPolicyAvailable = result.AvlPolicyAvailable;
         if (!result.AvlPolicyAvailable)
         {
-            if (result.Boundary == SupplierEligibilityBoundary.Award)
-                result.Block("SUPPLIER_RISK_POLICY_UNAVAILABLE",
-                    "A unique valid effective DEC-011 supplier-risk policy is required before award.");
-            else
-                result.Warn("SUPPLIER_RISK_POLICY_UNAVAILABLE",
-                    "Supplier risk cannot be evaluated until DEC-011 is Published, effective, approved, and evidenced.");
+            // A missing tenant risk policy is a configuration gap, not evidence that
+            // an otherwise approved supplier is ineligible. Once DEC-011 is
+            // published, its current assessments and configured hard stops remain
+            // mandatory at the Award boundary below.
+            result.Warn("SUPPLIER_RISK_POLICY_UNAVAILABLE",
+                "Supplier risk cannot be evaluated until DEC-011 is Published, effective, approved, and evidenced.");
             return;
         }
 
@@ -789,12 +789,11 @@ public class SupplierValidationService : ISupplierValidationService
         result.PerformanceScorecardPolicyAvailable = result.AvlPolicyAvailable;
         if (!result.AvlPolicyAvailable)
         {
-            if (result.Boundary == SupplierEligibilityBoundary.Award)
-                result.Block("SUPPLIER_PERFORMANCE_POLICY_UNAVAILABLE",
-                    "A unique valid effective DEC-011 supplier-performance policy is required before award.");
-            else
-                result.Warn("SUPPLIER_PERFORMANCE_POLICY_UNAVAILABLE",
-                    "Supplier performance cannot be evaluated until DEC-011 is Published, effective, approved, evidenced, and scorecard-complete.");
+            // Do not turn absence of optional performance configuration into a
+            // supplier-ineligibility decision. An effective DEC-011 policy is still
+            // enforced at Award, including stale scorecards and hard-stop outcomes.
+            result.Warn("SUPPLIER_PERFORMANCE_POLICY_UNAVAILABLE",
+                "Supplier performance cannot be evaluated until DEC-011 is Published, effective, approved, evidenced, and scorecard-complete.");
             return;
         }
 

@@ -9,6 +9,12 @@ namespace ErpSystem.Core.Interfaces;
 public interface IWorkflowIntegrationService
 {
     /// <summary>
+    /// Returns true only when approval is enabled by an active Published
+    /// workflow for the current tenant and entity type.
+    /// </summary>
+    Task<bool> HasActiveApprovalWorkflowAsync(string entityType);
+
+    /// <summary>
     /// Starts the approval workflow and returns a normalized outcome
     /// </summary>
     Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId);
@@ -48,13 +54,23 @@ public interface IWorkflowIntegrationService
 /// </summary>
 public class WorkflowIntegrationResult
 {
-    public WorkflowIntegrationResult(WorkflowExecutionResult executionResult, WorkflowOutcome outcome)
+    public WorkflowIntegrationResult(
+        WorkflowExecutionResult executionResult,
+        WorkflowOutcome outcome,
+        bool approvalRequired = true)
     {
         ExecutionResult = executionResult;
         Outcome = outcome;
+        ApprovalRequired = approvalRequired;
     }
 
     public WorkflowExecutionResult ExecutionResult { get; }
 
     public WorkflowOutcome Outcome { get; }
+
+    /// <summary>
+    /// False when the current tenant has no active Published workflow for the
+    /// entity type and the module may complete its normal direct lifecycle.
+    /// </summary>
+    public bool ApprovalRequired { get; }
 }

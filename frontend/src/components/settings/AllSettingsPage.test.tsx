@@ -77,6 +77,13 @@ describe('AllSettingsPage', () => {
       'Audit & Monitoring',
       'Notifications & Communications',
     ]));
+    expect(administration?.cards.find(card => card.title === 'General Administration')?.links)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Document Templates',
+          href: '/administration/document-management/document-templates',
+        }),
+      ]));
   });
 
   it('searches setting children and closes back to the previous workspace', () => {
@@ -167,6 +174,24 @@ describe('AllSettingsPage', () => {
       'href',
       '/administration/procurement/access-controls',
     );
+  });
+
+  it('exposes only the Civil Engineering policy to a configuration reader', () => {
+    const allowed = filterSettingsByAccess(
+      settingsNavigationItems,
+      () => false,
+      permissions => permissions.includes('civil-engineering.configuration.read'),
+    );
+    const links = buildSettingsSections(allowed)
+      .flatMap(section => section.cards)
+      .flatMap(card => card.links);
+
+    expect(links).toEqual([
+      expect.objectContaining({
+        title: 'Civil Engineering Policy',
+        href: '/administration/project-management/civil-engineering-config',
+      }),
+    ]);
   });
 
   it('fails closed for users with no settings role or permission', () => {

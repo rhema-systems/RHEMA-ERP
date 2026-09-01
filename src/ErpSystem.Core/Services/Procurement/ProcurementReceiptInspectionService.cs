@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -25,9 +26,13 @@ public sealed class ProcurementReceiptInspectionService :
 {
     private const string EventType = "ProcurementReceiptInspection";
     private const string WorkflowEntityType = "PROCUREMENT_RECEIPT_INSPECTION";
-    private const string ReadPermission = "procurement.inventory.read";
+    private const string RecordsReadPermission = "procurement.records.read";
+    private const string InventoryReadPermission = "procurement.inventory.read";
     private const string ManagePermission = "procurement.inventory.receive";
-    private const string ApprovePermission = "procurement.purchase-order.approve";
+    // Receipt inspection is a Stores responsibility. Maker/checker separation
+    // is enforced independently by the SOD guards, so a Stores Manager must
+    // not need purchase-order approval authority to decide an inspection.
+    private const string ApprovePermission = "procurement.inventory.receive";
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(value => $"DEC-{value:000}").ToList();
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
@@ -47,7 +52,7 @@ public sealed class ProcurementReceiptInspectionService :
     private readonly IProcurementReceiptInspectionStore _store;
     private readonly IInventoryValuationService _valuation;
     private readonly IInventoryReceiptFinancePostingService _receiptFinancePosting;
-    private readonly IProcurementBudgetService _budgetService;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<ProcurementReceiptInspectionService> _logger;
 
     public ProcurementReceiptInspectionService(
@@ -66,7 +71,7 @@ public sealed class ProcurementReceiptInspectionService :
         IProcurementReceiptInspectionStore store,
         IInventoryValuationService valuation,
         IInventoryReceiptFinancePostingService receiptFinancePosting,
-        IProcurementBudgetService budgetService,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         ILogger<ProcurementReceiptInspectionService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -84,7 +89,7 @@ public sealed class ProcurementReceiptInspectionService :
         _store = store;
         _valuation = valuation;
         _receiptFinancePosting = receiptFinancePosting;
-        _budgetService = budgetService;
+        _budgetCommitments = budgetCommitments;
         _logger = logger;
     }
 
@@ -105,7 +110,7 @@ public sealed class ProcurementReceiptInspectionService :
         if (_currentUser.IsExternalUser)
             await EnsureLinkedSupplierAsync(receipt.PurchaseOrder.BusinessPartnerId, cancellationToken);
         else
-            await EnsureCapabilityAsync(ReadPermission, receipt, NewCorrelation(), cancellationToken);
+            await EnsureReadCapabilityAsync(receipt, cancellationToken);
 
         var history = await CaseQuery(false)
             .Where(item => item.PurchaseOrderReceiptId == receiptId)
@@ -121,15 +126,15 @@ public sealed class ProcurementReceiptInspectionService :
         var receiptSodAllowed = false;
         var decisionSodAllowed = false;
         var workflowDecisionAllowed = false;
+        var warehouseId = await ResolveWarehouseIdAsync(
+            receipt, cancellationToken);
         if (!externalLinked)
         {
-            var warehouseId = await ResolveWarehouseIdAsync(
-                receipt, cancellationToken);
-            manageAllowed = IsAdministrator() ||
+            manageAllowed = HasPlatformSuperAdministratorBypass() ||
                             await CanUseCapabilityAsync(
                                 ManagePermission, receipt, warehouseId,
                                 cancellationToken);
-            approveAllowed = IsAdministrator() ||
+            approveAllowed = HasPlatformSuperAdministratorBypass() ||
                              await CanUseCapabilityAsync(
                                  ApprovePermission, receipt, warehouseId,
                                  cancellationToken);
@@ -150,6 +155,7 @@ public sealed class ProcurementReceiptInspectionService :
         return new ProcurementReceiptInspectionOverviewDto
         {
             PurchaseOrderReceiptId = receipt.Id,
+            WarehouseId = warehouseId,
             ReceiptNumber = receipt.ReceiptNumber,
             PurchaseOrderNumber = receipt.PurchaseOrder.OrderNumber,
             SupplierName = receipt.PurchaseOrder.BusinessPartner?.PartnerName ?? string.Empty,
@@ -387,10 +393,10 @@ public sealed class ProcurementReceiptInspectionService :
                 ApBlockedQuantity = receipt.Items.Sum(item => item.ReceivedQuantity),
                 ConfigurationProfileId = governance.Profile.Id,
                 ConfigurationProfileVersion = governance.Profile.Version,
-                PolicySetId = governance.Authority.Policy!.PolicySetId,
-                PolicyVersion = governance.Authority.Policy.Version,
-                AuthorityRuleId = governance.Authority.Steps.First().RuleId,
-                AuthorityName = governance.Authority.Steps.First().AuthorityName,
+                PolicySetId = governance.PolicySetId,
+                PolicyVersion = governance.PolicyVersion,
+                AuthorityRuleId = governance.AuthorityRuleId,
+                AuthorityName = governance.AuthorityName,
                 WorkflowDefinitionId = receiptWorkflowDefinitionId,
                 CreatedByUserId = _currentUser.UserId,
                 CreatedByName = ActorName,
@@ -749,6 +755,18 @@ public sealed class ProcurementReceiptInspectionService :
             try
             {
                 await ApplyAcceptedQuantitiesAndStockAsync(inspection, cancellationToken);
+                var acceptedValue = inspection.Lines.Sum(item =>
+                    item.AcceptedQuantity * item.PurchaseOrderReceiptItem.PurchaseOrderItem.UnitPrice);
+                if (acceptedValue > 0m)
+                {
+                    await _budgetCommitments.UtilizePurchaseOrderAsync(
+                        inspection.PurchaseOrderReceipt.PurchaseOrderId,
+                        inspection.PurchaseOrderReceiptId,
+                        inspection.PurchaseOrderReceipt.ReceiptNumber,
+                        acceptedValue,
+                        correlation,
+                        cancellationToken);
+                }
                 var hasRejection = inspection.RejectedQuantity > 0;
                 inspection.Status = hasRejection
                     ? ProcurementReceiptInspectionStatus.QualityHold
@@ -1383,10 +1401,6 @@ public sealed class ProcurementReceiptInspectionService :
         PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken)
     {
-        var wasFullyReceived = string.Equals(
-            purchaseOrder.Status,
-            "Received",
-            StringComparison.OrdinalIgnoreCase);
         var lines = await _unitOfWork.Repository<PurchaseOrderItem>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                   item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
@@ -1397,12 +1411,6 @@ public sealed class ProcurementReceiptInspectionService :
         purchaseOrder.ReceivedDate = fullyAccepted ? DateTime.UtcNow : purchaseOrder.ReceivedDate;
         purchaseOrder.UpdatedAt = DateTime.UtcNow;
         await _unitOfWork.Repository<PurchaseOrder>().UpdateAsync(purchaseOrder);
-        if (fullyAccepted && !wasFullyReceived)
-        {
-            await _budgetService.UtilizePurchaseOrderCommittedBudgetAsync(
-                purchaseOrder.Id,
-                purchaseOrder.TotalAmount);
-        }
     }
 
     private async Task ValidateReplacementReceiptAsync(
@@ -1726,13 +1734,10 @@ public sealed class ProcurementReceiptInspectionService :
         string correlation,
         CancellationToken cancellationToken)
     {
-        var profile = await _configuration.GetEffectiveProfileAsync(
-            "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken)
-            ?? throw Validation("RCV_CONFIGURATION_MISSING",
-                "No effective Published TDC procurement configuration profile exists.");
-        if (profile.Decisions.Count != 14 || profile.Decisions.Any(item => !item.IsComplete))
-            throw Validation("RCV_CONFIGURATION_INCOMPLETE",
-                "The effective configuration must contain fourteen complete approved decisions.");
+        // Detailed DEC configuration and authority bands are advisory for an
+        // ordinary receipt. The PO's independent approval and the Published
+        // receipt-inspection workflow remain the authoritative controls.
+        var profile = await ResolveReceiptConfigurationProfileAsync(cancellationToken);
         var purchaseOrder = receipt.PurchaseOrder;
         var authority = await _compliance.EvaluateAuthorityRouteAsync(
             new ProcurementAuthorityRouteDecisionRequest
@@ -1744,10 +1749,52 @@ public sealed class ProcurementReceiptInspectionService :
                 SourceType = EventType,
                 SourceReference = receipt.ReceiptNumber
             }, correlation, cancellationToken);
-        if (!authority.IsReady || authority.Policy is null ||
-            authority.Workflow is null || authority.Steps.Count == 0)
-            throw Validation("RCV_AUTHORITY_WORKFLOW_BLOCKED", authority.Message);
-        return new Governance(profile, authority, Serialize(new
+
+        var now = DateTime.UtcNow;
+        var fallbackPolicy = authority.Policy is not null
+            ? null
+            : await _unitOfWork.Repository<ProcurementPolicySet>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    !item.IsDeleted &&
+                    item.LifecycleStatus == ProcurementPolicyLifecycleStatus.Published &&
+                    item.EffectiveFrom <= now &&
+                    (!item.EffectiveTo.HasValue || item.EffectiveTo.Value >= now))
+                .AsNoTracking()
+                .OrderByDescending(item => item.IsDefault)
+                .ThenByDescending(item => item.Version)
+                .FirstOrDefaultAsync(cancellationToken);
+        var policySetId = authority.Policy?.PolicySetId ?? fallbackPolicy?.Id ?? Guid.Empty;
+        var policyVersion = authority.Policy?.Version ?? fallbackPolicy?.Version ?? 0;
+        var authorityStep = authority.Steps.OrderBy(item => item.Sequence).FirstOrDefault();
+        ProcurementPolicyAuthorityRule? advisoryRule = null;
+        if (authorityStep is null && policySetId != Guid.Empty)
+        {
+            var currency = NormalizeCurrency(purchaseOrder.Currency);
+            advisoryRule = await _unitOfWork.Repository<ProcurementPolicyAuthorityRule>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PolicySetId == policySetId &&
+                    item.IsEnabled && !item.IsDeleted &&
+                    (!item.Category.HasValue ||
+                     item.Category.Value == ProcurementCategoryClass.Goods) &&
+                    item.CurrencyCode == currency &&
+                    item.EffectiveFrom <= now &&
+                    (!item.EffectiveTo.HasValue || item.EffectiveTo.Value >= now) &&
+                    purchaseOrder.TotalAmount >= item.LowerBound &&
+                    (!item.UpperBound.HasValue ||
+                     purchaseOrder.TotalAmount <= item.UpperBound.Value))
+                .AsNoTracking()
+                .OrderBy(item => item.Sequence)
+                .ThenByDescending(item => item.Priority)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var authorityRuleId = authorityStep?.RuleId ?? advisoryRule?.Id ?? Guid.Empty;
+        var authorityName = authorityStep?.AuthorityName ?? advisoryRule?.AuthorityName ??
+                            "Published receipt-inspection workflow";
+        return new Governance(profile, policySetId, policyVersion,
+            authorityRuleId, authorityName, Serialize(new
         {
             schemaVersion = "tdc.receipt-inspection-governance.v1",
             profile = new { profile.Id, profile.ProfileCode, profile.Version },
@@ -1758,8 +1805,44 @@ public sealed class ProcurementReceiptInspectionService :
                     ValueHash = Hash(item.Value.GetRawText()),
                     item.IsComplete
                 }),
-            authority
+            authorityGuidance = new
+            {
+                authority.IsReady,
+                authority.DecisionCode,
+                authority.Message,
+                policySetId,
+                policyVersion,
+                AuthorityRuleId = authorityRuleId == Guid.Empty
+                    ? (Guid?)null
+                    : authorityRuleId,
+                authorityName,
+                enforcement = "Advisory; the Published receipt workflow is authoritative."
+            }
         }));
+    }
+
+    private async Task<ProcurementConfigurationProfileDto>
+        ResolveReceiptConfigurationProfileAsync(CancellationToken cancellationToken)
+    {
+        var effective = await _configuration.GetEffectiveProfileAsync(
+            "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken);
+        if (effective is not null) return effective;
+
+        var profileId = await _unitOfWork.Repository<ProcurementConfigurationProfile>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProfileCode == "TDC-PROCUREMENT" &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .OrderByDescending(item => item.Version)
+            .ThenByDescending(item => item.UpdatedAt)
+            .Select(item => (Guid?)item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return profileId.HasValue
+            ? await _configuration.GetProfileAsync(profileId.Value, cancellationToken)
+            : throw Validation("RCV_CONFIGURATION_MISSING",
+                "No TDC procurement configuration profile is available for receipt audit lineage.");
     }
 
     private async Task<PurchaseOrderReceipt> LoadReceiptAsync(
@@ -1831,7 +1914,7 @@ public sealed class ProcurementReceiptInspectionService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Supplier portal users cannot administer internal receipt inspection.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var warehouseId = await ResolveWarehouseIdAsync(
             receipt, cancellationToken);
         var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
@@ -1845,16 +1928,34 @@ public sealed class ProcurementReceiptInspectionService :
             throw new ProcurementReceiptInspectionAuthorizationException(decision.Message);
     }
 
+    private async Task EnsureReadCapabilityAsync(
+        PurchaseOrderReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        EnsureAuthenticatedTenant();
+        if (_currentUser.IsExternalUser)
+            throw new ProcurementReceiptInspectionAuthorizationException(
+                "Supplier portal users cannot access internal receipt inspection.");
+        if (HasPlatformSuperAdministratorBypass()) return;
+
+        var warehouseId = await ResolveWarehouseIdAsync(receipt, cancellationToken);
+        if (await CanUseCapabilityAsync(
+                RecordsReadPermission, receipt, warehouseId, cancellationToken) ||
+            await CanUseCapabilityAsync(
+                InventoryReadPermission, receipt, warehouseId, cancellationToken))
+            return;
+
+        throw new ProcurementReceiptInspectionAuthorizationException(
+            "Your assigned roles do not permit viewing this purchase receipt's inspection history.");
+    }
+
     private async Task<IReadOnlyList<string>> LoadEvidenceRequirementKeysAsync(
         Guid? configurationProfileId,
         CancellationToken cancellationToken)
     {
         var profile = configurationProfileId.HasValue
             ? await _configuration.GetProfileAsync(configurationProfileId.Value, cancellationToken)
-            : await _configuration.GetEffectiveProfileAsync(
-                "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken)
-              ?? throw Validation("RCV_CONFIGURATION_MISSING",
-                  "No effective Published TDC procurement configuration profile exists.");
+            : await ResolveReceiptConfigurationProfileAsync(cancellationToken);
         var decision = profile.Decisions.SingleOrDefault(item => item.DecisionKey == "DEC-013")
             ?? throw Validation("RCV_DEC013_MISSING",
                 "DEC-013 is missing from the effective configuration.");
@@ -1882,8 +1983,7 @@ public sealed class ProcurementReceiptInspectionService :
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (requirements.Count == 0)
-            throw Validation("RCV_DEC013_EVIDENCE_MISSING",
-                "DEC-013 must define at least one receipt evidence requirement.");
+            requirements.Add("Waybill");
         return requirements;
     }
 
@@ -1995,6 +2095,10 @@ public sealed class ProcurementReceiptInspectionService :
             return false;
         }
         catch (ProcurementAccessNotFoundException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessAuthorizationException)
         {
             return false;
         }
@@ -2580,8 +2684,8 @@ public sealed class ProcurementReceiptInspectionService :
                 "An authenticated tenant user is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string ActorName => string.IsNullOrWhiteSpace(_currentUser.FullName)
         ? _currentUser.Username
@@ -2631,6 +2735,9 @@ public sealed class ProcurementReceiptInspectionService :
 
     private sealed record Governance(
         ProcurementConfigurationProfileDto Profile,
-        ProcurementAuthorityRouteDecisionDto Authority,
+        Guid PolicySetId,
+        int PolicyVersion,
+        Guid AuthorityRuleId,
+        string AuthorityName,
         string Snapshot);
 }

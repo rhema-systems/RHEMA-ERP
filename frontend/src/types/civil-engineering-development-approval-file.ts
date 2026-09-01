@@ -1,0 +1,11 @@
+export type CivilEngineeringDevelopmentApprovalFileStatus = 'Registered' | 'SiteInspectionScheduled' | 'SiteInspectionCompleted';
+export type CivilEngineeringDevelopmentApprovalEvidenceKind = 'ApplicationPackage' | 'SiteInspection';
+
+export type CivilEngineeringDevelopmentApprovalLookupOption = { id: string; label: string };
+export type CivilEngineeringDevelopmentApprovalDocument = { centralDocumentRecordId: string; centralDocumentVersionId: string; documentReference: string; title: string; versionNumber: string };
+export type CivilEngineeringDevelopmentApprovalLookups = { applicants: CivilEngineeringDevelopmentApprovalLookupOption[]; projects: CivilEngineeringDevelopmentApprovalLookupOption[]; properties: CivilEngineeringDevelopmentApprovalLookupOption[]; documents: CivilEngineeringDevelopmentApprovalDocument[] };
+export type CivilEngineeringDevelopmentApprovalEvidence = { kind: CivilEngineeringDevelopmentApprovalEvidenceKind; centralDocumentRecordId: string; centralDocumentVersionId: string; documentReference?: string | null };
+export type CivilEngineeringDevelopmentApprovalFile = { id: string; fileNumber: string; applicantBusinessPartnerId?: string | null; applicantName: string; projectId: string; projectLabel: string; estateManagedAssetId: string; propertyLabel: string; applicationReference: string; currentSection: string; dueDate: string; status: CivilEngineeringDevelopmentApprovalFileStatus; siteInspectionDueDate?: string | null; siteInspectedAt?: string | null; evidence: CivilEngineeringDevelopmentApprovalEvidence[]; rowVersion: string };
+export type CivilEngineeringDevelopmentApprovalEvidenceRequest = { centralDocumentRecordId: string; centralDocumentVersionId: string };
+export type CreateCivilEngineeringDevelopmentApprovalFileRequest = { clientRequestId: string; applicantBusinessPartnerId?: string | null; applicantName?: string | null; projectId: string; estateManagedAssetId: string; applicationReference: string; dueDate: string; siteInspectionDueDate?: string | null; applicationEvidence: CivilEngineeringDevelopmentApprovalEvidenceRequest[] };
+export type RecordCivilEngineeringSiteInspectionRequest = { clientRequestId: string; siteInspectedAt: string; evidence: CivilEngineeringDevelopmentApprovalEvidenceRequest[]; rowVersion: string };

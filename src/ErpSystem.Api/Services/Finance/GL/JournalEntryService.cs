@@ -112,6 +112,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.FinanceDimensionSet)
                 .ThenInclude(set => set!.Items)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSnapshot)
+                .ThenInclude(snapshot => snapshot!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -130,6 +133,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.FinanceDimensionSet)
                 .ThenInclude(set => set!.Items)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSnapshot)
+                .ThenInclude(snapshot => snapshot!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -147,6 +153,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.FinanceDimensionSet)
                 .ThenInclude(set => set!.Items)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSnapshot)
+                .ThenInclude(snapshot => snapshot!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -550,6 +559,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var functionalCurrency = await GetBaseCurrencyCodeForTenantAsync(entry.TenantId, cancellationToken);
                 postingResult = await _financePostingEngine.PostAsync(
                     BuildManualJournalPostingRequest(entry, functionalCurrency, budgetReservationIds),
+                    new ErpSystem.Core.Finance.Integration.FinancePostingProducerContext(
+                        ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.ManualJournalEntry),
                     cancellationToken);
             }
             catch (Exception ex)
@@ -1200,18 +1211,52 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ExchangeRate = transaction.ExchangeRate,
                 LineNumber = transaction.LineNumber,
                 FinanceDimensionSetId = transaction.FinanceDimensionSetId,
-                FinanceDimensionDisplayValue = transaction.FinanceDimensionSet?.DisplayValue,
-                Dimensions = transaction.FinanceDimensionSet?.Items
+                FinanceDimensionDisplayValue = transaction.FinanceDimensionSnapshot?.DisplayValueSnapshot
+                    ?? transaction.FinanceDimensionSet?.DisplayValue,
+                Dimensions = transaction.FinanceDimensionSnapshot?.Items
                     .OrderBy(item => item.DimensionCodeSnapshot)
                     .Select(item => new FinanceDimensionAssignmentDto
                     {
                         DefinitionId = item.FinanceDimensionDefinitionId,
                         ValueId = item.FinanceDimensionValueId,
                         DimensionCode = item.DimensionCodeSnapshot,
-                        DimensionName = item.DimensionCodeSnapshot,
+                        DimensionName = item.DimensionNameSnapshot,
                         ValueCode = item.DimensionValueCodeSnapshot,
                         ValueName = item.DimensionValueNameSnapshot
-                    }).ToList() ?? []
+                    }).ToList()
+                    ?? transaction.FinanceDimensionSet?.Items
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .Select(item => new FinanceDimensionAssignmentDto
+                    {
+                        DefinitionId = item.FinanceDimensionDefinitionId,
+                        ValueId = item.FinanceDimensionValueId,
+                        DimensionCode = item.DimensionCodeSnapshot,
+                        DimensionName = item.DimensionNameSnapshot,
+                        ValueCode = item.DimensionValueCodeSnapshot,
+                        ValueName = item.DimensionValueNameSnapshot
+                    }).ToList() ?? [],
+                DimensionSnapshot = transaction.FinanceDimensionSnapshot == null ? null : new FinanceDimensionSnapshotDto
+                {
+                    Id = transaction.FinanceDimensionSnapshot.Id,
+                    FinanceDimensionSetId = transaction.FinanceDimensionSnapshot.FinanceDimensionSetId,
+                    CombinationHash = transaction.FinanceDimensionSnapshot.CombinationHashSnapshot,
+                    DisplayValue = transaction.FinanceDimensionSnapshot.DisplayValueSnapshot,
+                    SnapshotSource = transaction.FinanceDimensionSnapshot.SnapshotSource,
+                    SnapshotCapturedAt = transaction.FinanceDimensionSnapshot.SnapshotCapturedAt,
+                    SnapshotQuality = transaction.FinanceDimensionSnapshot.SnapshotQuality,
+                    HistoricalNameReconstructed = transaction.FinanceDimensionSnapshot.HistoricalNameReconstructed,
+                    Items = transaction.FinanceDimensionSnapshot.Items.OrderBy(item => item.DimensionCodeSnapshot)
+                        .Select(item => new FinanceDimensionSnapshotItemDto
+                        {
+                            FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                            FinanceDimensionValueId = item.FinanceDimensionValueId,
+                            DimensionCode = item.DimensionCodeSnapshot, DimensionName = item.DimensionNameSnapshot,
+                            ValueCode = item.DimensionValueCodeSnapshot, ValueName = item.DimensionValueNameSnapshot,
+                            FinanceDimensionAccountRuleId = item.FinanceDimensionAccountRuleId,
+                            RuleFamilyId = item.RuleFamilyIdSnapshot, RuleVersion = item.RuleVersionSnapshot,
+                            RuleType = item.RuleTypeSnapshot
+                        }).ToList()
+                }
             };
         }
 

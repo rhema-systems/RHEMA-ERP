@@ -440,6 +440,8 @@ public class TenderFeeDto
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     public string PaymentMethod { get; set; } = "Online";
+    public Guid? ReceivingAccountId { get; set; }
+    public Guid? RevenueAccountId { get; set; }
     public bool IsMandatory { get; set; }
     public DateTime? DueDate { get; set; }
     public string? Description { get; set; }
@@ -467,6 +469,10 @@ public class CreateTenderFeeDto
     [MaxLength(50)]
     public string PaymentMethod { get; set; } = "Online";
 
+    public Guid? ReceivingAccountId { get; set; }
+
+    public Guid? RevenueAccountId { get; set; }
+
     public bool IsMandatory { get; set; } = true;
     public DateTime? DueDate { get; set; }
     public string? Description { get; set; }
@@ -492,6 +498,18 @@ public class TenderEvaluatorDto
     public DateTime? CompletedDate { get; set; }
     public decimal? WeightagePercentage { get; set; }
     public int EvaluationCount { get; set; }
+}
+
+/// <summary>
+/// Active, tenant-scoped user who is authorised to evaluate tenders.
+/// </summary>
+public class TenderEvaluatorCandidateDto
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public List<string> RoleNames { get; set; } = new();
 }
 
 /// <summary>
@@ -576,6 +594,7 @@ public class TenderRevisionDto
     public string? RevisedByName { get; set; }
     public string RevisionType { get; set; } = "Amendment";
     public string Description { get; set; } = string.Empty;
+    public string? Changes { get; set; }
     public DateTime? NewSubmissionDeadline { get; set; }
     public bool RequiresRebid { get; set; }
     public bool NotificationSent { get; set; }

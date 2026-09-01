@@ -16,11 +16,15 @@ function getAuthHeaders(): HeadersInit {
 }
 
 function getMultipartAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  const token =
+    localStorage.getItem('token') || localStorage.getItem('authToken');
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function getFriendlyErrorMessage(response: Response): Promise<string> {
+async function getFriendlyErrorMessage(
+  response: Response,
+  procurementPermissionGuidance?: string
+): Promise<string> {
   // Try to extract a meaningful error message from the API.
   // Some endpoints return plain text; others return JSON.
   let raw = '';
@@ -31,9 +35,14 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
   }
 
   let message = raw?.trim();
+  let code: string | undefined;
   if (message) {
     try {
       const parsed = JSON.parse(message);
+      code =
+        parsed?.code ||
+        parsed?.extensions?.code ||
+        parsed?.Extensions?.code;
       // common shapes: { error: string } or { message: string } or { success: false, error: string }
       message =
         parsed?.error ||
@@ -46,6 +55,9 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
     }
   }
 
+  const includeCode = (value: string) =>
+    code && !value.includes(code) ? `${value} (${code})` : value;
+
   // Provide user-friendly guidance for known workflow-guard errors.
   if (
     response.status === 400 &&
@@ -54,11 +66,19 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
       "No active workflow definition found for entity type 'PurchaseRequisition'"
     )
   ) {
-    return 'No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.';
+    return includeCode('No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.');
   }
 
-  if (response.status === 403 && message && message.includes('no Security role granting this procurement privilege')) {
-    return 'You cannot create this purchase requisition yet. Ask a Security administrator to assign the active TDC Requisitioner, TDC User Department Head, TDC Procurement Officer, or TDC Senior Procurement Officer role. A warehouse responsibility assignment is not required for requisition creation.';
+  if (
+    response.status === 403 &&
+    message &&
+    message.includes('no Security role granting this procurement privilege')
+  ) {
+    if (procurementPermissionGuidance) {
+      return procurementPermissionGuidance;
+    }
+
+    return includeCode('Your assigned Security roles do not authorize this procurement action. Ask a Security administrator to assign the permission required for the action and try again.');
   }
 
   if (
@@ -68,10 +88,10 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
       "No active workflow definition found for entity type 'PurchaseOrder'"
     )
   ) {
-    return 'No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.';
+    return includeCode('No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.');
   }
 
-  if (message) return message;
+  if (message) return includeCode(message);
   return `Request failed (${response.status} ${response.statusText})`;
 }
 
@@ -89,9 +109,12 @@ export interface PurchaseRequisitionSummaryDto {
   priority: string;
   department?: string;
   totalAmount: number;
+  currency: string;
   itemCount: number;
   currentWorkflowStepName?: string;
   sourcePlanNumber?: string;
+  sourcePlanItemId?: string;
+  sourcePlanItemIds?: string[];
   sourcePlanItemDescription?: string;
   budgetCode?: string;
   procurementCategory?: ProcurementCategoryClass;
@@ -101,8 +124,7 @@ export interface PurchaseRequisitionSummaryDto {
   approvedExceptionReference?: string;
 }
 
-export interface PurchaseRequisitionDetailDto
-  extends PurchaseRequisitionSummaryDto {
+export interface PurchaseRequisitionDetailDto extends PurchaseRequisitionSummaryDto {
   costCenter?: string;
   justification?: string;
   notes?: string;
@@ -130,6 +152,7 @@ export type PurchaseRequisitionType =
 
 export interface SavePurchaseRequisitionLinkageRequest {
   sourcePlanItemId?: string;
+  sourcePlanItemIds?: string[];
   budgetId?: string;
   procurementCategory?: ProcurementCategoryClass;
   costCenter?: string;
@@ -142,8 +165,7 @@ export interface SavePurchaseRequisitionLinkageRequest {
   exceptionEvidenceReference?: string;
 }
 
-export interface PurchaseRequisitionLinkageDto
-  extends SavePurchaseRequisitionLinkageRequest {
+export interface PurchaseRequisitionLinkageDto extends SavePurchaseRequisitionLinkageRequest {
   sourcePlanId?: string;
   sourcePlanNumber?: string;
   sourcePlanTitle?: string;
@@ -173,10 +195,22 @@ export interface PurchaseRequisitionLinkageOptionDto {
   name: string;
   status?: string;
   parentId?: string;
+  linkedBudgetId?: string;
   parentReference?: string;
   category?: string;
   amount?: number;
   currency?: string;
+  budgetId?: string;
+  budgetCode?: string;
+  departmentId?: string;
+  departmentName?: string;
+  inventoryItemId?: string;
+  quantity?: number;
+  unitOfMeasure?: string;
+  unitPrice?: number;
+  requiredDate?: string;
+  specifications?: string;
+  preferredSupplierId?: string;
 }
 
 export interface PurchaseRequisitionNamedOptionDto {
@@ -390,21 +424,21 @@ export interface PurchaseRequisitionSourcingReleaseDto {
   requisitionNumber: string;
   attemptNumber: number;
   releaseReference: string;
-  sourcePlanId: string;
-  sourcePlanItemId: string;
+  sourcePlanId?: string;
+  sourcePlanItemId?: string;
   appSubmissionId?: string;
   appSubmissionAttemptNumber?: number;
   appAcknowledgementReference?: string;
   approvedExceptionRuleId?: string;
   exceptionApprovalReference?: string;
-  specificationTemplateId: string;
-  specificationTemplateCode: string;
-  specificationTemplateVersion: number;
-  budgetCommitmentId: string;
-  budgetCommitmentReference: string;
-  authorityRouteId: string;
-  authorityRouteReference: string;
-  workflowInstanceId: string;
+  specificationTemplateId?: string;
+  specificationTemplateCode?: string;
+  specificationTemplateVersion?: number;
+  budgetCommitmentId?: string;
+  budgetCommitmentReference?: string;
+  authorityRouteId?: string;
+  authorityRouteReference?: string;
+  workflowInstanceId?: string;
   releasedAtUtc: string;
   releasedById: string;
   releasedByName: string;
@@ -451,6 +485,7 @@ export interface PurchaseRequisitionItemDto {
   id: string;
   requisitionId: string;
   inventoryItemId?: string;
+  sourcePlanItemId?: string;
   itemCode?: string;
   itemName?: string;
   itemDescription: string;
@@ -485,6 +520,7 @@ export interface CreatePurchaseRequisitionDto {
   priority: string;
   department?: string;
   departmentId?: string;
+  currency?: string;
   costCenter?: string;
   justification?: string;
   notes?: string;
@@ -492,13 +528,13 @@ export interface CreatePurchaseRequisitionDto {
   items: CreatePurchaseRequisitionItemDto[];
 }
 
-export interface UpdatePurchaseRequisitionDto
-  extends CreatePurchaseRequisitionDto {
+export interface UpdatePurchaseRequisitionDto extends CreatePurchaseRequisitionDto {
   rowVersion: string;
 }
 
 export interface CreatePurchaseRequisitionItemDto {
   inventoryItemId?: string;
+  sourcePlanItemId?: string;
   itemDescription: string;
   quantity: number;
   unitOfMeasure?: string;
@@ -674,6 +710,35 @@ export interface PurchaseOrderSummaryDto {
   procurementSourceReference?: string;
 }
 
+export interface PurchaseOrderBudgetCommitmentHistoryDto {
+  sequence: number;
+  status: string;
+  event: string;
+  action: string;
+  amount: number;
+  occurredAtUtc: string;
+  actorName: string;
+  correlationId: string;
+  beforeSnapshotJson?: string;
+  afterSnapshotJson?: string;
+  reservedBalanceAfter?: number;
+  committedBalanceAfter?: number;
+  availableBalanceAfter?: number;
+}
+
+export interface PurchaseOrderBudgetCommitmentDto {
+  commitmentId: string;
+  reference: string;
+  status: string;
+  reservationStatus: string;
+  amount: number;
+  reservedAmount: number;
+  formallyCommittedAmount: number;
+  currency: string;
+  reservationSequence: number;
+  history: PurchaseOrderBudgetCommitmentHistoryDto[];
+}
+
 export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
   receivedDate?: string;
   approvedByName?: string;
@@ -708,6 +773,7 @@ export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
   awardReadinessDecisionId?: string;
   sourceIntegrityHash?: string;
   sourceValidatedAtUtc?: string;
+  budgetCommitment?: PurchaseOrderBudgetCommitmentDto;
   items: PurchaseOrderItemDto[];
   receipts: PurchaseOrderReceiptDto[];
 }
@@ -741,12 +807,7 @@ export interface PurchaseOrderItemDto {
 // ============================================================================
 
 export type LandedCostAllocationMethod =
-  | 'ByValue'
-  | 'ByQuantity'
-  | 'ByWeight'
-  | 'ByVolume'
-  | 'Equal'
-  | 'Manual';
+  'ByValue' | 'ByQuantity' | 'ByWeight' | 'ByVolume' | 'Equal' | 'Manual';
 
 export interface PurchaseOrderLandedCostPlanItemDto {
   id: string;
@@ -950,7 +1011,7 @@ export interface PurchaseOrderReceiptItemDto {
 }
 
 export type ProcurementReceiptInspectionStatus =
-  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 export type ProcurementReceiptDisposition = 0 | 1 | 2 | 3;
 export type ProcurementReceiptSupplierAcknowledgementStatus = 0 | 1 | 2 | 3;
 export type ProcurementReceiptResolutionKind = 0 | 1 | 2;
@@ -1035,6 +1096,7 @@ export interface ProcurementReceiptInspectionDto {
 
 export interface ProcurementReceiptInspectionOverviewDto {
   purchaseOrderReceiptId: string;
+  warehouseId?: string;
   receiptNumber: string;
   purchaseOrderNumber: string;
   supplierName: string;
@@ -1050,9 +1112,9 @@ export interface ProcurementReceiptInspectionOverviewDto {
   history: ProcurementReceiptInspectionDto[];
 }
 
-export type ProcurementReceiptDocumentKind = 0 | 1;
-export type ProcurementReceiptDocumentStatus = 0 | 1 | 2 | 3;
-export type ProcurementReceiptDocumentReconciliationStatus = 0 | 1 | 2 | 3;
+export type ProcurementReceiptDocumentKind = 0 | 1 | 'Grn' | 'Mrn';
+export type ProcurementReceiptDocumentStatus = 0 | 1 | 2 | 3 | 'Draft' | 'PendingSignatures' | 'Issued' | 'Cancelled';
+export type ProcurementReceiptDocumentReconciliationStatus = 0 | 1 | 2 | 3 | 'Pending' | 'Reconciled' | 'Exception' | 'Cancelled';
 
 export interface ProcurementReceiptDocumentSignatureDto {
   id: string;
@@ -1117,7 +1179,12 @@ export interface ProcurementReceiptDocumentOverviewDto {
   decisionKeys: string[];
   requiredEvidence: string[];
   availableEvidence: string[];
-  checks: Array<{ code: string; label: string; passed: boolean; message: string }>;
+  checks: Array<{
+    code: string;
+    label: string;
+    passed: boolean;
+    message: string;
+  }>;
   documents: ProcurementReceiptDocumentDto[];
   allowedActions: string[];
   isReconciled: boolean;
@@ -1166,6 +1233,9 @@ export interface ReceivePurchaseOrderItemDto {
   rejectedQuantity: number;
   warehouseId?: string;
   locationId?: string;
+  createInventoryItemIfMissing?: boolean;
+  inventoryCategoryId?: string;
+  proposedItemCode?: string;
   serialNumber?: string;
   lotNumber?: string;
   expirationDate?: string;
@@ -1218,6 +1288,7 @@ export const purchasingService = {
     startDate?: string;
     endDate?: string;
     department?: string;
+    sourcePlanId?: string;
   }): Promise<PagedResult<PurchaseRequisitionSummaryDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
@@ -1229,6 +1300,8 @@ export const purchasingService = {
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
     if (params?.department) queryParams.append('department', params.department);
+    if (params?.sourcePlanId)
+      queryParams.append('sourcePlanId', params.sourcePlanId);
 
     const response = await fetch(
       `${API_BASE_URL}/PurchaseRequisitions?${queryParams}`,
@@ -1422,7 +1495,7 @@ export const purchasingService = {
     );
 
     if (!response.ok)
-      throw new Error('Failed to convert requisition to purchase order');
+      throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1439,7 +1512,7 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error('Failed to fetch suggested suppliers');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1458,7 +1531,7 @@ export const purchasingService = {
     );
 
     if (!response.ok)
-      throw new Error('Failed to create RFQ from purchase requisition');
+      throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1495,7 +1568,7 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase orders');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1507,7 +1580,7 @@ export const purchasingService = {
       headers: getAuthHeaders(),
     });
 
-    if (!response.ok) throw new Error('Failed to fetch purchase order');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1523,10 +1596,7 @@ export const purchasingService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to create purchase order');
-    }
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1541,8 +1611,7 @@ export const purchasingService = {
       { headers: getAuthHeaders() }
     );
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to load approved purchase-order sources');
+      throw new Error(await getFriendlyErrorMessage(response));
     }
     return response.json();
   },
@@ -1555,7 +1624,14 @@ export const purchasingService = {
       `${API_BASE_URL}/PurchaseOrders/${id}/compliance-readiness?action=${encodeURIComponent(action)}`,
       { headers: getAuthHeaders() }
     );
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot view purchase-order compliance readiness. Ask a Security administrator to grant the procurement.records.read permission for this tenant.'
+        )
+      );
+    }
     return response.json();
   },
 
@@ -1566,15 +1642,26 @@ export const purchasingService = {
       `${API_BASE_URL}/PurchaseOrders/${id}/sod-readiness`,
       { headers: getAuthHeaders() }
     );
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot view purchase-order role-separation readiness. Ask a Security administrator to grant the procurement.records.read permission for this tenant.'
+        )
+      );
+    }
     return response.json();
   },
 
   async getReceiptSourceReadiness(
-    id: string
+    id: string,
+    warehouseId?: string
   ): Promise<ProcurementReceiptSourceReadinessDto> {
+    const warehouseQuery = warehouseId
+      ? `?warehouseId=${encodeURIComponent(warehouseId)}`
+      : '';
     const response = await fetch(
-      `${API_BASE_URL}/PurchaseOrders/${id}/receipt-source-readiness`,
+      `${API_BASE_URL}/PurchaseOrders/${id}/receipt-source-readiness${warehouseQuery}`,
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
@@ -1594,10 +1681,7 @@ export const purchasingService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update purchase order');
-    }
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1853,7 +1937,14 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot submit this purchase order for approval. Ask a Security administrator to grant the procurement.purchase-order.create permission. Only an authorized PO creator can submit it.'
+        )
+      );
+    }
   },
 
   /**
@@ -1869,8 +1960,14 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok)
-      throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot approve or reject this purchase order. Ask a Security administrator to grant the procurement.purchase-order.approve permission. The approver must also be independent from the PO creator.'
+        )
+      );
+    }
   },
 
   /**
@@ -2012,7 +2109,9 @@ export const purchasingService = {
     return response.json();
   },
 
-  async initializeReceiptInspection(receiptId: string): Promise<ProcurementReceiptInspectionDto> {
+  async initializeReceiptInspection(
+    receiptId: string
+  ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/${receiptId}/inspection-control/initialize`,
       { method: 'POST', headers: getAuthHeaders() }
@@ -2027,7 +2126,11 @@ export const purchasingService = {
   ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/${receiptId}/inspection-control`,
-      { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(request) }
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
@@ -2035,11 +2138,19 @@ export const purchasingService = {
 
   async submitReceiptInspection(
     caseId: string,
-    request: { comment: string; rowVersion: string; evidence: ProcurementReceiptInspectionEvidenceRequest[] }
+    request: {
+      comment: string;
+      rowVersion: string;
+      evidence: ProcurementReceiptInspectionEvidenceRequest[];
+    }
   ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/submit`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
@@ -2051,7 +2162,11 @@ export const purchasingService = {
   ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/decision`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
@@ -2070,7 +2185,11 @@ export const purchasingService = {
   ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/supplier-acknowledgement`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
@@ -2082,7 +2201,11 @@ export const purchasingService = {
   ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/resolution`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
@@ -2094,19 +2217,30 @@ export const purchasingService = {
   ): Promise<ProcurementReceiptInspectionDto> {
     const response = await fetch(
       `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/close`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
-  async getReceiptDocumentControl(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}`, { headers: getAuthHeaders() });
+  async getReceiptDocumentControl(
+    receiptId: string
+  ): Promise<ProcurementReceiptDocumentOverviewDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}`,
+      { headers: getAuthHeaders() }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
-  async getReceiptSourceEvidence(receiptId: string): Promise<ProcurementReceiptSourceEvidenceOverviewDto> {
+  async getReceiptSourceEvidence(
+    receiptId: string
+  ): Promise<ProcurementReceiptSourceEvidenceOverviewDto> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/purchase-order-receipts/${receiptId}/source-evidence`,
       { headers: getAuthHeaders() }
@@ -2115,13 +2249,16 @@ export const purchasingService = {
     return response.json();
   },
 
-  async uploadReceiptSourceEvidence(receiptId: string, values: {
-    evidenceKind: ProcurementReceiptSourceEvidenceKind;
-    referenceNumber: string;
-    documentDate: string;
-    clientRequestId: string;
-    file: File;
-  }): Promise<ProcurementReceiptSourceEvidenceDto> {
+  async uploadReceiptSourceEvidence(
+    receiptId: string,
+    values: {
+      evidenceKind: ProcurementReceiptSourceEvidenceKind;
+      referenceNumber: string;
+      documentDate: string;
+      clientRequestId: string;
+      file: File;
+    }
+  ): Promise<ProcurementReceiptSourceEvidenceDto> {
     const form = new FormData();
     form.append('evidenceKind', String(values.evidenceKind));
     form.append('referenceNumber', values.referenceNumber);
@@ -2136,7 +2273,10 @@ export const purchasingService = {
     return response.json();
   },
 
-  async downloadReceiptSourceEvidence(receiptId: string, evidenceId: string): Promise<Blob> {
+  async downloadReceiptSourceEvidence(
+    receiptId: string,
+    evidenceId: string
+  ): Promise<Blob> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/purchase-order-receipts/${receiptId}/source-evidence/${evidenceId}/download`,
       { headers: getAuthHeaders() }
@@ -2145,38 +2285,81 @@ export const purchasingService = {
     return response.blob();
   },
 
-  async ensureReceiptDocuments(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}/ensure`, { method: 'POST', headers: getAuthHeaders() });
+  async ensureReceiptDocuments(
+    receiptId: string
+  ): Promise<ProcurementReceiptDocumentOverviewDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}/ensure`,
+      { method: 'POST', headers: getAuthHeaders() }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
-  async reconcileReceiptDocuments(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
+  async reconcileReceiptDocuments(
+    receiptId: string
+  ): Promise<ProcurementReceiptDocumentOverviewDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}/reconcile`,
+      { method: 'POST', headers: getAuthHeaders() }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
-  async signReceiptDocument(documentId: string, request: { requiredRole: string; comment?: string; rowVersion: string }): Promise<ProcurementReceiptDocumentDto> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/sign`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) });
+  async signReceiptDocument(
+    documentId: string,
+    request: { requiredRole: string; comment?: string; rowVersion: string }
+  ): Promise<ProcurementReceiptDocumentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/sign`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
-  async issueReceiptDocument(documentId: string, request: { comment: string; rowVersion: string }): Promise<ProcurementReceiptDocumentDto> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/issue`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) });
+  async issueReceiptDocument(
+    documentId: string,
+    request: { comment: string; rowVersion: string }
+  ): Promise<ProcurementReceiptDocumentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/issue`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
-  async cancelReceiptDocument(documentId: string, request: { reason: string; rowVersion: string }): Promise<ProcurementReceiptDocumentDto> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/cancel`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) });
+  async cancelReceiptDocument(
+    documentId: string,
+    request: { reason: string; rowVersion: string }
+  ): Promise<ProcurementReceiptDocumentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/cancel`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
   async downloadReceiptDocument(documentId: string): Promise<Blob> {
-    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/download`, { headers: getAuthHeaders() });
+    const response = await fetch(
+      `${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/download`,
+      { headers: getAuthHeaders() }
+    );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.blob();
   },

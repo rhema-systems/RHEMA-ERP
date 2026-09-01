@@ -6,11 +6,12 @@ using ErpSystem.Core.Services.QuantitySurvey;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.QuantitySurvey;
 
 [ApiController]
-[Authorize]
+[Authorize(Roles = Constants.Roles.ExternalUser)]
 [Route("api/external-portal/tender-bids/{tenderBidId:guid}/quantity-survey-boq")]
 public sealed class ExternalTenderBoqSubmissionsController(
     IQuantitySurveyTenderBoqSubmissionService submissions) : ControllerBase

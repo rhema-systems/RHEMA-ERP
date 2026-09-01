@@ -70,11 +70,25 @@ import { ContractOperationsDashboard } from '@/components/procurement/ContractOp
 import { WorksCloseoutWorkspace } from '@/components/procurement/WorksCloseoutWorkspace';
 import { QuantitySurveyContractCommercialTermsPanel } from '@/components/quantity-survey/QuantitySurveyContractCommercialTermsPanel';
 import { format } from 'date-fns';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import {
+  canProcessContractAmendment,
+  canRequestContractAmendment,
+} from '@/lib/contract-amendment-lifecycle';
+
+type PendingContractConfirmation =
+  | { kind: 'milestone' | 'amendment' | 'document'; id: string; label: string }
+  | { kind: 'complete'; label: string };
 
 export default function ContractDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { hasPermission } = useAuth();
+  const canManageContract = hasPermission('procurement.contract.manage');
+  const canApproveContract = hasPermission('procurement.contract.approve');
   const contractId = Array.isArray(params?.id)
     ? params.id[0]
     : (params?.id ?? '');
@@ -111,6 +125,7 @@ export default function ContractDetailPage() {
   // Status dialogs
   const [showTerminateDialog, setShowTerminateDialog] = useState(false);
   const [terminateReason, setTerminateReason] = useState('');
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingContractConfirmation | null>(null);
 
   useEffect(() => {
     if (contractId) loadContract(contractId);
@@ -123,7 +138,7 @@ export default function ContractDetailPage() {
       setContract(data);
     } catch (error) {
       console.error('Error loading contract:', error);
-      toast.error('Failed to load contract');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load contract'));
     } finally {
       setLoading(false);
     }
@@ -166,6 +181,10 @@ export default function ContractDetailPage() {
         className: 'bg-orange-100 text-orange-800',
       },
       Pending: {
+        variant: 'secondary',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      PendingApproval: {
         variant: 'secondary',
         className: 'bg-yellow-100 text-yellow-800',
       },
@@ -272,16 +291,17 @@ export default function ContractDetailPage() {
   };
 
   const handleDeleteMilestone = async (milestoneId: string) => {
-    if (!confirm('Are you sure you want to delete this milestone?')) return;
     if (!contract) return;
     try {
       const contractId = contract.id;
       setSaving(true);
       await contractService.deleteMilestone(milestoneId);
       toast.success('Milestone deleted');
+      setPendingConfirmation(null);
       loadContract(contractId);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete milestone');
+      toast.error(getProcurementProblemMessage(error, 'Failed to delete milestone'));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -298,7 +318,7 @@ export default function ContractDetailPage() {
       setAmendmentData({ amendmentType: 'ValueChange' });
       loadContract(contract.id);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to create amendment');
+      toast.error(getProcurementProblemMessage(error, 'Failed to create amendment'));
     } finally {
       setSaving(false);
     }
@@ -316,23 +336,24 @@ export default function ContractDetailPage() {
       toast.success(approved ? 'Amendment approved' : 'Amendment rejected');
       loadContract(contractId);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to process amendment');
+      toast.error(getProcurementProblemMessage(error, 'Failed to process amendment'));
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteAmendment = async (amendmentId: string) => {
-    if (!confirm('Are you sure you want to delete this amendment?')) return;
     if (!contract) return;
     try {
       const contractId = contract.id;
       setSaving(true);
       await contractService.deleteAmendment(amendmentId);
       toast.success('Amendment deleted');
+      setPendingConfirmation(null);
       loadContract(contractId);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete amendment');
+      toast.error(getProcurementProblemMessage(error, 'Failed to delete amendment'));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -340,18 +361,16 @@ export default function ContractDetailPage() {
 
   // Contract status actions
   const handleCompleteContract = async () => {
-    if (
-      !contract ||
-      !confirm('Are you sure you want to mark this contract as completed?')
-    )
-      return;
+    if (!contract) return;
     try {
       setSaving(true);
       await contractService.completeContract(contract.id);
       toast.success('Contract completed successfully');
+      setPendingConfirmation(null);
       loadContract(contract.id);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to complete contract');
+      toast.error(getProcurementProblemMessage(error, 'Failed to complete contract'));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -403,18 +422,29 @@ export default function ContractDetailPage() {
   };
 
   const handleDeleteDocument = async (documentId: string) => {
-    if (!confirm('Are you sure you want to delete this document?')) return;
     if (!contract) return;
     try {
       const contractId = contract.id;
       setSaving(true);
       await contractService.deleteDocument(documentId);
       toast.success('Document deleted');
+      setPendingConfirmation(null);
       loadContract(contractId);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete document');
+      toast.error(getProcurementProblemMessage(error, 'Failed to delete document'));
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePendingConfirmation = () => {
+    if (!pendingConfirmation) return false;
+    switch (pendingConfirmation.kind) {
+      case 'milestone': return handleDeleteMilestone(pendingConfirmation.id);
+      case 'amendment': return handleDeleteAmendment(pendingConfirmation.id);
+      case 'document': return handleDeleteDocument(pendingConfirmation.id);
+      case 'complete': return handleCompleteContract();
     }
   };
 
@@ -473,7 +503,7 @@ export default function ContractDetailPage() {
           <Badge variant="outline">{contract.contractType}</Badge>
 
           {/* Action Buttons */}
-          {(contract.status === 'Draft' || contract.status === 'Active') && (
+          {canManageContract && (contract.status === 'Draft' || contract.status === 'Active') && (
             <Button
               variant="outline"
               size="sm"
@@ -484,13 +514,13 @@ export default function ContractDetailPage() {
               Edit
             </Button>
           )}
-          {contract.status === 'Active' &&
+          {canApproveContract && contract.status === 'Active' &&
             contract.contractType.toLowerCase() !== 'works' && (
               <>
                 <Button
                   size="sm"
                   className="bg-blue-600 hover:bg-blue-700"
-                  onClick={handleCompleteContract}
+                  onClick={() => setPendingConfirmation({ kind: 'complete', label: contract.contractTitle })}
                   disabled={saving}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-1" />
@@ -716,8 +746,7 @@ export default function ContractDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Contract Milestones</CardTitle>
-              {(contract.status === 'Draft' ||
-                contract.status === 'Active') && (
+              {canRequestContractAmendment(contract.status, canManageContract) && (
                 <Button
                   size="sm"
                   onClick={() => {
@@ -770,7 +799,7 @@ export default function ContractDetailPage() {
                         <TableCell>{getStatusBadge(m.status)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            {m.status === 'Pending' &&
+                            {canManageContract && m.status === 'Pending' &&
                               contract.status === 'Active' && (
                                 <Button
                                   size="sm"
@@ -782,14 +811,15 @@ export default function ContractDetailPage() {
                                   <CheckCircle2 className="h-3 w-3" />
                                 </Button>
                               )}
-                            {(contract.status === 'Draft' ||
+                            {canManageContract && (contract.status === 'Draft' ||
                               (contract.status === 'Active' &&
                                 m.status === 'Pending')) && (
                               <Button
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 px-2 text-red-600 hover:text-red-700"
-                                onClick={() => handleDeleteMilestone(m.id)}
+                                onClick={() => setPendingConfirmation({ kind: 'milestone', id: m.id, label: m.milestoneName })}
+                                aria-label={`Delete ${m.milestoneName}`}
                                 disabled={saving}
                               >
                                 <Trash2 className="h-3 w-3" />
@@ -810,7 +840,7 @@ export default function ContractDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Contract Amendments</CardTitle>
-              {(contract.status === 'Draft' ||
+              {canManageContract && (contract.status === 'Draft' ||
                 contract.status === 'Active') && (
                 <Button size="sm" onClick={() => setShowAmendmentDialog(true)}>
                   <Plus className="h-4 w-4 mr-1" />
@@ -851,7 +881,7 @@ export default function ContractDetailPage() {
                         <TableCell>{formatDate(a.requestedDate)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            {a.status === 'Pending' && (
+                            {canProcessContractAmendment(a.status, canApproveContract) && (
                               <>
                                 <Button
                                   size="sm"
@@ -877,12 +907,13 @@ export default function ContractDetailPage() {
                                 </Button>
                               </>
                             )}
-                            {a.status === 'Pending' && (
+                            {canProcessContractAmendment(a.status, canManageContract) && (
                               <Button
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 px-2 text-red-600 hover:text-red-700"
-                                onClick={() => handleDeleteAmendment(a.id)}
+                                onClick={() => setPendingConfirmation({ kind: 'amendment', id: a.id, label: a.amendmentNumber })}
+                                aria-label={`Delete amendment ${a.amendmentNumber}`}
                                 disabled={saving}
                               >
                                 <Trash2 className="h-3 w-3" />
@@ -903,7 +934,7 @@ export default function ContractDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Contract Documents</CardTitle>
-              {(contract.status === 'Draft' ||
+              {canManageContract && (contract.status === 'Draft' ||
                 contract.status === 'Active') && (
                 <Button size="sm" onClick={() => setShowDocumentDialog(true)}>
                   <Plus className="h-4 w-4 mr-1" />
@@ -941,15 +972,16 @@ export default function ContractDetailPage() {
                         </TableCell>
                         <TableCell>{formatDate(d.createdAt)}</TableCell>
                         <TableCell className="text-right">
-                          <Button
+                          {canManageContract && <Button
                             size="sm"
                             variant="ghost"
                             className="h-7 px-2 text-red-600 hover:text-red-700"
-                            onClick={() => handleDeleteDocument(d.id)}
+                            onClick={() => setPendingConfirmation({ kind: 'document', id: d.id, label: d.fileName })}
+                            aria-label={`Delete ${d.fileName}`}
                             disabled={saving}
                           >
                             <Trash2 className="h-3 w-3" />
-                          </Button>
+                          </Button>}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -960,6 +992,17 @@ export default function ContractDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ConfirmationDialog
+        open={Boolean(pendingConfirmation)}
+        onOpenChange={(open) => { if (!open) setPendingConfirmation(null); }}
+        title={pendingConfirmation?.kind === 'complete' ? 'Complete contract' : pendingConfirmation?.kind === 'amendment' ? 'Delete draft amendment' : pendingConfirmation?.kind === 'milestone' ? 'Delete milestone' : 'Delete contract document'}
+        description={pendingConfirmation?.kind === 'complete' ? `Mark ${pendingConfirmation.label} as completed? This changes the governed contract lifecycle status.` : `Permanently delete ${pendingConfirmation?.label || 'this record'}? The dialog remains open if the server rejects the action.`}
+        confirmText={pendingConfirmation?.kind === 'complete' ? 'Complete contract' : 'Delete'}
+        variant={pendingConfirmation?.kind === 'complete' ? 'default' : 'destructive'}
+        isLoading={saving}
+        onConfirm={handlePendingConfirmation}
+      />
 
       {/* Edit Contract Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>

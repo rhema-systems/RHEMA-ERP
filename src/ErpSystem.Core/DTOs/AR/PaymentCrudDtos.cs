@@ -105,10 +105,12 @@ public class InvoiceCreateDto
     public Guid? TaxGroupId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class InvoiceLineItemCreateDto
 {
+    public Guid? Id { get; set; }
     public string LineItemType { get; set; } = "Product";
     public Guid? ProductId { get; set; }
     public Guid? GLAccountId { get; set; }
@@ -136,6 +138,7 @@ public class InvoiceUpdateDto
     public Guid? ExchangeRateId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemUpdateDto> LineItems { get; set; } = new();
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class InvoiceLineItemUpdateDto

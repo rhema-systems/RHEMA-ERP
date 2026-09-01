@@ -19,6 +19,29 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
     [Fact]
+    public async Task MissingTenderCaseLinkIsRecoveredFromItsCurrentImmutableRelease()
+    {
+        await using var fixture = new Fixture();
+        fixture.RemoveTenderCaseLink();
+
+        var readiness = await fixture.Service.GetReadinessAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        readiness.SourceExists.Should().BeTrue();
+        var retained = await fixture.Context.Tenders.AsNoTracking()
+            .SingleAsync(item => item.Id == fixture.Tender.Id);
+        retained.SourcingReleaseId.Should().Be(fixture.SourcingCase.SourcingReleaseId);
+        retained.SourcingCaseId.Should().Be(fixture.SourcingCase.Id);
+        fixture.SourcingCases.Verify(service => service.RecoverTenderSourceEntryAsync(
+            fixture.Tender.SourcePurchaseRequisitionId!.Value,
+            fixture.SourcingCase.SourcingReleaseId,
+            fixture.Tender.Id,
+            fixture.Tender.TenderNumber,
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task OptionsAndBindingReuseExactMasterCommitteeMembership()
     {
         await using var fixture = new Fixture();
@@ -442,7 +465,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 IsEnabled = true,
                 EffectiveFrom = DateTime.UtcNow.AddDays(-30)
             };
-            var sourcingCase = new ProcurementSourcingCase
+            SourcingCase = new ProcurementSourcingCase
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
@@ -480,19 +503,21 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 Title = "Evaluation-controlled tender",
                 TenderType = "NCT",
                 Status = "Closed",
-                SourcingCaseId = sourcingCase.Id
+                SourcePurchaseRequisitionId = SourcingCase.PurchaseRequisitionId,
+                SourcingReleaseId = SourcingCase.SourcingReleaseId,
+                SourcingCaseId = SourcingCase.Id
             };
             TenderControl = new ProcurementTenderControl
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 TenderId = Tender.Id,
-                SourcingCaseId = sourcingCase.Id,
+                SourcingCaseId = SourcingCase.Id,
                 MethodRuleId = rule.Id,
-                AuthorityRouteId = sourcingCase.AuthorityRouteId,
+                AuthorityRouteId = SourcingCase.AuthorityRouteId!.Value,
                 Method = rule.Method,
                 MethodRuleCode = rule.RuleCode,
-                AuthorityRouteReference = sourcingCase.AuthorityRouteReference,
+                AuthorityRouteReference = SourcingCase.AuthorityRouteReference!,
                 Status = ProcurementTenderControlStatus.TechnicalEvaluated,
                 AdvertisementReference = "ADV-001",
                 PublicationChannel = "GHANEPS",
@@ -586,9 +611,10 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
                 IsActive = true
             };
-            Context.AddRange(Profile, Policy, rule, sourcingCase, Tender,
+            Context.AddRange(Profile, Policy, rule, SourcingCase, Tender,
                 TenderControl, role, Committee, workflowEntityType, Workflow);
             Context.SaveChanges();
+            Context.ChangeTracker.Clear();
 
             _unitOfWork = new UnitOfWork(Context);
             _current = new Mock<ICurrentUserProvider>();
@@ -605,7 +631,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             _current.Setup(item => item.HasRole(It.IsAny<string>()))
                 .Returns((string role) =>
                     _administrator &&
-                    string.Equals(role, "Administrator",
+                    string.Equals(role, Constants.Roles.SuperAdmin,
                         StringComparison.OrdinalIgnoreCase));
             var access = new Mock<IProcurementAccessControlService>();
             access.Setup(item => item.EnforceCapabilityAsync(
@@ -640,9 +666,25 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     TenantId = TenantId
                 });
             var notifications = new Mock<INotificationTopicPublisher>();
+            SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                    Tender.SourcePurchaseRequisitionId!.Value,
+                    SourcingCase.SourcingReleaseId,
+                    Tender.Id,
+                    Tender.TenderNumber,
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+                {
+                    SourcingReleaseId = SourcingCase.SourcingReleaseId,
+                    SourcingCaseId = SourcingCase.Id,
+                    SelectedMethod = SourcingCase.SelectedMethod,
+                    EstimatedValue = SourcingCase.EstimatedValue,
+                    CurrencyCode = SourcingCase.CurrencyCode
+                });
             Service = new ProcurementEvaluationCommitteeControlService(
                 _unitOfWork, _current.Object, access.Object, sod.Object,
-                events.Object, workflowInstances.Object, notifications.Object);
+                events.Object, SourcingCases.Object, workflowInstances.Object,
+                notifications.Object);
         }
 
         public Guid TenantId { get; }
@@ -650,12 +692,22 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         public ApplicationDbContext Context { get; }
         public ProcurementConfigurationProfile Profile { get; }
         public ProcurementPolicySet Policy { get; }
+        public ProcurementSourcingCase SourcingCase { get; }
         public Tender Tender { get; }
         public ProcurementTenderControl TenderControl { get; }
         public ProcurementCommittee Committee { get; }
         public ErpSystem.Core.Entities.Workflow.WorkflowDefinition Workflow { get; }
         public List<Guid> MemberUserIds { get; } = new();
+        public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         public ProcurementEvaluationCommitteeControlService Service { get; }
+
+        public void RemoveTenderCaseLink()
+        {
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.SourcingCaseId = null;
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
 
         public void SwitchTenant(Guid tenantId) => _currentTenantId = tenantId;
 

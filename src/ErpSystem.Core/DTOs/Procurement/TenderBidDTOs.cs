@@ -92,6 +92,7 @@ public class TenderBidDetailDto
     public DateTime UpdatedAt { get; set; }
 
     // Related Data
+    public List<Guid> SelectedLotIds { get; set; } = new();
     public List<TenderBidLotDto> BidLots { get; set; } = new();
     public List<TenderBidItemDto> Items { get; set; } = new();
     public List<TenderBidDocumentDto> Documents { get; set; } = new();
@@ -146,6 +147,8 @@ public class CreateTenderBidDto
 
     public bool AcceptedDeclaration { get; set; } = false;
 
+    public List<Guid> SelectedLotIds { get; set; } = new();
+
     [Required]
     public List<CreateTenderBidItemDto> Items { get; set; } = new();
 }
@@ -166,6 +169,13 @@ public class UpdateTenderBidDto
 
     public string? TechnicalProposal { get; set; }
     public string? CommercialProposal { get; set; }
+
+    [MaxLength(50)]
+    public string? AssociationType { get; set; }
+
+    public bool? AcceptedDeclaration { get; set; }
+
+    public List<Guid>? SelectedLotIds { get; set; }
 
     public List<UpdateTenderBidItemDto>? Items { get; set; }
 }
@@ -323,8 +333,44 @@ public class TenderPaymentDto
     public DateTime PaymentDate { get; set; }
     public DateTime? VerifiedDate { get; set; }
     public string? VerifiedByName { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public DateTime? PostedAtUtc { get; set; }
     public string? TransactionId { get; set; }
     public string? PaymentProof { get; set; }
+}
+
+/// <summary>
+/// Server-derived initiation state for the current supplier and tender.
+/// </summary>
+public class TenderBidInitiationStatusDto
+{
+    public Guid TenderId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? DraftBidId { get; set; }
+    public bool HasAssignment { get; set; }
+    public string? AssignmentType { get; set; }
+    public bool RequiresAcceptanceDeclaration { get; set; }
+    public bool DeclarationAccepted { get; set; }
+    public bool DeclarationSatisfied { get; set; }
+    public bool PaymentRequired { get; set; }
+    public bool HasPayment { get; set; }
+    public bool PaymentSatisfied { get; set; }
+    public bool PaymentEvidenceAccepted { get; set; }
+    public bool PaymentPendingVerification { get; set; }
+    public bool CanProceed { get; set; }
+    public List<TenderFeePaymentStatusDto> Fees { get; set; } = new();
+}
+
+public class TenderFeePaymentStatusDto
+{
+    public Guid TenderFeeId { get; set; }
+    public string FeeType { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public bool IsMandatory { get; set; }
+    public string Status { get; set; } = "NotPaid";
+    public Guid? PaymentId { get; set; }
 }
 
 /// <summary>
@@ -356,6 +402,9 @@ public class CreateTenderPaymentDto
     [MaxLength(500)]
     public string? TransactionId { get; set; }
 
+    [MaxLength(1000)]
+    public string? PaymentProof { get; set; }
+
     public string? Notes { get; set; }
 }
 
@@ -380,6 +429,9 @@ public class RecordPaymentDto
 
     [MaxLength(500)]
     public string? TransactionId { get; set; }
+
+    [MaxLength(1000)]
+    public string? PaymentProof { get; set; }
 
     public string? Notes { get; set; }
 }

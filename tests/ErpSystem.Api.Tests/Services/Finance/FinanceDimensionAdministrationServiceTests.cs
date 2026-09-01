@@ -133,7 +133,7 @@ public sealed class FinanceDimensionAdministrationServiceTests
     }
 
     [Fact]
-    public async Task Non_optional_rule_requires_a_certified_source_document_type()
+    public async Task Non_optional_rule_requires_a_recognized_route()
     {
         await using var db = CreateContext();
         var tenantId = Guid.NewGuid();
@@ -152,11 +152,11 @@ public sealed class FinanceDimensionAdministrationServiceTests
         });
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*certified source document type*");
+            .WithMessage("*recognized Finance dimension route*");
     }
 
     [Fact]
-    public async Task Mandatory_rule_cannot_claim_an_uncertified_operational_adapter()
+    public async Task Mandatory_rule_cannot_claim_an_unrecognized_operational_adapter()
     {
         await using var db = CreateContext();
         var tenantId = Guid.NewGuid();
@@ -178,7 +178,7 @@ public sealed class FinanceDimensionAdministrationServiceTests
         });
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*not yet certified*");
+            .WithMessage("*compiled route identity*");
     }
 
     private static ApplicationDbContext CreateContext() => new(

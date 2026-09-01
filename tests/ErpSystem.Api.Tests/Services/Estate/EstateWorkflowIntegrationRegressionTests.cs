@@ -1,10 +1,264 @@
 using FluentAssertions;
+using ErpSystem.Core.Services.Estate;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Estate;
 
 public sealed class EstateWorkflowIntegrationRegressionTests
 {
+    [Fact]
+    public void PropertyListingRequests_PersistPortalMetadataAndExposeApprovalFields()
+    {
+        var workspace = new PropertyManagementProcedureCatalogService()
+            .GetProcedureWorkspace("EstatePropertyManagementListingApplication");
+        var fieldKeys = workspace!.IntakeFields.Select(field => field.Key).ToList();
+        var frontend = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "ListingApplicationWorkspace.tsx");
+        var migration = ReadSource(
+            "src",
+            "ErpSystem.Data",
+            "Migrations",
+            "20260822120000_BackfillPropertyListingApplicationFields.cs");
+
+        fieldKeys.Should().Contain([
+            "applicationReference",
+            "listingReference",
+            "requestType",
+            "decisionStatus",
+            "agreementTemplateReference",
+            "moveInDate"
+        ]);
+        frontend.Should().Contain("keys.add('decisionStatus');");
+        frontend.Should().Contain("keys.add('moveInDate');");
+        migration.Should().Contain("EstateManagedAssets");
+        migration.Should().Contain("WHERE NOT EXISTS");
+    }
+
+    [Fact]
+    public void CompletedPropertyRequest_IsReadOnlyForEveryRole()
+    {
+        var procedureService = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "ProcedureCaseService.cs");
+        var canEdit = Slice(
+            procedureService,
+            "private bool CanEdit(ProcedureCase procedureCase)",
+            "private bool CanCreateLegalProcedureCase");
+        var workspace = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "ListingApplicationWorkspace.tsx");
+
+        canEdit.Should().Contain("if (IsCompleted(procedureCase))");
+        canEdit.Should().Contain("return false;");
+        workspace.Should().Contain("caseIsCompleted ||");
+        workspace.Should().Contain("? 'Case completed'");
+    }
+
+    [Fact]
+    public void ListingApproval_OwnsRentalMoveInDateBeforeCustomerAcceptance()
+    {
+        var procedureService = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "ProcedureCaseService.cs");
+        var approvalGuard = Slice(
+            procedureService,
+            "private static void EnsureExternalListingApprovalIsReady",
+            "private static string? NormalizeProcedureField");
+        var externalController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateExternalDocumentsController.cs");
+        var customerDecision = Slice(
+            externalController,
+            "public async Task<IActionResult> SubmitCustomerDecision",
+            "public async Task<IActionResult> DownloadGeneratedAgreement");
+        var signedUpload = Slice(
+            externalController,
+            "public async Task<IActionResult> UploadSignedAgreement",
+            "public async Task<IActionResult> CreateRequest");
+        var frontend = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "ListingApplicationWorkspace.tsx");
+        var portal = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "external-portal",
+            "my-property-requests",
+            "page.tsx");
+
+        procedureService.Should().Contain("EnsureExternalListingApprovalIsReady(procedureCase);");
+        approvalGuard.Should().Contain("generatedAgreementReference");
+        approvalGuard.Should().Contain("legalAgreementReviewStatus");
+        approvalGuard.Should().Contain("Legal must approve the generated agreement before completing final approval.");
+        approvalGuard.Should().Contain("moveInDate");
+        approvalGuard.Should().Contain("IsRentalListingApplication(procedureCase)");
+        frontend.Should().Contain("missingLegalAgreementReview");
+        frontend.Should().Contain("Legal must approve the generated agreement before completing final approval.");
+        customerDecision.Should().Contain("The approved agreement must be generated before you can accept this request.");
+        customerDecision.Should().Contain("Property Management must set the approved move-in date");
+        signedUpload.Should().NotContain("[FromForm] string? moveInDate");
+        signedUpload.Should().Contain("approvedMoveInDate = FieldValue(fields, \"moveInDate\")");
+        portal.Should().NotContain("moveInDates");
+    }
+
+    [Fact]
+    public void ExternalCustomerDecision_ExplicitlyAddsItsActivityAsANewRow()
+    {
+        var externalController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateExternalDocumentsController.cs");
+        var addActivity = Slice(
+            externalController,
+            "private void AddExternalCaseActivity",
+            "private IQueryable<BusinessPartner> PortalCustomers");
+
+        addActivity.Should().Contain("_db.ProcedureCaseActivities.Add(new ProcedureCaseActivity");
+        addActivity.Should().NotContain("procedureCase.Activities.Add(new ProcedureCaseActivity");
+    }
+
+    [Fact]
+    public void SignedAgreementUpload_ExplicitlyInsertsNewRowsAndCleansUpFailedStorage()
+    {
+        var externalController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateExternalDocumentsController.cs");
+        var signedUpload = Slice(
+            externalController,
+            "public async Task<IActionResult> UploadSignedAgreement",
+            "public async Task<IActionResult> CreateRequest");
+        var upsertField = Slice(
+            externalController,
+            "private void UpsertField",
+            "private void AddExternalCaseActivity");
+
+        signedUpload.Should().Contain("_db.ProcedureCaseDocuments.Add(document);");
+        signedUpload.Should().Contain("await _fileStorageService.DeleteFileAsync(upload.FilePath);");
+        signedUpload.Should().NotContain("procedureCase.Documents.Add(document);");
+        upsertField.Should().Contain("_db.ProcedureCaseFields.Add(created);");
+        upsertField.Should().NotContain("procedureCase.Fields.Add(created);");
+    }
+
+    [Fact]
+    public void CustomerAgreement_RequiresInternalApprovalAndSignatureBeforeMoveInBecomesEffective()
+    {
+        var externalController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateExternalDocumentsController.cs");
+        var signedUpload = Slice(
+            externalController,
+            "public async Task<IActionResult> UploadSignedAgreement",
+            "public async Task<IActionResult> CreateRequest");
+        var documentController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "DocumentManagement",
+            "DocumentManagementController.cs");
+        var agreementWorkflow = Slice(
+            documentController,
+            "private async Task SynchronizePropertyAgreementWorkflowAsync",
+            "private void UpsertPropertyAgreementField");
+        var internalWorkspace = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "ListingApplicationWorkspace.tsx");
+        var customerPortal = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "external-portal",
+            "my-property-requests",
+            "page.tsx");
+
+        signedUpload.Should().Contain("Blocked - internal approval and signature pending");
+        signedUpload.Should().NotContain("Ready for billing from move-in date");
+        documentController.Should().Contain("EnsureCustomerSignedAgreementVersionAsync");
+        documentController.Should().Contain("CanUseSourceModuleForDms(record.SourceModule)");
+        documentController.Should().Contain("IsPropertyListingAgreementAsync(record");
+        documentController.Should().Contain("HasAnyRole(\"Property Manager\", \"Estate Manager\", \"Head of Estate\")");
+        documentController.Should().Contain("HasAnyRole(\"Executive Approver\", \"Authorised Signatory\", \"Managing Director\")");
+        documentController.Should().Contain("Final signed agreement ready");
+        documentController.Should().Contain("/external-portal/my-property-requests");
+        agreementWorkflow.Should().Contain("Internally approved - digital signature pending");
+        agreementWorkflow.Should().Contain("Fully executed");
+        agreementWorkflow.Should().Contain("billingStartDate");
+        agreementWorkflow.Should().Contain("Effective - final agreement signed");
+        agreementWorkflow.Should().Contain("SynchronizeExecutedRentalLeaseAsync");
+        agreementWorkflow.Should().Contain("EstateManagedAssetStatus.Leased");
+        agreementWorkflow.Should().Contain("asset.CustomerBusinessPartnerId = customer.Id");
+        agreementWorkflow.Should().Contain("asset.PropertyFileReference = record.DocumentReference");
+        agreementWorkflow.Should().Contain("asset.IsPublishedToExternalPortal = false");
+        agreementWorkflow.Should().Contain("Agreement returned for correction");
+        agreementWorkflow.Should().Contain("\"signedAgreementReference\"");
+        var caseVisibility = Slice(
+            ReadSource(
+                "src",
+                "ErpSystem.Api",
+                "Services",
+                "ProcedureCaseService.cs"),
+            "private bool CanView(ProcedureCase procedureCase)",
+            "private bool UserOwnsCase");
+        caseVisibility.Should().Contain("CanOverseePropertyListingApplication(procedureCase)");
+        caseVisibility.Should().Contain("\"Property Manager\"");
+        caseVisibility.Should().Contain("\"Estate Manager\"");
+        internalWorkspace.Should().Contain("Customer-submitted documents");
+        internalWorkspace.Should().Contain("hasActiveCustomerSignedAgreement");
+        internalWorkspace.Should().Contain("Submit for approval");
+        internalWorkspace.Should().Contain("Approve agreement");
+        internalWorkspace.Should().Contain("Digitally sign");
+        internalWorkspace.Should().Contain("agreementAlreadyGenerated");
+        internalWorkspace.Should().Contain("selectedCase.currentStageIndex >= 2 || agreementAlreadyGenerated");
+        internalWorkspace.Should().Contain("'Agreement generated'");
+        customerPortal.Should().Contain("Final signed agreement");
+        customerPortal.Should().Contain("Download final PDF");
+        externalController.Should().Contain("Customer signed agreement received");
+        externalController.Should().Contain("Customer accepted property request");
+        documentController.Should().Contain("estate.property.agreement-correction-required");
+        var notificationDispatcher = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Notifications",
+            "RoleNotificationDispatcher.cs");
+        notificationDispatcher.Should().Contain("CreateInAppNotificationAsync");
+    }
+
     [Fact]
     public void ProcedureDocumentMetadataEndpoint_CannotBindAnArbitraryPrivatePath()
     {
@@ -27,6 +281,48 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void ExternalCustomerIntakeUpload_UsesPortalRouteAndClosesAfterFirstInternalStageRoutesForward()
+    {
+        var frontendService = ReadSource(
+            "frontend",
+            "src",
+            "services",
+            "external-estate-services.service.ts");
+        var frontendListingsService = ReadSource(
+            "frontend",
+            "src",
+            "services",
+            "external-estate-listings.service.ts");
+        var portalPage = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "external-portal",
+            "my-property-requests",
+            "page.tsx");
+        var externalController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateExternalDocumentsController.cs");
+        var procedureService = ReadSource("src", "ErpSystem.Api", "Services", "ProcedureCaseService.cs");
+
+        frontendService.Should().Contain("/estate/external/requests/${requestId}/customer-intake-documents/${documentId}/upload");
+        frontendService.Should().NotContain("/procedure-cases/${requestId}/customer-intake-documents/${documentId}/upload");
+        frontendListingsService.Should().Contain("/estate/external/requests/${requestId}/customer-intake-documents/${documentId}/upload");
+        frontendListingsService.Should().NotContain("/procedure-cases/${requestId}/customer-intake-documents/${documentId}/upload");
+        portalPage.Should().Contain("function canUploadIntakeDocuments");
+        portalPage.Should().Contain("request.customerIntakeUploadClosed || request.currentStageIndex > 0");
+        externalController.Should().Contain("[HttpPost(\"/api/estate/external/requests/{requestId:guid}/customer-intake-documents/{documentId:guid}/upload\")]");
+        externalController.Should().Contain("ToExternalRequestDto(procedureCase)");
+        externalController.Should().Contain("CustomerIntakeUploadClosed = HasFirstInternalStageBeenRoutedForward(item)");
+        externalController.Should().Contain("CustomerIntakeUploadClosed = HasFirstInternalStageBeenRoutedForward(procedureCase)");
+        procedureService.Should().Contain("HasFirstInternalStageBeenRoutedForward(procedureCase)");
+        procedureService.Should().Contain("Customer intake documents can only be uploaded until the first internal stage is routed forward.");
+    }
+
+    [Fact]
     public void StampDutyPayable_StoresTheProcurementSupplierIdentifier()
     {
         var source = ReadSource(
@@ -38,12 +334,33 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         var method = Slice(
             source,
             "private async Task EnsureStampDutyPayableAsync",
-            "private async Task<Guid> ResolveStampDutyDebitAccountIdAsync");
+            "private async Task EnsureAcquisitionPayableApprovedAndPostedAsync");
 
         method.Should().Contain("payment.AccountsPayableSupplierId = invoice.SupplierId;");
         method.Should().Contain("[\"accountsPayableSupplierId\"] = invoice.SupplierId");
         method.Should().NotContain("payment.AccountsPayableSupplierId = payee.Id;");
         method.Should().NotContain("[\"accountsPayableSupplierId\"] = payee.Id");
+    }
+
+    [Fact]
+    public void AcquisitionPayableApproval_RepairsLegacySubmissionMetadataBeforePostingGate()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "LandAcquisitionsController.cs");
+        var method = Slice(
+            source,
+            "private async Task EnsureAcquisitionPayableApprovedAndPostedAsync",
+            "private async Task<Guid> ResolveLandAcquisitionDebitAccountIdAsync");
+
+        method.Should().Contain("!invoice.SubmittedById.HasValue || invoice.SubmittedById.Value == Guid.Empty || !invoice.SubmittedDate.HasValue");
+        method.Should().Contain("invoice.SubmittedById = userId == Guid.Empty ? invoice.ApprovedById : userId;");
+        method.Should().Contain("invoice.SubmittedDate ??= invoice.ApprovedDate ?? now;");
+        method.IndexOf("if (!invoice.SubmittedById.HasValue", StringComparison.Ordinal)
+            .Should().BeLessThan(method.IndexOf("if (!invoice.JournalEntryId.HasValue)", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -550,6 +867,130 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         page.Should().Contain("selected.asset.isPublishedToExternalPortal ||");
         page.Should().Contain(
             "Withdraw the active external land listing before marking this land ready for a project.");
+    }
+
+    [Fact]
+    public void HandoverMoveOut_ExplicitlyReleasesOccupantAndPreservesHistory()
+    {
+        var service = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var workspace = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "MoveInHandoverWorkspace.tsx");
+        var updateOccupancy = Slice(
+            service,
+            "private async Task<EstateManagedAssetDto> UpdateOccupancyCoreAsync",
+            "public Task<EstateManagedAssetDto> UpdateExternalListingAsync");
+
+        workspace.Should().Contain("releaseOccupant: action === 'move-out'");
+        updateOccupancy.Should().Contain("request.ReleaseOccupant == true");
+        updateOccupancy.Should().Contain("Record the actual move-out date before releasing the occupant.");
+        updateOccupancy.Should().Contain("Occupancy released on");
+        updateOccupancy.Should().Contain("asset.CustomerBusinessPartnerId = null;");
+        updateOccupancy.Should().Contain("asset.PropertyFileReference = null;");
+    }
+
+    [Fact]
+    public void RentBillingActivation_CreatesAnIdempotentFinanceArDraftFromLeaseTerms()
+    {
+        var controller = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "PropertyManagementArBillingController.cs");
+        var workspace = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "BillingServiceChargeWorkspace.tsx");
+        var activation = Slice(
+            controller,
+            "public async Task<ActionResult<EstateRentBillingActivationResult>> ActivateRentBilling",
+            "[HttpPost(\"invoices\")]");
+
+        activation.Should().Contain("asset.RentBillingActivatedAt.HasValue");
+        activation.Should().Contain("asset.ExternalMonthlyRent ?? asset.ExternalListingPrice");
+        activation.Should().Contain("asset.CustomerBusinessPartnerId.Value");
+        activation.Should().Contain("BuildRentInvoiceReference(asset.AssetCode, billingStart)");
+        activation.Should().Contain("AccountCode == \"4110\"");
+        workspace.Should().Contain("Activate billing");
+        workspace.Should().Contain("asset.lastRentInvoiceId");
+        workspace.Should().Contain("<ConfirmationDialog");
+        workspace.Should().Contain("Monthly rent");
+        workspace.Should().NotContain("window.confirm");
+    }
+
+    [Fact]
+    public void PropertyAgreementRelease_RequiresLegalApprovalAcrossPortalAndDms()
+    {
+        var portalController = ReadSource(
+            "src", "ErpSystem.Api", "Controllers", "Estate", "EstateExternalDocumentsController.cs");
+        var dmsController = ReadSource(
+            "src", "ErpSystem.Api", "Controllers", "DocumentManagement", "DocumentManagementController.cs");
+        var legalCatalog = ReadSource(
+            "src", "ErpSystem.Core", "Services", "Legal", "LegalProcedureCatalogService.cs");
+
+        portalController.Should().Contain("IsLegalAgreementReleaseApproved(fields)");
+        portalController.Should().Contain("Legal must approve the draft agreement before it can be accepted.");
+        dmsController.Should().Contain("IsPropertyAgreementLegalReviewApprovedAsync");
+        dmsController.Should().Contain("before internal approval and digital signature can continue");
+        legalCatalog.Should().Contain("LegalPropertyAgreementReview");
+        legalCatalog.Should().Contain("Head of Legal Release");
+    }
+
+    [Fact]
+    public void ExternalListings_OnlyTreatActiveCustomerRequestsAsDuplicates()
+    {
+        var controller = ReadSource(
+            "src", "ErpSystem.Api", "Controllers", "Estate", "EstateExternalDocumentsController.cs");
+        var listings = Slice(
+            controller,
+            "public async Task<IActionResult> GetListings",
+            "[HttpGet(\"/api/estate/external/listings/{listingId:guid}/images/{documentId:guid}\")]");
+        var submission = Slice(
+            controller,
+            "public async Task<IActionResult> CreateListingRequest",
+            "private async Task NotifyListingRequestAsync");
+
+        foreach (var flow in new[] { listings, submission })
+        {
+            flow.Should().Contain("procedureCase.Status != \"Completed\"");
+            flow.Should().Contain("procedureCase.Status != \"Archived\"");
+            flow.Should().Contain("field.Value == \"Sale completed\"");
+            flow.Should().Contain("field.Value == \"Agreement fully executed\"");
+        }
+    }
+
+    [Fact]
+    public void PropertySaleCompletion_RequiresPaidFinanceInvoiceAndLegalConveyance()
+    {
+        var controller = ReadSource(
+            "src", "ErpSystem.Api", "Controllers", "Estate", "PropertyManagementArBillingController.cs");
+        var completion = Slice(
+            controller,
+            "public async Task<ActionResult<EstateSaleCompletionResult>> CompleteSaleOwnership",
+            "[HttpPost(\"invoices\")]");
+
+        completion.Should().Contain("invoice.BalanceAmount > 0m");
+        completion.Should().Contain("invoice.Status, \"Paid\"");
+        completion.Should().Contain("legalConveyanceStatus");
+        completion.Should().Contain("\"Completed by Legal\"");
+        completion.Should().Contain("asset.Status = EstateManagedAssetStatus.Sold;");
+        completion.Should().Contain("asset.IsPublishedToExternalPortal = false;");
+        completion.Should().Contain("estate.property.sale-completed");
     }
 
     [Fact]

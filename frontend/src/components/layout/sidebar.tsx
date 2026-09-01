@@ -20,6 +20,7 @@ import {
   X,
   Shield,
   FileText,
+  FileInput,
   Scale,
   Banknote,
   Globe,
@@ -42,6 +43,7 @@ import {
   Wrench,
   Calendar,
   ClipboardCheck,
+  ClipboardPlus,
   AlertTriangle,
   Clock,
   CheckSquare,
@@ -106,7 +108,147 @@ export interface NavItem {
   navigationSurface?: 'operations' | 'settings';
 }
 
-const ADMINISTRATION_ROLES = ['admin', 'SuperAdmin', 'TenantAdmin'];
+export function canAccessNavItem(
+  item: Pick<NavItem, 'roles' | 'permissions' | 'accessMode'>,
+  hasAnyRole: (roles: string[]) => boolean,
+  hasAnyPermission: (permissions: string[]) => boolean
+): boolean {
+  const checks: boolean[] = [];
+
+  if (item.roles?.length) {
+    checks.push(hasAnyRole(item.roles));
+  }
+
+  if (item.permissions?.length) {
+    checks.push(hasAnyPermission(item.permissions));
+  }
+
+  if (checks.length === 0) {
+    return true;
+  }
+
+  return item.accessMode === 'any'
+    ? checks.some(Boolean)
+    : checks.every(Boolean);
+}
+
+const ADMINISTRATION_ROLES = [
+  'admin',
+  'Admin',
+  'SystemAdmin',
+  'SuperAdmin',
+  'TenantAdmin',
+];
+
+const DOCUMENT_MANAGEMENT_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Estate Officer',
+  'Estate Manager',
+  'Head of Estate',
+  'Property Management Officer',
+  'Property Management Supervisor',
+  'Property Manager',
+  'Property Officer',
+  'PropertyManager',
+  'PropertySupervisor',
+  'PropertyOfficer',
+  'PropertyRecordsOfficer',
+  'Document Controller',
+  'Document Control Officer',
+  'Records Officer',
+  'PropertyRecordsOfficer',
+  'Property Records Officer',
+  'FacilitiesDocumentControl',
+  'Legal Officer',
+  'Legal Manager',
+  'Head of Legal',
+];
+
+const ESTATE_CORE_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Estate Officer',
+  'Estate Manager',
+  'Head of Estate',
+  'Land Registry Officer',
+  'Survey Officer',
+  'Records Officer',
+  'Acquisition Committee',
+];
+
+const PROPERTY_MANAGEMENT_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Estate Officer',
+  'Estate Manager',
+  'Head of Estate',
+  'Property Manager',
+  'Property Officer',
+  'PropertyManager',
+  'PropertySupervisor',
+  'PropertyOfficer',
+  'PropertyLeaseOfficer',
+  'PropertyBillingOfficer',
+  'PropertyRecordsOfficer',
+  'PropertyHandoverOfficer',
+  'Executive Approver',
+  'Authorised Signatory',
+  'Managing Director',
+];
+
+const FACILITIES_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Estate Officer',
+  'Estate Manager',
+  'Head of Estate',
+  'Facilities Manager',
+  'Facilities Officer',
+  'FacilitiesManager',
+  'FacilitiesSupervisor',
+  'FacilitiesOfficer',
+  'FacilitiesDocumentControl',
+  'FacilitiesFinanceOfficer',
+];
+
+const LEGAL_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Legal',
+  'Legal Officer',
+  'Senior Legal Officer',
+  'Legal Manager',
+  'Head of Legal',
+  'Legal Admin Assistant',
+];
+
+const FINANCE_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Finance User',
+  'Finance Clerk',
+  'Finance Officer',
+  'Accounts Officer',
+  'Accounts Payable',
+  'Accounts Payable Officer',
+  'Accounts Receivable Officer',
+  'Senior Accountant',
+  'Finance Manager',
+  'Financial Controller',
+  'Chief Accountant',
+  'Budget Officer',
+];
+
+const PROCUREMENT_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Procurement User',
+  'Procurement Officer',
+  'Procurement Manager',
+];
+
+const INVENTORY_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Inventory User',
+  'Inventory Officer',
+  'Inventory Manager',
+  'Warehouse Officer',
+  'Warehouse Manager',
+];
 
 export const navigationItems: NavItem[] = [
   {
@@ -118,6 +260,9 @@ export const navigationItems: NavItem[] = [
     title: 'Finance',
     href: '/finance',
     icon: CreditCard,
+    roles: FINANCE_ROLES,
+    permissions: ['Finance.Read', 'Finance.Admin'],
+    accessMode: 'any',
     children: [
       { title: 'Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
       {
@@ -130,8 +275,10 @@ export const navigationItems: NavItem[] = [
           'Manager',
           'Accounts Officer',
           'Senior Accountant',
+          'Chief Accountant',
           'Finance Manager',
           'Financial Controller',
+          'Managing Director',
         ],
       },
       {
@@ -728,6 +875,9 @@ export const navigationItems: NavItem[] = [
     title: 'Human Resources',
     href: '/hr',
     icon: UserCheck,
+    roles: [...ADMINISTRATION_ROLES, 'HR User', 'HR Officer', 'HR Manager'],
+    permissions: ['hr.access', 'hr.read', 'employees.read'],
+    accessMode: 'any',
     children: [
       { title: 'Employees', href: '/hr/employees', icon: Users },
       {
@@ -1028,78 +1178,263 @@ export const navigationItems: NavItem[] = [
     title: 'Projects',
     href: '/development/projects',
     icon: Briefcase,
-    permissions: ['project.access'],
     children: [
-      { title: 'Projects', href: '/development/projects', icon: Briefcase },
+      {
+        title: 'Projects',
+        href: '/development/projects',
+        icon: Briefcase,
+        permissions: ['project.access'],
+      },
       {
         title: 'Town Planning',
         href: '/development/planning',
         icon: MapPin,
+        permissions: ['project.access'],
         children: [
-          { title: 'Planning Dashboard', href: '/development/planning/dashboard', icon: BarChart3 },
-          { title: 'SOP Procedures', href: '/development/planning', icon: ClipboardList },
-          { title: 'Workflow Setup', href: '/administration/workflow?q=Planning', icon: Workflow },
-          { title: 'Documents', href: '/document-management?module=Planning', icon: FileText },
-          { title: 'Reports', href: '/reports?module=planning', icon: FileCheck },
+          {
+            title: 'Planning Dashboard',
+            href: '/development/planning/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'SOP Procedures',
+            href: '/development/planning',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Workflow Setup',
+            href: '/administration/workflow?q=Planning',
+            icon: Workflow,
+          },
+          {
+            title: 'Documents',
+            href: '/document-management?module=Planning',
+            icon: FileText,
+          },
+          {
+            title: 'Reports',
+            href: '/reports?module=planning',
+            icon: FileCheck,
+          },
         ],
       },
       {
         title: 'Operations',
         href: '/development/project-operations',
         icon: Activity,
+        permissions: ['project.access'],
       },
       {
         title: 'Portfolios',
         href: '/development/portfolios',
         icon: FolderTree,
+        permissions: ['project.access'],
       },
-      { title: 'Programs', href: '/development/programs', icon: Target },
+      {
+        title: 'Programs',
+        href: '/development/programs',
+        icon: Target,
+        permissions: ['project.access'],
+      },
       {
         title: 'Dependencies',
         href: '/development/project-dependencies',
         icon: AlertCircle,
+        permissions: ['project.access'],
       },
       {
         title: 'Analytics',
         href: '/development/project-analytics',
         icon: TrendingUp,
+        permissions: ['project.access'],
       },
       {
         title: 'Reports',
         href: '/development/project-reports',
         icon: FileCheck,
+        permissions: ['project.access'],
       },
       {
         title: 'Approvals',
         href: '/development/project-approvals',
         icon: ClipboardCheck,
+        permissions: ['project.access'],
       },
       {
         title: 'Billing',
         href: '/development/project-billing',
         icon: DollarSign,
+        permissions: ['project.access'],
       },
       {
         title: 'Materials',
         href: '/development/project-materials',
         icon: Package,
+        permissions: ['project.access'],
       },
       {
         title: 'Mobile',
         href: '/development/project-mobile',
         icon: Smartphone,
+        permissions: ['project.access'],
       },
-      { title: 'Tasks', href: '/development/tasks', icon: FileText },
-      { title: 'Timesheets', href: '/development/timesheets', icon: Clock },
-      { title: 'Expenses', href: '/development/expenses', icon: DollarSign },
-      { title: 'Resources', href: '/development/resources', icon: Users },
-      { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
+      {
+        title: 'Tasks',
+        href: '/development/tasks',
+        icon: FileText,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Timesheets',
+        href: '/development/timesheets',
+        icon: Clock,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Expenses',
+        href: '/development/expenses',
+        icon: DollarSign,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Resources',
+        href: '/development/resources',
+        icon: Users,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Timeline',
+        href: '/development/timeline',
+        icon: BarChart3,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Civil Engineering',
+        href: '/development/civil-engineering',
+        icon: Building2,
+        children: [
+          {
+            title: 'Design & Delivery',
+            href: '/development/civil-engineering/design-inputs',
+            icon: FileInput,
+            children: [
+              {
+                title: 'Design Inputs',
+                href: '/development/civil-engineering/design-inputs',
+                icon: FileInput,
+                permissions: ['civil-engineering.design-input.respond'],
+              },
+              {
+                title: 'Task Assignments',
+                href: '/development/civil-engineering/direct-tasks',
+                icon: ClipboardList,
+                permissions: ['civil-engineering.workspace.read'],
+              },
+            ],
+          },
+          {
+            title: 'Maintenance',
+            href: '/development/civil-engineering/maintenance-intakes',
+            icon: Wrench,
+            children: [
+              {
+                title: 'Intake',
+                href: '/development/civil-engineering/maintenance-intakes',
+                icon: ClipboardPlus,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Assessments',
+                href: '/development/civil-engineering/maintenance-assessments',
+                icon: ClipboardCheck,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Costing Handoffs',
+                href: '/development/civil-engineering/maintenance-costing-handoffs',
+                icon: DollarSign,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Execution',
+                href: '/development/civil-engineering/maintenance-execution-links',
+                icon: Wrench,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Completion',
+                href: '/development/civil-engineering/maintenance-completion-controls',
+                icon: ClipboardCheck,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Complaint Resolution',
+                href: '/development/civil-engineering/complaint-resolutions',
+                icon: MessageSquare,
+                permissions: ['civil-engineering.workspace.read'],
+              },
+            ],
+          },
+          {
+            title: 'Permitting',
+            href: '/development/civil-engineering/development-approval-files',
+            icon: ShieldCheck,
+            children: [
+              {
+                title: 'Development Approval Files',
+                href: '/development/civil-engineering/development-approval-files',
+                icon: Building2,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+              {
+                title: 'File Handoffs',
+                href: '/development/civil-engineering/development-approval-handoffs',
+                icon: ArrowRightLeft,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+              {
+                title: 'Engineering Reviews',
+                href: '/development/civil-engineering/permitting-engineering-reviews',
+                icon: ClipboardCheck,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+              {
+                title: 'HOD Decisions',
+                href: '/development/civil-engineering/permitting-hod-decisions',
+                icon: ShieldCheck,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+            ],
+          },
+          {
+            title: 'Administration',
+            href: '/development/civil-engineering/migration-batches',
+            icon: Settings,
+            children: [
+              {
+                title: 'Migration Workbench',
+                href: '/development/civil-engineering/migration-batches',
+                icon: FileCheck,
+                permissions: ['civil-engineering.migration.manage'],
+              },
+            ],
+          },
+        ],
+      },
     ],
   },
   {
     title: 'Procurement',
     href: '/procurement',
     icon: Briefcase,
+    roles: PROCUREMENT_ROLES,
+    permissions: [
+      'procurement.records.read',
+      'procurement.supplier.read',
+      'procurement.purchase-order.read',
+      'procurement.audit.read',
+    ],
+    accessMode: 'any',
     children: [
       {
         title: 'Supplier Management',
@@ -1439,6 +1774,12 @@ export const navigationItems: NavItem[] = [
     title: 'Inventory',
     href: '/inventory',
     icon: Package,
+    roles: INVENTORY_ROLES,
+    permissions: [
+      'procurement.inventory.read',
+      'procurement.inventory.master-data.manage',
+    ],
+    accessMode: 'any',
     children: [
       {
         title: 'Items & Catalogue',
@@ -1502,7 +1843,10 @@ export const navigationItems: NavItem[] = [
             title: 'Supplier Returns',
             href: '/inventory/supplier-returns',
             icon: RotateCcw,
-            permissions: ['procurement.inventory.issue', 'procurement.inventory.adjust.approve'],
+            permissions: [
+              'procurement.inventory.issue',
+              'procurement.inventory.adjust.approve',
+            ],
             accessMode: 'any',
           },
           {
@@ -1598,6 +1942,16 @@ export const navigationItems: NavItem[] = [
     title: 'CRM',
     href: '/crm',
     icon: Users,
+    roles: [
+      ...ADMINISTRATION_ROLES,
+      'CRM Manager',
+      'CRM Officer',
+      'Sales User',
+      'Sales Manager',
+      'Sales Officer',
+    ],
+    permissions: ['crm.access', 'crm.read', 'sales.access'],
+    accessMode: 'any',
     children: [
       { title: 'Overview', href: '/crm', icon: LayoutDashboard },
       { title: 'Accounts', href: '/crm/accounts', icon: Building2 },
@@ -1624,6 +1978,15 @@ export const navigationItems: NavItem[] = [
     title: 'Sales',
     href: '/sales',
     icon: ShoppingCart,
+    roles: [
+      ...ADMINISTRATION_ROLES,
+      'Sales User',
+      'Sales Manager',
+      'Sales Officer',
+      'Salesperson',
+    ],
+    permissions: ['sales.access', 'sales.read', 'sales.orders.read'],
+    accessMode: 'any',
     children: [
       { title: 'Sales Overview', href: '/sales', icon: LayoutDashboard },
       { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
@@ -1682,6 +2045,14 @@ export const navigationItems: NavItem[] = [
     title: 'Documents',
     href: '/document-management',
     icon: BookTemplate,
+    roles: DOCUMENT_MANAGEMENT_ROLES,
+    permissions: [
+      'document-management.access',
+      'document-management.read',
+      'dms.access',
+      'documents.read',
+    ],
+    accessMode: 'any',
     children: [
       {
         title: 'Dashboard',
@@ -1695,7 +2066,17 @@ export const navigationItems: NavItem[] = [
       },
       {
         title: 'Metadata Templates',
+        href: '/administration/document-management/metadata-templates',
+        icon: BookTemplate,
+      },
+      {
+        title: 'Metadata Template Records',
         href: '/document-management/CentralDocumentMetadataTemplate',
+        icon: FileText,
+      },
+      {
+        title: 'Document Templates',
+        href: '/administration/document-management/document-templates',
         icon: BookTemplate,
       },
       {
@@ -1720,33 +2101,57 @@ export const navigationItems: NavItem[] = [
     title: 'Estate',
     href: '/estate',
     icon: Home,
+    roles: [
+      ...ESTATE_CORE_ROLES,
+      ...PROPERTY_MANAGEMENT_ROLES,
+      ...FACILITIES_ROLES,
+    ],
+    permissions: [
+      'estate.access',
+      'property-management.access',
+      'facilities.access',
+    ],
+    accessMode: 'any',
     children: [
-      { title: 'Overview', href: '/estate', icon: ClipboardList },
       {
-        title: 'Property Dashboard',
-        href: '/estate/property-management/dashboard',
-        icon: BarChart3,
-      },
-      {
-        title: 'Facilities Dashboard',
-        href: '/estate/facilities/dashboard',
-        icon: BarChart3,
+        title: 'Overview',
+        href: '/estate',
+        icon: ClipboardList,
+        roles: ESTATE_CORE_ROLES,
+        permissions: ['estate.access', 'estate.read'],
+        accessMode: 'any',
       },
       {
         title: 'Land Acquisition',
         href: '/estate/land-acquisition',
         icon: Landmark,
+        roles: ESTATE_CORE_ROLES,
+        permissions: ['estate.access', 'estate.land.acquire'],
+        accessMode: 'any',
       },
       {
         title: 'Land Management',
         href: '/estate/land-management',
         icon: MapPin,
+        roles: ESTATE_CORE_ROLES,
+        permissions: ['estate.access', 'estate.land.manage'],
+        accessMode: 'any',
       },
-      { title: 'GIS Integration', href: '/estate/gis', icon: Globe2 },
+      {
+        title: 'GIS Integration',
+        href: '/estate/gis',
+        icon: Globe2,
+        roles: ESTATE_CORE_ROLES,
+        permissions: ['estate.access', 'estate.gis.read'],
+        accessMode: 'any',
+      },
       {
         title: 'Core Operations',
         href: '/estate',
         icon: ClipboardList,
+        roles: ESTATE_CORE_ROLES,
+        permissions: ['estate.access', 'estate.read'],
+        accessMode: 'any',
         children: [
           {
             title: 'Registry',
@@ -1869,6 +2274,9 @@ export const navigationItems: NavItem[] = [
         title: 'Property Management',
         href: '/estate/property-management',
         icon: Home,
+        roles: PROPERTY_MANAGEMENT_ROLES,
+        permissions: ['property-management.access'],
+        accessMode: 'any',
         children: [
           {
             title: 'Dashboard',
@@ -1928,24 +2336,17 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Facilities Management',
+        title: 'Facilities & Corporate Services',
         href: '/estate/facilities',
         icon: Building2,
+        roles: FACILITIES_ROLES,
+        permissions: ['facilities.access'],
+        accessMode: 'any',
         children: [
           {
             title: 'Dashboard',
             href: '/estate/facilities/dashboard',
             icon: BarChart3,
-          },
-          {
-            title: 'Property / Site Operating View',
-            href: '/estate/facilities/EstateFacilityPropertySite',
-            icon: Building2,
-          },
-          {
-            title: 'Lease / Occupancy Coordination',
-            href: '/estate/facilities/EstateFacilityLease',
-            icon: FileCheck,
           },
           {
             title: 'Maintenance Intake',
@@ -1968,19 +2369,9 @@ export const navigationItems: NavItem[] = [
             icon: ClipboardCheck,
           },
           {
-            title: 'Asset Operating View',
+            title: 'Facilities Assets',
             href: '/estate/facilities/EstateFacilityAssetRegister',
             icon: Database,
-          },
-          {
-            title: 'Billing / Service Charge',
-            href: '/estate/facilities/EstateFacilityBillingServiceCharge',
-            icon: CreditCard,
-          },
-          {
-            title: 'Documents Index',
-            href: '/estate/facilities/EstateFacilityDocument',
-            icon: FileText,
           },
         ],
       },
@@ -1991,9 +2382,17 @@ export const navigationItems: NavItem[] = [
     title: 'Legal',
     href: '/legal',
     icon: Gavel,
+    roles: LEGAL_ROLES,
+    permissions: ['legal.access', 'legal.read'],
+    accessMode: 'any',
     children: [
       { title: 'Dashboard', href: '/legal/dashboard', icon: BarChart3 },
       { title: 'Procedures', href: '/legal', icon: ClipboardList },
+      {
+        title: 'Property Agreement Reviews',
+        href: '/legal/LegalPropertyAgreementReview',
+        icon: FileCheck,
+      },
       {
         title: 'Procedure Manual',
         href: '/legal/LegalProcedure',
@@ -2261,6 +2660,9 @@ export const navigationItems: NavItem[] = [
     title: 'Reports',
     href: '/reports',
     icon: BarChart3,
+    roles: ADMINISTRATION_ROLES,
+    permissions: ['reports.read'],
+    accessMode: 'any',
     children: [
       {
         title: 'Financial Reports',
@@ -2278,7 +2680,11 @@ export const navigationItems: NavItem[] = [
         icon: ShoppingCart,
       },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
-      { title: 'Quantity Survey Reports', href: '/reports/quantity-survey', icon: Scale },
+      {
+        title: 'Quantity Survey Reports',
+        href: '/reports/quantity-survey',
+        icon: Scale,
+      },
       {
         title: 'Audit & Compliance Reports',
         href: '/reports/audit-compliance',
@@ -2366,6 +2772,41 @@ export const navigationItems: NavItem[] = [
         roles: ADMINISTRATION_ROLES,
       },
       {
+        title: 'Document Management',
+        href: '/administration/document-management',
+        icon: BookTemplate,
+        roles: ADMINISTRATION_ROLES,
+        permissions: ['Finance.Admin'],
+        accessMode: 'any',
+        children: [
+          {
+            title: 'Integration Contract',
+            href: '/administration/document-management/integration-contract',
+            icon: GitBranch,
+          },
+          {
+            title: 'Metadata Templates',
+            href: '/administration/document-management/metadata-templates',
+            icon: BookTemplate,
+          },
+          {
+            title: 'Document Templates',
+            href: '/administration/document-management/document-templates',
+            icon: FileText,
+          },
+          {
+            title: 'Access & Retention',
+            href: '/administration/document-management/access-retention',
+            icon: ShieldCheck,
+          },
+          {
+            title: 'Workflow Setup',
+            href: '/administration/workflow?q=Document%20Management',
+            icon: Workflow,
+          },
+        ],
+      },
+      {
         title: 'Finance',
         href: '/administration/finance',
         icon: CreditCard,
@@ -2402,6 +2843,12 @@ export const navigationItems: NavItem[] = [
                 href: '/administration/finance/dimensions',
                 icon: ListTree,
                 permissions: ['Finance.Dimensions.Manage'],
+              },
+              {
+                title: 'Dimension Route Readiness',
+                href: '/administration/finance/dimensions/readiness',
+                icon: ShieldCheck,
+                permissions: ['Finance.Dimensions.Certification.Manage'],
               },
               {
                 title: 'Account Generator',
@@ -2665,7 +3112,7 @@ export const navigationItems: NavItem[] = [
             icon: ShieldCheck,
           },
           {
-            title: 'Executable Policies',
+            title: 'Policy Sets',
             href: '/administration/procurement/policy-sets',
             icon: ShieldCheck,
           },
@@ -2866,6 +3313,7 @@ export const navigationItems: NavItem[] = [
           'admin.project-management',
           'quantity-survey.configuration.read',
           'quantity-survey.workspace.read',
+          'civil-engineering.configuration.read',
         ],
         accessMode: 'any',
         children: [
@@ -2909,6 +3357,12 @@ export const navigationItems: NavItem[] = [
             href: '/administration/project-management/quantity-survey-config',
             icon: ShieldCheck,
             permissions: ['quantity-survey.configuration.read'],
+          },
+          {
+            title: 'Civil Engineering Policy',
+            href: '/administration/project-management/civil-engineering-config',
+            icon: ShieldCheck,
+            permissions: ['civil-engineering.configuration.read'],
           },
           {
             title: 'Quantity Survey Catalogues',
@@ -3568,13 +4022,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
     }
 
     return items.reduce<NavItem[]>((acc, item) => {
-      const hasRoleAccess = !item.roles || hasAnyRole(item.roles);
-      const hasPermissionAccess =
-        !item.permissions || hasAnyPermission(item.permissions);
-      const hasAccess =
-        item.accessMode === 'any'
-          ? hasRoleAccess || hasPermissionAccess
-          : hasRoleAccess && hasPermissionAccess;
+      const hasAccess = canAccessNavItem(item, hasAnyRole, hasAnyPermission);
 
       if (!hasAccess) {
         return acc;

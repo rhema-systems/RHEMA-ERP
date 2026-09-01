@@ -265,6 +265,8 @@ export interface WorkflowDocumentRequirementDto {
   requirementKey: string;
   documentName: string;
   documentType?: string;
+  providedBy?: 'Customer' | 'Estate' | 'Legal' | 'Finance' | 'Internal';
+  appliesTo?: 'All' | 'Rent' | 'Sale';
   isRequired: boolean;
 }
 
@@ -381,6 +383,7 @@ export interface WorkflowEntitySummaryDto {
   entityType: string;
   entityId: string;
   hasActiveInstance: boolean;
+  approvalRequired: boolean;
   workflowInstanceId?: string;
   workflowName?: string;
   status?: WorkflowInstanceStatus;

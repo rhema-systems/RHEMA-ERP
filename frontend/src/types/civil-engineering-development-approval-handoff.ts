@@ -1,0 +1,7 @@
+import type { CivilEngineeringDevelopmentApprovalDocument, CivilEngineeringDevelopmentApprovalEvidence, CivilEngineeringDevelopmentApprovalLookupOption } from './civil-engineering-development-approval-file';
+
+export type CivilEngineeringPermittingSection = 'BuildingInspectorate' | 'Architecture' | 'CivilEngineering' | 'HeadOfDepartment' | 'GeodeticEngineering' | 'TownPlanning' | 'OtherTechnicalSection';
+export type CivilEngineeringPermittingRecipientRole = { roleId: string; roleName: string; recipients: CivilEngineeringDevelopmentApprovalLookupOption[] };
+export type CivilEngineeringDevelopmentApprovalHandoffLookups = { sections: CivilEngineeringPermittingSection[]; recipientRoles: CivilEngineeringPermittingRecipientRole[]; documents: CivilEngineeringDevelopmentApprovalDocument[] };
+export type CreateCivilEngineeringDevelopmentApprovalHandoffRequest = { clientRequestId: string; toSection: CivilEngineeringPermittingSection; recipientRoleId: string; recipientUserId: string; coverNote?: string | null; dueDate: string; evidence: { centralDocumentRecordId: string; centralDocumentVersionId: string }[] };
+export type CivilEngineeringDevelopmentApprovalHandoff = { id: string; sequenceNumber: number; fromSection: CivilEngineeringPermittingSection; toSection: CivilEngineeringPermittingSection; fromUserName: string; recipientRoleId: string; recipientRoleName: string; recipientUserId: string; recipientUserName: string; coverNote?: string | null; dueDate: string; createdAt: string; evidence: CivilEngineeringDevelopmentApprovalEvidence[] };

@@ -22,11 +22,11 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementControlEventsControllerTests
 {
     [Fact]
-    public void EveryEndpointIsReadOnlyAndRequiresAdministratorOrInternalAudit()
+    public void EveryEndpointIsReadOnlyAndRequiresProcurementAuditPermission()
     {
         var authorization = typeof(ProcurementControlEventsController).GetCustomAttribute<AuthorizeAttribute>();
         authorization.Should().NotBeNull();
-        authorization!.Roles.Should().Be("SuperAdmin,TenantAdmin,TDC_INTERNAL_AUDIT");
+        authorization!.Policy.Should().Be("procurement.audit.read");
         typeof(ProcurementControlEventsController).GetMethods(BindingFlags.Instance | BindingFlags.Public)
             .Where(method => method.DeclaringType == typeof(ProcurementControlEventsController))
             .Should().NotContain(method => method.Name.Contains("Create", StringComparison.OrdinalIgnoreCase) ||

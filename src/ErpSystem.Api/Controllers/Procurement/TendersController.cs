@@ -142,7 +142,7 @@ public class TendersController : ControllerBase
     /// Get tenders assigned to current user as evaluator
     /// </summary>
     [HttpGet("my-assigned")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderDto>>> GetMyAssignedTenders()
     {
         try
@@ -161,7 +161,7 @@ public class TendersController : ControllerBase
     /// Create a new tender
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDto>> CreateTender([FromBody] CreateTenderDto dto)
     {
         try
@@ -196,7 +196,7 @@ public class TendersController : ControllerBase
     /// Update a tender
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDto>> UpdateTender(Guid id, [FromBody] UpdateTenderDto dto)
     {
         try
@@ -219,7 +219,7 @@ public class TendersController : ControllerBase
     /// Submit a tender for approval (unified workflow)
     /// </summary>
     [HttpPost("{id}/submit")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<IActionResult> SubmitTender(Guid id)
     {
         try
@@ -243,6 +243,7 @@ public class TendersController : ControllerBase
     /// Approve the current tender workflow step
     /// </summary>
     [HttpPost("{id}/approve")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public async Task<IActionResult> ApproveTender(Guid id, [FromBody] ApproveTenderRequest? request)
     {
         try
@@ -270,6 +271,7 @@ public class TendersController : ControllerBase
     /// Reject the current tender workflow step
     /// </summary>
     [HttpPost("{id}/reject")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public async Task<IActionResult> RejectTender(Guid id, [FromBody] RejectTenderRequest request)
     {
         try
@@ -302,7 +304,7 @@ public class TendersController : ControllerBase
     /// Publish a tender
     /// </summary>
     [HttpPost("{id}/publish")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDto>> PublishTender(Guid id, [FromBody] PublishTenderDto dto)
     {
         try
@@ -337,17 +339,17 @@ public class TendersController : ControllerBase
     /// Close a tender
     /// </summary>
     [HttpPost("{id}/close")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDto>> CloseTender(Guid id)
     {
         try
         {
-            // TODO: Service interface doesn't have CloseTenderAsync method
-            // Commenting out until the method is implemented
-            // var tender = await _tenderService.CloseTenderAsync(id);
-            // return Ok(tender);
-            await Task.CompletedTask;
-            return StatusCode(501, "Close tender functionality not yet implemented");
+            var tender = await _tenderService.CloseTenderAsync(id);
+            return Ok(tender);
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -360,12 +362,62 @@ public class TendersController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Get the immutable amendment/addendum history for a tender.
+    /// </summary>
+    [HttpGet("{id}/revisions")]
+    [Authorize(Policy = "procurement.records.read")]
+    public async Task<ActionResult<IEnumerable<TenderRevisionDto>>> GetRevisions(Guid id)
+    {
+        try
+        {
+            return Ok(await _tenderService.GetTenderRevisionsAsync(id));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting revisions for tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while retrieving tender revisions");
+        }
+    }
+
+    /// <summary>
+    /// Issue an amendment, addendum, corrigendum, or deadline extension.
+    /// </summary>
+    [HttpPost("{id}/revisions")]
+    [Authorize(Policy = "procurement.tender.administer")]
+    public async Task<ActionResult<TenderRevisionDto>> CreateRevision(
+        Guid id,
+        [FromBody] CreateRevisionDto dto)
+    {
+        try
+        {
+            var revision = await _tenderService.CreateRevisionAsync(id, dto);
+            return CreatedAtAction(nameof(GetRevisions), new { id }, revision);
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
+        catch (ProcurementExceptionalSourcingConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating revision for tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while creating the tender revision");
+        }
+    }
+
     // TODO: Implement CancelTender endpoint when CancelTenderAsync service method is added
     // /// <summary>
     // /// Cancel a tender
     // /// </summary>
     // [HttpPost("{id}/cancel")]
-    // [Authorize(Roles = "Admin,ProcurementManager")]
     // public async Task<ActionResult<TenderDto>> CancelTender(Guid id, [FromBody] CancelTenderDto dto)
     // {
     //     try
@@ -388,7 +440,7 @@ public class TendersController : ControllerBase
     /// Delete a tender
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTender(Guid id)
     {
         try
@@ -411,7 +463,7 @@ public class TendersController : ControllerBase
     /// Add tender item
     /// </summary>
     [HttpPost("{id}/items")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderItemDto>> AddTenderItem(Guid id, [FromBody] CreateTenderItemDto dto)
     {
         try
@@ -434,7 +486,7 @@ public class TendersController : ControllerBase
     /// Update tender item
     /// </summary>
     [HttpPut("{tenderId}/items/{itemId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderItemDto>> UpdateTenderItem(Guid tenderId, Guid itemId, [FromBody] CreateTenderItemDto dto)
     {
         try
@@ -457,7 +509,7 @@ public class TendersController : ControllerBase
     /// Delete tender item
     /// </summary>
     [HttpDelete("{tenderId}/items/{itemId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTenderItem(Guid tenderId, Guid itemId)
     {
         try
@@ -480,7 +532,7 @@ public class TendersController : ControllerBase
     /// Upload tender document
     /// </summary>
     [HttpPost("{id}/documents")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     [RequestSizeLimit(20_000_000)] // 20MB limit
     public async Task<ActionResult<TenderDocumentDto>> UploadDocument(
         Guid id,
@@ -663,7 +715,7 @@ public class TendersController : ControllerBase
     /// Delete tender document
     /// </summary>
     [HttpDelete("{id}/documents/{documentId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteDocument(Guid id, Guid documentId)
     {
         try
@@ -686,7 +738,7 @@ public class TendersController : ControllerBase
     /// Invite tenderers
     /// </summary>
     [HttpPost("{id}/invitations")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> InviteTenderers(Guid id, [FromBody] InviteTenderersDto dto)
     {
         try
@@ -713,7 +765,7 @@ public class TendersController : ControllerBase
     /// Add tender fee
     /// </summary>
     [HttpPost("{id}/fees")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderFeeDto>> AddTenderFee(Guid id, [FromBody] CreateTenderFeeDto dto)
     {
         try
@@ -736,7 +788,7 @@ public class TendersController : ControllerBase
     /// Update tender fee
     /// </summary>
     [HttpPut("{tenderId}/fees/{feeId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderFeeDto>> UpdateTenderFee(Guid tenderId, Guid feeId, [FromBody] CreateTenderFeeDto dto)
     {
         try
@@ -759,7 +811,7 @@ public class TendersController : ControllerBase
     /// Delete tender fee
     /// </summary>
     [HttpDelete("{tenderId}/fees/{feeId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTenderFee(Guid tenderId, Guid feeId)
     {
         try
@@ -782,7 +834,7 @@ public class TendersController : ControllerBase
     /// Get tender evaluators
     /// </summary>
     [HttpGet("{id}/evaluators")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderEvaluatorDto>>> GetTenderEvaluators(Guid id)
     {
         try
@@ -798,10 +850,33 @@ public class TendersController : ControllerBase
     }
 
     /// <summary>
+    /// Get active evaluator candidates for this tenant and tender.
+    /// </summary>
+    [HttpGet("{id}/evaluator-candidates")]
+    [Authorize(Policy = "procurement.tender.administer")]
+    public async Task<ActionResult<IEnumerable<TenderEvaluatorCandidateDto>>> GetEvaluatorCandidates(Guid id)
+    {
+        try
+        {
+            var candidates = await _tenderService.GetEvaluatorCandidatesAsync(id);
+            return Ok(candidates);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving evaluator candidates for tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while retrieving evaluator candidates");
+        }
+    }
+
+    /// <summary>
     /// Assign evaluators
     /// </summary>
     [HttpPost("{id}/evaluators")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> AssignEvaluators(Guid id, [FromBody] AssignEvaluatorsDto dto)
     {
         try
@@ -818,6 +893,15 @@ public class TendersController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden,
                 EvaluationCommitteeProblem("EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -833,7 +917,7 @@ public class TendersController : ControllerBase
     /// Remove evaluator
     /// </summary>
     [HttpDelete("{tenderId}/evaluators/{evaluatorId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> RemoveEvaluator(Guid tenderId, Guid evaluatorId)
     {
         try
@@ -849,6 +933,15 @@ public class TendersController : ControllerBase
         {
             return StatusCode(StatusCodes.Status403Forbidden,
                 EvaluationCommitteeProblem("EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
         catch (InvalidOperationException ex)
         {
@@ -905,7 +998,7 @@ public class TendersController : ControllerBase
     /// Answer clarification
     /// </summary>
     [HttpPost("{tenderId}/clarifications/{clarificationId}/answer")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderClarificationDto>> AnswerClarification(Guid tenderId, Guid clarificationId, [FromBody] AnswerClarificationDto dto)
     {
         try
@@ -970,7 +1063,7 @@ public class TendersController : ControllerBase
     /// Add a new LOT to a tender
     /// </summary>
     [HttpPost("{tenderId}/lots")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderLotDto>> AddTenderLot(Guid tenderId, [FromBody] CreateTenderLotDto dto)
     {
         try
@@ -993,7 +1086,7 @@ public class TendersController : ControllerBase
     /// Update a tender LOT
     /// </summary>
     [HttpPut("lots/{lotId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderLotDto>> UpdateTenderLot(Guid lotId, [FromBody] UpdateTenderLotDto dto)
     {
         try
@@ -1016,7 +1109,7 @@ public class TendersController : ControllerBase
     /// Delete a tender LOT
     /// </summary>
     [HttpDelete("lots/{lotId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTenderLot(Guid lotId)
     {
         try
@@ -1039,7 +1132,7 @@ public class TendersController : ControllerBase
     /// Assign an item to a LOT
     /// </summary>
     [HttpPost("items/{itemId}/assign-lot/{lotId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> AssignItemToLot(Guid itemId, Guid lotId)
     {
         try
@@ -1062,7 +1155,7 @@ public class TendersController : ControllerBase
     /// Remove an item from its LOT
     /// </summary>
     [HttpPost("items/{itemId}/remove-from-lot")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> RemoveItemFromLot(Guid itemId)
     {
         try

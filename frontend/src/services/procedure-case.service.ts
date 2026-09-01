@@ -16,6 +16,7 @@ export interface ProcedureCaseSummary {
   workflowInstanceId?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  fieldValues?: Record<string, string | null> | null;
 }
 
 export interface ProcedureCaseField {
@@ -41,12 +42,20 @@ export interface ProcedureCaseDocument {
   id: string;
   name: string;
   requiredFrom?: string | null;
+  providedBy: string;
   isMandatory: boolean;
   fileName?: string | null;
   fileUrl?: string | null;
   notes?: string | null;
   uploadedById?: string | null;
   uploadedAt?: string | null;
+}
+
+export interface ProcedureCaseSubmissionDocumentRequirement {
+  name: string;
+  documentType?: string | null;
+  appliesTo: 'All' | 'Rent' | 'Sale';
+  isMandatory: boolean;
 }
 
 export interface ProcedureCaseActivity {
@@ -90,6 +99,17 @@ interface CreateCasePayload {
 }
 
 class ProcedureCaseService {
+  async getSubmissionDocumentRequirements(
+    module: string,
+    entityType: string
+  ): Promise<ProcedureCaseSubmissionDocumentRequirement[]> {
+    const response = await apiService.get<ApiResponse<ProcedureCaseSubmissionDocumentRequirement[]>>(
+      '/procedure-cases/submission-document-requirements',
+      { module, entityType }
+    );
+    return response.data || [];
+  }
+
   async listCases(module: string, entityType: string): Promise<ProcedureCaseSummary[]> {
     const response = await apiService.get<ApiResponse<ProcedureCaseSummary[]>>('/procedure-cases', {
       module,
@@ -113,6 +133,18 @@ class ProcedureCaseService {
 
   async createCase(payload: CreateCasePayload): Promise<ProcedureCaseDetail> {
     const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>('/procedure-cases', payload);
+    return response.data;
+  }
+
+  async createLinkedLegalMatter(
+    id: string,
+    matterType: string,
+    description?: string | null
+  ): Promise<ProcedureCaseDetail> {
+    const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(
+      `/procedure-cases/${id}/legal-matters`,
+      { matterType, description }
+    );
     return response.data;
   }
 
@@ -182,6 +214,42 @@ class ProcedureCaseService {
     const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(`/procedure-cases/${id}/complete-stage`, {
       notes,
     });
+    return response.data;
+  }
+
+  async syncLegalTransferFeePaymentStatus(id: string): Promise<ProcedureCaseDetail> {
+    const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(
+      `/procedure-cases/${id}/legal-transfer-fee-payment/sync`,
+      {}
+    );
+    return response.data;
+  }
+
+  async signLegalTransferExecutedDocument(
+    id: string,
+    documentId: string,
+    payload: { signatureRole: string; notes?: string | null }
+  ): Promise<ProcedureCaseDetail> {
+    const response = await rawApiService.request<ApiResponse<ProcedureCaseDetail>>(
+      `/procedure-cases/${id}/documents/${documentId}/legal-transfer-signature`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: new AbortController().signal,
+      }
+    );
+    return response.data;
+  }
+
+  async applyReviewAction(
+    id: string,
+    action: 'Reject' | 'RequestClarification',
+    reason: string
+  ): Promise<ProcedureCaseDetail> {
+    const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(
+      `/procedure-cases/${id}/review-action`,
+      { action, reason }
+    );
     return response.data;
   }
 }

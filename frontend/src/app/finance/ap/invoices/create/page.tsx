@@ -60,8 +60,14 @@ import { useQuery } from '@tanstack/react-query';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import {
+    toFinancePostingDimensionValues,
+    toFinanceSourceDimensionFormState,
+} from '@/lib/finance/source-document-dimensions';
 
 const lineItemSchema = z.object({
+    sourceLineId: z.string().uuid(),
     lineItemType: z.enum(['Expense', 'Product', 'Inventory']).default('Expense'),
     glAccountId: z.string().optional(),
     budgetEntryId: z.string().optional(),
@@ -133,6 +139,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const [glAccountSearch, setGlAccountSearch] = useState('');
     const [budgetCellsByLine, setBudgetCellsByLine] = useState<Record<string, ApBudgetCell[]>>({});
     const [budgetCellsLoading, setBudgetCellsLoading] = useState<Record<string, boolean>>({});
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Inventory Item combobox state
     const [inventoryItemOpenIndex, setInventoryItemOpenIndex] = useState<number | null>(null);
@@ -279,7 +288,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             withholdingTaxRate: 0,
             notes: '',
             lineItems: [
-                { lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }
+                { sourceLineId: crypto.randomUUID(), lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }
             ],
         },
     });
@@ -362,6 +371,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         setSelectedSupplier(supplier);
         setSelectedPurchaseOrderId(editInvoice.purchaseOrderId || '');
         suppressPurchaseOrderHydrationRef.current = Boolean(editInvoice.purchaseOrderId);
+        const dimensionState = toFinanceSourceDimensionFormState(editInvoice.financeDimensions);
+        setDefaultDimensionValues(dimensionState.defaultValues);
+        setLineDimensionValues(dimensionState.lineValues);
+        setApplyDefaultToAll(false);
 
         const invoiceDate = new Date(editInvoice.invoiceDate);
         const dueDate = editInvoice.dueDate
@@ -389,6 +402,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             withholdingTaxRate: editInvoice.withholdingTaxRate || 0,
             isOpeningBalance: editInvoice.isOpeningBalance,
             lineItems: editInvoice.lineItems.map(line => ({
+                sourceLineId: line.id,
                 lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Product' | 'Inventory',
                 glAccountId: line.glAccountId,
                 budgetEntryId: line.budgetEntryId,
@@ -671,6 +685,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         form.setValue('currencyCode', selectedPurchaseOrder.currency || 'GHS');
         form.setValue('exchangeRate', 1);
         form.setValue('lineItems', selectedPurchaseOrder.items.map(item => ({
+            sourceLineId: crypto.randomUUID(),
             lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Expense',
             inventoryItemId: item.inventoryItemId || undefined,
             warehouseId: item.warehouseId || undefined,
@@ -753,6 +768,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
                     return {
+                        id: item.sourceLineId,
                         lineItemType: item.lineItemType,
                         glAccountId: item.glAccountId || null,
                         budgetEntryId: item.budgetEntryId || null,
@@ -767,7 +783,23 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         inventoryItemId: item.inventoryItemId || null,
                         warehouseId: item.warehouseId || null,
                     } as any;
-                })
+                }),
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: data.lineItems.flatMap(item => {
+                        const accountId = !isOpeningBalance
+                            && !data.purchaseOrderId
+                            && item.lineItemType === 'Expense'
+                            ? item.glAccountId
+                            : undefined;
+                        return accountId ? [{
+                            sourceLineId: item.sourceLineId,
+                            accountId,
+                            dimensions: toFinancePostingDimensionValues(lineDimensionValues[item.sourceLineId] || {}),
+                        }] : [];
+                    }),
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             };
 
             if (isEditMode && editInvoice) {
@@ -841,7 +873,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             ? 'The invoice supplier is not available in the current tenant.'
                             : 'The invoice could not be loaded.')}
                 </p>
-                <Button variant="outline" onClick={() => router.push('/finance/ap/invoices')}>Back to invoices</Button>
+                <Button variant="outline" onClick={() => router.push('/finance/ap/invoices')}>
+                    Back to invoices
+                </Button>
             </div>
         );
     }
@@ -851,7 +885,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             <div className="mx-auto max-w-2xl space-y-4 p-8">
                 <h1 className="text-2xl font-bold">Invoice can no longer be edited</h1>
                 <p className="text-muted-foreground">Only Draft or Rejected invoices may be changed.</p>
-                <Button variant="outline" onClick={() => router.push(`/finance/ap/invoices/${editInvoice.id}`)}>View invoice</Button>
+                <Button variant="outline" onClick={() => router.push(`/finance/ap/invoices/${editInvoice.id}`)}>
+                    View invoice
+                </Button>
             </div>
         );
     }
@@ -1237,11 +1273,46 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </CardContent>
                 </Card>
 
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Finance coding dimensions</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <SourceDocumentDimensionPanel
+                            context={{
+                                sourceModule: 'AP',
+                                sourceDocumentType: 'VendorInvoice',
+                                postingAction: 'Post',
+                                sourceRoute: 'finance.ap.vendor-invoices.manual',
+                                contractVersion: '1.0',
+                            }}
+                            effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
+                            lines={watchLineItems.map((item) => ({
+                                id: item.sourceLineId,
+                                accountId: !watchIsOpeningBalance
+                                    && !selectedPurchaseOrderId
+                                    && item.lineItemType === 'Expense'
+                                    ? item.glAccountId
+                                    : undefined,
+                                accountLabel: item.description || undefined,
+                            }))}
+                            defaultValues={defaultDimensionValues}
+                            lineValues={lineDimensionValues}
+                            onDefaultValuesChange={(values) => {
+                                setDefaultDimensionValues(values);
+                                setApplyDefaultToAll(false);
+                            }}
+                            onLineValuesChange={setLineDimensionValues}
+                            onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        />
+                    </CardContent>
+                </Card>
+
                 {/* Line Items Card */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>

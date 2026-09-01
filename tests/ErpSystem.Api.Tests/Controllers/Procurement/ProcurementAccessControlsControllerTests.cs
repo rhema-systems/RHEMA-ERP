@@ -23,15 +23,15 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementAccessControlsControllerTests
 {
     [Fact]
-    public void RuntimeCapabilityRequiresAuthenticationWhileAdministrationRequiresTenantAdministrator()
+    public void RuntimeCapabilityRequiresAuthenticationWhileAdministrationUsesAccessPermission()
     {
         typeof(ProcurementAccessControlsController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(ProcurementAccessControlsController).GetMethod(nameof(ProcurementAccessControlsController.GetReadiness))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
         typeof(ProcurementAccessControlsController).GetMethod(nameof(ProcurementAccessControlsController.GetAssignments))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
         typeof(ProcurementAccessControlsController).GetMethod(nameof(ProcurementAccessControlsController.GetAudit))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
         typeof(ProcurementAccessControlsController).GetMethod(nameof(ProcurementAccessControlsController.EnforceCapability))!
             .GetCustomAttribute<AuthorizeAttribute>().Should().BeNull();
     }

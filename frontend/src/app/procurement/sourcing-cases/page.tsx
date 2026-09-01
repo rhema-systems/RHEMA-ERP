@@ -156,8 +156,8 @@ export default function ProcurementSourcingCasesPage() {
   const effectiveMethod = form.selectedMethod ?? recommendedMethod;
   const isMethodOverride = Boolean(
     form.selectedMethod &&
-      recommendedMethod &&
-      form.selectedMethod !== recommendedMethod
+    recommendedMethod &&
+    form.selectedMethod !== recommendedMethod
   );
   const recommendationCandidate = readiness.data?.methodCandidates.find(
     (candidate) => candidate.method === recommendedMethod
@@ -551,11 +551,11 @@ export default function ProcurementSourcingCasesPage() {
               </TableHeader>
               <TableBody>
                 {sources.data?.map((source) => (
-                  <TableRow key={source.sourcingReleaseId}>
+                  <TableRow key={source.requisitionId}>
                     <TableCell>
                       <p className="font-medium">{source.requisitionNumber}</p>
                       <p className="text-xs text-muted-foreground">
-                        {source.releaseReference}
+                        {source.releaseReference ?? 'Release recorded automatically when the case is created'}
                       </p>
                     </TableCell>
                     <TableCell>
@@ -614,7 +614,7 @@ export default function ProcurementSourcingCasesPage() {
                       colSpan={6}
                       className="py-12 text-center text-muted-foreground"
                     >
-                      No current immutable requisition releases are available.
+                      No approved requisitions are currently ready for sourcing.
                     </TableCell>
                   </TableRow>
                 )}
@@ -630,14 +630,14 @@ export default function ProcurementSourcingCasesPage() {
             <DialogTitle>Create controlled sourcing case</DialogTitle>
             <DialogDescription>
               The server derives the procurement method from the effective
-              policy and threshold. Assign every released requisition line to
-              exactly one lot; any different method must carry an already
-              approved exception and shared-workflow lineage.
+              policy and threshold. Assign every approved requisition line to
+              exactly one lot. The release audit record is created automatically;
+              a different method requires an approved exception.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Current immutable release</Label>
+              <Label>Approved requisition</Label>
               <Select
                 value={form.requisitionId}
                 onValueChange={(value) =>
@@ -645,7 +645,7 @@ export default function ProcurementSourcingCasesPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select released requisition" />
+                  <SelectValue placeholder="Select approved requisition" />
                 </SelectTrigger>
                 <SelectContent>
                   {sources.data
@@ -655,7 +655,8 @@ export default function ProcurementSourcingCasesPage() {
                         key={source.requisitionId}
                         value={source.requisitionId}
                       >
-                        {source.requisitionNumber} · {source.releaseReference}
+                        {source.requisitionNumber}
+                        {source.releaseReference ? ` · ${source.releaseReference}` : ' · Ready'}
                       </SelectItem>
                     ))}
                 </SelectContent>
@@ -860,7 +861,10 @@ export default function ProcurementSourcingCasesPage() {
           )}
 
           <div className="space-y-2">
-            <Label>Method justification</Label>
+            <Label>
+              Sourcing and lot notes
+              {form.lots.length > 1 ? ' *' : ' (optional)'}
+            </Label>
             <Textarea
               value={form.justification}
               onChange={(event) =>
@@ -869,9 +873,18 @@ export default function ProcurementSourcingCasesPage() {
                   justification: event.target.value,
                 }))
               }
-              placeholder="Record why this method and lot structure are appropriate for the released demand."
+              placeholder={
+                form.lots.length > 1
+                  ? 'Explain why this requisition is divided into multiple sourcing lots.'
+                  : 'Add any useful operational notes. The system records the policy-selected method and rationale automatically.'
+              }
               rows={3}
             />
+            <p className="text-xs text-muted-foreground">
+              {form.lots.length > 1
+                ? 'Multiple lots require a short structure explanation. A separate approval reason is required for a method override.'
+                : 'A separate reason is required only when requesting a method other than the policy recommendation.'}
+            </p>
           </div>
 
           <div className="space-y-3">

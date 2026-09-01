@@ -60,6 +60,30 @@ public sealed class InventoryItemsProfileControllerSecurityTests
             .Should().BeLessThan(history.IndexOf("Repository<InventoryItem>", StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait("Batch", "TDC-INV-STORES")]
+    public void Stock_reconciliation_is_dry_run_by_default_and_requires_controlled_permissions()
+    {
+        var method = typeof(InventoryItemsController)
+            .GetMethod(nameof(InventoryItemsController.ReconcileStockTotals))!;
+        method.GetParameters().Single(value => value.Name == "dryRun").DefaultValue.Should().Be(true);
+        method.GetParameters().Single(value => value.Name == "reason")
+            .GetCustomAttributes(typeof(MaxLengthAttribute), true)
+            .Cast<MaxLengthAttribute>().Single().Length.Should().Be(500);
+
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "ErpSystem.Api", "Controllers", "InventoryItemsController.cs"));
+        var start = source.IndexOf("ReconcileStockTotals(", StringComparison.Ordinal);
+        var end = source.IndexOf("GetInventoryItemAllocations", start, StringComparison.Ordinal);
+        var reconcile = source[start..end];
+
+        reconcile.Should().Contain("GetTenantId()");
+        reconcile.Should().Contain("procurement.inventory.master-data.manage");
+        reconcile.Should().Contain("procurement.inventory.adjust.approve");
+        reconcile.Should().Contain("InventoryStock.Reconciled");
+        reconcile.Should().NotContain("DefaultTenantId");
+    }
+
     private static string FindRepositoryRoot([System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
     {
         var directory = new DirectoryInfo(Path.GetDirectoryName(sourcePath) ?? AppContext.BaseDirectory);

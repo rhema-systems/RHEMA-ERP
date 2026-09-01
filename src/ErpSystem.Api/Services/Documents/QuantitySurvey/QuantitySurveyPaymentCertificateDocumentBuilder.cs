@@ -35,7 +35,7 @@ public sealed class QuantitySurveyPaymentCertificateDocumentBuilder(
             .FirstOrDefaultAsync(value => value.TenantId == tenantId && value.Id == request.EntityId &&
                 !value.IsDeleted && value.QuantitySurveyValuationWorksheetId != null, cancellationToken)
             ?? throw new QuantitySurveyPaymentCertificateNotFoundException("The governed payment certificate was not found.");
-        if (await projectService.GetProjectByIdAsync(certificate.ProjectId) is null)
+        if (!await projectService.HasProjectAccessAsync(certificate.ProjectId))
             throw new UnauthorizedAccessException("You are not permitted to export this project's payment certificate.");
         if (certificate.Status is not (ProjectPaymentCertificateStatuses.Approved or ProjectPaymentCertificateStatuses.Paid) ||
             certificate.ApprovalStatus != "Approved")

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -39,6 +40,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
     private readonly ITaxCalculationEngine _taxEngine;
     private readonly IApSupplierIdentityService _supplierIdentity;
     private readonly ILogger<SupplierDebitNoteService> _logger;
+    private readonly IFinanceSourceDimensionService? _sourceDimensions;
 
     public SupplierDebitNoteService(
         ApplicationDbContext db,
@@ -50,7 +52,8 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         IFinanceAuditService audit,
         ITaxCalculationEngine taxEngine,
         IApSupplierIdentityService supplierIdentity,
-        ILogger<SupplierDebitNoteService> logger)
+        ILogger<SupplierDebitNoteService> logger,
+        IFinanceSourceDimensionService? sourceDimensions = null)
     {
         _db = db;
         _unitOfWork = unitOfWork;
@@ -62,6 +65,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         _taxEngine = taxEngine;
         _supplierIdentity = supplierIdentity;
         _logger = logger;
+        _sourceDimensions = sourceDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -112,9 +116,37 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         return note == null ? null : Map(note);
     }
 
-    public async Task<SupplierDebitNoteDto> CreateAsync(
-        CreateSupplierDebitNoteDto dto,
+    public async Task<SupplierDebitNoteDto?> GetByIdAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken = default)
+    {
+        EnsureSupplierDebitNoteRoute(producer);
+        var note = await BaseQuery(TenantId).AsSplitQuery().AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (note is null) return null;
+        var result = Map(note);
+        if (_sourceDimensions is not null)
+            result.FinanceDimensions = await _sourceDimensions.GetAsync(
+                producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note), cancellationToken);
+        return result;
+    }
+
+    public Task<SupplierDebitNoteDto> CreateAsync(
+        CreateSupplierDebitNoteDto dto,
+        CancellationToken cancellationToken = default) =>
+        CreateRouteAsync(dto, null, cancellationToken);
+
+    public Task<SupplierDebitNoteDto> CreateAsync(
+        CreateSupplierDebitNoteDto dto,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default) =>
+        CreateRouteAsync(dto, EnsureSupplierDebitNoteRoute(producer), cancellationToken);
+
+    private async Task<SupplierDebitNoteDto> CreateRouteAsync(
+        CreateSupplierDebitNoteDto dto,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
     {
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -124,7 +156,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 if (dto.OriginalVendorInvoiceId.HasValue)
                     await _unitOfWork.AcquireTransactionLockAsync(
                         ApSettlementLockKeys.Invoice(TenantId, dto.OriginalVendorInvoiceId.Value), cancellationToken);
-                var created = await CreateCoreAsync(dto, cancellationToken);
+                var created = await CreateCoreAsync(dto, producer, cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
                 return created;
             }
@@ -139,6 +171,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
 
     private async Task<SupplierDebitNoteDto> CreateCoreAsync(
         CreateSupplierDebitNoteDto dto,
+        FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
@@ -189,14 +222,42 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, excludedId: null, cancellationToken);
         _db.SupplierDebitNotes.Add(note);
         await _db.SaveChangesAsync(cancellationToken);
+        if (producer is not null)
+        {
+            if (_sourceDimensions is null)
+                throw new InvalidOperationException("Finance source dimensions are not configured for supplier debit notes.");
+            await _sourceDimensions.SynchronizeDraftAsync(
+                producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note),
+                await BuildDebitNoteDimensionInputAsync(note, dto.FinanceDimensions, cancellationToken),
+                inheritDefaultForUnassignedLines: true,
+                budgetReservationSourceDocumentType: null,
+                "Supplier debit note created.", cancellationToken);
+        }
         await RecordAuditAsync(CreatedEvent, note, after: Snapshot(note), cancellationToken: cancellationToken);
-        return await GetRequiredAsync(note.Id, cancellationToken);
+        return producer is null
+            ? await GetRequiredAsync(note.Id, cancellationToken)
+            : await GetByIdAsync(note.Id, producer, cancellationToken)
+              ?? throw new InvalidOperationException("Supplier debit note could not be reloaded.");
     }
 
-    public async Task<SupplierDebitNoteDto> UpdateDraftAsync(
+    public Task<SupplierDebitNoteDto> UpdateDraftAsync(
         Guid id,
         UpdateSupplierDebitNoteDto dto,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        UpdateDraftRouteAsync(id, dto, null, cancellationToken);
+
+    public Task<SupplierDebitNoteDto> UpdateDraftAsync(
+        Guid id,
+        UpdateSupplierDebitNoteDto dto,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default) =>
+        UpdateDraftRouteAsync(id, dto, EnsureSupplierDebitNoteRoute(producer), cancellationToken);
+
+    private async Task<SupplierDebitNoteDto> UpdateDraftRouteAsync(
+        Guid id,
+        UpdateSupplierDebitNoteDto dto,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
     {
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -216,7 +277,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                              .OrderBy(item => item))
                     await _unitOfWork.AcquireTransactionLockAsync(
                         ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
-                var updated = await UpdateDraftCoreAsync(id, dto, cancellationToken);
+                var updated = await UpdateDraftCoreAsync(id, dto, producer, cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
                 return updated;
             }
@@ -232,6 +293,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
     private async Task<SupplierDebitNoteDto> UpdateDraftCoreAsync(
         Guid id,
         UpdateSupplierDebitNoteDto dto,
+        FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
     {
         var note = await _db.SupplierDebitNotes
@@ -273,11 +335,37 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         await ReplaceLinesAsync(note, dto.Lines, invoice, cancellationToken);
         await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        if (producer is not null)
+        {
+            if (_sourceDimensions is null)
+                throw new InvalidOperationException("Finance source dimensions are not configured for supplier debit notes.");
+            await _sourceDimensions.SynchronizeDraftAsync(
+                producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note),
+                await BuildDebitNoteDimensionInputAsync(note, dto.FinanceDimensions, cancellationToken),
+                inheritDefaultForUnassignedLines: true,
+                budgetReservationSourceDocumentType: null,
+                "Supplier debit note draft changed.", cancellationToken);
+        }
         await RecordAuditAsync(UpdatedEvent, note, before, Snapshot(note), cancellationToken: cancellationToken);
-        return await GetRequiredAsync(note.Id, cancellationToken);
+        return producer is null
+            ? await GetRequiredAsync(note.Id, cancellationToken)
+            : await GetByIdAsync(note.Id, producer, cancellationToken)
+              ?? throw new InvalidOperationException("Supplier debit note could not be reloaded.");
     }
 
-    public async Task<SupplierDebitNoteDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task<SupplierDebitNoteDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default) =>
+        SubmitRouteAsync(id, null, cancellationToken);
+
+    public Task<SupplierDebitNoteDto> SubmitAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default) =>
+        SubmitRouteAsync(id, EnsureSupplierDebitNoteRoute(producer), cancellationToken);
+
+    private async Task<SupplierDebitNoteDto> SubmitRouteAsync(
+        Guid id,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
     {
         return await ExecuteNoteMutationAsync(id, async note =>
         {
@@ -286,12 +374,13 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 note.SupplierId ?? throw new InvalidOperationException("Supplier debit note has no canonical AP supplier identity."),
                 cancellationToken);
             await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
-            return await SubmitCoreAsync(note, cancellationToken);
+            return await SubmitCoreAsync(note, producer, cancellationToken);
         }, cancellationToken);
     }
 
     private async Task<SupplierDebitNoteDto> SubmitCoreAsync(
         SupplierDebitNote note,
+        FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
     {
         if (note.Status != SupplierDebitNoteStatus.Draft)
@@ -301,6 +390,14 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         if (note.LineItems.Count == 0 || note.TotalAmount <= 0m)
             throw new InvalidOperationException("Supplier debit note must contain at least one positive-value line.");
         ValidateLineClassificationEvidence(note);
+        if (producer is not null)
+        {
+            if (_sourceDimensions is null)
+                throw new InvalidOperationException("Finance source dimensions are not configured for supplier debit notes.");
+            await _sourceDimensions.ValidateAndFreezeAsync(
+                producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note),
+                requireCurrentBudgetEvidence: false, cancellationToken);
+        }
 
         var result = await _workflow.SubmitAsync(WorkflowEntityType, note.Id);
         if (!result.ExecutionResult.Success)
@@ -332,16 +429,30 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             note.ApprovalSource = "WorkflowAutoApproval";
             note.ApprovedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
-            return await GetRequiredAsync(note.Id, cancellationToken);
+            return await GetRequiredAsync(note.Id, producer, cancellationToken);
         }
 
-        return await GetRequiredAsync(note.Id, cancellationToken);
+        return await GetRequiredAsync(note.Id, producer, cancellationToken);
     }
 
-    public async Task<SupplierDebitNoteDto> ProcessApprovalAsync(
+    public Task<SupplierDebitNoteDto> ProcessApprovalAsync(
         Guid id,
         SupplierDebitNoteApprovalDto dto,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ProcessApprovalRouteAsync(id, dto, null, cancellationToken);
+
+    public Task<SupplierDebitNoteDto> ProcessApprovalAsync(
+        Guid id,
+        SupplierDebitNoteApprovalDto dto,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default) =>
+        ProcessApprovalRouteAsync(id, dto, EnsureSupplierDebitNoteRoute(producer), cancellationToken);
+
+    private async Task<SupplierDebitNoteDto> ProcessApprovalRouteAsync(
+        Guid id,
+        SupplierDebitNoteApprovalDto dto,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
     {
         return await ExecuteNoteMutationAsync(id, async note =>
         {
@@ -350,13 +461,14 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 note.SupplierId ?? throw new InvalidOperationException("Supplier debit note has no canonical AP supplier identity."),
                 cancellationToken);
             await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
-            return await ProcessApprovalCoreAsync(note, dto, cancellationToken);
+            return await ProcessApprovalCoreAsync(note, dto, producer, cancellationToken);
         }, cancellationToken);
     }
 
     private async Task<SupplierDebitNoteDto> ProcessApprovalCoreAsync(
         SupplierDebitNote note,
         SupplierDebitNoteApprovalDto dto,
+        FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
     {
         if (note.Status != SupplierDebitNoteStatus.PendingApproval)
@@ -369,6 +481,14 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             throw new InvalidOperationException("A rejection reason is required.");
         if (!await _workflow.CanUserApproveAsync(WorkflowEntityType, note.Id, CurrentUserId))
             throw new UnauthorizedAccessException("You are not assigned to the current supplier debit-note approval step.");
+        if (dto.Approve && producer is not null)
+        {
+            if (_sourceDimensions is null)
+                throw new InvalidOperationException("Finance source dimensions are not configured for supplier debit notes.");
+            await _sourceDimensions.ValidateAndFreezeAsync(
+                producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note),
+                requireCurrentBudgetEvidence: false, cancellationToken);
+        }
 
         var comments = dto.Approve ? dto.Comments : dto.RejectionReason ?? dto.Comments;
         var result = await _workflow.ProcessApprovalAsync(
@@ -396,11 +516,11 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 reason: note.RejectionReason,
                 workflowInstanceId: note.WorkflowInstanceId,
                 cancellationToken: cancellationToken);
-            return await GetRequiredAsync(note.Id, cancellationToken);
+            return await GetRequiredAsync(note.Id, producer, cancellationToken);
         }
 
         if (result.Outcome != WorkflowOutcome.Approved)
-            return await GetRequiredAsync(note.Id, cancellationToken);
+            return await GetRequiredAsync(note.Id, producer, cancellationToken);
 
         note.Status = SupplierDebitNoteStatus.Approved;
         note.ApprovedById = CurrentUserId;
@@ -419,10 +539,22 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         // Approval and posting are separate controlled actions. The Finance workflow proves the
         // independent commercial review; a purpose-permissioned poster then creates the journal
         // through the central posting engine. Do not silently borrow the approver's HTTP authority.
-        return await GetRequiredAsync(note.Id, cancellationToken);
+        return await GetRequiredAsync(note.Id, producer, cancellationToken);
     }
 
-    public async Task<SupplierDebitNoteDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task<SupplierDebitNoteDto> PostAsync(Guid id, CancellationToken cancellationToken = default) =>
+        PostRouteAsync(id, null, cancellationToken);
+
+    public Task<SupplierDebitNoteDto> PostAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default) =>
+        PostRouteAsync(id, EnsureSupplierDebitNoteRoute(producer), cancellationToken);
+
+    private async Task<SupplierDebitNoteDto> PostRouteAsync(
+        Guid id,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
     {
         SupplierDebitNote? failedNote = null;
         try
@@ -435,7 +567,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                     note.SupplierId ?? throw new InvalidOperationException("Supplier debit note has no canonical AP supplier identity."),
                     cancellationToken);
                 await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
-                return await PostCoreAsync(note, cancellationToken);
+                return await PostCoreAsync(note, producer, cancellationToken);
             }, cancellationToken);
         }
         catch (Exception exception)
@@ -457,6 +589,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
 
     private async Task<SupplierDebitNoteDto> PostCoreAsync(
         SupplierDebitNote note,
+        FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
     {
         if (note.Status == SupplierDebitNoteStatus.Posted && note.JournalEntryId.HasValue && note.PostingEventId.HasValue)
@@ -464,9 +597,19 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         if (note.Status != SupplierDebitNoteStatus.Approved)
             throw new InvalidOperationException("Only approved supplier debit notes can be posted.");
         ValidateLineClassificationEvidence(note);
+        if (producer is not null)
+        {
+            if (_sourceDimensions is null)
+                throw new InvalidOperationException("Finance source dimensions are not configured for supplier debit notes.");
+            await _sourceDimensions.ValidateAndFreezeAsync(
+                producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note),
+                requireCurrentBudgetEvidence: false, cancellationToken);
+        }
 
-        var request = await BuildPostingRequestAsync(note, cancellationToken);
-        var result = await _posting.PostAsync(request, cancellationToken);
+        var request = await BuildPostingRequestAsync(note, producer, cancellationToken);
+        var result = producer is null
+            ? await _posting.PostAsync(request, cancellationToken)
+            : await _posting.PostAsync(request, producer, cancellationToken);
         if (note.JournalEntryId.HasValue && note.JournalEntryId != result.JournalEntryId)
             throw new InvalidOperationException("Supplier debit note is already linked to a different journal entry.");
 
@@ -495,7 +638,9 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             postingEventId: result.PostingEventId,
             journalEntryId: result.JournalEntryId,
             cancellationToken: cancellationToken);
-        return Map(note);
+        return producer is null
+            ? Map(note)
+            : await GetRequiredAsync(note.Id, producer, cancellationToken);
     }
 
     private async Task<SupplierDebitNoteDto> ExecuteNoteMutationAsync(
@@ -652,6 +797,88 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         await GetByIdAsync(id, cancellationToken)
         ?? throw new InvalidOperationException("Supplier debit note could not be reloaded.");
 
+    private async Task<SupplierDebitNoteDto> GetRequiredAsync(
+        Guid id,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken) =>
+        producer is null
+            ? await GetRequiredAsync(id, cancellationToken)
+            : await GetByIdAsync(id, producer, cancellationToken)
+                ?? throw new InvalidOperationException("Supplier debit note could not be reloaded.");
+
+    private static IReadOnlyList<FinanceSourceDocumentLineContext> DimensionLineContexts(
+        SupplierDebitNote note) =>
+        note.LineItems.Where(line => !line.IsDeleted).Select(line =>
+            new FinanceSourceDocumentLineContext(
+                line.Id,
+                line.ResolvedCreditAccountId
+                ?? throw new InvalidOperationException(
+                    $"Supplier debit-note line '{line.Description}' has no server-resolved economic account.")))
+            .ToArray();
+
+    private async Task<FinanceSourceDocumentDimensionInputDto?> BuildDebitNoteDimensionInputAsync(
+        SupplierDebitNote note,
+        FinanceSourceDocumentDimensionInputDto? requested,
+        CancellationToken cancellationToken)
+    {
+        if (!note.OriginalVendorInvoiceId.HasValue) return requested;
+        if ((requested?.Lines.Count ?? 0) > 0)
+            throw new InvalidOperationException(
+                "Dimensions on a linked supplier debit note are inherited from the exact posted invoice lines and cannot be overridden.");
+
+        var transactionIds = note.LineItems.Where(line => !line.IsDeleted && line.OriginalAccountTransactionId.HasValue)
+            .Select(line => line.OriginalAccountTransactionId!.Value).Distinct().ToArray();
+        var transactions = await _db.AccountTransactions.AsNoTracking()
+            .Include(item => item.FinanceDimensionSnapshot)!.ThenInclude(snapshot => snapshot!.Items)
+            .Include(item => item.FinanceDimensionSet)!.ThenInclude(set => set!.Items)
+            .Where(item => item.TenantId == TenantId && transactionIds.Contains(item.Id) && !item.IsDeleted)
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        return new FinanceSourceDocumentDimensionInputDto
+        {
+            DefaultDimensions = requested?.DefaultDimensions ?? Array.Empty<FinancePostingDimensionValueDto>(),
+            ApplyDefaultToEligibleLines = false,
+            Lines = note.LineItems.Where(line => !line.IsDeleted).Select(line =>
+            {
+                transactions.TryGetValue(line.OriginalAccountTransactionId ?? Guid.Empty, out var transaction);
+                return new FinanceSourceLineDimensionInputDto
+                {
+                    SourceLineId = line.Id,
+                    AccountId = line.ResolvedCreditAccountId
+                        ?? throw new InvalidOperationException("Linked supplier debit-note line has no historical account."),
+                    Dimensions = InheritedPostingDimensions(transaction)
+                };
+            }).ToArray()
+        };
+    }
+
+    private static IReadOnlyList<FinancePostingDimensionValueDto> InheritedPostingDimensions(
+        AccountTransaction? transaction)
+    {
+        if (transaction?.FinanceDimensionSnapshot is { } snapshot)
+            return snapshot.Items.OrderBy(item => item.DimensionCodeSnapshot)
+                .Select(item => new FinancePostingDimensionValueDto
+                {
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    ValueCode = item.DimensionValueCodeSnapshot
+                }).ToArray();
+        return transaction?.FinanceDimensionSet?.Items
+            .OrderBy(item => item.DimensionCodeSnapshot)
+            .Select(item => new FinancePostingDimensionValueDto
+            {
+                DimensionCode = item.DimensionCodeSnapshot,
+                ValueCode = item.DimensionValueCodeSnapshot
+            }).ToArray() ?? Array.Empty<FinancePostingDimensionValueDto>();
+    }
+
+    private static FinancePostingProducerContext EnsureSupplierDebitNoteRoute(
+        FinancePostingProducerContext producer)
+    {
+        ArgumentNullException.ThrowIfNull(producer);
+        if (producer.RouteId != FinanceDimensionRouteId.FinanceApSupplierDebitNote)
+            throw new InvalidOperationException("The trusted producer context is not the Finance AP supplier-debit-note route.");
+        return producer;
+    }
+
     private async Task<BusinessPartner> GetVendorAsync(Guid vendorId, CancellationToken cancellationToken)
     {
         var vendor = await _db.BusinessPartners.FirstOrDefaultAsync(item =>
@@ -702,13 +929,27 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         if (lines.Count == 0)
             throw new InvalidOperationException("At least one supplier debit-note line is required.");
 
-        if (note.LineItems.Count > 0)
+        var existingLines = note.LineItems.Where(line => !line.IsDeleted).ToDictionary(line => line.Id);
+        var requestedIds = lines.Where(line => line.Id.HasValue).Select(line => line.Id!.Value).ToArray();
+        if (requestedIds.Any(id => id == Guid.Empty) || requestedIds.Distinct().Count() != requestedIds.Length)
+            throw new InvalidOperationException("Supplier debit-note line identities are invalid or duplicated.");
+        var foreignIds = requestedIds.Where(id => !existingLines.ContainsKey(id)).ToArray();
+        if (foreignIds.Length > 0 && await _db.SupplierDebitNoteLineItems.AsNoTracking().AnyAsync(line =>
+                line.TenantId == TenantId && foreignIds.Contains(line.Id) && line.SupplierDebitNoteId != note.Id,
+                cancellationToken))
+            throw new InvalidOperationException("A supplier debit-note line identity belongs to another document.");
+        foreach (var existing in existingLines.Values.Where(line => !requestedIds.Contains(line.Id)).ToList())
         {
-            var oldComponents = note.LineItems.SelectMany(line => line.TaxComponents).ToList();
-            if (oldComponents.Count > 0)
-                _db.SupplierDebitNoteTaxComponents.RemoveRange(oldComponents);
-            _db.SupplierDebitNoteLineItems.RemoveRange(note.LineItems);
-            note.LineItems.Clear();
+            if (existing.TaxComponents.Count > 0)
+                _db.SupplierDebitNoteTaxComponents.RemoveRange(existing.TaxComponents);
+            _db.SupplierDebitNoteLineItems.Remove(existing);
+            note.LineItems.Remove(existing);
+        }
+        foreach (var existing in existingLines.Values.Where(line => requestedIds.Contains(line.Id)))
+        {
+            if (existing.TaxComponents.Count > 0)
+                _db.SupplierDebitNoteTaxComponents.RemoveRange(existing.TaxComponents);
+            existing.TaxComponents.Clear();
         }
 
         note.SubTotal = 0m;
@@ -756,10 +997,10 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                     sourceLine,
                     sourceTransactions,
                     sourceTaxSnapshots);
-                note.LineItems.Add(linkedLine);
-                note.SubTotal += linkedLine.LineTotal - linkedLine.TaxAmount;
-                note.TaxAmount += linkedLine.TaxAmount;
-                note.DiscountAmount += linkedLine.DiscountAmount;
+                var attachedLinkedLine = AttachOrUpdateLine(note, linkedLine, existingLines);
+                note.SubTotal += attachedLinkedLine.LineTotal - attachedLinkedLine.TaxAmount;
+                note.TaxAmount += attachedLinkedLine.TaxAmount;
+                note.DiscountAmount += attachedLinkedLine.DiscountAmount;
                 continue;
             }
 
@@ -798,7 +1039,9 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
 
             var line = new SupplierDebitNoteLineItem
             {
-                Id = Guid.NewGuid(),
+                Id = dto.Id is { } requestedLineId && requestedLineId != Guid.Empty
+                    ? requestedLineId
+                    : Guid.NewGuid(),
                 TenantId = TenantId,
                 SupplierDebitNoteId = note.Id,
                 GLAccountId = dto.GLAccountId,
@@ -850,10 +1093,10 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                     CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
                 });
             }
-            note.LineItems.Add(line);
-            note.SubTotal += net;
-            note.TaxAmount += calculatedTax;
-            note.DiscountAmount += calculatedDiscount;
+            var attachedLine = AttachOrUpdateLine(note, line, existingLines);
+            note.SubTotal += attachedLine.LineTotal - attachedLine.TaxAmount;
+            note.TaxAmount += attachedLine.TaxAmount;
+            note.DiscountAmount += attachedLine.DiscountAmount;
         }
 
         note.SubTotal = Round(note.SubTotal);
@@ -864,6 +1107,43 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             throw new InvalidOperationException(
                 "Supplier debit note has no valid frozen exchange-rate evidence.");
         note.BaseCurrencyAmount = Round(note.TotalAmount * note.ExchangeRate);
+    }
+
+    private SupplierDebitNoteLineItem AttachOrUpdateLine(
+        SupplierDebitNote note,
+        SupplierDebitNoteLineItem candidate,
+        IReadOnlyDictionary<Guid, SupplierDebitNoteLineItem> existingLines)
+    {
+        if (!existingLines.TryGetValue(candidate.Id, out var existing))
+        {
+            note.LineItems.Add(candidate);
+            return candidate;
+        }
+
+        existing.OriginalVendorInvoiceLineItemId = candidate.OriginalVendorInvoiceLineItemId;
+        existing.OriginalFinancePurchaseOrderItemId = candidate.OriginalFinancePurchaseOrderItemId;
+        existing.GLAccountId = candidate.GLAccountId;
+        existing.ResolvedCreditAccountId = candidate.ResolvedCreditAccountId;
+        existing.OriginalAccountTransactionId = candidate.OriginalAccountTransactionId;
+        existing.LineItemType = candidate.LineItemType;
+        existing.Description = candidate.Description;
+        existing.Quantity = candidate.Quantity;
+        existing.UnitPrice = candidate.UnitPrice;
+        existing.TaxGroupId = candidate.TaxGroupId;
+        existing.TaxRate = candidate.TaxRate;
+        existing.TaxAmount = candidate.TaxAmount;
+        existing.DiscountPercentage = candidate.DiscountPercentage;
+        existing.DiscountAmount = candidate.DiscountAmount;
+        existing.LineTotal = candidate.LineTotal;
+        existing.UpdatedAt = DateTime.UtcNow;
+        existing.UpdatedBy = UserName;
+        existing.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+        foreach (var component in candidate.TaxComponents)
+        {
+            component.SupplierDebitNoteLineItemId = existing.Id;
+            existing.TaxComponents.Add(component);
+        }
+        return existing;
     }
 
     private async Task ValidatePurchaseTaxGroupAsync(
@@ -939,7 +1219,9 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
 
         var line = new SupplierDebitNoteLineItem
         {
-            Id = Guid.NewGuid(),
+            Id = dto.Id is { } requestedLineId && requestedLineId != Guid.Empty
+                ? requestedLineId
+                : Guid.NewGuid(),
             TenantId = TenantId,
             SupplierDebitNoteId = note.Id,
             OriginalVendorInvoiceLineItemId = sourceLine.Id,
@@ -1007,8 +1289,12 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
 
     private async Task<FinancePostingRequestDto> BuildPostingRequestAsync(
         SupplierDebitNote note,
+        FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
     {
+        var sourceDimensions = producer is not null && _sourceDimensions is not null
+            ? await _sourceDimensions.GetPostingDimensionsAsync(producer, note.Id, cancellationToken)
+            : new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>();
         var settings = await _db.FinanceSettings.AsNoTracking().FirstOrDefaultAsync(item =>
             item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
@@ -1058,9 +1344,17 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
 
         var apAccountId = originalApControl?.AccountId
             ?? await ResolveStandaloneApControlAccountAsync(note, settings, currency, cancellationToken);
+        var originalDiscountTransactions = linkedInvoice?.JournalEntryId.HasValue == true
+            ? await _db.AccountTransactions.AsNoTracking().Where(item =>
+                    item.TenantId == TenantId
+                    && item.JournalEntryId == linkedInvoice.JournalEntryId.Value
+                    && !item.IsDeleted
+                    && item.CreditAmount > 0m
+                    && item.TransactionTag == "AP-Discount")
+                .ToListAsync(cancellationToken)
+            : [];
         var lines = new List<FinancePostingLineDto>();
         var lineNumber = 2;
-        var linkedOrdinaryDiscount = 0m;
         foreach (var line in note.LineItems.Where(item => !item.IsDeleted))
         {
             decimal principalAmount;
@@ -1080,8 +1374,6 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 principalAmount = Round(SourceDebitAmount(sourceTransaction) * ratio);
                 accountId = sourceTransaction.AccountId;
                 exchangeRateId = sourceTransaction.ExchangeRateId;
-                if (!IsNetPostedSourceTransaction(sourceTransaction))
-                    linkedOrdinaryDiscount += line.DiscountAmount;
             }
             else
             {
@@ -1090,7 +1382,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 principalAmount = Round(line.LineTotal - line.TaxAmount);
             }
 
-            lines.Add(PostingLine(
+            var principalLine = PostingLine(
                 accountId,
                 $"Supplier debit note {note.DebitNoteNumber} - {line.Description}",
                 debit: 0m,
@@ -1105,7 +1397,47 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 "AP-SupplierDebitNote-Line",
                 line.Id,
                 exchangeRateId,
-                linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null));
+                linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null);
+            var inheritedDimensions = sourceDimensions.TryGetValue(line.Id, out var dimensionValues)
+                ? dimensionValues
+                : Array.Empty<FinancePostingDimensionValueDto>();
+            principalLine.Dimensions = inheritedDimensions;
+            lines.Add(principalLine);
+
+            if (linkedInvoice != null
+                && !IsNetPostedSourceTransaction(originalTransactions[line.OriginalAccountTransactionId!.Value])
+                && Round(line.DiscountAmount) > 0m)
+            {
+                var exactDiscounts = originalDiscountTransactions.Where(item =>
+                    item.SourceDocumentLineId == line.OriginalVendorInvoiceLineItemId).ToList();
+                var discountTransaction = exactDiscounts.Count switch
+                {
+                    1 => exactDiscounts[0],
+                    0 when originalDiscountTransactions.Count == 1
+                        && !originalDiscountTransactions[0].SourceDocumentLineId.HasValue =>
+                        originalDiscountTransactions[0],
+                    _ => throw new InvalidOperationException(
+                        "AP_DEBIT_NOTE_SOURCE_LINEAGE_UNAVAILABLE: the source invoice discount transaction is ambiguous or missing.")
+                };
+                var discountLine = PostingLine(
+                    discountTransaction.AccountId,
+                    $"Reverse purchase discount - {note.DebitNoteNumber} - {line.Description}",
+                    Functional(line.DiscountAmount, currency, functionalCurrency, rate),
+                    0m,
+                    line.DiscountAmount,
+                    currency,
+                    functionalCurrency,
+                    rate,
+                    note.DebitNoteDate,
+                    note.DebitNoteNumber,
+                    lineNumber++,
+                    "AP-SupplierDebitNote-Discount",
+                    line.Id,
+                    discountTransaction.ExchangeRateId,
+                    "Original AP invoice exchange-rate snapshot");
+                discountLine.Dimensions = inheritedDimensions;
+                lines.Add(discountLine);
+            }
 
             foreach (var component in line.TaxComponents.Where(item => !item.IsDeleted).OrderBy(item => item.CalculationOrder))
             {
@@ -1136,35 +1468,6 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                     componentRateId,
                     linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null));
             }
-        }
-
-        if (linkedInvoice != null && Round(linkedOrdinaryDiscount) > 0m)
-        {
-            var discountCandidates = await _db.AccountTransactions.AsNoTracking().Where(item =>
-                    item.TenantId == TenantId &&
-                    item.JournalEntryId == linkedInvoice.JournalEntryId &&
-                    !item.IsDeleted &&
-                    item.CreditAmount > 0m &&
-                    item.TransactionTag == "AP-Discount")
-                .ToListAsync(cancellationToken);
-            if (discountCandidates.Count != 1)
-                throw new InvalidOperationException("AP_DEBIT_NOTE_SOURCE_LINEAGE_UNAVAILABLE: the source invoice discount transaction is ambiguous or missing.");
-            var discountTransaction = discountCandidates[0];
-            lines.Add(PostingLine(
-                discountTransaction.AccountId,
-                $"Reverse purchase discount - {note.DebitNoteNumber}",
-                Functional(linkedOrdinaryDiscount, currency, functionalCurrency, rate),
-                0m,
-                linkedOrdinaryDiscount,
-                currency,
-                functionalCurrency,
-                rate,
-                note.DebitNoteDate,
-                note.DebitNoteNumber,
-                lineNumber++,
-                "AP-SupplierDebitNote-Discount",
-                exchangeRateId: discountTransaction.ExchangeRateId,
-                exchangeRateSource: "Original AP invoice exchange-rate snapshot"));
         }
 
         var creditTotal = Round(lines.Sum(item => item.CreditAmount));

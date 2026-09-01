@@ -1,4 +1,7 @@
-import type { PurchaseRequisitionBudgetReadinessDto } from '@/services/purchasingService';
+import type {
+  PurchaseRequisitionBudgetControlHistoryDto,
+  PurchaseRequisitionBudgetReadinessDto,
+} from '@/services/purchasingService';
 
 export type BudgetControlTone = 'neutral' | 'ready' | 'blocked';
 
@@ -7,6 +10,13 @@ export interface BudgetControlPresentation {
   title: string;
   basisLabel: string;
 }
+
+export function getPurchaseRequisitionBudgetControlHistory(
+  history: PurchaseRequisitionBudgetControlHistoryDto[]
+) {
+  return history;
+}
+
 export function getBudgetControlPresentation(
   readiness?: PurchaseRequisitionBudgetReadinessDto,
   loading = false
@@ -20,15 +30,17 @@ export function getBudgetControlPresentation(
   }
 
   if (readiness.canReserve) {
-    const activeCommitment = readiness.basis === 'ExistingCommitment';
+    const existingCommitment = readiness.basis === 'ExistingCommitment';
     return {
       tone: 'ready',
-      title: activeCommitment ? 'Budget commitment protected' : 'Ready for atomic reservation',
+      title: existingCommitment
+        ? 'Downstream budget commitment recorded'
+        : 'Approved budget is available',
       basisLabel: readiness.isOverride
         ? 'Authorized override'
-        : activeCommitment
-          ? 'Active commitment'
-          : 'Approved budget'
+        : existingCommitment
+          ? readiness.commitmentStatus || 'Commitment recorded'
+          : 'Availability confirmed'
     };
   }
 

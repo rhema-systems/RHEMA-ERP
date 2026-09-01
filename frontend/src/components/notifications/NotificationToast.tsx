@@ -20,7 +20,7 @@ interface ToastItem {
 export function NotificationToast({
   maxToasts = 3,
   autoDismissDelay = 5000,
-  position = 'top-right'
+  position = 'bottom-right'
 }: NotificationToastProps) {
   const { notifications = [] } = useNotifications({ autoFetch: false, enableRealTime: true });
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
@@ -126,8 +126,15 @@ export function NotificationToast({
       case 'bottom-right':
         return `${baseClasses} bottom-4 right-4 flex flex-col gap-2`;
       default:
-        return `${baseClasses} top-4 right-4 flex flex-col gap-2`;
+        return `${baseClasses} bottom-4 right-4 flex flex-col gap-2`;
     }
+  };
+
+  const getEntityReference = (notification: any) => {
+    const entityNumber = notification.additionalData?.entityNumber
+      ?? notification.additionalData?.EntityNumber;
+
+    return entityNumber || notification.entityId?.substring(0, 8);
   };
 
   return (
@@ -163,7 +170,7 @@ export function NotificationToast({
               {toast.notification.entityType && (
                 <p className="text-xs text-muted-foreground mt-1">
                   {toast.notification.entityType}
-                  {toast.notification.entityId && ` #${toast.notification.entityId.substring(0, 8)}`}
+                  {getEntityReference(toast.notification) && ` #${getEntityReference(toast.notification)}`}
                 </p>
               )}
             </div>
