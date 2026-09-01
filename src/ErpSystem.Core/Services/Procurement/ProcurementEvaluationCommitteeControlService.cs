@@ -1424,8 +1424,20 @@ public sealed class ProcurementEvaluationCommitteeControlService
         tender.SourcingReleaseId = gate.SourcingReleaseId;
         tender.SourcingCaseId = gate.SourcingCaseId;
         tender.UpdatedAt = DateTime.UtcNow;
-        await Tenders.UpdateAsync(tender);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await Tenders.UpdateAsync(tender);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            exception.GetBaseException().Message.Contains(
+                "PR-linked Tender requires an approved requisition",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw Validation(
+                "EVALUATION_SOURCE_LINEAGE_PERSISTENCE_REJECTED",
+                "The tender's validated sourcing-case lineage could not be retained. Refresh the tender and retry the evaluation.");
+        }
 
         return await LoadTenderSourceAsync(tender.Id, cancellationToken);
     }

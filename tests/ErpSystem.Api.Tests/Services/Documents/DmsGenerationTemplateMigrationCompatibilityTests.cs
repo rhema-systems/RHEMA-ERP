@@ -54,7 +54,8 @@ public sealed class DmsGenerationTemplateMigrationCompatibilityTests
             .Which.Should().BeOfType<SqlOperation>().Which.Sql;
 
         migrationBuilder.Operations.Should().NotContain(operation =>
-            operation is AddColumnOperation or CreateIndexOperation);
+            operation.GetType() == typeof(AddColumnOperation) ||
+            operation.GetType() == typeof(CreateIndexOperation));
         foreach (var column in Columns)
         {
             sql.Should().Contain(

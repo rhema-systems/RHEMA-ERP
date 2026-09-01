@@ -123,6 +123,8 @@ public sealed class FinanceControllerSecurityTests
     }
 
     [Theory]
+    [InlineData(typeof(JournalEntryController), "GetJournalEntryById", FinancePermissions.ViewTenderPaymentJournalPolicy)]
+    [InlineData(typeof(JournalEntryController), "GetAttachments", FinancePermissions.ViewTenderPaymentJournalPolicy)]
     [InlineData(typeof(JournalEntryController), "CreateJournalEntry", FinancePermissions.CreateJournalEntries)]
     [InlineData(typeof(JournalEntryController), "RequestApproval", FinancePermissions.SubmitJournalEntries)]
     [InlineData(typeof(JournalEntryController), "WithdrawApproval", FinancePermissions.WithdrawJournalApprovalPolicy)]

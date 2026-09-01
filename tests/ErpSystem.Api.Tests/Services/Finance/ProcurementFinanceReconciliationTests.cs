@@ -876,7 +876,7 @@ public sealed class ProcurementFinanceReconciliationTests
             Currency = "GHS",
             SourceRequisitionId = requisitionId,
             ContractId = contractId,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = new DateTime(2026, 7, 1),
             CreatedBy = "seed"
         };
         var poLine = new PurchaseOrderItem
@@ -953,7 +953,7 @@ public sealed class ProcurementFinanceReconciliationTests
             SubmittedDate = new DateTime(2026, 7, 3),
             ApprovedDate = new DateTime(2026, 7, 3),
             JournalEntryId = invoiceJournal.Id,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = new DateTime(2026, 7, 3),
             CreatedBy = "seed"
         };
         var invoicePosting = Posting(tenantId, invoice.Id, "VendorInvoice", invoiceJournal.Id, 100m);
@@ -974,7 +974,7 @@ public sealed class ProcurementFinanceReconciliationTests
             CurrencyCode = "GHS",
             Status = VendorPaymentStatus.Processed,
             JournalEntryId = paymentJournal.Id,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = new DateTime(2026, 7, 4),
             CreatedBy = "seed"
         };
         var allocation = new VendorPaymentAllocation
@@ -986,7 +986,7 @@ public sealed class ProcurementFinanceReconciliationTests
             AllocatedAmount = 100m,
             AllocationDate = payment.PaymentDate,
             ApplicationJournalEntryId = paymentJournal.Id,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = new DateTime(2026, 7, 4),
             CreatedBy = "seed"
         };
         payment.Allocations.Add(allocation);
@@ -1039,6 +1039,13 @@ public sealed class ProcurementFinanceReconciliationTests
             Currency = "GHS"
         };
         db.ProjectPaymentCertificates.Add(certificate);
+
+        // ApplicationDbContext stamps Added entities with the current UTC time.
+        // Persist first, then restore the scenario's historical creation dates so
+        // fixed as-of reporting tests do not change behavior after 31 Aug 2026.
+        db.SaveChanges();
+        foreach (var entry in db.ChangeTracker.Entries<BaseEntity>())
+            entry.Entity.CreatedAt = new DateTime(2026, 7, 1);
 
         return new ScenarioFixture(po, commitment, payment, paymentPosting, certificate);
     }

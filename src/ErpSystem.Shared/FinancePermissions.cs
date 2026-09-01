@@ -34,6 +34,7 @@ public static class FinancePermissions
     public const string ConfigureTaxPolicy = "Finance.Policy.ConfigureTax";
     public const string ConfigureFixedAssetCategoriesPolicy = "Finance.Policy.ConfigureFixedAssetCategories";
     public const string WithdrawJournalApprovalPolicy = "Finance.Policy.WithdrawJournalApproval";
+    public const string ViewTenderPaymentJournalPolicy = "Finance.Policy.ViewTenderPaymentJournal";
 
     public const string CreateJournalEntries = "Finance.JournalEntries.Create";
     public const string EditJournalEntries = "Finance.JournalEntries.Edit";
@@ -311,7 +312,8 @@ public static class FinancePermissions
             ConfigureChartOfAccountsPolicy,
             ConfigureTaxPolicy,
             ConfigureFixedAssetCategoriesPolicy,
-            WithdrawJournalApprovalPolicy
+            WithdrawJournalApprovalPolicy,
+            ViewTenderPaymentJournalPolicy
         })
         .ToArray();
 }
