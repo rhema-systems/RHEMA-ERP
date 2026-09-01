@@ -602,7 +602,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CreatedDate = now
             };
 
-            account.CurrencyLinks.Add(currencyLink);
+            // The link has an application-assigned Guid. Adding it only through a
+            // tracked account navigation can make EF infer Modified for the detached
+            // dependent, which produces an UPDATE and then a concurrency exception
+            // because the row does not exist yet. Explicitly register the new link as
+            // Added while retaining the stable identity used by Finance evidence.
+            await _unitOfWork.Repository<AccountCurrencyLink>().AddAsync(currencyLink);
             await _unitOfWork.SaveChangesAsync();
             return MapCurrencyLinkToDto(currencyLink, account);
         }
