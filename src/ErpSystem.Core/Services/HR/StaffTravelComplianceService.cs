@@ -256,22 +256,72 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
             .ToList();
     }
 
+    /// <summary>
+    /// Re-reads a saved requirement through the include-carrying lookup, so the write response
+    /// names its two countries.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>ToDto</c> reads <c>entity.PassportCountry?.Name</c>, and a just-constructed entity has
+    /// no navigation loaded — so create and update both answered with two null country names while
+    /// the lookup beside them answered "Ghana" and "United Kingdom". Measured 2026-09-01. A screen
+    /// that renders the write response instead of refetching shows a row naming nobody, which is
+    /// the shape area 13's DevelopmentPanel shipped as "undefined — undefined".
+    /// </remarks>
+    private async Task<StaffTravelVisaRequirementDto> ReadBackVisaRequirementAsync(StaffTravelVisaRequirement entity)
+    {
+        var saved = await _visaRequirementRepository.GetRequirementAsync(
+            entity.PassportCountryId, entity.DestinationCountryId);
+        return (saved ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// Refuses a second requirement for a country pair that already has one.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Nothing stopped it. Probed 2026-09-01: Ghana → United Kingdom was saved twice, once
+    /// as <c>EmbassyVisa</c> and once as <c>VisaFree</c>, and both were accepted. This table exists
+    /// to answer exactly one question — *what does this passport need for this destination* — and
+    /// <c>GetRequirementAsync</c> answers it with <c>FirstOrDefaultAsync</c>, so with two rows it
+    /// returns whichever the database hands back first. A traveller could be told a visa is not
+    /// required by a register that also says an embassy visa is.</para>
+    ///
+    /// <para>Enforced here rather than by a unique index, deliberately: the delete is a SOFT delete,
+    /// and this module has met "a soft delete does not release a unique index" nine times. Querying
+    /// the repository excludes tombstones by construction, so a pair can be retired and entered
+    /// again — which a filtered index would also allow, but only if the filter were written
+    /// correctly, and only after a migration.</para>
+    /// </remarks>
+    private async Task RequireUnclaimedCountryPairAsync(Guid passportCountryId, Guid destinationCountryId)
+    {
+        var existing = await _visaRequirementRepository.GetRequirementAsync(passportCountryId, destinationCountryId);
+        if (existing == null || existing.TenantId != GetTenantId()) return;
+
+        throw new InvalidOperationException(
+            $"A visa requirement for {existing.PassportCountry?.Name ?? "that passport"} travelling to "
+            + $"{existing.DestinationCountry?.Name ?? "that destination"} already exists, and there can only be one — "
+            + "two would give the same traveller two different answers. Edit the existing one instead.");
+    }
+
     public async Task<StaffTravelVisaRequirementDto> CreateVisaRequirementAsync(CreateStaffTravelVisaRequirementDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireUnclaimedCountryPairAsync(createDto.PassportCountryId, createDto.DestinationCountryId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _visaRequirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReadBackVisaRequirementAsync(entity);
     }
 
     public async Task<StaffTravelVisaRequirementDto> UpdateVisaRequirementAsync(UpdateStaffTravelVisaRequirementDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedVisaRequirementAsync(updateDto.Id);
+        // ⚠ The update DTO carries no country fields, so an edit cannot move a requirement onto
+        // another pair and the uniqueness check above does not need repeating here.
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _visaRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReadBackVisaRequirementAsync(entity);
     }
 
     public async Task<bool> DeleteVisaRequirementAsync(Guid id, CancellationToken cancellationToken = default)

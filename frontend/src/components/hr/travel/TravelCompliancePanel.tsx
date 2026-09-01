@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -32,6 +33,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
+import { VISA_REQUIREMENT_TYPE_LABELS } from '@/types/hr/travel-compliance';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 
 const VISA_STATUSES = [
@@ -146,6 +148,43 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
     queryKey: ['travel-alert-notifications', requestId],
     queryFn: () => travelComplianceService.getAlertNotifications(request.employeeId),
     enabled: !!request.employeeId,
+  });
+
+  // ── what this traveller's passport actually needs ─────────────────────────
+  // The visa-requirement register is reference data, and reference data nobody consults does not
+  // get maintained. This is where it earns its place: the question "what does this passport need
+  // for this destination" is asked at exactly the moment a visa is about to be recorded.
+  //
+  // ⚠ The passport country is not on the employee record — it is the ISSUING COUNTRY of their
+  // Passport travel document. A traveller with no passport on file cannot be looked up at all,
+  // which is worth saying out loud here rather than showing an empty answer.
+  const { data: travelDocs } = useQuery({
+    queryKey: ['travel-documents', request.employeeId],
+    queryFn: () => travelComplianceService.getDocumentsByEmployee(request.employeeId),
+    enabled: !!request.employeeId,
+  });
+
+  const passport = (travelDocs ?? [])
+    .filter((d) => d.documentType === 'Passport')
+    // Prefer the one marked primary, then the latest expiry — a traveller may hold two.
+    .sort((a, b) =>
+      a.isPrimary === b.isPrimary
+        ? (b.expiryDate ?? '').localeCompare(a.expiryDate ?? '')
+        : a.isPrimary
+          ? -1
+          : 1,
+    )[0];
+
+  const passportCountryId = passport?.issuingCountryId;
+
+  const { data: requirement, isLoading: requirementLoading } = useQuery({
+    queryKey: ['travel-visa-requirement', passportCountryId, request.destinationCountryId],
+    queryFn: () =>
+      travelComplianceService.getVisaRequirement(
+        passportCountryId as string,
+        request.destinationCountryId,
+      ),
+    enabled: !!passportCountryId && !!request.destinationCountryId,
   });
 
   const notify = useMutation({
@@ -432,6 +471,92 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
           </Button>
         </CardHeader>
         <CardContent className="p-0">
+          {/*
+            What the register says, before anything is recorded. Built 2026-09-01 (lane 5b) — the
+            requirement table had a screen to fill it and nothing that read it.
+          */}
+          <div className="border-b px-6 pb-4">
+            {!passport ? (
+              <p className="text-sm text-muted-foreground">
+                No passport is on file for this traveller, so the visa requirement cannot be looked
+                up. Record their passport under travel documents first — the requirement is keyed on
+                the country that issued it.
+              </p>
+            ) : requirementLoading ? (
+              <p className="text-sm text-muted-foreground">
+                Checking what a {passport.issuingCountryName ?? 'that'} passport needs…
+              </p>
+            ) : !requirement ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing is recorded for a {passport.issuingCountryName ?? 'that'} passport travelling
+                to {request.destinationCountryName}. The travel desk has no answer to give until
+                somebody adds it to the{' '}
+                <Link href="/hr/travel/visa-requirements" className="text-primary hover:underline">
+                  visa requirements register
+                </Link>
+                .
+              </p>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-sm">
+                  <Badge
+                    variant={
+                      requirement.visaRequirementType === 'Prohibited'
+                        ? 'destructive'
+                        : requirement.visaRequirementType === 'VisaFree'
+                          ? 'secondary'
+                          : 'outline'
+                    }
+                  >
+                    {VISA_REQUIREMENT_TYPE_LABELS[requirement.visaRequirementType] ??
+                      requirement.visaRequirementTypeName}
+                  </Badge>{' '}
+                  for a {requirement.passportCountryName} passport entering{' '}
+                  {requirement.destinationCountryName}
+                  {requirement.visaCategory ? ` · ${requirement.visaCategory}` : ''}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {[
+                    requirement.processingDays != null
+                      ? `Allow ${requirement.processingDays} days to process`
+                      : null,
+                    requirement.maxStayDays != null
+                      ? `maximum stay ${requirement.maxStayDays} days`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'No processing time or stay limit recorded.'}
+                </p>
+                {/*
+                  ⚠ Visa rules change without notice, so how stale the entry is matters as much as
+                  what it says. An unverified entry is shown as such rather than presented as fact.
+                */}
+                <p className="text-xs text-muted-foreground">
+                  {requirement.lastVerifiedAt ? (
+                    <>Last checked {requirement.lastVerifiedAt.slice(0, 10)}</>
+                  ) : (
+                    <span className="text-amber-600">
+                      Never checked against an official source — confirm before relying on it.
+                    </span>
+                  )}
+                  {requirement.officialSourceUrl && (
+                    <>
+                      {' · '}
+                      <a
+                        href={requirement.officialSourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        source
+                      </a>
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+
           {(visas ?? []).length === 0 ? (
             <EmptyState
               title="No visa recorded"

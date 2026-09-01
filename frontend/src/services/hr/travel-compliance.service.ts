@@ -7,6 +7,8 @@ import type {
   CreateStaffTravelVisaApplication,
   UpdateStaffTravelVisaApplication,
   StaffTravelVisaRequirement,
+  CreateStaffTravelVisaRequirement,
+  UpdateStaffTravelVisaRequirement,
   VisaApplicationStatus,
   StaffTravelRiskAssessment,
   CreateStaffTravelRiskAssessment,
@@ -95,21 +97,38 @@ class TravelComplianceService {
 
   // ── Visa requirements (reference data) ─────────────────────────────────────
 
-  getVisaRequirements() {
-    return apiService.get<StaffTravelVisaRequirement[]>(`${this.baseUrl}/visa-requirements`);
+  /**
+   * The requirement for ONE country pair, or `null` when none is recorded.
+   *
+   * ⚠ This is not a list, and `getVisaRequirements()` — which called the same route with no query
+   * parameters and typed the result as an array — was never one. The route takes both country ids
+   * and answers `204 No Content` without them, so that method returned `null` cast as an array on
+   * every call. It had no screen caller, which is why nothing ever noticed. Removed 2026-09-01.
+   *
+   * ⚠ **This replacement is deliberately unwired**, and that is a disposition rather than an
+   * oversight. The register screen reads by destination and filters client-side, so it does not
+   * need a pair lookup. The consumer this is shaped for is the travel REQUEST screen — "this
+   * traveller's passport needs an embassy visa for this destination, allow 15 days" — which is
+   * area 12's surface, not the register's. Kept because the correct shape has now been measured
+   * against the wire; do not delete it and guess again.
+   */
+  getVisaRequirement(passportCountryId: string, destinationCountryId: string) {
+    return apiService.get<StaffTravelVisaRequirement | null>(
+      `${this.baseUrl}/visa-requirements`, { passportCountryId, destinationCountryId });
   }
 
+  /** Every passport's requirement for one destination — the only genuine list the API offers. */
   getVisaRequirementsForDestination(destinationCountryId: string) {
     return apiService.get<StaffTravelVisaRequirement[]>(
       `${this.baseUrl}/visa-requirements/destination/${destinationCountryId}`);
   }
 
-  createVisaRequirement(payload: Omit<StaffTravelVisaRequirement, keyof StaffTravelDocument>) {
+  createVisaRequirement(payload: CreateStaffTravelVisaRequirement) {
     return apiService.post<StaffTravelVisaRequirement>(
       `${this.baseUrl}/visa-requirements`, payload);
   }
 
-  updateVisaRequirement(payload: StaffTravelVisaRequirement) {
+  updateVisaRequirement(payload: UpdateStaffTravelVisaRequirement) {
     return apiService.put<StaffTravelVisaRequirement>(
       `${this.baseUrl}/visa-requirements/${payload.id}`, payload);
   }

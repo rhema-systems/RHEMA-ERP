@@ -115,7 +115,18 @@ public class StaffTravelComplianceController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        return Ok(await _service.CreateVisaRequirementAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
+        try
+        {
+            return Ok(await _service.CreateVisaRequirementAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
+        }
+        catch (InvalidOperationException ex)
+        {
+            // ⚠ Without this the rule reaches nobody: GlobalExceptionHandlingMiddleware maps
+            // InvalidOperationException to the fixed string "The operation is not valid for the
+            // current state of the object." and DISCARDS the message. The duplicate-pair refusal
+            // names both countries and tells the caller to edit the existing row — worth arriving.
+            return UnprocessableEntity(new { message = ex.Message });
+        }
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]

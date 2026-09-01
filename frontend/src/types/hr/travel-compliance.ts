@@ -117,18 +117,83 @@ export interface CreateStaffTravelVisaApplication {
 export type UpdateStaffTravelVisaApplication =
   Omit<CreateStaffTravelVisaApplication, 'staffTravelRequestId' | 'employeeId'> & { id: string };
 
+// ── Visa requirements ────────────────────────────────────────────────────────
+// ⚠ Rewritten 2026-09-01 from a live response. What stood here declared `originCountryId`,
+// `visaRequired`, `visaOnArrival`, `eVisaAvailable`, `validityDays` and `isActive` — SIX fields
+// that exist on neither the entity nor either DTO. It type-checked for as long as it did because
+// no screen ever called these methods (ledger § E2, finding 2). Only `destinationCountryId`,
+// `processingDays` and `notes` were real.
+
+/** HREnums.cs `VisaRequirementType` — 1..6. */
+export const VISA_REQUIREMENT_TYPES = [
+  'VisaFree',
+  'VisaOnArrival',
+  'EVisa',
+  'EmbassyVisa',
+  'Prohibited',
+  'Conditional',
+] as const;
+export type VisaRequirementType = (typeof VISA_REQUIREMENT_TYPES)[number];
+
+export const VISA_REQUIREMENT_TYPE_LABELS: Record<VisaRequirementType, string> = {
+  VisaFree: 'No visa needed',
+  VisaOnArrival: 'Visa on arrival',
+  EVisa: 'e-Visa',
+  EmbassyVisa: 'Embassy visa',
+  Prohibited: 'Travel prohibited',
+  Conditional: 'Conditional',
+};
+
 export interface StaffTravelVisaRequirement extends AuditFields {
-  originCountryId: string;
-  originCountryName?: string | null;
+  passportCountryId: string;
+  /**
+   * ⚠ Resolved by the lookup and the by-destination list. It is **null on a create or update
+   * response**, which maps a freshly-built entity whose navigation is not loaded — refetch rather
+   * than rendering the write response.
+   */
+  passportCountryName?: string | null;
   destinationCountryId: string;
   destinationCountryName?: string | null;
-  visaRequired: boolean;
-  visaOnArrival: boolean;
-  eVisaAvailable: boolean;
+  visaRequirementType: VisaRequirementType;
+  visaRequirementTypeName: string;
+  /** Free text — the insurer's own name for the category, e.g. "Standard visitor". */
+  visaCategory?: string | null;
+  maxStayDays?: number | null;
   processingDays?: number | null;
-  validityDays?: number | null;
+  officialSourceUrl?: string | null;
+  /** `DateOnly` — 'YYYY-MM-DD'. When the entry was last checked against the official source. */
+  lastVerifiedAt?: string | null;
   notes?: string | null;
-  isActive: boolean;
+}
+
+/** The create payload. Both countries are required and fix the pair for good. */
+export interface CreateStaffTravelVisaRequirement {
+  passportCountryId: string;
+  destinationCountryId: string;
+  visaRequirementType: VisaRequirementType;
+  visaCategory?: string | null;
+  maxStayDays?: number | null;
+  processingDays?: number | null;
+  officialSourceUrl?: string | null;
+  lastVerifiedAt?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * The update payload.
+ *
+ * ⚠ It carries **no country fields** — deliberately, on the server. A requirement cannot be moved
+ * onto a different country pair; it is retired and a new one entered.
+ */
+export interface UpdateStaffTravelVisaRequirement {
+  id: string;
+  visaRequirementType: VisaRequirementType;
+  visaCategory?: string | null;
+  maxStayDays?: number | null;
+  processingDays?: number | null;
+  officialSourceUrl?: string | null;
+  lastVerifiedAt?: string | null;
+  notes?: string | null;
 }
 
 // ── Risk assessments ─────────────────────────────────────────────────────────

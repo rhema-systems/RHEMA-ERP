@@ -94,6 +94,12 @@ public class StaffTravelVisaRequirementRepository : GenericRepository<StaffTrave
     {
         return await _dbSet
             .Include(r => r.PassportCountry)
+            // ⚠ DestinationCountry was NOT included, while GetRequirementAsync beside it includes
+            // both — so this list resolved the passport name and returned a null destination name
+            // for every row, though the DTO declares it. Measured 2026-09-01 (lane 5b): the lookup
+            // answered "Ghana"/"United Kingdom" and this list answered "Ghana"/null. The uneven
+            // `.Include` shape.
+            .Include(r => r.DestinationCountry)
             .Where(r => r.DestinationCountryId == destinationCountryId && !r.IsDeleted)
             .ToListAsync();
     }
