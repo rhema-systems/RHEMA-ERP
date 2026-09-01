@@ -88,6 +88,7 @@ export default function MyOrientationPlayerPage() {
     facilitatorRating: '',
     relevanceRating: '',
     comments: '',
+    anonymous: false,
   });
   const [sendingFeedback, setSendingFeedback] = useState(false);
 
@@ -129,11 +130,15 @@ export default function MyOrientationPlayerPage() {
     enabled: !!id,
   });
 
-  const { data: myFeedback = [] } = useQuery({
-    queryKey: ['hr', 'orientation-enrollments', id, 'feedback'],
-    queryFn: () => employeeOrientationService.getFeedback(id),
-    enabled: !!id,
+  // Own feedback only, via the read built for this form. The per-enrollment read would also work
+  // for the subject, but it is HR's view of the enrollment; this one is the author's, and it is
+  // the one that stays whole when the feedback was filed anonymously.
+  const { data: allMyFeedback = [] } = useQuery({
+    queryKey: ['hr', 'orientation-feedback', 'mine'],
+    queryFn: () => employeeOrientationService.getMyFeedback(),
   });
+  const myFeedback = allMyFeedback.filter((f) => f.employeeOrientationId === id);
+  const filed = myFeedback[0] ?? null;
 
   const progressByItem = useMemo(
     () => new Map(progress.map((p) => [p.contentItemId, p])),
@@ -298,11 +303,9 @@ export default function MyOrientationPlayerPage() {
         facilitatorRating: num(feedback.facilitatorRating),
         relevanceRating: num(feedback.relevanceRating),
         comments: feedback.comments || null,
-        isAnonymous: false,
+        isAnonymous: feedback.anonymous,
       });
-      await queryClient.invalidateQueries({
-        queryKey: ['hr', 'orientation-enrollments', id, 'feedback'],
-      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-feedback', 'mine'] });
       toast({ title: 'Thank you', description: 'Your feedback has been recorded.' });
       setFeedback({
         overallRating: '',
@@ -310,6 +313,7 @@ export default function MyOrientationPlayerPage() {
         facilitatorRating: '',
         relevanceRating: '',
         comments: '',
+        anonymous: false,
       });
     } catch (error: any) {
       toast({
@@ -719,11 +723,38 @@ export default function MyOrientationPlayerPage() {
             <CardHeader>
               <CardTitle className="text-base">How was it?</CardTitle>
               <CardDescription>
-                {myFeedback.length > 0
-                  ? 'You have already given feedback. Sending again adds another response.'
+                {filed
+                  ? `You gave feedback on ${fmt(filed.submittedAt)}. One response per orientation, so it cannot be sent again.`
                   : 'Rated out of 5. Everything here is optional.'}
               </CardDescription>
             </CardHeader>
+            {filed ? (
+              <CardContent className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-2 text-sm">
+                  {(
+                    [
+                      ['Overall', filed.overallRating],
+                      ['Content', filed.contentRating],
+                      ['Facilitator', filed.facilitatorRating],
+                      ['Relevance', filed.relevanceRating],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <div key={label} className="flex justify-between rounded-md border px-3 py-2">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="font-medium">{value ?? '—'}/5</span>
+                    </div>
+                  ))}
+                </div>
+                {filed.comments && (
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">{filed.comments}</p>
+                )}
+                {filed.isAnonymous && (
+                  <p className="text-xs text-muted-foreground">
+                    Sent anonymously: HR sees the ratings and comments, not your name.
+                  </p>
+                )}
+              </CardContent>
+            ) : (
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 {(
@@ -764,7 +795,15 @@ export default function MyOrientationPlayerPage() {
                   placeholder="What worked, what did not."
                 />
               </div>
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Checkbox
+                    id="feedback-anonymous"
+                    checked={feedback.anonymous}
+                    onCheckedChange={(v) => setFeedback((f) => ({ ...f, anonymous: v === true }))}
+                  />
+                  Send anonymously
+                </label>
                 <Button onClick={sendFeedback} disabled={sendingFeedback}>
                   {sendingFeedback ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -775,6 +814,7 @@ export default function MyOrientationPlayerPage() {
                 </Button>
               </div>
             </CardContent>
+            )}
           </Card>
         </TabsContent>
 

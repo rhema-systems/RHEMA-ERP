@@ -1246,8 +1246,9 @@ public static class StaffTravelMappingExtensions
             MerchantName = dto.MerchantName,
             AmountOriginal = dto.AmountOriginal,
             CurrencyOriginal = dto.CurrencyOriginal,
-            ExchangeRate = dto.ExchangeRate,
-            AmountBaseCurrency = dto.AmountBaseCurrency,
+            // ⚠ ExchangeRate and AmountBaseCurrency are set by the service from Finance's published
+            // rate immediately after this, so copying the payload's numbers here only made it look
+            // as though the caller's figures counted.
             PolicyLimit = dto.PolicyLimit,
             ReceiptAttachmentId = dto.ReceiptAttachmentId,
             IsPerDiem = dto.IsPerDiem,
@@ -1265,8 +1266,9 @@ public static class StaffTravelMappingExtensions
         entity.MerchantName = dto.MerchantName;
         entity.AmountOriginal = dto.AmountOriginal;
         entity.CurrencyOriginal = dto.CurrencyOriginal;
-        entity.ExchangeRate = dto.ExchangeRate;
-        entity.AmountBaseCurrency = dto.AmountBaseCurrency;
+        // ⚠ ExchangeRate and AmountBaseCurrency are DERIVED, not accepted. The service applies
+        // Finance's published rate for the expense date and does the arithmetic itself; taking them
+        // from the payload here is what let an edited line be valued at whatever the caller said.
         entity.PolicyLimit = dto.PolicyLimit;
         entity.ReceiptAttachmentId = dto.ReceiptAttachmentId;
         entity.IsPerDiem = dto.IsPerDiem;

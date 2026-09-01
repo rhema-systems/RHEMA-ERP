@@ -41,6 +41,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { LinkedErCasesPanel } from '@/components/hr/employee-relations/LinkedErCasesPanel';
 import { DocumentUploadField } from '@/components/hr/common/DocumentUploadField';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -369,6 +370,9 @@ export default function PipDetailPage() {
           {data.outcomeNotes && <AlertDescription>{data.outcomeNotes}</AlertDescription>}
         </Alert>
       )}
+
+      {/* Lane 6: the reverse ER link. HR-desk screen only — the read is ER-permission gated. */}
+      <LinkedErCasesPanel source="PerformanceImprovementPlan" recordId={id} />
 
       <Tabs defaultValue="plan">
         <TabsList>

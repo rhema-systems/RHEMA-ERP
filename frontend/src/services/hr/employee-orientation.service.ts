@@ -222,6 +222,17 @@ class EmployeeOrientationService {
     return apiService.post<OrientationFeedback>(`${this.baseUrl}/${enrollmentId}/feedback`, data);
   }
 
+  /**
+   * The caller's own feedback, across every orientation they have had.
+   *
+   * Lane 6: the read the portal form needed. Without it a submission was write-only and the page
+   * could only say "sending again adds another response" -- which the server now refuses anyway.
+   * Own rows are never withheld, anonymous or not: the author always sees their own name.
+   */
+  getMyFeedback(): Promise<OrientationFeedback[]> {
+    return apiService.get<OrientationFeedback[]>(`${this.baseUrl}/feedback/mine`);
+  }
+
   // ── Certificates ──────────────────────────────────────────────────────────
 
   getCertificatesForEnrollment(enrollmentId: string): Promise<OrientationCertificate[]> {

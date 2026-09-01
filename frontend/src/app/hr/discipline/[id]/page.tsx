@@ -26,6 +26,7 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { LinkedErCasesPanel } from '@/components/hr/employee-relations/LinkedErCasesPanel';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
@@ -422,6 +423,9 @@ export default function DisciplineCaseDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Lane 6: the reverse ER link. HR-desk screen only — the read is ER-permission gated. */}
+      <LinkedErCasesPanel source="DisciplinaryCase" recordId={id} />
 
       <Tabs defaultValue="overview">
         <TabsList>

@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Enums;
@@ -742,9 +742,65 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         await GetOwnedEnrollmentAsync(createDto.EmployeeOrientationId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // The submitter is the TOKEN's employee, never the payload's. The DTO used to carry
+        // SubmittedByEmployeeId and the mapping stored it as sent -- the "id reaching the service is
+        // not the actor being stored" shape area 9 met four times. IsAnonymous stays a display flag:
+        // the row still knows who filed it, so it can be deduplicated and so the author can see
+        // their own; the READ is what withholds the name from everyone else.
+        entity.SubmittedByEmployeeId = _currentUser.EmployeeId is { } me && me != Guid.Empty ? me : null;
+
+        // One submission per enrollment per person. Feedback is an opinion, and a second press of
+        // the button must not become a second opinion -- the training side had exactly this defect
+        // (a repeatable vote into a trainer's average) and this was the sibling nobody closed.
+        if (entity.SubmittedByEmployeeId is { } submitter)
+        {
+            var already = await _feedbackRepository.GetQueryable().AnyAsync(f =>
+                f.TenantId == tenantId && !f.IsDeleted
+                && f.EmployeeOrientationId == createDto.EmployeeOrientationId
+                && f.SubmittedByEmployeeId == submitter, cancellationToken);
+            if (already)
+                throw new InvalidOperationException(
+                    "You have already given feedback on this orientation. It can be read back under "
+                    + "your own feedback, but it cannot be filed twice.");
+        }
+
         await _feedbackRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return WithholdIfAnonymous(entity.ToDto());
+    }
+
+    public async Task<IEnumerable<OrientationFeedbackDto>> GetMyFeedbackAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        if (_currentUser.EmployeeId is not { } me || me == Guid.Empty)
+            throw new UnauthorizedAccessException("Your user account is not linked to an employee record.");
+
+        var rows = await _feedbackRepository.GetQueryable()
+            .Where(f => f.TenantId == tenantId && !f.IsDeleted && f.SubmittedByEmployeeId == me)
+            .OrderByDescending(f => f.SubmittedAt)
+            .ToListAsync(cancellationToken);
+
+        // Their own rows: nothing withheld, anonymous or not -- the author always sees their own name.
+        return rows.Select(f => f.ToDto()).ToList();
+    }
+
+    /// <summary>
+    /// Anonymous feedback names nobody except its author.
+    /// </summary>
+    /// <remarks>
+    /// Until lane 6, IsAnonymous hid nothing: the read handed SubmittedByEmployeeId to every caller
+    /// who could reach the enrollment, so HR saw exactly who had ticked "anonymous". A flag the
+    /// reader can see through is a promise the product does not keep.
+    /// </remarks>
+    private OrientationFeedbackDto WithholdIfAnonymous(OrientationFeedbackDto dto)
+    {
+        if (!dto.IsAnonymous) return dto;
+        var me = _currentUser.EmployeeId;
+        if (me is { } id && id != Guid.Empty && dto.SubmittedByEmployeeId == id) return dto;
+        dto.SubmittedByEmployeeId = null;
+        dto.SubmittedByName = null;
+        return dto;
     }
 
     public async Task<IEnumerable<OrientationFeedbackDto>> GetFeedbackAsync(Guid enrollmentId, CancellationToken cancellationToken = default)
@@ -757,7 +813,8 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             .ToList();
         var map = await _unitOfWork.ResolveEmployeesAsync(tenantId, list.Select(f => f.SubmittedByEmployeeId));
         list.FillNames(map);
-        return list;
+        // After the names are filled, so an anonymous row is stripped of the name too.
+        return list.Select(WithholdIfAnonymous).ToList();
     }
 
     // ====================================================================

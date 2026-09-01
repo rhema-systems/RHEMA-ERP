@@ -47,6 +47,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { LinkedErCasesPanel } from '@/components/hr/employee-relations/LinkedErCasesPanel';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
@@ -494,6 +495,9 @@ export default function IncidentDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Lane 6: the reverse ER link. HR-desk screen only — the read is ER-permission gated. */}
+      <LinkedErCasesPanel source="SafetyIncident" recordId={id} />
 
       <Tabs defaultValue="persons">
         <TabsList>

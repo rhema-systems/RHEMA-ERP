@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -168,6 +168,11 @@ public interface IEmployeeOrientationService
     // Feedback
     Task<OrientationFeedbackDto> SubmitFeedbackAsync(CreateOrientationFeedbackDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationFeedbackDto>> GetFeedbackAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
+
+    /// <summary>The caller's own orientation feedback, across every enrollment they have had.</summary>
+    /// <remarks>Lane 6: the read the portal form needed before it could exist. Without it a
+    /// submission was write-only, and a second press of the button filed a second row.</remarks>
+    Task<IEnumerable<OrientationFeedbackDto>> GetMyFeedbackAsync(CancellationToken cancellationToken = default);
 
     // Certificates
     Task<OrientationCertificateDto> IssueCertificateAsync(IssueOrientationCertificateDto issueDto, Guid tenantId, Guid issuedByUserId, CancellationToken cancellationToken = default);

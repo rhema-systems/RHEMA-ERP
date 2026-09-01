@@ -39,7 +39,9 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
-▶ **Recommended next: lane 6.** Lanes 3b and **3a-ii** are closed — all four caller-supplied image
+▶ **Recommended next: lane 4** (leave · training · succession · recruitment feedback). Lane 6's
+buildable rows are closed as of 2026-09-01 — two of its seven were stale, one was verified not
+live, and the four real ones are built. Lanes 3b and **3a-ii** are closed — all four caller-supplied image
 paths are gone, and the seal and signature are versioned instruments rather than settings fields.
 
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
@@ -857,17 +859,47 @@ Each was a deliberate deferral with a trigger, not an oversight.
 
 ### Buildable now
 
-- [ ] **9c — `getCasesForSource` has no screen.** The reverse "this incident has ER cases" panel
-      needs UI in SHE, performance and discipline — three closed areas. API and client method ready.
-- [ ] **9c — `probe-slice10b.mjs` files a real concern on every run**, leaving probe rows in the
-      live whistleblower inbox. Fix the harness, or clean up after it.
-- [ ] **25 — portal feedback form**, which needs a `feedback/mine` read.
-- [ ] **25 — `appraisalNotificationService` left with no consumers.** Wire it or delete it; a
-      service with no caller is the shape closure lane 2 kept finding.
-- [ ] **12 — the travel exchange rate is still caller-supplied.** `IExchangeRateService` is
-      registered and callable at `ServiceCollectionExtensions.cs:796`. This is **not** deferred to
-      the GL sweep: master data is read now, per the standing split.
-- [ ] **D-02 — self-service invitation response is act-as-anyone.**
+- [x] **9c — `getCasesForSource` has no screen** — ✅ **DONE 2026-09-01.** One shared
+      `LinkedErCasesPanel`, mounted above the tabs on the three HR-desk detail screens (SHE incident,
+      PIP, disciplinary case). Deliberately NOT on `/me/...`: the read is ER-permission gated, and
+      the subject of a disciplinary case must not be shown the grievances filed about it. A 403 for
+      a user without the ER permission renders nothing rather than an error. The client method now
+      has a caller (was 0). The safety detail page carries 2 pre-existing lint errors far from the
+      mount, verified identical with the change stashed.
+- [x] **9c — `probe-slice10b.mjs` files a real concern on every run** — ✅ **DONE 2026-09-01.**
+      There is no delete or withdraw endpoint on a concern, by design (a concern raised is a record),
+      so the write is now opt-in behind `PROBE_WRITE_CONCERN=1`. Proven: inbox count 0 before and
+      after a run.
+- [x] **25 — portal feedback form** — ✅ **DONE 2026-09-01 · 20 assertions ×2** (`hr-orientation/run-lane6-feedback.mjs`).
+      ⚠ **The row was half stale and half worse than stated.** The *training* half was already
+      closed in area 25 (dedupe + `feedback/mine` + the `/me/learning` render all exist). The
+      *orientation* half had a FORM already — whose own copy said "sending again adds another
+      response" — and nothing behind it: `SubmittedByEmployeeId` came from the PAYLOAD (anyone could
+      file feedback in another name); nothing deduped; no own-feedback read; and **`IsAnonymous` hid
+      nothing** — the read handed the submitter id to every caller who could reach the enrollment,
+      so HR saw exactly who had ticked "anonymous". Now: submitter stamped from the token, one
+      response per enrollment per person (409 with its own sentence), `GET employee-orientations/
+      feedback/mine`, names withheld on anonymous rows from everyone but the author, and the form
+      shows what was filed instead of offering itself again, with a real "send anonymously" choice.
+- [x] **25 — `appraisalNotificationService` left with no consumers** — **STALE ROW, verified
+      2026-09-01.** The frontend client was deleted in area 25 slice 14 (`appraisal.service.ts:576`
+      records it), its reads folded into `me-portal.service`. The backend
+      `IAppraisalNotificationService` has three consumers. Nothing to do.
+- [x] **12 — the travel exchange rate is still caller-supplied** — ✅ **DONE 2026-09-01 ·
+      `hr-travel/run-slice4.mjs` 37 ×2 (was 30), slice 6 23.**
+      ⚠ **Half stale, and the half that was true was worse than the row said.** On the CREATE path
+      the rate was already Finance's (`HrCurrencyBridge`) — only the XML doc still claimed otherwise.
+      But **`UpdateClaimLineAsync` never called the same valuation**: `UpdateEntity` wrote
+      `ExchangeRate` AND `AmountBaseCurrency` straight from the payload, and `RecomputeClaimTotalsAsync`
+      summed the result — so a line could be added at the published rate and then EDITED to any rate
+      and any base amount, and the claim total followed. The same half-fix shape as
+      `EmployeeNumberExistsAsync`: fixed where it was noticed, not on every path that writes the
+      field. Both derived fields are now gone from the write DTOs and derived on both paths.
+- [ ] **D-02 — self-service invitation response is act-as-anyone** — **VERIFIED NOT LIVE
+      2026-09-01, trigger kept.** The only caller of `participants/respond` is the HR-desk screen
+      (`/hr/company-schedule/events/[id]`), and no `/me` events or invitations surface exists
+      (`me-portal.service` has none). Correct for its one consumer; the self-or-permission check is
+      still owed the day a `/me` calendar ships.
       `events/{id}/participants/respond` takes a `ParticipantId` on the HR-desk policy. Correct for
       the HR screens; needs a self-or-permission check **before** any `/me` calendar ships.
 - [ ] **D-29 — the travel policy rules.** Not a screen job: the work is **enforcement**, and three
@@ -905,6 +937,12 @@ the suites; each is data, not code:
       (which has rows). `hr-performance/run-sliceC` and `run-sliceE` abort on it.
 - [ ] **The employee population is down to ~1,084**, and awards slices 0/0b are ground reports with
       stale hardcoded fixtures rather than pass/fail suites. Read this list before believing a red.
+
+⚠ **A suite can DIE at a gate and keep its recorded count.** `hr-orientation/run.mjs` §5 deleted a
+programme as the HR actor; delete became `HR.Orientation.Admin` in W3, so the 403 was uncaught and
+the suite has died there on every run since — sections 5–8 had not executed for weeks while the
+README still said 107. Found 2026-09-01 running it as lane 6 regression; the delete now runs as
+admin and the suite is back to **107/107**. **Re-run old suites; a count in a README is a claim.**
 
 ⚠ **Harness litter is a live hazard, not a tidiness issue.** `hr-discipline/run-slice5`'s cleanup
 needed `HR.Attendance.Admin`, which its HR actor does not hold, so it 403'd on **every run since it

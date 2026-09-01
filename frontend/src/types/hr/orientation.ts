@@ -870,8 +870,10 @@ export interface OrientationFeedbackCreateRequest {
   facilitatorRating?: number | null;
   relevanceRating?: number | null;
   comments?: string | null;
+  /** Withholds the submitter's name from everyone except the author. */
   isAnonymous: boolean;
-  submittedByEmployeeId?: string | null;
+  // No submittedByEmployeeId: the server stamps the caller. A payload id let anyone file
+  // feedback in somebody else's name.
 }
 
 export interface OrientationCertificate extends AuditFields {

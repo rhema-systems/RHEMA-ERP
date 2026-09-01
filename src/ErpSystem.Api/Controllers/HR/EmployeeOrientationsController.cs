@@ -1,4 +1,4 @@
-using ErpSystem.Api.Filters;
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
@@ -240,6 +240,14 @@ public class EmployeeOrientationsController : ControllerBase
     // FEEDBACK
     // =========================================================================
 
+    /// <summary>The caller's own orientation feedback -- what the portal form shows back.</summary>
+    [HttpGet("feedback/mine")]
+    public async Task<ActionResult<IEnumerable<OrientationFeedbackDto>>> GetMyFeedback(CancellationToken ct)
+    {
+        try { return Ok(await _service.GetMyFeedbackAsync(ct)); }
+        catch (UnauthorizedAccessException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpGet("{id:guid}/feedback")]
     public async Task<ActionResult<IEnumerable<OrientationFeedbackDto>>> GetFeedback(Guid id)
         => Ok(await _service.GetFeedbackAsync(id));
@@ -252,7 +260,9 @@ public class EmployeeOrientationsController : ControllerBase
         var ctx = ResolveContext(out var bad);
         if (bad != null) return bad;
 
-        return Ok(await _service.SubmitFeedbackAsync(dto, ctx.TenantId, ctx.UserId));
+        try { return Ok(await _service.SubmitFeedbackAsync(dto, ctx.TenantId, ctx.UserId)); }
+        // Surfaces the dedupe's own sentence; the middleware would map this to a fixed string.
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
     // =========================================================================

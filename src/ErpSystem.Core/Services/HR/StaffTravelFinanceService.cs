@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Interfaces;
@@ -415,6 +415,15 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var entity = await GetOwnedClaimLineAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+
+        // ⚠ The SAME valuation as the create path, and it was missing here. Slice 4 stopped a caller
+        // declaring the converted amount and slice 6 stopped them declaring the rate — but both fixes
+        // landed on AddClaimLineAsync only, so a line could be added at the organisation's published
+        // rate and then EDITED to any rate and any base amount, with RecomputeClaimTotalsAsync
+        // summing whatever the payload said. The half-fix shape: when a derived field is taken back
+        // from the caller, take it back on every path that writes it.
+        await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
+
         await _lineRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -691,8 +700,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// 100 USD at a rate of 15 and declare the base amount to be anything at all — and
     /// <c>TotalClaimed</c>, which sums this field, believed it. The arithmetic is the server's.
     ///
-    /// ⚠ The RATE is still caller-supplied. Sourcing it from Finance's ExchangeRate is slice 6
-    /// (§7.2); this only stops the product disagreeing with its own factors.
+    /// The rate is Finance's too, read for the expense date, so a claim is valued at the
+    /// organisation's own published rate and cannot disagree with what Finance reports the trip
+    /// cost. Applied on BOTH the add and the update path.
     /// </remarks>
     private async Task ApplyBaseCurrencyAmountAsync(
         StaffTravelExpenseClaimLine line, CancellationToken cancellationToken)

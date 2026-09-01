@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -1294,7 +1294,8 @@ public class CreateOrientationFeedbackDto : CreateDtoBase
 
     public bool IsAnonymous { get; set; }
 
-    public Guid? SubmittedByEmployeeId { get; set; }
+    // No SubmittedByEmployeeId. The submitter is the caller, stamped from the token by the
+    // service; a payload-supplied id let anyone file feedback in somebody else's name.
 }
 
 #endregion

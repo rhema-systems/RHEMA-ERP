@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Enums;
 
@@ -1019,7 +1019,7 @@ public static class OrientationMappingExtensions
             RelevanceRating = dto.RelevanceRating,
             Comments = dto.Comments,
             IsAnonymous = dto.IsAnonymous,
-            SubmittedByEmployeeId = dto.SubmittedByEmployeeId,
+            // SubmittedByEmployeeId is stamped by the service from the token, not copied from here.
             SubmittedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString(),
         };

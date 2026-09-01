@@ -1842,11 +1842,10 @@ public class CreateStaffTravelExpenseClaimLineDto : CreateDtoBase
     [MaxLength(3)]
     public string CurrencyOriginal { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
-    public decimal ExchangeRate { get; set; } = 1;
+    // ⚠ No ExchangeRate or AmountBaseCurrency. Both are DERIVED: the service reads Finance's
+    // published rate for the expense date and does the arithmetic, so a claim is valued at the
+    // organisation's own rate and cannot disagree with what Finance reports the trip cost.
 
-    [Range(0, double.MaxValue)]
-    public decimal AmountBaseCurrency { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal? PolicyLimit { get; set; }
@@ -1877,11 +1876,10 @@ public class UpdateStaffTravelExpenseClaimLineDto : UpdateDtoBase
     [MaxLength(3)]
     public string CurrencyOriginal { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
-    public decimal ExchangeRate { get; set; }
+    // ⚠ No ExchangeRate or AmountBaseCurrency. Both are DERIVED: the service reads Finance's
+    // published rate for the expense date and does the arithmetic, so a claim is valued at the
+    // organisation's own rate and cannot disagree with what Finance reports the trip cost.
 
-    [Range(0, double.MaxValue)]
-    public decimal AmountBaseCurrency { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal? PolicyLimit { get; set; }
