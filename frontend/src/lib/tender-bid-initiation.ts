@@ -36,18 +36,12 @@ export function nextTenderBidInitiationStep(
     | 'declarationSatisfied'
     | 'paymentRequired'
     | 'paymentSatisfied'
-    | 'paymentEvidenceAccepted'
   >
 ): TenderBidInitiationStep {
   if (!status.hasAssignment) return 1;
   if (status.requiresAcceptanceDeclaration && !status.declarationSatisfied)
     return 2;
-  if (
-    status.paymentRequired &&
-    !status.paymentSatisfied &&
-    !status.paymentEvidenceAccepted
-  )
-    return 3;
+  if (status.paymentRequired && !status.paymentSatisfied) return 3;
   return 'complete';
 }
 

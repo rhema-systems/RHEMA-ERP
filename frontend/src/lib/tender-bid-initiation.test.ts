@@ -6,6 +6,18 @@ import {
 } from './tender-bid-initiation';
 
 describe('tender bid initiation routing', () => {
+  it('starts a new supplier at user-access assignment', () => {
+    expect(
+      nextTenderBidInitiationStep({
+        hasAssignment: false,
+        requiresAcceptanceDeclaration: false,
+        declarationSatisfied: false,
+        paymentRequired: true,
+        paymentSatisfied: false,
+      })
+    ).toBe(1);
+  });
+
   it('completes a free tender without a declaration after assignment', () => {
     expect(
       nextTenderBidInitiationStep({
@@ -14,7 +26,6 @@ describe('tender bid initiation routing', () => {
         declarationSatisfied: true,
         paymentRequired: false,
         paymentSatisfied: true,
-        paymentEvidenceAccepted: true,
       })
     ).toBe('complete');
   });
@@ -25,9 +36,8 @@ describe('tender bid initiation routing', () => {
         hasAssignment: true,
         requiresAcceptanceDeclaration: true,
         declarationSatisfied: false,
-        paymentRequired: false,
-        paymentSatisfied: true,
-        paymentEvidenceAccepted: true,
+        paymentRequired: true,
+        paymentSatisfied: false,
       })
     ).toBe(2);
   });
@@ -40,20 +50,47 @@ describe('tender bid initiation routing', () => {
         declarationSatisfied: true,
         paymentRequired: true,
         paymentSatisfied: false,
-        paymentEvidenceAccepted: false,
       })
     ).toBe(3);
   });
 
-  it('allows sealed submission when manual payment evidence awaits verification', () => {
+  it.each([
+    ['manual evidence pending verification', true],
+    ['payment provider confirmation pending', false],
+    ['payment rejected', false],
+  ])('keeps %s on the payment step', (_scenario, paymentEvidenceAccepted) => {
+    const status = {
+      hasAssignment: true,
+      requiresAcceptanceDeclaration: false,
+      declarationSatisfied: true,
+      paymentRequired: true,
+      paymentSatisfied: false,
+      paymentEvidenceAccepted,
+    };
+
+    expect(nextTenderBidInitiationStep(status)).toBe(3);
+  });
+
+  it('completes initiation after the required payment is verified', () => {
     expect(
       nextTenderBidInitiationStep({
         hasAssignment: true,
         requiresAcceptanceDeclaration: false,
         declarationSatisfied: true,
         paymentRequired: true,
+        paymentSatisfied: true,
+      })
+    ).toBe('complete');
+  });
+
+  it('completes initiation when no tender fee is required', () => {
+    expect(
+      nextTenderBidInitiationStep({
+        hasAssignment: true,
+        requiresAcceptanceDeclaration: false,
+        declarationSatisfied: true,
+        paymentRequired: false,
         paymentSatisfied: false,
-        paymentEvidenceAccepted: true,
       })
     ).toBe('complete');
   });
