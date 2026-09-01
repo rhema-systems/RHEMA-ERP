@@ -1085,6 +1085,9 @@ public class IdentificationTypeDto : BaseDto
     public Guid? IssuingCountryId { get; set; }
     public string? IssuingCountryName { get; set; }
     public bool HasExpiryDate { get; set; }
+
+    /// <summary>Days before expiry that the holder is reminded. Null means no reminder.</summary>
+    public int? ExpiryNotificationLeadDays { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -1110,6 +1113,16 @@ public class CreateIdentificationTypeDto
     public Guid? IssuingCountryId { get; set; }
 
     public bool HasExpiryDate { get; set; } = true;
+
+    /// <summary>
+    /// Days before expiry that the holder is reminded. Null means this type raises no reminder.
+    /// </summary>
+    /// <remarks>
+    /// Per TYPE, because the lead time belongs to the document: a Ghana Card renewal is not a
+    /// passport renewal. Read by <c>IdentificationExpiryReminderBackgroundService</c>.
+    /// </remarks>
+    [Range(1, 365)]
+    public int? ExpiryNotificationLeadDays { get; set; }
 
     public bool IsActive { get; set; } = true;
 }
@@ -1139,6 +1152,10 @@ public class UpdateIdentificationTypeDto
     public Guid? IssuingCountryId { get; set; }
 
     public bool HasExpiryDate { get; set; }
+
+    /// <summary>Days before expiry that the holder is reminded. Null means no reminder.</summary>
+    [Range(1, 365)]
+    public int? ExpiryNotificationLeadDays { get; set; }
 
     public bool IsActive { get; set; }
 }

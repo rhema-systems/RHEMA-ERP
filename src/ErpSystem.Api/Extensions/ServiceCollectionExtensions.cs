@@ -1006,6 +1006,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,
                                ErpSystem.Core.Services.HR.StaffNumberService>();
 
+            // Lane 3b reference dimensions: the qualification ladder, certifying bodies, and the
+            // staff-numbering rules themselves.
+            services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
+                               ErpSystem.Core.Services.HR.ReferenceDimensionService>();
+
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
             services.AddScoped<IOrganizationLevelService, OrganizationLevelService>();
