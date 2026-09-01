@@ -556,3 +556,15 @@ public class TenderNegotiationItemConfiguration : IEntityTypeConfiguration<Tende
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class TenderEvaluationConfiguration : IEntityTypeConfiguration<TenderEvaluation>
+{
+    public void Configure(EntityTypeBuilder<TenderEvaluation> builder)
+    {
+        // SQL Server rejects EF's OUTPUT clause when an enabled trigger exists on
+        // the target table. Declaring the projection trigger keeps draft creates
+        // and governed submission updates compatible with the database control.
+        builder.ToTable("TenderEvaluations", table =>
+            table.HasTrigger("TR_TenderEvaluations_CommitteeScoreProjection"));
+    }
+}

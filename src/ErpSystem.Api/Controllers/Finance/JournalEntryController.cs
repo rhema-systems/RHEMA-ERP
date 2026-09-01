@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using ErpSystem.Shared;
@@ -107,6 +108,23 @@ namespace ErpSystem.Api.Controllers.Finance
                 .ToListAsync();
 
             return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
+        }
+
+        private async Task<bool> CanViewJournalEntryAsync(Guid journalEntryId)
+        {
+            if (await HasAnyPermissionAsync(FinancePermissions.ViewFinance))
+                return true;
+
+            if (!await HasAnyPermissionAsync(ProcurementAccessControlRegistry.TenderPaymentVerifyPermission))
+                return false;
+
+            var tenantId = TenantId;
+            return await _dbContext.TenderPayments
+                .AsNoTracking()
+                .AnyAsync(payment =>
+                    payment.TenantId == tenantId &&
+                    !payment.IsDeleted &&
+                    payment.JournalEntryId == journalEntryId);
         }
 
         private async Task<ConflictObjectResult?> GetBatchOwnershipConflictAsync(Guid journalEntryId)
@@ -306,6 +324,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await CanViewJournalEntryAsync(id))
+                    return Forbid();
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -880,6 +901,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await CanViewJournalEntryAsync(id))
+                    return Forbid();
+
                 var attachments = await _journalEntryService.GetAttachmentsAsync(id);
                 return Ok(attachments);
             }
