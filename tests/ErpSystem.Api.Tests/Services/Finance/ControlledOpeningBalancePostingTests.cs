@@ -29,6 +29,42 @@ public sealed class ControlledOpeningBalancePostingTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "CanonicalMasterData")]
+    public async Task SpecializedOptions_ShouldUseCanonicalArCustomersAndActiveApSuppliers()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        db.Suppliers.Add(new Supplier
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SupplierCode = "SUP-001",
+            Name = "Opening Supplier",
+            IsActive = true,
+            Status = "Active"
+        });
+        db.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PartnerCode = "CUS-001",
+            CustomerAccountNumber = "AR-CUS-001",
+            PartnerName = "Opening Customer",
+            PartnerType = "Customer",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        var options = await CreateService(db, tenantId).GetSpecializedOptionsAsync();
+
+        options.Suppliers.Should().ContainSingle(item =>
+            item.Code == "SUP-001" && item.Name == "Opening Supplier");
+        options.Customers.Should().ContainSingle(item =>
+            item.Code == "AR-CUS-001" && item.Name == "Opening Customer");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "ProjectionContract")]
     public async Task ApprovalProjection_ShouldLabelFunctionalAmountWithFunctionalCurrency_NotFiscalPeriod()
     {

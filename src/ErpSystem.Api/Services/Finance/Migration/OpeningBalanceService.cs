@@ -631,10 +631,20 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             .OrderBy(item => item.Name)
             .Select(item => new OpeningBalancePartyOptionDto { Id = item.Id, Code = item.SupplierCode, Name = item.Name })
             .ToListAsync(cancellationToken);
-        var customers = await _db.Set<Customer>().AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status == "Active")
-            .OrderBy(item => item.CustomerName)
-            .Select(item => new OpeningBalancePartyOptionDto { Id = item.Id, Code = item.CustomerCode, Name = item.CustomerName })
+        // AR customer identity is owned by the canonical BusinessPartner master. The legacy
+        // Customer entity is not a deployed table in current tenants and must never be queried
+        // by a Finance cutover projection.
+        var customers = await _db.BusinessPartners.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive &&
+                (item.PartnerType == "Customer" || item.PartnerType == "Both"))
+            .OrderBy(item => item.PartnerName)
+            .ThenBy(item => item.PartnerCode)
+            .Select(item => new OpeningBalancePartyOptionDto
+            {
+                Id = item.Id,
+                Code = item.CustomerAccountNumber ?? item.PartnerCode,
+                Name = item.PartnerName
+            })
             .ToListAsync(cancellationToken);
         var taxes = await _db.Taxes.AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Category == TaxCategory.Withholding)

@@ -307,6 +307,11 @@ export default function OpeningBalancesPage() {
     const specializedRateRequired = isSpecializedAdvance
         && specializedCurrencyCode.length === 3
         && specializedCurrencyCode !== functionalCurrencyCode;
+    const specializedPartyIsSupplier = specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding';
+    const specializedPartyLabel = specializedPartyIsSupplier ? 'Supplier' : 'Customer';
+    const specializedPartyOptions = specializedPartyIsSupplier
+        ? (specializedOptionsQuery.data?.suppliers ?? [])
+        : (specializedOptionsQuery.data?.customers ?? []);
 
     useEffect(() => {
         if (!isSpecializedAdvance) {
@@ -912,7 +917,15 @@ export default function OpeningBalancesPage() {
     const handleRefresh = async () => {
         const refreshes: Promise<unknown>[] = [batchesQuery.refetch()];
         if (canRunDiagnostics) refreshes.push(diagnosticsQuery.refetch());
-        if (canPrepareOpeningBalances && governedHeaderComplete) refreshes.push(governedOptionsQuery.refetch());
+        if (canPrepareOpeningBalances) {
+            refreshes.push(
+                specializedOptionsQuery.refetch(),
+                currenciesQuery.refetch(),
+                settingsQuery.refetch(),
+                subledgerReadinessQuery.refetch(),
+            );
+            if (governedHeaderComplete) refreshes.push(governedOptionsQuery.refetch());
+        }
         if (canPrepareInventoryOpening) refreshes.push(openingStockOptionsQuery.refetch());
         if (currentBatch) {
             refreshes.push(loadBatch(currentBatch.id, false));
@@ -1802,6 +1815,44 @@ export default function OpeningBalancesPage() {
                                     These balances arose before go-live, so migration clearing offsets the source account. Maker-checker approval and central posting still apply.
                                 </AlertDescription>
                             </Alert>
+                            {!canPrepareOpeningBalances && (
+                                <Alert>
+                                    <ShieldCheck className="h-4 w-4" />
+                                    <AlertTitle>Opening-balance preparation permission required</AlertTitle>
+                                    <AlertDescription>
+                                        Your role can view this workspace but cannot load or prepare specialised cutover evidence. The tenant-scoped Finance.Migration.OpeningBalances.Prepare permission is required.
+                                    </AlertDescription>
+                                </Alert>
+                            )}
+                            {canPrepareOpeningBalances && specializedOptionsQuery.isLoading && (
+                                <Alert>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <AlertTitle>Loading specialised master data</AlertTitle>
+                                    <AlertDescription>Loading active suppliers, customers and withholding-tax mappings for this tenant.</AlertDescription>
+                                </Alert>
+                            )}
+                            {canPrepareOpeningBalances && specializedOptionsQuery.isError && (
+                                <Alert variant="destructive">
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertTitle>Specialised master data could not be loaded</AlertTitle>
+                                    <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                                        <span>{specializedOptionsQuery.error instanceof Error ? specializedOptionsQuery.error.message : 'The specialised cutover-options request failed.'}</span>
+                                        <Button type="button" variant="outline" size="sm" onClick={() => specializedOptionsQuery.refetch()} disabled={specializedOptionsQuery.isFetching}>
+                                            {specializedOptionsQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                            Retry
+                                        </Button>
+                                    </AlertDescription>
+                                </Alert>
+                            )}
+                            {canPrepareOpeningBalances && specializedOptionsQuery.isSuccess && specializedPartyOptions.length === 0 && (
+                                <Alert>
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertTitle>No active {specializedPartyLabel.toLowerCase()} master is available</AlertTitle>
+                                    <AlertDescription>
+                                        No eligible {specializedPartyLabel.toLowerCase()} exists for the active tenant. Complete or activate the canonical master before preparing this opening type.
+                                    </AlertDescription>
+                                </Alert>
+                            )}
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 <div className="space-y-2">
                                     <Label>Opening type</Label>
@@ -1816,13 +1867,25 @@ export default function OpeningBalancesPage() {
                                     </Select>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label>{specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding' ? 'Supplier' : 'Customer'}</Label>
-                                    <Select value={specialized.partyId} onValueChange={value => setSpecialized(current => ({ ...current, partyId: value }))}>
-                                        <SelectTrigger><SelectValue placeholder="Select party" /></SelectTrigger>
+                                    <Label>{specializedPartyLabel}</Label>
+                                    <Select
+                                        value={specialized.partyId}
+                                        onValueChange={value => setSpecialized(current => ({ ...current, partyId: value }))}
+                                        disabled={!canPrepareOpeningBalances || specializedOptionsQuery.isLoading || specializedOptionsQuery.isError || specializedPartyOptions.length === 0}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={
+                                                specializedOptionsQuery.isLoading
+                                                    ? `Loading ${specializedPartyLabel.toLowerCase()}s…`
+                                                    : specializedOptionsQuery.isError
+                                                        ? `${specializedPartyLabel} options unavailable`
+                                                        : specializedPartyOptions.length === 0
+                                                            ? `No active ${specializedPartyLabel.toLowerCase()}s`
+                                                            : `Select ${specializedPartyLabel.toLowerCase()}`
+                                            } />
+                                        </SelectTrigger>
                                         <SelectContent>
-                                            {(specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding'
-                                                ? specializedOptionsQuery.data?.suppliers
-                                                : specializedOptionsQuery.data?.customers)?.map(item => (
+                                            {specializedPartyOptions.map(item => (
                                                 <SelectItem key={item.id} value={item.id}>{item.code} · {item.name}</SelectItem>
                                             ))}
                                         </SelectContent>
@@ -1888,7 +1951,7 @@ export default function OpeningBalancesPage() {
                                     <div className="space-y-2"><Label>Certificate date</Label><Input type="date" value={specialized.certificateDate} onChange={event => setSpecialized(current => ({ ...current, certificateDate: event.target.value }))} /></div>
                                 </>}
                             </div>
-                            <Button onClick={handleCreateSpecializedBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || specializedOptionsQuery.isLoading || (isSpecializedAdvance && (specializedRateEvidence.isLoading || specializedRateEvidence.isError || (specializedRateRequired && !specialized.exchangeRateId)))}>
+                            <Button onClick={handleCreateSpecializedBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || specializedOptionsQuery.isLoading || specializedOptionsQuery.isError || specializedPartyOptions.length === 0 || (isSpecializedAdvance && (specializedRateEvidence.isLoading || specializedRateEvidence.isError || (specializedRateRequired && !specialized.exchangeRateId)))}>
                                 {busyAction === 'specialized' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
                                 Prepare controlled batch
                             </Button>
