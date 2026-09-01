@@ -11,6 +11,7 @@ import {
   EmployeePositionForm,
   type EmployeePositionFormValues,
 } from '@/components/hr/position/EmployeePositionForm';
+import { PositionDocumentRequirementsPanel } from '@/components/hr/position/PositionDocumentRequirementsPanel';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
@@ -200,6 +201,10 @@ export default function EditEmployeePositionPage() {
           onCancel={() => router.push('/administration/hr/positions')}
         />
       )}
+
+      {/* Beside the form, not inside it: requirements are their own endpoints rather than part of
+          the position payload, and they only mean anything for a position that already exists. */}
+      {position && <PositionDocumentRequirementsPanel positionId={id} />}
     </div>
   );
 }

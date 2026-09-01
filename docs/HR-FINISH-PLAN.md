@@ -23,7 +23,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **0** | Ledger truth — make the instruments tell the truth again | ✅ **done 2026-08-31** | — | — |
 | **1** | Close the coverage queue | ✅ **done 2026-08-31** | — | — |
 | **2** | Decisions owed — 6 settings ✅ built, the rest is a memo | 13 asks | memo | TDC / the user |
-| **3** | Employee Master feedback block | 19 | 4 slices | partly lane 2 |
+| **3** | Employee Master feedback block | 19 | 4 slices | — (1 of 19 needs TDC) |
 | **4** | Leave · Training · Succession · Recruitment feedback | 15 | 2 slices | partly lane 2 |
 | **5** | Section E — fields no form can set | 69 fields / 27 DTOs | 2 slices | own classification pass |
 | **6** | Deferred area residues | 13 | 2 slices | 4 are blocked outside HR |
@@ -35,7 +35,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 
 ### Critical path
 
-~~Lane 0~~ ✅ → ~~lane 1~~ ✅ **the queue is empty (0 BUILD).** Next is lane 2's settings half, then lane 5 or 6. Lane 2 is a **memo, and it should still go out on day one** — it gates the largest build (lane 3) and the money decisions in lane 8. It no longer gates lane 7, which is built.
+~~Lane 0~~ ✅ → ~~lane 1~~ ✅ **the queue is empty (0 BUILD).** Next is lane 2's settings half, then lane 5 or 6. Lane 2's remaining half is a **memo, and it should still go out on day one** — but ⚠ **it does not gate lane 3**, which is what this line used to claim. Checked item by item on 2026-08-31: of lane 3's nineteen rows, **one** (the labour-law checklist) genuinely needs TDC before it can be built, three want TDC's *data* to fill a mechanism that can be built now, and fifteen need nothing at all. What the memo does gate is lane 8's money decisions and the four `DECIDE` rows. It no longer gates lane 7, which is built.
 
 ⚠ **Lane 2 is smaller than it looks.** Eight of its questions convert to `CompanyHrPolicySettings` entries whose defaults are what the system already does, so those ship now and TDC's answer later costs an edit rather than a deploy. Do that half (½ slice) without waiting for anybody. Lanes 5 and 6 run in parallel with the wait. Lane 8 is the long pole and cannot finish without two other module owners.
 
@@ -334,16 +334,38 @@ one schema change, one set of screens, one harness run.
       ⚠ Build it on `INumberSequenceService`, not a max+1 scan: this module has met the
       prefix-scan defect **at least eight times**, and the platform mechanism is atomic per tenant.
 
-### 3c — The document surface (controlled upload gate)
+### 3c — The document surface · ✅ **DONE 2026-09-01** · 47 assertions ×2
 
-- [ ] **No employee document attachments exist at all.** ✅ *verified 2026-08-31 — there is no
-      `EmployeeDocument` entity and `EmployeesController` has no upload route, while the gate is
-      wired into 30+ other HR controllers.* This is the single largest functional hole left in the
-      module: the most-used entity in HR cannot hold a contract, an ID scan or a certificate.
-      New table, `HrAttachmentUpload` + `HrDocumentDownload`, a category registered in
-      `SystemCleanScanRequired` **in the same commit** (D-11's half-job must not recur).
-- [ ] No mandatory documents against a position — the checklist that makes 3c enforceable.
-- [ ] No appointment letter templates — only email templates exist today.
+- [x] **Employee document attachments** — three tables (`EmployeeDocumentTypes`,
+      `EmployeeDocuments`, `PositionDocumentRequirements`), a controller, the Documents tab on
+      employee detail, and the `hr-employee-documents` category declared AND registered in
+      `SystemCleanScanRequired` in one edit. Harness `hr-employee-docs/run-lane3c.mjs`, 47
+      assertions, green twice. Both standing greps clean: 15 of 15 client methods have a screen
+      caller, 10 of 10 write routes have a client method.
+- [x] **Mandatory documents against a position** — the requirements panel on the position edit
+      screen, plus the compliance read that makes it answerable. It **reports and does not block**:
+      area 8's FR-HR-173 was built as a hard block exactly as specified and refused nearly every
+      movement, and refusing an appointment over a missing document stops the transaction that gets
+      somebody able to supply it.
+- [ ] **No appointment letter templates** — ⚠ **deliberately NOT in this slice.** Templating is a
+      different feature from document storage, and it is one of the three lane-3 items whose
+      *content* is TDC's. Building the engine now means guessing what a TDC appointment letter says.
+
+**Three things this slice established:**
+
+1. ⚠ **The vocabulary had to be a TABLE, not an enum.** An employee HOLDS documents and a position
+   REQUIRES them, so both must speak one language; every other HR document vocabulary in the
+   codebase is a compiled enum precisely because nothing else reads it.
+2. ⚠ **The paged employee list does not return `positionId`** (probed — it comes back undefined),
+   while the compliance read resolves it. A requirements editor keyed off a list row's position
+   would be keyed off nothing. The D-09/D-12 shape, one layer further out.
+3. ⚠ **Two defects the harness caught that reading could not.** `AddRequirementAsync` used
+   `GetQueryable()`, which filters soft-deleted rows — so the revive branch was unreachable and
+   every re-add silently inserted a duplicate, and it did **not** throw, because the unique index is
+   filtered and a tombstone does not occupy the slot. And every refusal on the controller was mute:
+   `GlobalExceptionHandlingMiddleware` maps `InvalidOperationException` to a fixed string and
+   DISCARDS the message, so three carefully-worded rules reached nobody until a `ToClientError`
+   helper was added. **The code looked right in all four cases.**
 
 ### 3d — Guards, pickers and the rest
 

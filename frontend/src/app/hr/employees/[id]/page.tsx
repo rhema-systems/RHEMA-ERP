@@ -18,6 +18,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { employeeService } from '@/services/hr/employee.service';
 import type { EmployeeDetail } from '@/types/hr/employee';
 import { ContactsTab } from '@/components/hr/employee/tabs/ContactsTab';
+import { DocumentsTab } from '@/components/hr/employee/tabs/DocumentsTab';
 import { EmergencyContactsTab } from '@/components/hr/employee/tabs/EmergencyContactsTab';
 import { DependentsTab } from '@/components/hr/employee/tabs/DependentsTab';
 import { QualificationsTab } from '@/components/hr/employee/tabs/QualificationsTab';
@@ -186,6 +187,7 @@ export default function EmployeeDetailPage() {
             <TabsTrigger value="referees">Referees</TabsTrigger>
             <TabsTrigger value="guarantors">Guarantors</TabsTrigger>
             <TabsTrigger value="bank">Bank</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
           </TabsList>
         </div>
 
@@ -242,6 +244,9 @@ export default function EmployeeDetailPage() {
           )}
         </TabsContent>
 
+        <TabsContent value="documents" className="pt-4">
+          <DocumentsTab employeeId={id} />
+        </TabsContent>
         <TabsContent value="contacts" className="pt-4">
           <ContactsTab employeeId={id} />
         </TabsContent>

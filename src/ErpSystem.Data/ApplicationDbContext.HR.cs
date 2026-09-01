@@ -433,6 +433,12 @@ public partial class ApplicationDbContext
     public DbSet<DisciplineReminderRun> DisciplineReminderRuns { get; set; } = null!;
     public DbSet<DisciplineReminderDispatchLog> DisciplineReminderDispatchLogs { get; set; } = null!;
     public DbSet<EmployeeOathOfSecrecy> EmployeeOathsOfSecrecy { get; set; } = null!;
+
+    // Employee document file — the vocabulary, the documents themselves, and what each position
+    // requires its holder to have (finish plan, lane 3c).
+    public DbSet<EmployeeDocumentType> EmployeeDocumentTypes { get; set; } = null!;
+    public DbSet<EmployeeDocument> EmployeeDocuments { get; set; } = null!;
+    public DbSet<PositionDocumentRequirement> PositionDocumentRequirements { get; set; } = null!;
     public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
     public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
     public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
@@ -9697,6 +9703,62 @@ private void ConfigureHREntities(ModelBuilder builder)
         });
 
         // ---- Oath of secrecy (area 15b slice 9, FR-HR-030) ----
+        builder.Entity<EmployeeDocumentType>(e =>
+        {
+            // One name per tenant, filtered so a retired type's name can be reused.
+            e.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EmployeeDocumentTypes_Tenant_Name");
+        });
+
+        builder.Entity<EmployeeDocument>(e =>
+        {
+            // The two reads this table serves: an employee's file, and "who holds this type".
+            e.HasIndex(x => new { x.TenantId, x.EmployeeId, x.DocumentTypeId });
+            // The expiry sweep's index, ahead of the sweep — a chase list ordered by expiry is the
+            // only way this table is ever scanned across employees.
+            e.HasIndex(x => new { x.TenantId, x.ExpiresOn });
+
+            e.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.DocumentType)
+                .WithMany(t => t.Documents)
+                .HasForeignKey(x => x.DocumentTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ⚠ Paired explicitly. An unpaired navigation mints a duplicate shadow FK (Id1) —
+            // the shape this module fixed across HR in 2026-08.
+            e.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PositionDocumentRequirement>(e =>
+        {
+            // ⚠ FILTERED unique index, and the service revives rather than re-inserts. A soft
+            // delete does not release a unique index — met nine times in this module — so an
+            // unfiltered one would make a removed requirement permanently un-re-addable.
+            e.HasIndex(x => new { x.TenantId, x.PositionId, x.DocumentTypeId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_PositionDocumentRequirements_Position_Type");
+
+            e.HasOne(x => x.Position)
+                .WithMany()
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.DocumentType)
+                .WithMany()
+                .HasForeignKey(x => x.DocumentTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<EmployeeOathOfSecrecy>(e =>
         {
             // No unique index on the employee: a rehire swears again, so several per employee is

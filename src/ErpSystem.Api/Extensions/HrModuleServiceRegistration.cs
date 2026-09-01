@@ -683,6 +683,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
         services.AddScoped<IProbationConfirmingAuthorityService, ProbationConfirmingAuthorityService>();
         services.AddScoped<IEmployeeOathOfSecrecyService, EmployeeOathOfSecrecyService>();
+
+        // Finish plan lane 3c — the employee document file, its shared vocabulary and the position
+        // requirements that make it answerable.
+        services.AddScoped<IEmployeeDocumentService, EmployeeDocumentService>();
         // The exit register (area 9b) — one separation record per employee leaving, by any route.
         services.AddScoped<ISeparationService, SeparationService>();
         // HR Assets' read-only answer to "what has this leaver not given back?" — FR-HR-183, the

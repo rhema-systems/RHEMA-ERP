@@ -3106,6 +3106,8 @@ export const navigationItems: NavItem[] = [
           { title: 'Establishment', href: '/administration/hr/establishment', icon: ShieldCheck },
           { title: 'Qualifications', href: '/administration/hr/qualifications', icon: GraduationCap },
           { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
+          // The vocabulary an employee's document file and a position's requirements both speak.
+          { title: 'Document Types', href: '/administration/hr/document-types', icon: FileText },
           { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           // Ten write endpoints with no screen anywhere until 2026-08-31: a bank could not be

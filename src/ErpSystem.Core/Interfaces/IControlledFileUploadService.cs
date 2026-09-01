@@ -193,6 +193,18 @@ public static class ControlledFileUploadCategories
     public const string HrPolicyDocuments = "hr-policy-documents";
 
     /// <summary>
+    /// Files on an employee's own record — the signed contract, the ID scan, the certificate, the
+    /// residence permit.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than a share of any existing pile, and the reason is retention. These
+    /// are the documents that identify a person and evidence their right to work; they outlive every
+    /// case, claim and trip that might otherwise have carried them, and "delete the discipline
+    /// documents for a closed case" must never be able to reach somebody's passport scan.
+    /// </remarks>
+    public const string HrEmployeeDocuments = "hr-employee-documents";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -221,6 +233,7 @@ public static class ControlledFileUploadCategories
                 QuantitySurveyClaimEvidence,
                 QuantitySurveyDayworkEvidence,
                 QuantitySurveySubcontractEvidence,
+                HrEmployeeDocuments,
                 HrCandidateCv,
                 HrCandidateDocuments,
                 HrCandidatePhotos,
