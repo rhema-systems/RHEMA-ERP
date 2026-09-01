@@ -32,7 +32,11 @@ export type HealthFacilityType =
   | 'RehabilitationCenter'
   | 'MaternityHome'
   | 'DentalClinic'
-  | 'OpticalCenter';
+  | 'OpticalCenter'
+  // HealthFacilityType.MentalHealthFacility = 17 and Other = 99. Both absent until 2026-09-01,
+  // so a facility stored as either could not be edited through the shared form.
+  | 'MentalHealthFacility'
+  | 'Other';
 
 export const HEALTH_FACILITY_TYPE_OPTIONS: { value: HealthFacilityType; label: string }[] = [
   { value: 'GeneralHospital', label: 'General hospital' },
@@ -51,6 +55,8 @@ export const HEALTH_FACILITY_TYPE_OPTIONS: { value: HealthFacilityType; label: s
   { value: 'MaternityHome', label: 'Maternity home' },
   { value: 'DentalClinic', label: 'Dental clinic' },
   { value: 'OpticalCenter', label: 'Optical centre' },
+  { value: 'MentalHealthFacility', label: 'Mental health facility' },
+  { value: 'Other', label: 'Other' },
 ];
 
 export interface HealthcareFacilitySummary {
@@ -85,6 +91,19 @@ export interface HealthcareFacility extends HealthcareFacilitySummary {
   contactPersonPhone?: string | null;
   contactPersonEmail?: string | null;
   operatingHours?: string | null;
+  /**
+   * Which days the facility opens, as a free-text list.
+   *
+   * ⚠ Instrument 03 flagged only `accreditationDate` and `operatingDays` on this type, because the
+   * other three accreditation identifiers occur elsewhere in the frontend (the training-vendor
+   * screens use the same names). The whole accreditation block was in fact missing — the
+   * instrument's stated blind spot, not a two-field omission.
+   */
+  operatingDays?: string | null;
+  accreditationBody?: string | null;
+  accreditationNumber?: string | null;
+  accreditationDate?: string | null;
+  accreditationExpiryDate?: string | null;
   notes?: string | null;
 }
 
@@ -110,6 +129,11 @@ export interface HealthcareFacilityCreateRequest {
   contactPersonName?: string | null;
   contactPersonPhone?: string | null;
   operatingHours?: string | null;
+  operatingDays?: string | null;
+  accreditationBody?: string | null;
+  accreditationNumber?: string | null;
+  accreditationDate?: string | null;
+  accreditationExpiryDate?: string | null;
   isActive: boolean;
   notes?: string | null;
 }
@@ -174,7 +198,10 @@ export type MedicalInsuranceProviderType =
   | 'GroupInsurance'
   | 'TravelInsurance'
   | 'DentalInsurance'
-  | 'VisionInsurance';
+  | 'VisionInsurance'
+  // MedicalInsuranceProviderType.Other = 99. Absent from this union until 2026-09-01, so a
+  // provider stored as Other by any other path failed the form's schema and could not be edited.
+  | 'Other';
 
 export const MEDICAL_PROVIDER_TYPE_OPTIONS: {
   value: MedicalInsuranceProviderType;
@@ -190,6 +217,7 @@ export const MEDICAL_PROVIDER_TYPE_OPTIONS: {
   { value: 'TravelInsurance', label: 'Travel insurance' },
   { value: 'DentalInsurance', label: 'Dental insurance' },
   { value: 'VisionInsurance', label: 'Vision insurance' },
+  { value: 'Other', label: 'Other' },
 ];
 
 export type MedicalInsurancePlanType =
@@ -241,10 +269,16 @@ export interface MedicalInsuranceProvider extends MedicalInsuranceProviderSummar
   email: string;
   claimsEmail?: string | null;
   website?: string | null;
+  /** Whether the insurer offers a self-service claims portal, and where it is. */
+  hasOnlinePortal: boolean;
+  claimsPortalUrl?: string | null;
   standardProcessingDays: number;
   emergencyProcessingDays?: number | null;
   claimSubmissionDeadlineDays: number;
   claimSubmissionProcess?: string | null;
+  /** How this insurer prefers to be paid. Companion `preferredPaymentMethodName` on the read. */
+  preferredPaymentMethod?: PaymentMethod | null;
+  preferredPaymentMethodName?: string | null;
   notes?: string | null;
 }
 
@@ -261,8 +295,11 @@ export interface MedicalInsuranceProviderCreateRequest {
   email: string;
   claimsEmail?: string | null;
   website?: string | null;
+  hasOnlinePortal: boolean;
+  claimsPortalUrl?: string | null;
   standardProcessingDays: number;
   claimSubmissionDeadlineDays: number;
+  preferredPaymentMethod?: PaymentMethod | null;
   isActive: boolean;
   notes?: string | null;
 }
@@ -280,6 +317,8 @@ export interface MedicalInsurancePlan {
   planType: MedicalInsurancePlanType;
   description?: string | null;
   annualLimit: number;
+  /** A cap across the life of the policy, distinct from the per-year `annualLimit`. */
+  lifetimeLimit?: number | null;
   outpatientLimit?: number | null;
   inpatientLimit?: number | null;
   dentalLimit?: number | null;
@@ -287,8 +326,19 @@ export interface MedicalInsurancePlan {
   maternityLimit?: number | null;
   coversDependents: boolean;
   maxDependents?: number | null;
+  /** The age at which a child dependant ages out of cover. */
+  maxChildAge?: number | null;
   monthlyPremium?: number | null;
   annualPremium?: number | null;
+  /**
+   * How the premium is split.
+   *
+   * ⚠ The server enforces `Range(0, 100)` on each **independently** — probed 2026-09-01, a plan
+   * with 90/90 is accepted with a 201. Nothing requires the two to sum to 100, so the form is
+   * where that gets noticed.
+   */
+  employerContributionPercent?: number | null;
+  employeeContributionPercent?: number | null;
   effectiveDate: string;
   expiryDate?: string | null;
   isActive: boolean;
@@ -302,6 +352,7 @@ export interface MedicalInsurancePlanCreateRequest {
   planType: MedicalInsurancePlanType;
   description?: string | null;
   annualLimit: number;
+  lifetimeLimit?: number | null;
   outpatientLimit?: number | null;
   inpatientLimit?: number | null;
   dentalLimit?: number | null;
@@ -309,8 +360,11 @@ export interface MedicalInsurancePlanCreateRequest {
   maternityLimit?: number | null;
   coversDependents: boolean;
   maxDependents?: number | null;
+  maxChildAge?: number | null;
   monthlyPremium?: number | null;
   annualPremium?: number | null;
+  employerContributionPercent?: number | null;
+  employeeContributionPercent?: number | null;
   effectiveDate: string;
   expiryDate?: string | null;
   isActive: boolean;
@@ -1139,6 +1193,9 @@ export interface MedicalExpenseClaimSummary {
   amountRequested: number;
   amountApproved?: number | null;
   status: ClaimStatus;
+  /** The server sends these companions beside the two enums; measured 2026-09-01. */
+  expenseTypeName?: string | null;
+  statusName?: string | null;
   isFlaggedForReview: boolean;
 }
 
@@ -1549,7 +1606,9 @@ export interface NHISClaim extends NHISClaimSummary {
   rejectionReason?: string | null;
   paymentDate?: string | null;
   paymentReference?: string | null;
+  linkedMedicalClaimId?: string | null;
   linkedMedicalClaimNumber?: string | null;
+  notes?: string | null;
 }
 
 /**
@@ -1572,8 +1631,16 @@ export interface NHISClaimDocument {
   uploadDate: string;
 }
 
+/**
+ * ⚠ Five fields were missing from this type until 2026-09-01, and instrument 03 flagged only one of
+ * them (`linkedMedicalClaimId`) — the other four occur as identifiers elsewhere in the frontend, so
+ * the instrument could not see them. The flagged count is a floor, not a total.
+ */
 export interface NHISClaimCreateRequest {
   employeeId: string;
+  /** A claim can be for a dependant rather than the member; `dependentId` then names which. */
+  isForDependent?: boolean;
+  dependentId?: string | null;
   nhisMembershipNumber: string;
   facilityId: string;
   physicianId?: string | null;
@@ -1581,9 +1648,19 @@ export interface NHISClaimCreateRequest {
   serviceType: MedicalServiceType;
   serviceDescription: string;
   diagnosis?: string | null;
+  icdCode?: string | null;
   totalCost: number;
   nhisCoveredAmount?: number | null;
   coPayAmount?: number | null;
+  /**
+   * The employer-reimbursement claim this NHIS claim sits against — set when the employer covers
+   * the co-pay or a top-up.
+   *
+   * ⚠ `IMedicalRepositories.GetByLinkedMedicalClaimIdAsync` reads this relationship in reverse.
+   * With nothing able to set the link, that query could only ever return empty.
+   */
+  linkedMedicalClaimId?: string | null;
+  notes?: string | null;
 }
 
 export interface NHISClaimUpdateRequest extends NHISClaimCreateRequest {

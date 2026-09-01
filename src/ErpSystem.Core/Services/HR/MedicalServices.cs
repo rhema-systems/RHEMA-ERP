@@ -625,9 +625,36 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
+    /// <summary>
+    /// Refuses a premium split that adds up to more than the premium.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <c>[Range(0, 100)]</c> sits on each percentage <b>independently</b>, so nothing
+    /// stopped a plan being saved with employer 90% and employee 90% — probed 2026-09-01, it
+    /// returned a 201.</para>
+    ///
+    /// <para><b>Only the over-100 case is refused, deliberately.</b> Whether a split must total
+    /// exactly 100 is a policy question — a scheme can be part-funded by a third party, so
+    /// rejecting 80/10 would invent a rule TDC has not asked for. Totalling more than 100 is not a
+    /// policy question: it is arithmetic, and no arrangement charges 180% of a premium.</para>
+    ///
+    /// <para>This lives in the service rather than the form because a screen-side check protects
+    /// one caller. An import, another screen or a direct call would still write it.</para>
+    /// </remarks>
+    private static void RequireCoherentContributionSplit(decimal? employerPercent, decimal? employeePercent)
+    {
+        var total = (employerPercent ?? 0m) + (employeePercent ?? 0m);
+        if (total > 100m)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"The employer and employee contributions add up to {total:0.##}% of the premium. "
+                + "They may total less than 100% when someone else funds the balance, but not more.");
+    }
+
     public async Task<MedicalInsurancePlanDto> CreatePlanAsync(CreateMedicalInsurancePlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         EnsureTenant(tenantId);
+        RequireCoherentContributionSplit(createDto.EmployerContributionPercent, createDto.EmployeeContributionPercent);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _planRepository.AddAsync(entity);
@@ -642,6 +669,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance plan with ID '{updateDto.Id}' not found.");
+
+        RequireCoherentContributionSplit(updateDto.EmployerContributionPercent, updateDto.EmployeeContributionPercent);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -2174,6 +2203,22 @@ public class NHISService : INHISService
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{updateDto.Id}' not found.");
+
+        // ⚠ There was NO state guard here. A claim already submitted to the scheme — or approved,
+        // or paid — could have its amounts, service date and facility rewritten, silently, leaving
+        // the record disagreeing with what was actually claimed and settled. Found 2026-09-01 while
+        // building the screen's first edit path; the same shape as D-03, where probation dates
+        // stayed editable after confirmation and was closed with a service-level guard.
+        //
+        // Draft is editable because nothing has been asserted to anyone yet. Rejected is editable
+        // because correcting and resubmitting is exactly what a rejection is for. Everything from
+        // Submitted onward is a statement already made to NHIS, and is amended through the status
+        // and payment paths rather than by rewriting the claim.
+        if (entity.Status is not (NHISClaimStatus.Draft or NHISClaimStatus.Rejected))
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"This claim is {entity.Status} and can no longer be edited — it has already been put to the scheme. "
+                + "Record the scheme's decision or its payment instead; only a draft or a rejected claim can be changed.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 

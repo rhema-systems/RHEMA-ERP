@@ -14,7 +14,7 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { medicalInsuranceService } from '@/services/hr/medical-reference.service';
-import { MEDICAL_PROVIDER_TYPE_OPTIONS } from '@/types/hr/medical';
+import { MEDICAL_PROVIDER_TYPE_OPTIONS, PAYMENT_METHOD_OPTIONS } from '@/types/hr/medical';
 import type { MedicalInsuranceProviderSummary } from '@/types/hr/medical';
 
 /**
@@ -40,6 +40,7 @@ const providerSchema = z.object({
     'TravelInsurance',
     'DentalInsurance',
     'VisionInsurance',
+    'Other',
   ]),
   licenseNumber: z.string().min(1, 'Required').max(100),
   address: z.string().min(1, 'Required').max(500),
@@ -49,8 +50,14 @@ const providerSchema = z.object({
   email: z.string().email('Not a valid email').max(255),
   claimsEmail: z.string().email('Not a valid email').max(255).optional().or(z.literal('')),
   website: z.string().max(255).optional(),
+  hasOnlinePortal: z.boolean(),
+  claimsPortalUrl: z.string().max(255).optional(),
   standardProcessingDays: z.coerce.number().min(1, 'At least 1 day'),
   claimSubmissionDeadlineDays: z.coerce.number().min(1, 'At least 1 day'),
+  preferredPaymentMethod: z
+    .enum(['BankTransfer', 'Cash', 'Cheque', 'MobileMoney', 'DirectDeposit', 'SalaryDeduction'])
+    .optional()
+    .or(z.literal('')),
   isActive: z.boolean(),
   notes: z.string().max(2000).optional(),
 });
@@ -70,8 +77,11 @@ const emptyProvider: ProviderForm = {
   email: '',
   claimsEmail: '',
   website: '',
+  hasOnlinePortal: false,
+  claimsPortalUrl: '',
   standardProcessingDays: 14,
   claimSubmissionDeadlineDays: 30,
+  preferredPaymentMethod: '',
   isActive: true,
   notes: '',
 };
@@ -106,6 +116,8 @@ export default function MedicalInsuranceProvidersPage() {
             claimsHotline: blank(v.claimsHotline),
             claimsEmail: blank(v.claimsEmail),
             website: blank(v.website),
+            claimsPortalUrl: blank(v.claimsPortalUrl),
+            preferredPaymentMethod: (blank(v.preferredPaymentMethod) as any) ?? null,
             notes: blank(v.notes),
           });
         }}
@@ -119,6 +131,8 @@ export default function MedicalInsuranceProvidersPage() {
             claimsHotline: blank(v.claimsHotline),
             claimsEmail: blank(v.claimsEmail),
             website: blank(v.website),
+            claimsPortalUrl: blank(v.claimsPortalUrl),
+            preferredPaymentMethod: (blank(v.preferredPaymentMethod) as any) ?? null,
             notes: blank(v.notes),
           });
         }}
@@ -154,9 +168,37 @@ export default function MedicalInsuranceProvidersPage() {
           providerType: p.providerType,
           primaryPhone: p.primaryPhone,
           isActive: p.isActive,
-          // licenseNumber, address and email are required by the API but absent from the summary
-          // row; the dialog re-collects them rather than sending blanks.
+          // The list row is a SUMMARY — licenceNumber, address, email, the portal fields and the
+          // payment method are all absent from it. This seeds the dialog so it is never blank;
+          // `loadForEdit` below then replaces it with the real record.
         })}
+        // ⚠ Without this, opening a provider and pressing Save would blank every optional field
+        // the summary does not carry — silently, because they are optional. The required ones
+        // merely forced re-typing. See ResourceCollectionTab.loadForEdit.
+        loadForEdit={async (p) => {
+          const full = await medicalInsuranceService.getProvider(p.id);
+          return {
+            name: full.name,
+            shortName: full.shortName ?? '',
+            code: full.code,
+            providerType: full.providerType,
+            licenseNumber: full.licenseNumber,
+            address: full.address,
+            city: full.city ?? '',
+            primaryPhone: full.primaryPhone,
+            claimsHotline: full.claimsHotline ?? '',
+            email: full.email,
+            claimsEmail: full.claimsEmail ?? '',
+            website: full.website ?? '',
+            hasOnlinePortal: full.hasOnlinePortal,
+            claimsPortalUrl: full.claimsPortalUrl ?? '',
+            standardProcessingDays: full.standardProcessingDays,
+            claimSubmissionDeadlineDays: full.claimSubmissionDeadlineDays,
+            preferredPaymentMethod: full.preferredPaymentMethod ?? '',
+            isActive: full.isActive,
+            notes: full.notes ?? '',
+          };
+        }}
         renderFields={(form) => (
           <>
             <FieldRow>
@@ -201,6 +243,20 @@ export default function MedicalInsuranceProvidersPage() {
                 required
               />
             </FieldRow>
+            {/* Where staff go to chase a claim themselves, and how the insurer wants to be paid. */}
+            <SwitchField form={form} name="hasOnlinePortal" label="Has a claims portal" />
+            <TextField
+              form={form}
+              name="claimsPortalUrl"
+              label="Claims portal address"
+              placeholder="https://claims.example.com"
+            />
+            <SelectField
+              form={form}
+              name="preferredPaymentMethod"
+              label="Preferred payment method"
+              options={PAYMENT_METHOD_OPTIONS}
+            />
             <SwitchField form={form} name="isActive" label="Active" />
             <TextareaField form={form} name="notes" label="Notes" rows={2} />
           </>

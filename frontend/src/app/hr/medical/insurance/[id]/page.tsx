@@ -2,6 +2,7 @@
 
 import { use } from 'react';
 import { z } from 'zod';
+import type { UseFormReturn } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -51,6 +52,7 @@ const planSchema = z.object({
   ]),
   description: z.string().max(1000).optional(),
   annualLimit: z.coerce.number().min(0, 'Cannot be negative'),
+  lifetimeLimit: z.coerce.number().min(0).optional(),
   outpatientLimit: z.coerce.number().min(0).optional(),
   inpatientLimit: z.coerce.number().min(0).optional(),
   dentalLimit: z.coerce.number().min(0).optional(),
@@ -58,8 +60,11 @@ const planSchema = z.object({
   maternityLimit: z.coerce.number().min(0).optional(),
   coversDependents: z.boolean(),
   maxDependents: z.coerce.number().min(0).optional(),
+  maxChildAge: z.coerce.number().min(0).max(120).optional(),
   monthlyPremium: z.coerce.number().min(0).optional(),
   annualPremium: z.coerce.number().min(0).optional(),
+  employerContributionPercent: z.coerce.number().min(0).max(100).optional(),
+  employeeContributionPercent: z.coerce.number().min(0).max(100).optional(),
   effectiveDate: z.string().min(1, 'Required'),
   expiryDate: z.string().optional(),
   isActive: z.boolean(),
@@ -74,6 +79,7 @@ const emptyPlan: PlanForm = {
   planType: 'StandardPlan',
   description: '',
   annualLimit: 0,
+  lifetimeLimit: undefined,
   outpatientLimit: undefined,
   inpatientLimit: undefined,
   dentalLimit: undefined,
@@ -81,13 +87,45 @@ const emptyPlan: PlanForm = {
   maternityLimit: undefined,
   coversDependents: false,
   maxDependents: undefined,
+  maxChildAge: undefined,
   monthlyPremium: undefined,
   annualPremium: undefined,
+  employerContributionPercent: undefined,
+  employeeContributionPercent: undefined,
   effectiveDate: '',
   expiryDate: '',
   isActive: true,
   notes: '',
 };
+
+/**
+ * Shows what the two contribution percentages add up to.
+ *
+ * ⚠ The server validates each percentage independently — `Range(0, 100)` on both, nothing on the
+ * pair. Probed 2026-09-01: a plan with employer 90 and employee 90 is accepted with a 201. Whether
+ * a split must total exactly 100 is a policy question (a third party could fund the balance), so
+ * this reports rather than refuses, and only speaks up when the total exceeds 100 or when a
+ * partially-filled pair leaves a gap.
+ */
+function ContributionTotal({ form }: { form: UseFormReturn<any> }) {
+  const employer = Number(form.watch('employerContributionPercent'));
+  const employee = Number(form.watch('employeeContributionPercent'));
+  const hasEmployer = Number.isFinite(employer);
+  const hasEmployee = Number.isFinite(employee);
+  if (!hasEmployer && !hasEmployee) return null;
+
+  const total = (hasEmployer ? employer : 0) + (hasEmployee ? employee : 0);
+  if (total === 100) {
+    return <p className="text-xs text-muted-foreground">The split covers the full premium.</p>;
+  }
+  return (
+    <p className={`text-xs ${total > 100 ? 'text-red-500' : 'text-amber-600'}`}>
+      {total > 100
+        ? `These add up to ${total}% — more than the premium. The server will accept it; nothing else will.`
+        : `These add up to ${total}%. The remaining ${100 - total}% is funded by neither party as recorded.`}
+    </p>
+  );
+}
 
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
 const money = (v?: number | null) =>
@@ -167,14 +205,18 @@ export default function MedicalInsuranceProviderDetailPage({
             ...v,
             medicalInsuranceProviderId: providerId,
             description: blank(v.description),
+            lifetimeLimit: v.lifetimeLimit ?? null,
             outpatientLimit: v.outpatientLimit ?? null,
             inpatientLimit: v.inpatientLimit ?? null,
             dentalLimit: v.dentalLimit ?? null,
             opticalLimit: v.opticalLimit ?? null,
             maternityLimit: v.maternityLimit ?? null,
             maxDependents: v.maxDependents ?? null,
+            maxChildAge: v.maxChildAge ?? null,
             monthlyPremium: v.monthlyPremium ?? null,
             annualPremium: v.annualPremium ?? null,
+            employerContributionPercent: v.employerContributionPercent ?? null,
+            employeeContributionPercent: v.employeeContributionPercent ?? null,
             expiryDate: blank(v.expiryDate),
             notes: blank(v.notes),
           });
@@ -186,14 +228,18 @@ export default function MedicalInsuranceProviderDetailPage({
             ...v,
             medicalInsuranceProviderId: providerId,
             description: blank(v.description),
+            lifetimeLimit: v.lifetimeLimit ?? null,
             outpatientLimit: v.outpatientLimit ?? null,
             inpatientLimit: v.inpatientLimit ?? null,
             dentalLimit: v.dentalLimit ?? null,
             opticalLimit: v.opticalLimit ?? null,
             maternityLimit: v.maternityLimit ?? null,
             maxDependents: v.maxDependents ?? null,
+            maxChildAge: v.maxChildAge ?? null,
             monthlyPremium: v.monthlyPremium ?? null,
             annualPremium: v.annualPremium ?? null,
+            employerContributionPercent: v.employerContributionPercent ?? null,
+            employeeContributionPercent: v.employeeContributionPercent ?? null,
             expiryDate: blank(v.expiryDate),
             notes: blank(v.notes),
           });
@@ -224,6 +270,7 @@ export default function MedicalInsuranceProviderDetailPage({
           planType: p.planType,
           description: p.description ?? '',
           annualLimit: p.annualLimit,
+          lifetimeLimit: p.lifetimeLimit ?? undefined,
           outpatientLimit: p.outpatientLimit ?? undefined,
           inpatientLimit: p.inpatientLimit ?? undefined,
           dentalLimit: p.dentalLimit ?? undefined,
@@ -231,8 +278,11 @@ export default function MedicalInsuranceProviderDetailPage({
           maternityLimit: p.maternityLimit ?? undefined,
           coversDependents: p.coversDependents,
           maxDependents: p.maxDependents ?? undefined,
+          maxChildAge: p.maxChildAge ?? undefined,
           monthlyPremium: p.monthlyPremium ?? undefined,
           annualPremium: p.annualPremium ?? undefined,
+          employerContributionPercent: p.employerContributionPercent ?? undefined,
+          employeeContributionPercent: p.employeeContributionPercent ?? undefined,
           effectiveDate: p.effectiveDate?.slice(0, 10) ?? '',
           expiryDate: p.expiryDate?.slice(0, 10) ?? '',
           isActive: p.isActive,
@@ -254,6 +304,14 @@ export default function MedicalInsuranceProviderDetailPage({
               />
               <NumberField form={form} name="annualLimit" label="Annual limit" required />
             </FieldRow>
+            {/* A lifetime cap is a different thing from the annual one: it does not reset. */}
+            <div className="space-y-1">
+              <NumberField form={form} name="lifetimeLimit" label="Lifetime limit" />
+              <p className="text-xs text-muted-foreground">
+                A cap across the whole life of the policy — it does not reset each year. Leave blank
+                if there is none.
+              </p>
+            </div>
             <TextareaField form={form} name="description" label="Description" rows={2} />
 
             <p className="pt-2 text-sm font-medium">Sub-limits — caps within the annual limit</p>
@@ -268,12 +326,22 @@ export default function MedicalInsuranceProviderDetailPage({
             <NumberField form={form} name="maternityLimit" label="Maternity" />
 
             <SwitchField form={form} name="coversDependents" label="Covers dependants" />
-            <NumberField form={form} name="maxDependents" label="Maximum dependants" />
+            <FieldRow>
+              <NumberField form={form} name="maxDependents" label="Maximum dependants" />
+              <NumberField form={form} name="maxChildAge" label="Children covered to age" />
+            </FieldRow>
 
             <FieldRow>
               <NumberField form={form} name="monthlyPremium" label="Monthly premium" />
               <NumberField form={form} name="annualPremium" label="Annual premium" />
             </FieldRow>
+
+            <p className="pt-2 text-sm font-medium">Who pays the premium</p>
+            <FieldRow>
+              <NumberField form={form} name="employerContributionPercent" label="Employer (%)" />
+              <NumberField form={form} name="employeeContributionPercent" label="Employee (%)" />
+            </FieldRow>
+            <ContributionTotal form={form} />
             <FieldRow>
               <DateField form={form} name="effectiveDate" label="Effective from" required />
               <DateField form={form} name="expiryDate" label="Expires" />

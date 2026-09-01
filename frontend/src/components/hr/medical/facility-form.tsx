@@ -7,6 +7,7 @@ import {
   TextareaField,
   SelectField,
   SwitchField,
+  DateField,
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { HEALTH_FACILITY_TYPE_OPTIONS } from '@/types/hr/medical';
@@ -44,6 +45,10 @@ export const facilitySchema = z.object({
     'MaternityHome',
     'DentalClinic',
     'OpticalCenter',
+    // HealthFacilityType also has MentalHealthFacility = 17 and Other = 99. Both were missing, so
+    // a facility stored as either failed this schema and could not be edited.
+    'MentalHealthFacility',
+    'Other',
   ]),
   licenseNumber: z.string().max(100).optional(),
   physicalAddress: z.string().min(1, 'Required').max(500),
@@ -62,6 +67,14 @@ export const facilitySchema = z.object({
   contactPersonName: z.string().max(200).optional(),
   contactPersonPhone: z.string().max(50).optional(),
   operatingHours: z.string().max(100).optional(),
+  operatingDays: z.string().max(500).optional(),
+  // ⚠ Instrument 03 flagged only `accreditationDate` and `operatingDays` here, because the other
+  // three names also occur on the training-vendor screens. The whole accreditation block was
+  // missing — the instrument matches identifiers across the frontend, not per form.
+  accreditationBody: z.string().max(200).optional(),
+  accreditationNumber: z.string().max(100).optional(),
+  accreditationDate: z.string().optional(),
+  accreditationExpiryDate: z.string().optional(),
   isActive: z.boolean(),
   notes: z.string().max(1000).optional(),
 });
@@ -90,6 +103,11 @@ export const emptyFacility: FacilityForm = {
   contactPersonName: '',
   contactPersonPhone: '',
   operatingHours: '',
+  operatingDays: '',
+  accreditationBody: '',
+  accreditationNumber: '',
+  accreditationDate: '',
+  accreditationExpiryDate: '',
   isActive: true,
   notes: '',
 };
@@ -112,6 +130,11 @@ export function facilityFormToRequest(values: FacilityForm) {
     contactPersonName: blank(v.contactPersonName),
     contactPersonPhone: blank(v.contactPersonPhone),
     operatingHours: blank(v.operatingHours),
+    operatingDays: blank(v.operatingDays),
+    accreditationBody: blank(v.accreditationBody),
+    accreditationNumber: blank(v.accreditationNumber),
+    accreditationDate: blank(v.accreditationDate),
+    accreditationExpiryDate: blank(v.accreditationExpiryDate),
     notes: blank(v.notes),
   };
 }
@@ -140,6 +163,12 @@ export function facilityToForm(f: HealthcareFacility): FacilityForm {
     contactPersonName: f.contactPersonName ?? '',
     contactPersonPhone: f.contactPersonPhone ?? '',
     operatingHours: f.operatingHours ?? '',
+    operatingDays: f.operatingDays ?? '',
+    accreditationBody: f.accreditationBody ?? '',
+    accreditationNumber: f.accreditationNumber ?? '',
+    // The API returns a DateTime instant; the date control holds YYYY-MM-DD.
+    accreditationDate: f.accreditationDate?.slice(0, 10) ?? '',
+    accreditationExpiryDate: f.accreditationExpiryDate?.slice(0, 10) ?? '',
     isActive: f.isActive,
     notes: f.notes ?? '',
   };
@@ -193,7 +222,28 @@ export function FacilityFormFields({ form }: { form: UseFormReturn<FacilityForm>
 
       <FieldRow>
         <TextField form={form} name="nhisAccreditationNumber" label="NHIS accreditation number" />
-        <TextField form={form} name="operatingHours" label="Operating hours" />
+        <TextField
+          form={form}
+          name="operatingHours"
+          label="Operating hours"
+          placeholder="e.g. 08:00-17:00"
+        />
+      </FieldRow>
+      <TextField
+        form={form}
+        name="operatingDays"
+        label="Operating days"
+        placeholder="e.g. Monday, Tuesday, Wednesday, Thursday, Friday"
+      />
+
+      <p className="pt-2 text-sm font-medium">Accreditation</p>
+      <FieldRow>
+        <TextField form={form} name="accreditationBody" label="Accrediting body" placeholder="e.g. HeFRA" />
+        <TextField form={form} name="accreditationNumber" label="Accreditation number" />
+      </FieldRow>
+      <FieldRow>
+        <DateField form={form} name="accreditationDate" label="Accredited on" />
+        <DateField form={form} name="accreditationExpiryDate" label="Accreditation expires" />
       </FieldRow>
       <FieldRow>
         <TextField form={form} name="contactPersonName" label="Contact person" />

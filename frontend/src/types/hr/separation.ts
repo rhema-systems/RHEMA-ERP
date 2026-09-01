@@ -275,6 +275,14 @@ export interface ClearanceTemplate {
   sortOrder: number;
   /** Only loans, advances and recoveries can carry money. */
   carriesAmount: boolean;
+  /**
+   * Whether this line is fed automatically from the HR Assets register.
+   *
+   * ⚠ **At most one line may be**, enforced server-side by `RequireSoleAssetSourceAsync`: two
+   * would list every unreturned asset twice and deduct every surcharge twice from the final
+   * settlement. The seeded catalogue puts it on "Company property".
+   */
+  sourcesFromAssetRegister: boolean;
 }
 
 export interface CreateClearanceTemplate {
@@ -285,6 +293,7 @@ export interface CreateClearanceTemplate {
   isMandatory?: boolean;
   isActive?: boolean;
   sortOrder?: number;
+  sourcesFromAssetRegister?: boolean;
 }
 
 export interface UpdateClearanceTemplate {
@@ -295,6 +304,7 @@ export interface UpdateClearanceTemplate {
   isMandatory?: boolean;
   isActive?: boolean;
   sortOrder?: number;
+  sourcesFromAssetRegister?: boolean;
 }
 
 export interface ClearanceItem {
