@@ -1,4 +1,5 @@
 using ErpSystem.Data;
+using ErpSystem.Api.Controllers.Finance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -9,6 +10,24 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinanceConcurrencyHardeningTests
 {
+    [Theory]
+    [InlineData("Invoice", "AR_INVOICE_POSTING_BLOCKED")]
+    [InlineData("VendorInvoice", "AP_INVOICE_POSTING_BLOCKED")]
+    public void InvoiceApprovalPostingFailure_ShouldPreserveSafeValidationMessage(
+        string entityType,
+        string expectedCode)
+    {
+        const string validationMessage = "The configured tax account is missing.";
+
+        var result = FinanceApprovalsController.CreateInvoicePostingBusinessRuleException(
+            entityType,
+            new InvalidOperationException(validationMessage));
+
+        result.Code.Should().Be(expectedCode);
+        result.Message.Should().Be(validationMessage);
+        result.StatusCode.Should().Be(422);
+    }
+
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "QuantitySurveyFinalAcceptance")]

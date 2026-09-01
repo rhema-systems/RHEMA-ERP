@@ -218,6 +218,19 @@ namespace ErpSystem.Api.Services.Finance.AR
                 earlyPaymentDiscountDueDate = dto.InvoiceDate.AddDays(paymentTerm.DiscountDays);
             }
 
+            // The manual invoice UI uses stable line IDs to correlate dimension assignments. If
+            // the browser times out after the transaction commits, its retry carries those same
+            // IDs. Recover only an exact replay; otherwise the later INSERT fails with an opaque
+            // PK_InvoiceLineItem violation (or, worse, a changed request could be accepted as the
+            // original invoice).
+            var replay = await TryResolveCreateReplayAsync(
+                dto,
+                dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
+                producer,
+                cancellationToken);
+            if (replay is not null)
+                return replay;
+
             // Check for duplicate invoice
             if (!string.IsNullOrWhiteSpace(dto.Reference))
             {
@@ -412,6 +425,87 @@ namespace ErpSystem.Api.Services.Finance.AR
             return producer is null
                 ? MapToDto(invoice)
                 : await GetByIdAsync(invoice.Id, producer, cancellationToken) ?? MapToDto(invoice);
+        }
+
+        private async Task<InvoiceDto?> TryResolveCreateReplayAsync(
+            InvoiceCreateDto dto,
+            DateTime resolvedDueDate,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
+        {
+            var requestedIds = dto.LineItems
+                .Where(line => line.Id is { } id && id != Guid.Empty)
+                .Select(line => line.Id!.Value)
+                .ToArray();
+
+            if (requestedIds.Length == 0)
+                return null;
+
+            if (requestedIds.Length != dto.LineItems.Count
+                || requestedIds.Distinct().Count() != requestedIds.Length)
+                throw new InvalidOperationException("Customer invoice line identities must be unique and non-empty.");
+
+            var matchingLines = await _unitOfWork.Repository<InvoiceLineItem>()
+                .GetQueryable(line => line.TenantId == TenantId && requestedIds.Contains(line.Id))
+                .Include(line => line.Invoice)
+                    .ThenInclude(invoice => invoice.LineItems)
+                .ToListAsync(cancellationToken);
+
+            if (matchingLines.Count == 0)
+                return null;
+
+            var invoiceIds = matchingLines.Select(line => line.InvoiceId).Distinct().ToArray();
+            if (matchingLines.Count != requestedIds.Length || invoiceIds.Length != 1)
+                throw new InvalidOperationException("Customer invoice line identities are already bound to another request.");
+
+            var existing = matchingLines[0].Invoice;
+            var activeLines = existing.LineItems.Where(line => !line.IsDeleted).ToDictionary(line => line.Id);
+            var sameHeader = existing.TenantId == TenantId
+                && existing.BusinessPartnerId == dto.CustomerId
+                && existing.InvoiceDate == dto.InvoiceDate
+                && existing.DueDate == resolvedDueDate
+                && string.Equals(existing.Reference ?? string.Empty, dto.Reference ?? string.Empty, StringComparison.Ordinal)
+                && string.Equals(existing.Notes ?? string.Empty, dto.Notes ?? string.Empty, StringComparison.Ordinal)
+                && existing.IsOpeningBalance == dto.IsOpeningBalance
+                && string.Equals(existing.CurrencyCode, dto.CurrencyCode, StringComparison.OrdinalIgnoreCase)
+                && existing.DiscountAmount == dto.DiscountAmount
+                && existing.TaxGroupId == (dto.IsOpeningBalance ? null : dto.TaxGroupId)
+                && activeLines.Count == dto.LineItems.Count;
+
+            var sameLines = sameHeader && dto.LineItems.All(requested =>
+            {
+                var requestedId = requested.Id!.Value;
+                if (!activeLines.TryGetValue(requestedId, out var persisted))
+                    return false;
+
+                var requestedType = Enum.TryParse<LineItemType>(requested.LineItemType, out var parsedType)
+                    ? parsedType
+                    : LineItemType.Product;
+                var requestedTaxGroupId = dto.IsOpeningBalance ? null : (requested.TaxGroupId ?? dto.TaxGroupId);
+
+                return persisted.LineItemType == requestedType
+                    && persisted.ProductId == requested.ProductId
+                    && persisted.GLAccountId == requested.GLAccountId
+                    && string.Equals(persisted.Description, requested.Description, StringComparison.Ordinal)
+                    && persisted.Quantity == requested.Quantity
+                    && persisted.UnitPrice == requested.UnitPrice
+                    && string.Equals(persisted.TaxCode ?? string.Empty, requested.TaxCode ?? string.Empty, StringComparison.Ordinal)
+                    && persisted.TaxGroupId == requestedTaxGroupId
+                    && persisted.TaxTreatment == requested.TaxTreatment
+                    && string.Equals(persisted.Unit ?? string.Empty, requested.Unit ?? string.Empty, StringComparison.Ordinal)
+                    && persisted.DiscountPercentage == requested.DiscountPercentage;
+            });
+
+            if (!sameLines)
+                throw new InvalidOperationException("Customer invoice line identities are already bound to a different request.");
+
+            _logger.LogInformation(
+                "Recovered idempotent customer invoice create replay for {InvoiceId}",
+                existing.Id);
+
+            return producer is null
+                ? MapToDto(existing)
+                : await GetByIdAsync(existing.Id, producer, cancellationToken) ?? MapToDto(existing);
         }
 
         public Task<InvoiceDto> UpdateAsync(

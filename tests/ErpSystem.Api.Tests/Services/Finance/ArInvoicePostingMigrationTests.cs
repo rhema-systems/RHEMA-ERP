@@ -221,6 +221,85 @@ public sealed class ArInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task RepeatedArInvoiceCreateWithSameLineIdentity_ShouldReturnCommittedInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var lineId = Guid.NewGuid();
+        var request = new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = lineId,
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Retry-safe consulting invoice",
+                    Quantity = 1m,
+                    UnitPrice = 15000m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        };
+
+        var first = await service.CreateAsync(request);
+        var replay = await service.CreateAsync(request);
+
+        replay.Id.Should().Be(first.Id);
+        replay.LineItems.Should().ContainSingle(line => line.Id == lineId);
+        (await db.Invoices.CountAsync()).Should().Be(2);
+        (await db.Set<InvoiceLineItem>().CountAsync(line => line.Id == lineId)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ReusedArInvoiceLineIdentityWithChangedPayload_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var request = new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Original request",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        };
+        await service.CreateAsync(request);
+        request.LineItems[0].UnitPrice = 200m;
+
+        var action = () => service.CreateAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already bound to a different request*");
+        (await db.Invoices.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task DraftOpeningBalanceArInvoice_ShouldSendAndPostControlAgainstMigrationClearing()
     {
         var tenantId = Guid.NewGuid();
@@ -559,6 +638,16 @@ public sealed class ArInvoicePostingMigrationTests
             Mock.Of<ILogger<FinancePostingEngine>>(),
             auditService);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.ARInvoice,
+                tenantId,
+                It.IsAny<DateTime?>(),
+                nameof(Invoice),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"INV-TEST-{Guid.NewGuid():N}");
 
         var service = new InvoiceService(
             new UnitOfWork(db),
@@ -566,7 +655,7 @@ public sealed class ArInvoicePostingMigrationTests
             Mock.Of<ITaxCalculationEngine>(),
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<InvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             postingEngine,
             auditService);
 

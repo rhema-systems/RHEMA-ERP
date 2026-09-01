@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Finance.Integration;
@@ -806,6 +807,24 @@ public class FinanceApprovalsController : ControllerBase
         });
     }
 
+    internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
+        string entityType,
+        InvalidOperationException exception)
+    {
+        var isVendorInvoice = Normalize(entityType) == Normalize("VendorInvoice");
+        var code = isVendorInvoice
+            ? "AP_INVOICE_POSTING_BLOCKED"
+            : "AR_INVOICE_POSTING_BLOCKED";
+        var fallback = isVendorInvoice
+            ? "The vendor invoice could not be posted after final approval."
+            : "The customer invoice could not be posted after final approval.";
+
+        return new BusinessRuleException(
+            code,
+            string.IsNullOrWhiteSpace(exception.Message) ? fallback : exception.Message,
+            StatusCodes.Status422UnprocessableEntity);
+    }
+
     internal IQueryable<WorkflowApproval> QueryPendingApprovals(Guid tenantId)
         => _db.WorkflowApprovals
             .Include(a => a.StepInstance)
@@ -1200,42 +1219,56 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("Invoice"))
         {
-            var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            if (invoice?.Status == InvoiceStatus.PendingApproval)
+            try
             {
-                await RecordCustomerInvoiceAuditAsync(
-                    tenantId,
-                    invoice,
-                    FinanceAuditEvents.ArInvoiceApproved,
-                    new
-                    {
-                        invoice.Status,
-                        approvedByUserId = userId,
-                        approvedAt = now
-                    },
-                    comments,
-                    cancellationToken);
-
-                var trustedManualRoute = await HasTrustedDimensionRouteAsync(
-                    tenantId,
-                    "CustomerInvoice",
-                    entityId,
-                    FinanceDimensionRouteId.FinanceArCustomerInvoice,
-                    cancellationToken);
-                if (trustedManualRoute)
-                    await _invoiceService.SendInvoiceAsync(
-                        entityId,
-                        new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+                if (invoice?.Status == InvoiceStatus.PendingApproval)
+                {
+                    await RecordCustomerInvoiceAuditAsync(
+                        tenantId,
+                        invoice,
+                        FinanceAuditEvents.ArInvoiceApproved,
+                        new
+                        {
+                            invoice.Status,
+                            approvedByUserId = userId,
+                            approvedAt = now
+                        },
+                        comments,
                         cancellationToken);
-                else
-                    await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
+
+                    var trustedManualRoute = await HasTrustedDimensionRouteAsync(
+                        tenantId,
+                        "CustomerInvoice",
+                        entityId,
+                        FinanceDimensionRouteId.FinanceArCustomerInvoice,
+                        cancellationToken);
+                    if (trustedManualRoute)
+                        await _invoiceService.SendInvoiceAsync(
+                            entityId,
+                            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                            cancellationToken);
+                    else
+                        await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
+                }
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw CreateInvoicePostingBusinessRuleException(entityType, exception);
             }
             return;
         }
 
         if (key == Normalize("VendorInvoice"))
         {
-            await FinalizeVendorInvoiceApprovalAsync(tenantId, entityId, userId, comments, cancellationToken);
+            try
+            {
+                await FinalizeVendorInvoiceApprovalAsync(tenantId, entityId, userId, comments, cancellationToken);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw CreateInvoicePostingBusinessRuleException(entityType, exception);
+            }
             return;
         }
 
