@@ -309,7 +309,7 @@ so they are never re-derived.
 Nineteen rows against the module's most-used entity. Grouped by migration boundary so each slice is
 one schema change, one set of screens, one harness run.
 
-### 3a — Employee record fields (one migration)
+### 3a — Employee record fields · ✅ **DONE 2026-09-01** · 47 assertions ×2
 
 - [ ] Disability tick and description sit on `EmployeeDependent`, not `Employee` — **wrong entity,
       not merely absent**. Moving it is a migration plus a back-fill, not a new field.
@@ -321,6 +321,63 @@ one schema change, one set of screens, one harness run.
       `filePath` string — see 3c.
 - [ ] Expatriate: no issue dates, no resident permit, no family members (`FamilyAccompanying` is a
       bare bool today).
+
+**Done 2026-09-01.** Backend, screens and harness (`hr-employee-docs/run-lane3a.mjs`, 47
+assertions, green twice; lane 3c re-run 47/47, no regression). Screens: the three new employee
+fields, the guarantor surety + currency, the position's guarantor requirement, the compliance strip,
+the expatriate permits, and a family panel behind a per-row action.
+
+⚠ **Two decisions the user made, and the assertions that hold them.** Disability is DUPLICATED on
+the employee, not moved from the dependant — the harness records the employee's flag as true and a
+dependant created afterwards as false, so a later "tidy-up" that merges them fails. And the
+guarantor requirement lives on the POSITION: requires 75,000, holds 50,000 → shortfall 25,000; add a
+second guarantor at 25,000 → satisfied. **Sum, not maximum** — two guarantors at half each satisfy a
+surety between them, which is what co-signing means.
+
+⚠ **`api/hr/currencies` exists because of this slice.** `api/finance/currencies` is mapped to
+`FinancePermissions.ViewFinance` by `FinancePermissionPolicyMap` — a convention map, invisible on
+the controller — so an HR user gets a **403** and every HR currency picker fed from it renders
+EMPTY. Found by the harness. Both new pickers had it, and **area 13's `DevelopmentPanel` has had it
+since it shipped**, on top of reading `c.code` off Finance's DTO behind an `any` cast and rendering
+"undefined — undefined". Granting HR `ViewFinance` would have opened ledgers and payments to
+populate a dropdown; the new endpoint is a read-only `{code, name, symbol}` projection instead.
+
+**Original probe notes.** 39 columns, one new table, migration
+`20260901013629_AddExtraEmployeeMasterFields`. Verified live: `/details` carries the new fields, a
+guarantor round-trips with `amountGuaranteedCurrencyCode`, an unknown currency (`XYZ`) is **refused
+with 400 by Finance's master**, and the compliance read answers the guarantor question — required
+75,000, held 50,000, **shortfall 25,000, not satisfied**.
+
+⚠ **Two things this slice turned up that are not in the six rows.**
+
+1. **`GET api/hr/Employees/{id}` is a SUMMARY** (`GetEmployeeSummaryByIdAsync` → `EmployeeDto`); the
+   record is at `/{id}/details`. None of the new fields appear on the summary and none should. **The
+   employee form must read `/details`** — binding it to the summary would render every new field
+   blank and blank them on save, which is D-09/D-12 one layer further out.
+2. ⚠ **A string field on `UpdateEmployeeDto` cannot be CLEARED.** The mapper's pre-existing idiom is
+   `if (dto.X != null) e.X = dto.X`, so null means "not supplied" — sending `hometown: null` leaves
+   the old value. Found by trying to revert a probe: `hasDisability` cleared (a bool is always
+   written) and `hometown` did not. This is the ESTABLISHED convention for `Religion`, `Address` and
+   the rest, so the new fields inherit it rather than diverge — but it means a typo in a hometown
+   can be corrected and never removed. Changing it is a behavioural change across the whole employee
+   update path and deserves its own deliberate slice, not a quiet exception for two fields.
+
+### 3a-ii — The remaining caller-supplied image paths · **NEW, recorded 2026-09-01**
+
+Found while gating the employee, dependant and guarantor photographs. Kept OUT of 3a deliberately:
+they belong to other areas, and one of them deserves its own thinking rather than being swept in.
+
+- [ ] **`ExternalAssociate.PicturePath`** — non-nullable, so a location is *expected* to be filled.
+- [ ] **`JobCandidate.ProfilePhotoUrl`** — recruitment (area 6).
+- [ ] ⚠ **`CompanyProfile.SignatureImageUrl` and `CompanySealImageUrl`** — **the one to think about
+      before touching.** A company seal is what stamps a document as authentic; a caller-supplied
+      path to one is not merely the usual sink, it is a path to an instrument of authority. Who may
+      replace the seal, whether a change is audited, and whether the old image survives are product
+      questions, not a gating exercise.
+
+The pattern to copy is `EmployeeDocumentsController`'s photo endpoints: gate on the way in, three
+DMS ids on the row, a token-bearing download that falls back to the legacy path so ported images
+are not lost.
 
 ### 3b — Reference data that should be a dimension (one migration + admin screens)
 

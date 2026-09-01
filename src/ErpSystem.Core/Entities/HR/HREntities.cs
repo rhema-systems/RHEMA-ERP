@@ -52,12 +52,44 @@ public class Employee : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    /// <summary>
+    /// How the employee describes their gender, where <see cref="Enums.Gender.Other"/> is chosen.
+    /// </summary>
+    /// <remarks>
+    /// The enum offers <c>Other</c> and then had nowhere to say what "other" means, which makes the
+    /// option a dead end for the person choosing it. Free text on purpose: an enumeration of the
+    /// answers would be the same problem one level down.
+    /// </remarks>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
     public DateOnly? DateOfBirth { get; set; }
 
     public MaritalStatus? MaritalStatus { get; set; }
 
     [MaxLength(50)]
     public string? Religion { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    [MaxLength(150)]
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// Whether the employee has a disability, and what it is.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Deliberately DUPLICATED with <see cref="EmployeeDependent"/>, not moved from it.</b>
+    /// The demo feedback recorded these as sitting "on EmployeeDependent, not Employee" — read as a
+    /// misplacement. It is not one: a dependant's disability and an employee's own are different
+    /// facts about different people, and both are needed. The dependant's fields stay exactly as
+    /// they are; these are new. Decided by the user, 2026-09-01.</para>
+    /// <para>Same names and same length as the dependant's pair, so a reader moving between the two
+    /// is not asked to learn a second vocabulary for one idea.</para>
+    /// </remarks>
+    public bool HasDisability { get; set; }
+
+    [MaxLength(500)]
+    public string? DisabilityDescription { get; set; }
 
     public bool IsFullTime { get; set; } = true;
 
@@ -109,8 +141,31 @@ public class Employee : TenantEntity
 
     public DateOnly? EndDate { get; set; } // Populated on exit
 
+    /// <summary>
+    /// ⚠ <b>LEGACY, and a caller-supplied path.</b> It is on the create AND update DTOs and mapped
+    /// straight onto the entity, while no photo upload endpoint has ever existed — so the only way
+    /// to "set" an employee photo has been for a caller to type a location. That is the sink area 16
+    /// replaced wholesale and D-10, D-14 and D-39 each removed again after shipping; this is its
+    /// seventh instance and the first on the module's most-used entity.
+    /// <para>Kept because it holds ported values. Use <see cref="PhotoDocumentRecordId"/> and its
+    /// siblings for anything new; the download helper prefers the DMS ids and only falls back to
+    /// this string. It should be retired once the ported images are migrated through the gate.</para>
+    /// </summary>
     [MaxLength(500)]
     public string? PicturePath { get; set; }
+
+    // ── The photograph, through the controlled gate ───────────────────────────
+    public Guid? PhotoFileUploadRecordId { get; set; }
+    public Guid? PhotoDocumentRecordId { get; set; }
+    public Guid? PhotoDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? PhotoFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? PhotoMimeType { get; set; }
+
+    public long? PhotoFileSizeBytes { get; set; }
 
     public Guid? DepartmentId { get; set; }
 
@@ -839,6 +894,36 @@ public class EmployeePosition : TenantEntity
 
     public bool RequiresGuarantor { get; set; }
 
+    /// <summary>
+    /// How much surety the post requires, where <see cref="RequiresGuarantor"/> is set.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b><c>RequiresGuarantor</c> was a bare bool</b> — the post could demand a guarantor
+    /// and never say for how much, so "is this cashier properly guaranteed?" was a question the
+    /// system could pose and not answer. The same shape as <c>FamilyAccompanying</c>, and the same
+    /// fix: give the flag something behind it.</para>
+    ///
+    /// <para>Per POSITION rather than per employee or per tenant, because the exposure is the
+    /// post's: a cashier handling daily takings needs a larger surety than a clerk, and it should
+    /// not have to be re-argued for each person appointed to the seat.</para>
+    ///
+    /// <para>Null with <c>RequiresGuarantor</c> true means "a guarantor is required, no amount is
+    /// specified" — a legitimate state, and the compliance read reports the guarantor as present
+    /// or absent without judging the sum.</para>
+    /// </remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>
+    /// The currency that requirement is stated in, validated against Finance's currency master.
+    /// </summary>
+    /// <remarks>
+    /// Null means the tenant's configured HR default. ⚠ Comparing a surety in one currency against
+    /// a requirement in another needs a rate and a date; see <c>EmployeeDocumentService</c>'s
+    /// guarantor compliance for what it does and — more importantly — what it refuses to guess.
+    /// </remarks>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
+
     public int? NumberOfGuarantors { get; set; }
 
     public bool RequiresLicense { get; set; }
@@ -1025,6 +1110,10 @@ public class EmployeeDependent : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
     public bool HasDisability { get; set; }
 
     [MaxLength(500)]
@@ -1046,8 +1135,22 @@ public class EmployeeDependent : TenantEntity
 
     public bool IsDeceased { get; set; }
 
+    /// <summary>⚠ Legacy caller-supplied path, as on <see cref="Employee"/>. See the note there.</summary>
     [MaxLength(500)]
     public string? PicturePath { get; set; }
+
+    // The photograph, through the controlled gate.
+    public Guid? PhotoFileUploadRecordId { get; set; }
+    public Guid? PhotoDocumentRecordId { get; set; }
+    public Guid? PhotoDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? PhotoFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? PhotoMimeType { get; set; }
+
+    public long? PhotoFileSizeBytes { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -1347,6 +1450,15 @@ public class ExpatriateAssignment : TenantEntity
 
     public DateOnly? RelocationDate { get; set; }
 
+    /// <summary>
+    /// Whether family came with them — and, when true, <see cref="FamilyMembers"/> says who.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This was a bare bool with nothing behind it: the record could say a family had accompanied
+    /// the assignee and never who they were, so nobody could tell how many permits were owed or
+    /// whose were expiring. The flag stays — it is what a form asks first — and the collection is
+    /// what makes it answerable.
+    /// </remarks>
     public bool FamilyAccompanying { get; set; }
 
     [MaxLength(1000)]
@@ -1355,12 +1467,42 @@ public class ExpatriateAssignment : TenantEntity
     [MaxLength(100)]
     public string? VisaType { get; set; }
 
+    /// <summary>
+    /// When the visa was ISSUED, as opposed to when it runs out.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every permit on this record carried an expiry and no issue date, so it could never answer
+    /// "how long was this granted for" — the question asked when a renewal is refused or shortened.
+    /// </remarks>
+    public DateOnly? VisaIssueDate { get; set; }
+
     public DateOnly? VisaExpiryDate { get; set; }
 
     [MaxLength(100)]
     public string? WorkPermitNumber { get; set; }
 
+    public DateOnly? WorkPermitIssueDate { get; set; }
+
     public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    /// <summary>
+    /// The residence permit — a separate instrument from the work permit.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ These are issued by different authorities on different clocks: the work permit says you
+    /// may be employed, the residence permit says you may live here. Recording only one and calling
+    /// it "the permit" is how somebody ends up lawfully employed and unlawfully resident, with a
+    /// record that cannot show it.
+    /// </remarks>
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    public virtual ICollection<ExpatriateFamilyMember> FamilyMembers { get; set; }
+        = new List<ExpatriateFamilyMember>();
 
     // Navigation Properties
     [ForeignKey(nameof(EmployeeId))]
@@ -1488,6 +1630,21 @@ public class EmployeeReferee : TenantEntity
     [MaxLength(1000)]
     public string? ReferenceNotes { get; set; }
 
+    // ── The written reference, through the controlled gate ────────────────────
+    // A referee could be recorded, phoned and noted, and the letter they actually wrote had nowhere
+    // to live. Three ids, never a path.
+    public Guid? LetterFileUploadRecordId { get; set; }
+    public Guid? LetterDocumentRecordId { get; set; }
+    public Guid? LetterDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? LetterFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? LetterMimeType { get; set; }
+
+    public long? LetterFileSizeBytes { get; set; }
+
     public bool IsPrimary { get; set; }
 
     public bool IsActive { get; set; } = true;
@@ -1532,6 +1689,10 @@ public class EmployeeGuarantor : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
     public DateOnly? DateOfBirth { get; set; }
 
     [Required]
@@ -1575,6 +1736,49 @@ public class EmployeeGuarantor : TenantEntity
     public string? NationalIdNumber { get; set; }
 
     public DateOnly? NationalIdExpiryDate { get; set; }
+
+    /// <summary>
+    /// What the guarantor stands surety FOR.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from <c>MonthlyIncome</c>, which is what the guarantor EARNS — the row could say
+    /// how solvent the person was and never what they had undertaken, which is the only figure that
+    /// matters if the guarantee is ever called. Stated in the tenant's default currency
+    /// (<c>CompanyHrPolicySettings.DefaultCurrencyCode</c>); a per-row currency would need the
+    /// Finance rate bridge and no HR guarantee has ever been in anything but GHS.
+    /// </remarks>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>
+    /// The currency that amount is stated in — validated against FINANCE's currency master.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A bare three-letter code that nothing checks is how travel ended up able to file a claim
+    /// in "XYZ" and total it. <c>HrCurrencyBridge.RequireKnownCurrencyAsync</c> refuses a code
+    /// Finance does not hold. Null means the tenant's configured HR default applies, so existing
+    /// rows keep meaning what they meant.
+    /// <para>No FK column: Finance's uniqueness is <c>(TenantId, Code)</c>, and a composite FK here
+    /// would make a currency re-code a schema problem — the same call travel made.</para>
+    /// </remarks>
+    [MaxLength(3)]
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    // ── The guarantor's photograph, through the controlled gate ───────────────
+    // ⚠ Three ids and never a path. Note `GuarantorFormPath` above: a caller-supplied file location
+    // of exactly the kind D-10, D-14 and D-39 each had to remove. It is left alone here because it
+    // holds legacy values and gating it is its own migration, but nothing NEW on this row may use
+    // that shape — which is why the photograph gets its own gated columns rather than a second path.
+    public Guid? PhotoFileUploadRecordId { get; set; }
+    public Guid? PhotoDocumentRecordId { get; set; }
+    public Guid? PhotoDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? PhotoFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? PhotoMimeType { get; set; }
+
+    public long? PhotoFileSizeBytes { get; set; }
 
     public bool HasSignedGuarantorForm { get; set; } = false;
 

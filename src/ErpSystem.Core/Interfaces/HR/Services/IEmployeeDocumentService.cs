@@ -52,6 +52,17 @@ public interface IEmployeeDocumentService
     Task<EmployeeDocumentDto> UpdateAsync(Guid id, UpdateEmployeeDocumentDto dto, CancellationToken ct = default);
     Task DeleteAsync(Guid id, CancellationToken ct = default);
 
+    // Files that belong to a ROW rather than to the employee's general file: a guarantor's
+    // photograph and a referee's written reference. One file per row, the oath-of-secrecy shape.
+    Task<Employee> AttachEmployeePhotoAsync(Guid employeeId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default);
+    Task<Employee?> GetEmployeeForPhotoAsync(Guid id, CancellationToken ct = default);
+    Task<EmployeeDependent> AttachDependentPhotoAsync(Guid dependentId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default);
+    Task<EmployeeDependent?> GetDependentForPhotoAsync(Guid id, CancellationToken ct = default);
+    Task<EmployeeGuarantor> AttachGuarantorPhotoAsync(Guid guarantorId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default);
+    Task<EmployeeGuarantor?> GetGuarantorAsync(Guid id, CancellationToken ct = default);
+    Task<EmployeeReferee> AttachRefereeLetterAsync(Guid refereeId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default);
+    Task<EmployeeReferee?> GetRefereeAsync(Guid id, CancellationToken ct = default);
+
     // Position requirements.
     Task<IEnumerable<PositionDocumentRequirementDto>> GetRequirementsAsync(Guid positionId, CancellationToken ct = default);
     Task<PositionDocumentRequirementDto> AddRequirementAsync(CreatePositionDocumentRequirementDto dto, CancellationToken ct = default);

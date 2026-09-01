@@ -82,8 +82,27 @@ export interface EmployeeDocumentCompliance {
    */
   positionId: string | null;
   positionTitle: string | null;
+  /** ⚠ Mandatory DOCUMENTS only — it kept its original meaning when the guarantor block arrived. */
   isCompliant: boolean;
   mandatoryCount: number;
   mandatorySatisfiedCount: number;
   lines: EmployeeDocumentComplianceLine[];
+
+  // ── The guarantor the post requires ────────────────────────────────────────
+  requiresGuarantor: boolean;
+  /** Null means "a guarantor, amount unspecified" — having one at all is then the whole test. */
+  requiredGuarantorAmount: number | null;
+  requiredGuarantorCurrencyCode: string | null;
+  guarantorCount: number;
+  /** Counts only sureties stated in the requirement's currency. */
+  guaranteedTotal: number;
+  /**
+   * Sureties in another currency, counted and shown but NEVER converted — a converted verdict
+   * would move with the exchange rate, and which date's rate to use is a policy nobody has chosen.
+   */
+  guarantorsInOtherCurrencies: number;
+  isGuarantorSatisfied: boolean;
+  guarantorShortfall: number | null;
+  /** Documents AND guarantor. */
+  isFullyCompliant: boolean;
 }

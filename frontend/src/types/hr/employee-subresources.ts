@@ -500,7 +500,34 @@ export interface TerminateContractRequest {
 
 // ── Expatriate assignments ──────────────────────────────────────────────────────
 
+/** A family member accompanying an expatriate assignee. */
+export interface ExpatriateFamilyMember {
+  id: string;
+  expatriateAssignmentId: string;
+  fullName: string;
+  /** ⚠ The SAME enum a dependant uses, with the same description-for-Other companion. */
+  relationship: string;
+  relationshipDescription?: string | null;
+  gender?: string | null;
+  genderDescription?: string | null;
+  dateOfBirth?: string | null;
+  passportNumber?: string | null;
+  passportExpiryDate?: string | null;
+  /** Their own residence permit — separate from the assignee's. */
+  residentPermitNumber?: string | null;
+  residentPermitIssueDate?: string | null;
+  residentPermitExpiryDate?: string | null;
+  arrivalDate?: string | null;
+  departureDate?: string | null;
+  notes?: string | null;
+}
+
 export interface ExpatriateAssignment {
+  /**
+   * ⚠ Populated by the DETAIL read only — the list read is a summary and returns none. A panel
+   * that binds to a list row would render "nobody accompanied them" for a posting with three.
+   */
+  familyMembers?: ExpatriateFamilyMember[];
   id: string;
   employeeId: string;
   homeCountryId: string;
@@ -513,9 +540,16 @@ export interface ExpatriateAssignment {
   relocationDate?: string | null;
   assignmentObjective?: string | null;
   visaType?: string | null;
+  /** ⚠ When the visa was ISSUED — every permit carried an expiry and no issue date. */
+  visaIssueDate?: string | null;
   visaExpiryDate?: string | null;
   workPermitNumber?: string | null;
+  workPermitIssueDate?: string | null;
   workPermitExpiryDate?: string | null;
+  /** ⚠ A different instrument from the work permit, on a different authority's clock. */
+  residentPermitNumber?: string | null;
+  residentPermitIssueDate?: string | null;
+  residentPermitExpiryDate?: string | null;
 }
 
 export interface CreateExpatriateAssignmentRequest {
@@ -528,9 +562,16 @@ export interface CreateExpatriateAssignmentRequest {
   familyAccompanying: boolean;
   assignmentObjective?: string | null;
   visaType?: string | null;
+  /** ⚠ When the visa was ISSUED — every permit carried an expiry and no issue date. */
+  visaIssueDate?: string | null;
   visaExpiryDate?: string | null;
   workPermitNumber?: string | null;
+  workPermitIssueDate?: string | null;
   workPermitExpiryDate?: string | null;
+  /** ⚠ A different instrument from the work permit, on a different authority's clock. */
+  residentPermitNumber?: string | null;
+  residentPermitIssueDate?: string | null;
+  residentPermitExpiryDate?: string | null;
 }
 
 export interface UpdateExpatriateAssignmentRequest
@@ -655,6 +696,11 @@ export interface UpdateEmployeeRefereeRequest extends Partial<CreateEmployeeRefe
 // ── Guarantors ──────────────────────────────────────────────────────────────────
 
 export interface EmployeeGuarantor {
+  // ⚠ Read-only: the photograph arrives through POST employee-documents/guarantors/{id}/photo.
+  hasPhoto?: boolean;
+  photoFileName?: string | null;
+  photoMimeType?: string | null;
+  photoFileSizeBytes?: number | null;
   id: string;
   employeeId: string;
   isPrimary: boolean;
@@ -677,6 +723,12 @@ export interface EmployeeGuarantor {
   employerAddress?: string | null;
   employerPhone?: string | null;
   monthlyIncome?: number | null;
+  /** ⚠ What they stand surety FOR — distinct from monthlyIncome, which is what they earn. */
+  amountGuaranteed?: number | null;
+  /** Validated against Finance's currency master. Null means HR's configured default. */
+  amountGuaranteedCurrencyCode?: string | null;
+  /** How the guarantor describes their gender, where gender is Other. */
+  genderDescription?: string | null;
   nationalIdType?: string | null;
   /** The detail projection masks the ID number; writes use nationalIdNumber. */
   nationalIdNumberMasked?: string | null;
@@ -714,6 +766,12 @@ export interface CreateEmployeeGuarantorRequest {
   employerAddress?: string | null;
   employerPhone?: string | null;
   monthlyIncome?: number | null;
+  /** ⚠ What they stand surety FOR — distinct from monthlyIncome, which is what they earn. */
+  amountGuaranteed?: number | null;
+  /** Validated against Finance's currency master. Null means HR's configured default. */
+  amountGuaranteedCurrencyCode?: string | null;
+  /** How the guarantor describes their gender, where gender is Other. */
+  genderDescription?: string | null;
   nationalIdType?: string | null;
   nationalIdNumber?: string | null;
   nationalIdExpiryDate?: string | null;

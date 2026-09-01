@@ -99,6 +99,8 @@ public class EmployeePositionService : IEmployeePositionService
             WorkMode = createDto.WorkMode,
             RequiresCertification = createDto.RequiresCertification,
             RequiresGuarantor = createDto.RequiresGuarantor,
+            RequiredGuarantorAmount = createDto.RequiredGuarantorAmount,
+            RequiredGuarantorCurrencyCode = createDto.RequiredGuarantorCurrencyCode,
             RequiresLicense = createDto.RequiresLicense,
             StaffLevelId = createDto.StaffLevelId,
             ReportsToPositionId = createDto.ReportsToPositionId,
@@ -172,6 +174,8 @@ public class EmployeePositionService : IEmployeePositionService
         position.WorkMode = updateDto.WorkMode;
         position.RequiresCertification = updateDto.RequiresCertification;
         position.RequiresGuarantor = updateDto.RequiresGuarantor;
+        position.RequiredGuarantorAmount = updateDto.RequiredGuarantorAmount;
+        position.RequiredGuarantorCurrencyCode = updateDto.RequiredGuarantorCurrencyCode;
         position.RequiresLicense = updateDto.RequiresLicense;
         position.ExpectedHeadcount = updateDto.ExpectedHeadcount;
         position.MinimumExperienceYears = updateDto.MinimumExperienceYears;
@@ -237,6 +241,8 @@ public class EmployeePositionService : IEmployeePositionService
             NoticePeriodMonths = position.NoticePeriodMonths,
             RequiresCertification = position.RequiresCertification,
             RequiresGuarantor = position.RequiresGuarantor,
+            RequiredGuarantorAmount = position.RequiredGuarantorAmount,
+            RequiredGuarantorCurrencyCode = position.RequiredGuarantorCurrencyCode,
             RequiresLicense = position.RequiresLicense,
             IsActive = position.IsActive,
             EmployeeCount = 0,

@@ -140,6 +140,14 @@ export interface Employee {
 
 // --- Detail — mirrors EmployeeDetailDto (extends EmployeeDto) ---
 export interface EmployeeDetail extends Employee {
+  // ⚠ Read-only. The photograph arrives through POST employee-documents/employee/{id}/photo and
+  // the gate fills these in; `picturePath` above is the LEGACY caller-supplied location, kept only
+  // so ported images still resolve. Prefer `hasPhoto`.
+  hasPhoto?: boolean;
+  photoFileName?: string | null;
+  photoMimeType?: string | null;
+  photoFileSizeBytes?: number | null;
+
   departmentId?: string | null;
   sectionId?: string | null;
   organizationLevelId?: string | null;
@@ -152,6 +160,18 @@ export interface EmployeeDetail extends Employee {
   dateOfBirth?: string | null;
   maritalStatus?: MaritalStatus | null;
   religion?: string | null;
+
+  // ── Employee Master feedback, lane 3a ──────────────────────────────────────
+  /** How the employee describes their gender, where `gender` is Other. */
+  genderDescription?: string | null;
+  /** Home town or place of origin. */
+  hometown?: string | null;
+  /**
+   * ⚠ The EMPLOYEE's own disability — added alongside, never replacing, the one on a DEPENDANT.
+   * A dependant's disability and an employee's are different facts about different people.
+   */
+  hasDisability?: boolean;
+  disabilityDescription?: string | null;
   address?: string | null;
   city?: string | null;
   state?: string | null;
@@ -194,6 +214,18 @@ export interface CreateEmployeeRequest {
   dateOfBirth?: string | null;
   maritalStatus?: MaritalStatus | null;
   religion?: string | null;
+
+  // ── Employee Master feedback, lane 3a ──────────────────────────────────────
+  /** How the employee describes their gender, where `gender` is Other. */
+  genderDescription?: string | null;
+  /** Home town or place of origin. */
+  hometown?: string | null;
+  /**
+   * ⚠ The EMPLOYEE's own disability — added alongside, never replacing, the one on a DEPENDANT.
+   * A dependant's disability and an employee's are different facts about different people.
+   */
+  hasDisability?: boolean;
+  disabilityDescription?: string | null;
   isFullTime: boolean;
   dateEmployed?: string | null;
   address?: string | null;

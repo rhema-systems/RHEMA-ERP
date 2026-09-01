@@ -205,4 +205,64 @@ public class EmployeeDocumentComplianceDto
     public int MandatorySatisfiedCount { get; set; }
 
     public List<EmployeeDocumentComplianceLineDto> Lines { get; set; } = new();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  GUARANTOR COMPLIANCE
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // ⚠ `EmployeePosition.RequiresGuarantor` was a bare bool: a post could demand a guarantor and
+    // never say for how much, so "is this cashier properly guaranteed?" was a question the system
+    // could pose and not answer.
+
+    /// <summary>Whether the employee's position requires a guarantor at all.</summary>
+    public bool RequiresGuarantor { get; set; }
+
+    /// <summary>The surety the post requires. Null means "a guarantor, amount unspecified".</summary>
+    public decimal? RequiredGuarantorAmount { get; set; }
+    public string? RequiredGuarantorCurrencyCode { get; set; }
+
+    /// <summary>Active guarantors on file for this employee.</summary>
+    public int GuarantorCount { get; set; }
+
+    /// <summary>
+    /// The total guaranteed, counting only guarantors stated in the requirement's currency.
+    /// </summary>
+    public decimal GuaranteedTotal { get; set; }
+
+    /// <summary>
+    /// Guarantors whose surety is in a DIFFERENT currency and is therefore not in the total.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Reported, never converted — and the reason is NOT that conversion is unavailable.</b>
+    /// Finance's rates were transposed when travel first met this (cross-module defect #2), but
+    /// that was RESOLVED by PR #99 and re-verified at merge #8, so <c>HrCurrencyBridge</c> could
+    /// convert correctly today. Two reasons survive that fix and are why it still does not:
+    /// <list type="number">
+    /// <item>a converted verdict MOVES WITH THE RATE, so an employee would drift in and out of
+    /// compliance with nobody having done anything and no event on the record to point at;</item>
+    /// <item>which date's rate — the day the surety was signed, or today? A guarantee written for
+    /// USD 5,000 in 2020 answers differently under each, and choosing is TDC's policy call.</item>
+    /// </list>
+    /// So the verdict is decided like-for-like and the foreign amounts are counted and shown, which
+    /// leaves the gap visible and the choice open rather than papering over either.
+    /// </remarks>
+    public int GuarantorsInOtherCurrencies { get; set; }
+
+    /// <summary>
+    /// True when no guarantor is required, or one is on file meeting the required amount.
+    /// </summary>
+    public bool IsGuarantorSatisfied { get; set; }
+
+    /// <summary>How much short the guaranteed total is, where it falls short.</summary>
+    public decimal? GuarantorShortfall { get; set; }
+
+    /// <summary>
+    /// Documents AND guarantor.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <see cref="IsCompliant"/> keeps its original meaning — mandatory DOCUMENTS only — because
+    /// screens and assertions already read it. Widening it silently would have changed what every
+    /// existing caller was told without any of them asking.
+    /// </remarks>
+    public bool IsFullyCompliant { get; set; }
 }

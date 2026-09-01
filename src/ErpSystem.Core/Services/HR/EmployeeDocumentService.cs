@@ -26,15 +26,20 @@ public class EmployeeDocumentService : IEmployeeDocumentService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+
+    // For the tenant's default currency, which is what an unstated guarantor amount is stated in.
+    private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ILogger<EmployeeDocumentService> _logger;
 
     public EmployeeDocumentService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ICompanyHrPolicyProvider policyProvider,
         ILogger<EmployeeDocumentService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _policyProvider = policyProvider;
         _logger = logger;
     }
 
@@ -331,6 +336,142 @@ public class EmployeeDocumentService : IEmployeeDocumentService
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  FILES THAT BELONG TO A ROW, NOT TO THE FILE (lane 3a)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // ⚠ A guarantor's photograph and a referee's letter hang off THEIR row, not off the employee's
+    // general document file — "which guarantor is this a photo of" is not a question a shared
+    // documents list can answer. So they follow the oath-of-secrecy shape: one file per row, its
+    // three gate identifiers on the row itself, and no path anywhere.
+    //
+    // ⚠ `EmployeeGuarantor.GuarantorFormPath` is a pre-existing caller-supplied path of exactly the
+    // kind D-10/D-14/D-39 removed. It is untouched here because it holds legacy values and gating
+    // it is its own piece of work — but nothing new uses that shape.
+
+    public async Task<Employee> AttachEmployeePhotoAsync(
+        Guid employeeId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, ct)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        entity.PhotoFileUploadRecordId = fileUploadRecordId;
+        entity.PhotoDocumentRecordId = documentRecordId;
+        entity.PhotoDocumentVersionId = documentVersionId;
+        entity.PhotoFileName = fileName;
+        entity.PhotoMimeType = mimeType;
+        entity.PhotoFileSizeBytes = fileSizeBytes;
+
+        // ⚠ PicturePath is deliberately NOT cleared. It is the ported location and may still be the
+        // only copy of an older image; the download prefers the gated ids and falls back to it, so
+        // clearing it here would destroy the fallback for anyone who has not re-uploaded.
+        await _unitOfWork.SaveChangesAsync(ct);
+        return entity;
+    }
+
+    public async Task<Employee?> GetEmployeeForPhotoAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId && !e.IsDeleted, ct);
+    }
+
+    public async Task<EmployeeDependent> AttachDependentPhotoAsync(
+        Guid dependentId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<EmployeeDependent>().GetQueryable()
+            .FirstOrDefaultAsync(d => d.Id == dependentId && d.TenantId == tenantId && !d.IsDeleted, ct)
+            ?? throw new ArgumentException($"Dependant with ID '{dependentId}' not found.");
+
+        entity.PhotoFileUploadRecordId = fileUploadRecordId;
+        entity.PhotoDocumentRecordId = documentRecordId;
+        entity.PhotoDocumentVersionId = documentVersionId;
+        entity.PhotoFileName = fileName;
+        entity.PhotoMimeType = mimeType;
+        entity.PhotoFileSizeBytes = fileSizeBytes;
+
+        await _unitOfWork.SaveChangesAsync(ct);
+        return entity;
+    }
+
+    public async Task<EmployeeDependent?> GetDependentForPhotoAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<EmployeeDependent>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId && !d.IsDeleted, ct);
+    }
+
+    public async Task<EmployeeGuarantor> AttachGuarantorPhotoAsync(
+        Guid guarantorId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<EmployeeGuarantor>().GetQueryable()
+            .FirstOrDefaultAsync(g => g.Id == guarantorId && g.TenantId == tenantId && !g.IsDeleted, ct)
+            ?? throw new ArgumentException($"Guarantor with ID '{guarantorId}' not found.");
+
+        entity.PhotoFileUploadRecordId = fileUploadRecordId;
+        entity.PhotoDocumentRecordId = documentRecordId;
+        entity.PhotoDocumentVersionId = documentVersionId;
+        entity.PhotoFileName = fileName;
+        entity.PhotoMimeType = mimeType;
+        entity.PhotoFileSizeBytes = fileSizeBytes;
+
+        await _unitOfWork.SaveChangesAsync(ct);
+        return entity;
+    }
+
+    public async Task<EmployeeGuarantor?> GetGuarantorAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<EmployeeGuarantor>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(g => g.Id == id && g.TenantId == tenantId && !g.IsDeleted, ct);
+    }
+
+    public async Task<EmployeeReferee> AttachRefereeLetterAsync(
+        Guid refereeId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<EmployeeReferee>().GetQueryable()
+            .FirstOrDefaultAsync(r => r.Id == refereeId && r.TenantId == tenantId && !r.IsDeleted, ct)
+            ?? throw new ArgumentException($"Referee with ID '{refereeId}' not found.");
+
+        entity.LetterFileUploadRecordId = fileUploadRecordId;
+        entity.LetterDocumentRecordId = documentRecordId;
+        entity.LetterDocumentVersionId = documentVersionId;
+        entity.LetterFileName = fileName;
+        entity.LetterMimeType = mimeType;
+        entity.LetterFileSizeBytes = fileSizeBytes;
+
+        // Receiving the written reference IS being contacted. Leaving IsContacted false while a
+        // letter sits on the row would let the referee report contradict the file.
+        if (!entity.IsContacted)
+        {
+            entity.IsContacted = true;
+            entity.ContactedDate ??= DateTime.UtcNow;
+        }
+
+        await _unitOfWork.SaveChangesAsync(ct);
+        return entity;
+    }
+
+    public async Task<EmployeeReferee?> GetRefereeAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<EmployeeReferee>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId && !r.IsDeleted, ct);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  POSITION REQUIREMENTS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -485,7 +626,11 @@ public class EmployeeDocumentService : IEmployeeDocumentService
         // empty position. Kept because an import can produce one and the alternative is a query
         // that silently matches every requirement row whose PositionId is also empty.
         if (employee.PositionId == Guid.Empty)
+        {
+            result.IsGuarantorSatisfied = true;
+            result.IsFullyCompliant = result.IsCompliant;
             return result;
+        }
 
         var positionId = employee.PositionId;
 
@@ -495,7 +640,13 @@ public class EmployeeDocumentService : IEmployeeDocumentService
             .Select(r => new { r.DocumentTypeId, TypeName = r.DocumentType.Name, r.IsMandatory })
             .ToListAsync(ct);
 
-        if (requirements.Count == 0) return result;
+        if (requirements.Count == 0)
+        {
+            // ⚠ NOT a shortcut out of the whole method. A position can require a guarantor and no
+            // documents at all, and returning here reported an unguaranteed cashier as compliant.
+            await ApplyGuarantorComplianceAsync(result, tenantId, positionId, employeeId, ct);
+            return result;
+        }
 
         var held = await _unitOfWork.Repository<EmployeeDocument>().GetQueryable()
             .AsNoTracking()
@@ -534,7 +685,94 @@ public class EmployeeDocumentService : IEmployeeDocumentService
         result.MandatoryCount = result.Lines.Count(l => l.IsMandatory);
         result.MandatorySatisfiedCount = result.Lines.Count(l => l.IsMandatory && l.IsSatisfied);
         result.IsCompliant = result.MandatoryCount == result.MandatorySatisfiedCount;
+
+        await ApplyGuarantorComplianceAsync(result, tenantId, positionId, employeeId, ct);
         return result;
+    }
+
+    /// <summary>
+    /// Whether the employee's guarantors meet what their post requires.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Amounts in another currency are counted separately and never converted.</b>
+    /// Not because conversion is unavailable — <c>HrCurrencyBridge</c> can do it and Finance's
+    /// rate inversion (cross-module defect #2) was resolved by PR #99 and re-verified at merge #8.
+    /// Because a converted verdict moves with the rate, so an employee would drift in and out of
+    /// compliance with nobody having acted; and because "which date's rate" — signature date or
+    /// today — is a policy choice TDC has not made. The foreign amounts are counted and reported,
+    /// so the gap is visible and the choice stays open.</para>
+    ///
+    /// <para>⚠ <b>Sum, not maximum.</b> Two guarantors at half the amount each satisfy a surety
+    /// between them — that is what co-signing means. If TDC wants a single guarantor to cover the
+    /// whole sum, that is a rule to add, not an assumption to bake in silently.</para>
+    /// </remarks>
+    private async Task ApplyGuarantorComplianceAsync(
+        EmployeeDocumentComplianceDto result, Guid tenantId, Guid positionId, Guid employeeId,
+        CancellationToken ct)
+    {
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .AsNoTracking()
+            .Where(p => p.Id == positionId && p.TenantId == tenantId)
+            .Select(p => new
+            {
+                p.RequiresGuarantor,
+                p.RequiredGuarantorAmount,
+                p.RequiredGuarantorCurrencyCode,
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (position is null || !position.RequiresGuarantor)
+        {
+            // Nothing required: satisfied, and IsFullyCompliant is just the document answer.
+            result.IsGuarantorSatisfied = true;
+            result.IsFullyCompliant = result.IsCompliant;
+            return;
+        }
+
+        var settings = await _policyProvider.GetAsync(ct);
+        var requiredCurrency =
+            (position.RequiredGuarantorCurrencyCode ?? settings.DefaultCurrencyCode ?? string.Empty)
+            .Trim().ToUpperInvariant();
+
+        var guarantors = await _unitOfWork.Repository<EmployeeGuarantor>().GetQueryable()
+            .AsNoTracking()
+            .Where(g => g.TenantId == tenantId && !g.IsDeleted && g.EmployeeId == employeeId && g.IsActive)
+            .Select(g => new { g.AmountGuaranteed, g.AmountGuaranteedCurrencyCode })
+            .ToListAsync(ct);
+
+        result.RequiresGuarantor = true;
+        result.RequiredGuarantorAmount = position.RequiredGuarantorAmount;
+        result.RequiredGuarantorCurrencyCode = requiredCurrency;
+        result.GuarantorCount = guarantors.Count;
+
+        // A guarantor with no stated currency is stated in the tenant default, which is what the
+        // requirement falls back to as well — so they compare.
+        static string Code(string? c, string fallback) =>
+            string.IsNullOrWhiteSpace(c) ? fallback : c.Trim().ToUpperInvariant();
+
+        result.GuaranteedTotal = guarantors
+            .Where(g => g.AmountGuaranteed.HasValue
+                     && Code(g.AmountGuaranteedCurrencyCode, requiredCurrency) == requiredCurrency)
+            .Sum(g => g.AmountGuaranteed!.Value);
+
+        result.GuarantorsInOtherCurrencies = guarantors
+            .Count(g => g.AmountGuaranteed.HasValue
+                     && Code(g.AmountGuaranteedCurrencyCode, requiredCurrency) != requiredCurrency);
+
+        if (position.RequiredGuarantorAmount is not decimal required || required <= 0m)
+        {
+            // "A guarantor is required, no amount specified" — a legitimate state. Having one at
+            // all is the whole test; judging a sum nobody set would be inventing the rule.
+            result.IsGuarantorSatisfied = result.GuarantorCount > 0;
+        }
+        else
+        {
+            result.IsGuarantorSatisfied = result.GuaranteedTotal >= required;
+            if (!result.IsGuarantorSatisfied)
+                result.GuarantorShortfall = required - result.GuaranteedTotal;
+        }
+
+        result.IsFullyCompliant = result.IsCompliant && result.IsGuarantorSatisfied;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -491,6 +491,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EmployeeWorkHistory> EmployeeWorkHistories { get; set; }
     public DbSet<EmployeeContractDetail> EmployeeContractDetails { get; set; }
     public DbSet<ExpatriateAssignment> ExpatriateAssignments { get; set; }
+    public DbSet<ExpatriateFamilyMember> ExpatriateFamilyMembers { get; set; }
     public DbSet<EmployeePositionHistory> EmployeePositionHistories { get; set; }
     public DbSet<EmployeeSalaryAssignment> EmployeeSalaryAssignments { get; set; }
     public DbSet<EmployeeReferee> EmployeeReferees { get; set; }

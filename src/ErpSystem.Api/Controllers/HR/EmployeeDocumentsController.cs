@@ -247,6 +247,219 @@ public class EmployeeDocumentsController : ControllerBase
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  FILES THAT BELONG TO A ROW (lane 3a)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // ⚠ A guarantor's photograph and a referee's written reference belong to THEIR row, not to the
+    // employee's general document file — a shared list cannot answer "which guarantor is this a
+    // photo of". They live on this controller rather than EmployeesController because the gate's
+    // four dependencies are already here and that file already carries 81 write endpoints.
+    //
+    // They share the `hr-employee-documents` category deliberately: same subject, same retention,
+    // and a category per file kind would multiply without telling anyone anything new.
+
+    /// <summary>
+    /// The employee's own photograph, through the gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Until this existed the ONLY way to set an employee photo was to put a path string on the
+    /// create or update DTO — a caller-supplied file location on the module's most-used entity, and
+    /// the seventh instance of the sink area 16 replaced. <c>PicturePath</c> survives for ported
+    /// images and the download falls back to it; nothing new writes it.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("employee/{employeeId:guid}/photo")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadEmployeePhoto(
+        Guid employeeId, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var employee = await _service.GetEmployeeForPhotoAsync(employeeId, ct);
+        if (employee is null) return NotFound(new { message = $"Employee '{employeeId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.Employee),
+            sourceRecordId: employeeId,
+            sourceLabel: "Employee photograph",
+            documentType: "EmployeePhoto",
+            description: null,
+            persist: (_, document) => _service.AttachEmployeePhotoAsync(
+                employeeId, document.FileUploadRecordId, document.DocumentRecordId,
+                document.DocumentVersionId, document.OriginalFileName, document.ContentType,
+                document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("employee/{employeeId:guid}/photo")]
+    public async Task<IActionResult> DownloadEmployeePhoto(Guid employeeId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var employee = await _service.GetEmployeeForPhotoAsync(employeeId, ct);
+        if (employee is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            employee.PhotoDocumentRecordId, employee.PhotoDocumentVersionId,
+            employee.PhotoFileUploadRecordId,
+            // ⚠ The one place the legacy path is still read — a ported image has no gate record,
+            // and refusing to serve it would lose every photo the port brought over.
+            legacyPath: employee.PicturePath,
+            employee.PhotoFileName ?? "employee-photo",
+            fallbackContentType: employee.PhotoMimeType,
+            inline: true, ct);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("dependants/{dependentId:guid}/photo")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadDependentPhoto(
+        Guid dependentId, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var dependent = await _service.GetDependentForPhotoAsync(dependentId, ct);
+        if (dependent is null) return NotFound(new { message = $"Dependant '{dependentId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeDependent),
+            sourceRecordId: dependentId,
+            sourceLabel: "Dependant photograph",
+            documentType: "DependentPhoto",
+            description: null,
+            persist: (_, document) => _service.AttachDependentPhotoAsync(
+                dependentId, document.FileUploadRecordId, document.DocumentRecordId,
+                document.DocumentVersionId, document.OriginalFileName, document.ContentType,
+                document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("dependants/{dependentId:guid}/photo")]
+    public async Task<IActionResult> DownloadDependentPhoto(Guid dependentId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var dependent = await _service.GetDependentForPhotoAsync(dependentId, ct);
+        if (dependent is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            dependent.PhotoDocumentRecordId, dependent.PhotoDocumentVersionId,
+            dependent.PhotoFileUploadRecordId,
+            legacyPath: dependent.PicturePath,
+            dependent.PhotoFileName ?? "dependant-photo",
+            fallbackContentType: dependent.PhotoMimeType,
+            inline: true, ct);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("guarantors/{guarantorId:guid}/photo")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadGuarantorPhoto(
+        Guid guarantorId, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        // Entitlement first, storage second: neither the gate nor the DMS checks whether this
+        // caller may touch the parent.
+        var guarantor = await _service.GetGuarantorAsync(guarantorId, ct);
+        if (guarantor is null) return NotFound(new { message = $"Guarantor '{guarantorId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeGuarantor),
+            sourceRecordId: guarantorId,
+            sourceLabel: "Guarantor photograph",
+            documentType: "GuarantorPhoto",
+            description: null,
+            persist: (_, document) => _service.AttachGuarantorPhotoAsync(
+                guarantorId, document.FileUploadRecordId, document.DocumentRecordId,
+                document.DocumentVersionId, document.OriginalFileName, document.ContentType,
+                document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("guarantors/{guarantorId:guid}/photo")]
+    public async Task<IActionResult> DownloadGuarantorPhoto(Guid guarantorId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var guarantor = await _service.GetGuarantorAsync(guarantorId, ct);
+        if (guarantor?.PhotoFileUploadRecordId is null && guarantor?.PhotoDocumentRecordId is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            guarantor.PhotoDocumentRecordId, guarantor.PhotoDocumentVersionId,
+            guarantor.PhotoFileUploadRecordId,
+            legacyPath: null,
+            guarantor.PhotoFileName ?? "guarantor-photo",
+            fallbackContentType: guarantor.PhotoMimeType,
+            // Inline: a photograph is looked AT, not filed away, and forcing a download to view a
+            // face is the kind of friction that stops people attaching them at all.
+            inline: true, ct);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("referees/{refereeId:guid}/letter")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadRefereeLetter(
+        Guid refereeId, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var referee = await _service.GetRefereeAsync(refereeId, ct);
+        if (referee is null) return NotFound(new { message = $"Referee '{refereeId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeReferee),
+            sourceRecordId: refereeId,
+            sourceLabel: "Reference letter",
+            documentType: "RefereeLetter",
+            description: null,
+            persist: (_, document) => _service.AttachRefereeLetterAsync(
+                refereeId, document.FileUploadRecordId, document.DocumentRecordId,
+                document.DocumentVersionId, document.OriginalFileName, document.ContentType,
+                document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("referees/{refereeId:guid}/letter")]
+    public async Task<IActionResult> DownloadRefereeLetter(Guid refereeId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var referee = await _service.GetRefereeAsync(refereeId, ct);
+        if (referee?.LetterFileUploadRecordId is null && referee?.LetterDocumentRecordId is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            referee.LetterDocumentRecordId, referee.LetterDocumentVersionId,
+            referee.LetterFileUploadRecordId,
+            legacyPath: null,
+            referee.LetterFileName ?? "reference-letter",
+            fallbackContentType: referee.LetterMimeType,
+            inline: false, ct);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  POSITION REQUIREMENTS AND COMPLIANCE
     // ═══════════════════════════════════════════════════════════════════════
 

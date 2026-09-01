@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
@@ -77,6 +78,13 @@ export default function EditEmployeePositionPage() {
     queryFn: () => benefitPolicyService.getActive(),
   });
 
+  // Finance owns the currency list; the server refuses a code it does not hold, so a free-text
+  // box would be offering a way to fail.
+  const { data: currencies } = useQuery({
+    queryKey: ['finance', 'currencies'],
+    queryFn: () => hrCurrencyService.getActive(),
+  });
+
   // A position can't report to itself.
   const reportsToOptions = useMemo(
     () => (positions ?? []).filter((p) => p.id !== id),
@@ -105,6 +113,11 @@ export default function EditEmployeePositionPage() {
         maximumAge: toIntOrNull(values.maximumAge ?? ''),
         requiresCertification: values.requiresCertification,
         requiresGuarantor: values.requiresGuarantor,
+        // Blank means "no set amount", which the compliance read treats as "a guarantor, any sum".
+        requiredGuarantorAmount: values.requiredGuarantorAmount
+          ? Number(values.requiredGuarantorAmount)
+          : null,
+        requiredGuarantorCurrencyCode: values.requiredGuarantorCurrencyCode || null,
         requiresLicense: values.requiresLicense,
         isActive: values.isActive,
         skillRequirements: values.skillRequirements.map((r) => ({
@@ -158,6 +171,7 @@ export default function EditEmployeePositionPage() {
           salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
           benefitPolicies={benefitPolicies ?? []}
+          currencies={currencies ?? []}
           defaultValues={{
             title: position.title,
             code: position.code ?? '',
@@ -177,6 +191,9 @@ export default function EditEmployeePositionPage() {
             maximumAge: toStr(position.maximumAge),
             requiresCertification: position.requiresCertification,
             requiresGuarantor: position.requiresGuarantor,
+            requiredGuarantorAmount:
+              position.requiredGuarantorAmount != null ? String(position.requiredGuarantorAmount) : '',
+            requiredGuarantorCurrencyCode: position.requiredGuarantorCurrencyCode ?? '',
             requiresLicense: position.requiresLicense,
             isActive: position.isActive,
             skillRequirements: (position.skillRequirements ?? []).map((r) => ({

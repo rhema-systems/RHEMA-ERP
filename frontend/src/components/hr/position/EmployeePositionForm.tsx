@@ -68,6 +68,8 @@ export const employeePositionSchema = z.object({
   maximumAge: optionalInt,
   requiresCertification: z.boolean(),
   requiresGuarantor: z.boolean(),
+  requiredGuarantorAmount: z.string().optional().or(z.literal('')),
+  requiredGuarantorCurrencyCode: z.string().optional().or(z.literal('')),
   requiresLicense: z.boolean(),
   isActive: z.boolean(),
   skillRequirements: z.array(
@@ -110,6 +112,8 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   maximumAge: '',
   requiresCertification: false,
   requiresGuarantor: false,
+  requiredGuarantorAmount: '',
+  requiredGuarantorCurrencyCode: '',
   requiresLicense: false,
   isActive: true,
   skillRequirements: [],
@@ -126,6 +130,12 @@ interface EmployeePositionFormProps {
   skills: Skill[];
   /** Active benefit policies an entitlement can point at. */
   benefitPolicies: BenefitPolicySummary[];
+  /**
+   * Currencies FINANCE holds, for the guarantor requirement.
+   * ⚠ A prop rather than a fetch, like every other list here: this form is presentational and its
+   * two callers already own their data-loading.
+   */
+  currencies?: { code: string; name: string }[];
   defaultValues: EmployeePositionFormValues;
   onSubmit: (values: EmployeePositionFormValues) => Promise<void>;
   submitting: boolean;
@@ -141,6 +151,7 @@ export function EmployeePositionForm({
   salaryGrades,
   skills,
   benefitPolicies,
+  currencies,
   defaultValues,
   onSubmit,
   submitting,
@@ -652,6 +663,49 @@ export function EmployeePositionForm({
                 onCheckedChange={(v) => form.setValue('requiresGuarantor', v)}
               />
             </div>
+            {/* ⚠ The flag alone could demand a guarantor and never say for how much, so "is this
+                cashier properly guaranteed?" was a question the system could pose and not answer.
+                Leaving the amount blank is a legitimate answer — "a guarantor, sum unspecified" —
+                and the compliance read then tests only that one exists. */}
+            {requiresGuarantor && (
+              <div className="grid grid-cols-2 gap-3 rounded-md border p-3">
+                <div className="space-y-2">
+                  <Label htmlFor="requiredGuarantorAmount">Amount required</Label>
+                  <Input
+                    id="requiredGuarantorAmount"
+                    type="number"
+                    step="0.01"
+                    placeholder="Leave blank for no set amount"
+                    {...form.register('requiredGuarantorAmount')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="requiredGuarantorCurrencyCode">Currency</Label>
+                  <Select
+                    value={form.watch('requiredGuarantorCurrencyCode') || NONE}
+                    onValueChange={(v) =>
+                      form.setValue('requiredGuarantorCurrencyCode', v === NONE ? '' : v)
+                    }
+                  >
+                    <SelectTrigger id="requiredGuarantorCurrencyCode">
+                      <SelectValue placeholder="HR default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>HR default</SelectItem>
+                      {(currencies ?? []).map((c) => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.code} — {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="col-span-2 text-xs text-muted-foreground">
+                  Each holder&apos;s Documents tab shows whether their guarantors meet this. Sureties
+                  stated in another currency are counted and shown separately, never converted.
+                </p>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <Label htmlFor="requiresLicense">Requires License</Label>
               <Switch

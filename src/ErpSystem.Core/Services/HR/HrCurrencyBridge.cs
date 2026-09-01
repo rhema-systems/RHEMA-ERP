@@ -3,7 +3,7 @@ using ErpSystem.Core.Interfaces.Finance;
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// Travel's read-only window onto Finance's currency and exchange-rate masters.
+/// HR's read-only window onto Finance's currency and exchange-rate masters.
 /// </summary>
 /// <remarks>
 /// <para><b>Why this exists.</b> Travel shipped its own <c>StaffTravelCurrencyExchangeRate</c> —
@@ -17,15 +17,27 @@ namespace ErpSystem.Core.Services.HR;
 /// to let travel invent one — which is precisely what the retired table allowed.</para>
 ///
 /// <para>Not an interface of its own: it is a thin composition over two Finance services that
-/// several travel services need, and giving it a bespoke abstraction would only obscure where the
-/// data actually comes from.</para>
+/// several HR services need, and giving it a bespoke abstraction would only obscure where the data
+/// actually comes from.</para>
+///
+/// <para><b>⚠ Renamed from travel-specific to HR-wide on 2026-09-01, because this file said to.</b>
+/// Its own note read: <i>"Same division StaffTravelCurrencyBridge settled for travel; when a third
+/// area needs this the two should become one HR-wide bridge."</i> Guarantor sureties (lane 3a) are
+/// that third area, so the implementation moved here and
+/// <see cref="StaffTravelCurrencyBridge"/> is now a thin alias.</para>
+///
+/// <para><b>Two callers are owed migration and are deliberately NOT migrated here.</b> Area 12's
+/// travel services keep using the alias, and <c>SeparationService.ResolveCurrencyAsync</c> keeps
+/// its own copy of the settings-then-base fallback. Both are closed areas with their own harnesses;
+/// moving them is a change worth making deliberately with those suites green, not as a side effect
+/// of an employee-master slice.</para>
 /// </remarks>
-public sealed class StaffTravelCurrencyBridge
+public class HrCurrencyBridge
 {
     private readonly ICurrencyService _currencies;
     private readonly IExchangeRateService _rates;
 
-    public StaffTravelCurrencyBridge(ICurrencyService currencies, IExchangeRateService rates)
+    public HrCurrencyBridge(ICurrencyService currencies, IExchangeRateService rates)
     {
         _currencies = currencies;
         _rates = rates;
@@ -57,7 +69,10 @@ public sealed class StaffTravelCurrencyBridge
         var currency = await _currencies.GetByCodeAsync(currencyCode.Trim().ToUpperInvariant(), cancellationToken);
         if (currency is null)
             throw new InvalidOperationException(
-                $"'{currencyCode}' is not a currency this organisation holds. Add it in Finance before using it on travel.");
+                // ⚠ Area-neutral wording. This said "before using it on travel" until the bridge
+                // stopped being travel's — and a guarantor's surety then refused with a sentence
+                // about trips. A shared component's messages have to survive its callers.
+                $"'{currencyCode}' is not a currency this organisation holds. Add it in Finance before using it.");
     }
 
     /// <summary>
@@ -122,4 +137,18 @@ public sealed class StaffTravelCurrencyBridge
 
         return rate;
     }
+}
+
+/// <summary>
+/// Travel's name for <see cref="HrCurrencyBridge"/>, kept so area 12's call sites and its harness
+/// need no change.
+/// </summary>
+/// <remarks>
+/// ⚠ Retire this when area 12 is next opened with its suite runnable — not before. A rename across
+/// a closed area is a cheap edit and an expensive regression.
+/// </remarks>
+public sealed class StaffTravelCurrencyBridge : HrCurrencyBridge
+{
+    public StaffTravelCurrencyBridge(ICurrencyService currencies, IExchangeRateService rates)
+        : base(currencies, rates) { }
 }

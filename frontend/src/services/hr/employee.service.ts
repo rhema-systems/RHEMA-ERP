@@ -39,6 +39,7 @@ import type {
   UpdateEmployeeContractRequest,
   TerminateContractRequest,
   ExpatriateAssignment,
+  ExpatriateFamilyMember,
   CreateExpatriateAssignmentRequest,
   UpdateExpatriateAssignmentRequest,
   EmployeePositionHistory,
@@ -546,6 +547,37 @@ class EmployeeService {
 
   removeExpatriateAssignment(employeeId: string, id: string): Promise<void> {
     return apiService.delete<void>(this.sub(employeeId, `expatriate-assignments/${id}`));
+  }
+
+  // ── Expatriate family members ──────────────────────────────────────────────
+  //
+  // ⚠ `familyAccompanying` was a bare bool: the posting could assert a family had come and never
+  // say who, so nobody could count the residence permits owed or see whose lapsed next. Recording
+  // a member SETS the flag server-side — the flag follows the facts rather than waiting to be
+  // ticked separately and then disagreeing with them.
+
+  getExpatriateFamily(employeeId: string, assignmentId: string) {
+    return apiService.get<ExpatriateFamilyMember[]>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family`));
+  }
+
+  addExpatriateFamilyMember(
+    employeeId: string, assignmentId: string, payload: Partial<ExpatriateFamilyMember>) {
+    return apiService.post<ExpatriateFamilyMember>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family`),
+      { ...payload, expatriateAssignmentId: assignmentId });
+  }
+
+  updateExpatriateFamilyMember(
+    employeeId: string, assignmentId: string, id: string, payload: Partial<ExpatriateFamilyMember>) {
+    return apiService.put<ExpatriateFamilyMember>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family/${id}`),
+      { ...payload, id });
+  }
+
+  removeExpatriateFamilyMember(employeeId: string, assignmentId: string, id: string): Promise<void> {
+    return apiService.delete<void>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family/${id}`));
   }
 
   // ── Position histories ────────────────────────────────────────────────────────

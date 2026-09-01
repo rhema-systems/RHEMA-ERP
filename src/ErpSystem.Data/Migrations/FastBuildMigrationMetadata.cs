@@ -265,3 +265,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831135847_AddAwardAttachmentDmsColumns")] partial class AddAwardAttachmentDmsColumns { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260831232612_AddHrPolicyDeadlineSettings")] partial class AddHrPolicyDeadlineSettings { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260901001749_AddEmployeeDocuments")] partial class AddEmployeeDocuments { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260901013629_AddExtraEmployeeMasterFields")] partial class AddExtraEmployeeMasterFields { }

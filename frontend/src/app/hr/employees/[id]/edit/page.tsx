@@ -30,6 +30,13 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     dateOfBirth: d.dateOfBirth ?? '',
     maritalStatus: d.maritalStatus ?? '',
     religion: d.religion ?? '',
+    // ⚠ Read from /details, never the summary: GET api/hr/Employees/{id} is
+    // GetEmployeeSummaryByIdAsync and carries none of these, so binding the form to it would
+    // render every one blank and blank them on save.
+    genderDescription: d.genderDescription ?? '',
+    hometown: d.hometown ?? '',
+    hasDisability: d.hasDisability ?? false,
+    disabilityDescription: d.disabilityDescription ?? '',
     bloodType: d.bloodType ?? '',
     isExpatriate: d.isExpatriate,
     emailAddress: d.emailAddress,

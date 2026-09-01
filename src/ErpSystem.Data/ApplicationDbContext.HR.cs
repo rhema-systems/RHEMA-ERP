@@ -1410,6 +1410,21 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<ExpatriateFamilyMember>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ExpatriateAssignmentId });
+            // Ahead of the permit-expiry sweep that is owed: the only cross-assignment question
+            // anyone asks of this table is "whose permit lapses next".
+            entity.HasIndex(e => new { e.TenantId, e.ResidentPermitExpiryDate });
+
+            // Cascade, unlike most HR children: a family member exists only as part of a posting,
+            // and an assignment already cascades from the employee.
+            entity.HasOne(e => e.ExpatriateAssignment)
+                .WithMany(a => a.FamilyMembers)
+                .HasForeignKey(e => e.ExpatriateAssignmentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // Configure Department entity
         builder.Entity<Department>(entity =>
         {

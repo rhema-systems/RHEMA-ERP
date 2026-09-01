@@ -705,6 +705,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAssetReminderService, AssetReminderService>();
         // Travel's read-only window onto Finance's currency and exchange-rate masters —
         // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
+        services.AddScoped<HrCurrencyBridge>();
+        // Area 12's alias for the same bridge — registered separately so its existing constructor
+        // injections resolve unchanged. Retire with the alias.
         services.AddScoped<StaffTravelCurrencyBridge>();
         // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
         services.AddScoped<StaffTravelPolicyGuard>();

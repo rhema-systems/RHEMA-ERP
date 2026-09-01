@@ -102,6 +102,14 @@ public static class EmployeeMappingExtensions
             DateOfBirth = e.DateOfBirth,
             MaritalStatus = e.MaritalStatus,
             Religion = e.Religion,
+            GenderDescription = e.GenderDescription,
+            Hometown = e.Hometown,
+            HasDisability = e.HasDisability,
+            HasPhoto = e.PhotoFileUploadRecordId != null || e.PhotoDocumentRecordId != null,
+            PhotoFileName = e.PhotoFileName,
+            PhotoMimeType = e.PhotoMimeType,
+            PhotoFileSizeBytes = e.PhotoFileSizeBytes,
+            DisabilityDescription = e.DisabilityDescription,
             Address = e.Address,
             City = e.City,
             State = e.State,
@@ -213,6 +221,14 @@ public static class EmployeeMappingExtensions
         to.DateOfBirth = from.DateOfBirth;
         to.MaritalStatus = from.MaritalStatus;
         to.Religion = from.Religion;
+        to.GenderDescription = from.GenderDescription;
+        to.Hometown = from.Hometown;
+        to.HasDisability = from.HasDisability;
+        to.HasPhoto = from.HasPhoto;
+        to.PhotoFileName = from.PhotoFileName;
+        to.PhotoMimeType = from.PhotoMimeType;
+        to.PhotoFileSizeBytes = from.PhotoFileSizeBytes;
+        to.DisabilityDescription = from.DisabilityDescription;
         to.Address = from.Address;
         to.City = from.City;
         to.State = from.State;
@@ -292,6 +308,10 @@ public static class EmployeeMappingExtensions
             DateOfBirth = dto.DateOfBirth,
             MaritalStatus = dto.MaritalStatus,
             Religion = dto.Religion,
+            GenderDescription = dto.GenderDescription,
+            Hometown = dto.Hometown,
+            HasDisability = dto.HasDisability,
+            DisabilityDescription = dto.DisabilityDescription,
             IsFullTime = dto.IsFullTime,
             DateEmployed = dto.DateEmployed,
 
@@ -359,6 +379,12 @@ public static class EmployeeMappingExtensions
         if (dto.DateOfBirth.HasValue) e.DateOfBirth = dto.DateOfBirth;
         if (dto.MaritalStatus.HasValue) e.MaritalStatus = dto.MaritalStatus;
         if (dto.Religion != null) e.Religion = dto.Religion;
+        if (dto.GenderDescription != null) e.GenderDescription = dto.GenderDescription;
+        if (dto.Hometown != null) e.Hometown = dto.Hometown;
+        // ⚠ Always written, unlike the strings around it. A bool cannot say "not supplied", and
+        // treating false as absent would make the tick impossible to UNtick.
+        e.HasDisability = dto.HasDisability;
+        if (dto.DisabilityDescription != null) e.DisabilityDescription = dto.DisabilityDescription;
         if (dto.DateEmployed.HasValue) e.DateEmployed = dto.DateEmployed;
 
         e.IsFullTime = dto.IsFullTime;
@@ -583,6 +609,11 @@ public static class EmployeeMappingExtensions
             RelationshipDescription = d.RelationshipDescription,
             DateOfBirth = d.DateOfBirth,
             Gender = d.Gender,
+            GenderDescription = d.GenderDescription,
+            HasPhoto = d.PhotoFileUploadRecordId != null || d.PhotoDocumentRecordId != null,
+            PhotoFileName = d.PhotoFileName,
+            PhotoMimeType = d.PhotoMimeType,
+            PhotoFileSizeBytes = d.PhotoFileSizeBytes,
             HasDisability = d.HasDisability,
             DisabilityDescription = d.DisabilityDescription,
             GhanaCardNumber = d.GhanaCardNumber,
@@ -606,6 +637,7 @@ public static class EmployeeMappingExtensions
             RelationshipDescription = dto.RelationshipDescription,
             DateOfBirth = dto.DateOfBirth,
             Gender = dto.Gender,
+            GenderDescription = dto.GenderDescription,
             HasDisability = dto.HasDisability,
             DisabilityDescription = dto.DisabilityDescription,
             GhanaCardNumber = dto.GhanaCardNumber,
@@ -627,6 +659,7 @@ public static class EmployeeMappingExtensions
         d.RelationshipDescription = dto.RelationshipDescription;
         d.DateOfBirth = dto.DateOfBirth;
         d.Gender = dto.Gender;
+        d.GenderDescription = dto.GenderDescription;
         if (dto.HasDisability.HasValue) d.HasDisability = dto.HasDisability.Value;
         d.DisabilityDescription = dto.DisabilityDescription;
         d.GhanaCardNumber = dto.GhanaCardNumber;
@@ -964,9 +997,19 @@ public static class EmployeeMappingExtensions
             RelocationDate = a.RelocationDate,
             AssignmentObjective = a.AssignmentObjective,
             VisaType = a.VisaType,
+            VisaIssueDate = a.VisaIssueDate,
             VisaExpiryDate = a.VisaExpiryDate,
             WorkPermitNumber = a.WorkPermitNumber,
-            WorkPermitExpiryDate = a.WorkPermitExpiryDate
+            WorkPermitIssueDate = a.WorkPermitIssueDate,
+            WorkPermitExpiryDate = a.WorkPermitExpiryDate,
+            ResidentPermitNumber = a.ResidentPermitNumber,
+            ResidentPermitIssueDate = a.ResidentPermitIssueDate,
+            ResidentPermitExpiryDate = a.ResidentPermitExpiryDate,
+            // ⚠ Only populated where the caller Included them. A detail read that silently returns
+            // an empty family is the shape D-09 kept producing; the service Includes it.
+            FamilyMembers = a.FamilyMembers == null
+                ? new List<ExpatriateFamilyMemberDto>()
+                : a.FamilyMembers.Where(m => !m.IsDeleted).Select(m => m.ToDto()).ToList()
         };
 
     public static ExpatriateAssignment ToEntity(this CreateExpatriateAssignmentDto dto)
@@ -981,9 +1024,14 @@ public static class EmployeeMappingExtensions
             FamilyAccompanying = dto.FamilyAccompanying,
             AssignmentObjective = dto.AssignmentObjective,
             VisaType = dto.VisaType,
+            VisaIssueDate = dto.VisaIssueDate,
             VisaExpiryDate = dto.VisaExpiryDate,
             WorkPermitNumber = dto.WorkPermitNumber,
-            WorkPermitExpiryDate = dto.WorkPermitExpiryDate
+            WorkPermitIssueDate = dto.WorkPermitIssueDate,
+            WorkPermitExpiryDate = dto.WorkPermitExpiryDate,
+            ResidentPermitNumber = dto.ResidentPermitNumber,
+            ResidentPermitIssueDate = dto.ResidentPermitIssueDate,
+            ResidentPermitExpiryDate = dto.ResidentPermitExpiryDate
         };
 
     public static void Apply(this UpdateExpatriateAssignmentDto dto, ExpatriateAssignment a)
@@ -999,6 +1047,75 @@ public static class EmployeeMappingExtensions
         if (dto.VisaExpiryDate.HasValue) a.VisaExpiryDate = dto.VisaExpiryDate;
         if (dto.WorkPermitNumber != null) a.WorkPermitNumber = dto.WorkPermitNumber;
         if (dto.WorkPermitExpiryDate.HasValue) a.WorkPermitExpiryDate = dto.WorkPermitExpiryDate;
+        if (dto.VisaIssueDate.HasValue) a.VisaIssueDate = dto.VisaIssueDate;
+        if (dto.WorkPermitIssueDate.HasValue) a.WorkPermitIssueDate = dto.WorkPermitIssueDate;
+        if (dto.ResidentPermitNumber != null) a.ResidentPermitNumber = dto.ResidentPermitNumber;
+        if (dto.ResidentPermitIssueDate.HasValue) a.ResidentPermitIssueDate = dto.ResidentPermitIssueDate;
+        if (dto.ResidentPermitExpiryDate.HasValue) a.ResidentPermitExpiryDate = dto.ResidentPermitExpiryDate;
+    }
+
+    // ── expatriate family members ────────────────────────────────────────────
+
+    public static ExpatriateFamilyMemberDto ToDto(this ExpatriateFamilyMember m) => new()
+    {
+        Id = m.Id,
+        ExpatriateAssignmentId = m.ExpatriateAssignmentId,
+        FullName = m.FullName,
+        Relationship = m.Relationship,
+        RelationshipDescription = m.RelationshipDescription,
+        GenderDescription = m.GenderDescription,
+        Gender = m.Gender,
+        DateOfBirth = m.DateOfBirth,
+        PassportNumber = m.PassportNumber,
+        PassportExpiryDate = m.PassportExpiryDate,
+        ResidentPermitNumber = m.ResidentPermitNumber,
+        ResidentPermitIssueDate = m.ResidentPermitIssueDate,
+        ResidentPermitExpiryDate = m.ResidentPermitExpiryDate,
+        ArrivalDate = m.ArrivalDate,
+        DepartureDate = m.DepartureDate,
+        Notes = m.Notes,
+    };
+
+    public static ExpatriateFamilyMember ToEntity(this CreateExpatriateFamilyMemberDto dto) => new()
+    {
+        ExpatriateAssignmentId = dto.ExpatriateAssignmentId,
+        FullName = dto.FullName,
+        Relationship = dto.Relationship,
+        RelationshipDescription = dto.RelationshipDescription,
+        GenderDescription = dto.GenderDescription,
+        Gender = dto.Gender,
+        DateOfBirth = dto.DateOfBirth,
+        PassportNumber = dto.PassportNumber,
+        PassportExpiryDate = dto.PassportExpiryDate,
+        ResidentPermitNumber = dto.ResidentPermitNumber,
+        ResidentPermitIssueDate = dto.ResidentPermitIssueDate,
+        ResidentPermitExpiryDate = dto.ResidentPermitExpiryDate,
+        ArrivalDate = dto.ArrivalDate,
+        DepartureDate = dto.DepartureDate,
+        Notes = dto.Notes,
+    };
+
+    /// <remarks>
+    /// ⚠ A full overwrite, not the "only if provided" idiom used above. Every field here is one a
+    /// user can legitimately CLEAR — a permit number entered against the wrong person, a departure
+    /// date set by mistake — and a null-means-absent mapper makes clearing impossible.
+    /// </remarks>
+    public static void Apply(this UpdateExpatriateFamilyMemberDto dto, ExpatriateFamilyMember m)
+    {
+        m.FullName = dto.FullName;
+        m.Relationship = dto.Relationship;
+        m.RelationshipDescription = dto.RelationshipDescription;
+        m.GenderDescription = dto.GenderDescription;
+        m.Gender = dto.Gender;
+        m.DateOfBirth = dto.DateOfBirth;
+        m.PassportNumber = dto.PassportNumber;
+        m.PassportExpiryDate = dto.PassportExpiryDate;
+        m.ResidentPermitNumber = dto.ResidentPermitNumber;
+        m.ResidentPermitIssueDate = dto.ResidentPermitIssueDate;
+        m.ResidentPermitExpiryDate = dto.ResidentPermitExpiryDate;
+        m.ArrivalDate = dto.ArrivalDate;
+        m.DepartureDate = dto.DepartureDate;
+        m.Notes = dto.Notes;
     }
 
     public static EmployeePositionHistoryListDto ToListDto(this EmployeePositionHistory h)
@@ -1153,7 +1270,13 @@ public static class EmployeeMappingExtensions
             IsActive = r.IsActive,
             IsContacted = r.IsContacted,
             ContactedDate = r.ContactedDate,
-            ReferenceNotes = r.ReferenceNotes
+            ReferenceNotes = r.ReferenceNotes,
+            // ⚠ One flag rather than making every screen reason about which of three ids means
+            // "there is a file". The download affordance keys off this.
+            HasLetter = r.LetterFileUploadRecordId != null || r.LetterDocumentRecordId != null,
+            LetterFileName = r.LetterFileName,
+            LetterMimeType = r.LetterMimeType,
+            LetterFileSizeBytes = r.LetterFileSizeBytes
         };
 
     public static EmployeeReferee ToEntity(this CreateEmployeeRefereeDto dto)
@@ -1226,6 +1349,13 @@ public static class EmployeeMappingExtensions
             EmployerAddress = g.EmployerAddress,
             EmployerPhone = g.EmployerPhone,
             MonthlyIncome = g.MonthlyIncome,
+            AmountGuaranteed = g.AmountGuaranteed,
+            AmountGuaranteedCurrencyCode = g.AmountGuaranteedCurrencyCode,
+            GenderDescription = g.GenderDescription,
+            HasPhoto = g.PhotoFileUploadRecordId != null || g.PhotoDocumentRecordId != null,
+            PhotoFileName = g.PhotoFileName,
+            PhotoMimeType = g.PhotoMimeType,
+            PhotoFileSizeBytes = g.PhotoFileSizeBytes,
             NationalIdType = g.NationalIdType,
             NationalIdNumberMasked = string.IsNullOrWhiteSpace(g.NationalIdNumber) ? null : Mask(g.NationalIdNumber),
             NationalIdExpiryDate = g.NationalIdExpiryDate,
@@ -1263,6 +1393,9 @@ public static class EmployeeMappingExtensions
             EmployerAddress = dto.EmployerAddress,
             EmployerPhone = dto.EmployerPhone,
             MonthlyIncome = dto.MonthlyIncome,
+            AmountGuaranteed = dto.AmountGuaranteed,
+            AmountGuaranteedCurrencyCode = dto.AmountGuaranteedCurrencyCode,
+            GenderDescription = dto.GenderDescription,
             NationalIdType = dto.NationalIdType,
             NationalIdNumber = dto.NationalIdNumber,
             NationalIdExpiryDate = dto.NationalIdExpiryDate,
@@ -1294,6 +1427,9 @@ public static class EmployeeMappingExtensions
         if (dto.EmployerAddress != null) g.EmployerAddress = dto.EmployerAddress;
         if (dto.EmployerPhone != null) g.EmployerPhone = dto.EmployerPhone;
         if (dto.MonthlyIncome.HasValue) g.MonthlyIncome = dto.MonthlyIncome;
+        if (dto.AmountGuaranteed.HasValue) g.AmountGuaranteed = dto.AmountGuaranteed;
+        if (dto.AmountGuaranteedCurrencyCode != null) g.AmountGuaranteedCurrencyCode = dto.AmountGuaranteedCurrencyCode;
+        if (dto.GenderDescription != null) g.GenderDescription = dto.GenderDescription;
         if (dto.NationalIdType != null) g.NationalIdType = dto.NationalIdType;
         if (dto.NationalIdNumber != null) g.NationalIdNumber = dto.NationalIdNumber;
         if (dto.NationalIdExpiryDate.HasValue) g.NationalIdExpiryDate = dto.NationalIdExpiryDate;

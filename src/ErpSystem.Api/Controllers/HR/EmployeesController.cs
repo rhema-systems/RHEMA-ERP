@@ -1569,6 +1569,86 @@ public class EmployeesController : ControllerBase
         }
     }
 
+    // ── Expatriate family members ────────────────────────────────────────────
+    //
+    // ⚠ `FamilyAccompanying` was a bare bool. The record could say a family had come and never who
+    // they were, so nobody could count the residence permits owed or see whose lapsed next.
+
+    [HttpGet("{employeeId:guid}/expatriate-assignments/{assignmentId:guid}/family")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<ExpatriateFamilyMemberDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<ExpatriateFamilyMemberDto>>> GetExpatriateFamily(
+        Guid employeeId, Guid assignmentId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (assignmentId == Guid.Empty) return BadRequest("Invalid expatriate assignment id.");
+        return Ok(await _service.GetExpatriateFamilyMembersAsync(assignmentId, cancellationToken));
+    }
+
+    [HttpPost("{employeeId:guid}/expatriate-assignments/{assignmentId:guid}/family")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [ProducesResponseType(typeof(ExpatriateFamilyMemberDto), StatusCodes.Status201Created)]
+    public async Task<ActionResult<ExpatriateFamilyMemberDto>> AddExpatriateFamilyMember(
+        Guid employeeId, Guid assignmentId,
+        [FromBody] CreateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (assignmentId == Guid.Empty) return BadRequest("Invalid expatriate assignment id.");
+        // The route wins over the body, so a mismatched id cannot file a person against another
+        // assignment — the same rule every other nested write in this controller applies.
+        dto.ExpatriateAssignmentId = assignmentId;
+
+        try
+        {
+            var created = await _service.AddExpatriateFamilyMemberAsync(dto, cancellationToken);
+            return CreatedAtAction(nameof(GetExpatriateFamily),
+                new { employeeId, assignmentId }, created);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpPut("{employeeId:guid}/expatriate-assignments/{assignmentId:guid}/family/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [ProducesResponseType(typeof(ExpatriateFamilyMemberDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ExpatriateFamilyMemberDto>> UpdateExpatriateFamilyMember(
+        Guid employeeId, Guid assignmentId, Guid id,
+        [FromBody] UpdateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest("Invalid family member id.");
+        dto.Id = id;
+
+        try
+        {
+            return Ok(await _service.UpdateExpatriateFamilyMemberAsync(dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    [HttpDelete("{employeeId:guid}/expatriate-assignments/{assignmentId:guid}/family/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> RemoveExpatriateFamilyMember(
+        Guid employeeId, Guid assignmentId, Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest("Invalid family member id.");
+
+        try
+        {
+            var ok = await _service.RemoveExpatriateFamilyMemberAsync(id, cancellationToken);
+            return ok ? NoContent() : NotFound();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // NEW ENDPOINTS: Position history
     [HttpGet("{employeeId:guid}/position-histories")]
     [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]

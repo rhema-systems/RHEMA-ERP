@@ -220,18 +220,24 @@ export function DocumentsTab({ employeeId }: { employeeId: string }) {
   return (
     <div className="space-y-4">
       {/* ── What the position requires ──────────────────────────────────────── */}
-      {compliance && compliance.lines.length > 0 && (
+      {compliance && (compliance.lines.length > 0 || compliance.requiresGuarantor) && (
         <Card className={compliance.isCompliant ? undefined : 'border-amber-400'}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              {compliance.isCompliant
+              {/* ⚠ The headline reads FULL compliance — documents and guarantor. `isCompliant`
+                  kept its narrower meaning so existing callers were not silently rebased. */}
+              {compliance.isFullyCompliant
                 ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                 : <AlertTriangle className="h-4 w-4 text-amber-600" />}
               Required for {compliance.positionTitle ?? 'this position'}
             </CardTitle>
             <CardDescription>
-              {compliance.mandatorySatisfiedCount} of {compliance.mandatoryCount} mandatory
-              document{compliance.mandatoryCount === 1 ? '' : 's'} on file.
+              {compliance.mandatoryCount > 0 && (
+                <>
+                  {compliance.mandatorySatisfiedCount} of {compliance.mandatoryCount} mandatory
+                  document{compliance.mandatoryCount === 1 ? '' : 's'} on file.
+                </>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
@@ -259,6 +265,50 @@ export function DocumentsTab({ employeeId }: { employeeId: string }) {
               </Badge>
             ))}
           </CardContent>
+          {compliance.requiresGuarantor && (
+            <CardContent className="border-t pt-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {compliance.isGuarantorSatisfied
+                  ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  : <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                <span className="font-medium">Guarantor</span>
+                <span className="text-muted-foreground">
+                  {compliance.requiredGuarantorAmount == null ? (
+                    // A legitimate state: a guarantor is required, no sum is set, so having one is
+                    // the whole test.
+                    <>
+                      required, no set amount ·{' '}
+                      {compliance.guarantorCount} on file
+                    </>
+                  ) : (
+                    <>
+                      {compliance.guaranteedTotal.toLocaleString()} of{' '}
+                      {compliance.requiredGuarantorAmount.toLocaleString()}{' '}
+                      {compliance.requiredGuarantorCurrencyCode} ·{' '}
+                      {compliance.guarantorCount} guarantor
+                      {compliance.guarantorCount === 1 ? '' : 's'}
+                    </>
+                  )}
+                </span>
+                {compliance.guarantorShortfall != null && (
+                  <Badge variant="destructive">
+                    {compliance.guarantorShortfall.toLocaleString()} short
+                  </Badge>
+                )}
+              </div>
+              {compliance.guarantorsInOtherCurrencies > 0 && (
+                // ⚠ Said out loud rather than folded in. These sureties are real and are NOT in the
+                // total, because converting would make the verdict move with the exchange rate.
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {compliance.guarantorsInOtherCurrencies} further guarantor
+                  {compliance.guarantorsInOtherCurrencies === 1 ? ' is' : 's are'} recorded in a
+                  different currency and {compliance.guarantorsInOtherCurrencies === 1 ? 'is' : 'are'}{' '}
+                  not counted above. Re-state the surety in{' '}
+                  {compliance.requiredGuarantorCurrencyCode} to have it count.
+                </p>
+              )}
+            </CardContent>
+          )}
         </Card>
       )}
 

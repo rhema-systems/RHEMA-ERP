@@ -38,7 +38,7 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
-import { financeDataService } from '@/services/finance/finance-data.service';
+import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { successionDevelopmentService } from '@/services/hr/succession.service';
 import type { SuccessionCandidate } from '@/types/hr/succession';
 
@@ -120,7 +120,7 @@ export function DevelopmentPanel({ candidate }: { candidate: SuccessionCandidate
   // text box would be offering a way to fail.
   const { data: currencies } = useQuery({
     queryKey: ['finance', 'currencies'],
-    queryFn: () => financeDataService.getCurrencies(),
+    queryFn: () => hrCurrencyService.getActive(),
   });
 
   const refresh = async () => {
@@ -375,7 +375,11 @@ export function DevelopmentPanel({ candidate }: { candidate: SuccessionCandidate
                 name="currencyCode"
                 label="Currency"
                 // Finance owns this list. An unknown code is refused by the server.
-                options={(currencies ?? []).map((c: any) => ({
+                // ⚠ `currencyCode`/`currencyName`, NOT `code`/`name`. This read `c.code` behind an
+                // `any` cast, so every option rendered "undefined — undefined" with an undefined
+                // value and TypeScript never objected. Found 2026-09-01 while copying this block
+                // for the guarantor surety, where a TYPED prop refused to compile.
+                options={(currencies ?? []).map((c) => ({
                   value: c.code,
                   label: `${c.code} — ${c.name}`,
                 }))}

@@ -126,6 +126,12 @@ public interface IEmployeeService
 
     // Expatriate assignments
     Task<IEnumerable<ExpatriateAssignmentListDto>> GetExpatriateAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    // Expatriate family members — who actually accompanied the assignee, and on whose permits.
+    Task<IEnumerable<ExpatriateFamilyMemberDto>> GetExpatriateFamilyMembersAsync(Guid assignmentId, CancellationToken cancellationToken = default);
+    Task<ExpatriateFamilyMemberDto> AddExpatriateFamilyMemberAsync(CreateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default);
+    Task<ExpatriateFamilyMemberDto> UpdateExpatriateFamilyMemberAsync(UpdateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveExpatriateFamilyMemberAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ExpatriateAssignmentDetailDto?> GetExpatriateAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ExpatriateAssignmentDetailDto> AddExpatriateAssignmentAsync(CreateExpatriateAssignmentDto dto, CancellationToken cancellationToken = default);
     Task<ExpatriateAssignmentDetailDto> UpdateExpatriateAssignmentAsync(UpdateExpatriateAssignmentDto dto, CancellationToken cancellationToken = default);

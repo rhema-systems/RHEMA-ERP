@@ -65,6 +65,20 @@ public class EmployeeDetailDto : EmployeeDto
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
+
+    /// <summary>How the employee describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// ⚠ The EMPLOYEE's own disability, added alongside — never replacing — the one on
+    /// EmployeeDependent. A dependant's disability and an employee's are different facts about
+    /// different people; the feedback read as a misplacement and was not one.
+    /// </summary>
+    public bool HasDisability { get; set; }
+    public string? DisabilityDescription { get; set; }
     public string? Address { get; set; }
     public string? City { get; set; }
     public string? State { get; set; }
@@ -109,6 +123,15 @@ public class EmployeeDetailDto : EmployeeDto
     public List<EmployeeQualificationDto> Qualifications { get; set; } = new();
     public List<EmployeeSkillDto> Skills { get; set; } = new();
     public List<EmployeeContractDetailDto> ContractDetails { get; set; } = new();
+    // ── The photograph, through the gate ──────────────────────────────────────
+    // ⚠ Read-side only. There is no way to SET these from a DTO: the image arrives through the
+    // upload endpoint and the gate fills them in. `PicturePath` above is the LEGACY caller-supplied
+    // location and is being retired — prefer `hasPhoto` for whether an image exists.
+    public bool HasPhoto { get; set; }
+    public string? PhotoFileName { get; set; }
+    public string? PhotoMimeType { get; set; }
+    public long? PhotoFileSizeBytes { get; set; }
+
 }
 
 /// <summary>
@@ -153,6 +176,20 @@ public class CreateEmployeeDto
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
+
+    /// <summary>How the employee describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// ⚠ The EMPLOYEE's own disability, added alongside — never replacing — the one on
+    /// EmployeeDependent. A dependant's disability and an employee's are different facts about
+    /// different people; the feedback read as a misplacement and was not one.
+    /// </summary>
+    public bool HasDisability { get; set; }
+    public string? DisabilityDescription { get; set; }
     public bool IsFullTime { get; set; } = true;
     public DateOnly? DateEmployed { get; set; }
 
@@ -228,6 +265,20 @@ public class UpdateEmployeeDto
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
+
+    /// <summary>How the employee describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// ⚠ The EMPLOYEE's own disability, added alongside — never replacing — the one on
+    /// EmployeeDependent. A dependant's disability and an employee's are different facts about
+    /// different people; the feedback read as a misplacement and was not one.
+    /// </summary>
+    public bool HasDisability { get; set; }
+    public string? DisabilityDescription { get; set; }
     public bool IsFullTime { get; set; }
     public DateOnly? DateEmployed { get; set; }
 
@@ -508,6 +559,9 @@ public class EmployeeDependentReadDto
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
 
+
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
 
@@ -521,6 +575,15 @@ public class EmployeeDependentReadDto
 
     public string? PicturePath { get; set; }
     public string? Notes { get; set; }
+    // ── The photograph, through the gate ──────────────────────────────────────
+    // ⚠ Read-side only. There is no way to SET these from a DTO: the image arrives through the
+    // upload endpoint and the gate fills them in. `PicturePath` above is the LEGACY caller-supplied
+    // location and is being retired — prefer `hasPhoto` for whether an image exists.
+    public bool HasPhoto { get; set; }
+    public string? PhotoFileName { get; set; }
+    public string? PhotoMimeType { get; set; }
+    public long? PhotoFileSizeBytes { get; set; }
+
 }
 
 /// <summary>
@@ -550,6 +613,9 @@ public class EmployeeDependentCreateDto
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
 
+
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
     public bool HasDisability { get; set; }
 
     [MaxLength(500)]
@@ -591,6 +657,9 @@ public class EmployeeDependentUpdateDto
     public string? RelationshipDescription { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
+
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
     public bool? HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
     public string? GhanaCardNumber { get; set; }
@@ -1198,9 +1267,119 @@ public class ExpatriateAssignmentDetailDto : ExpatriateAssignmentListDto
     public DateOnly? RelocationDate { get; set; }
     public string? AssignmentObjective { get; set; }
     public string? VisaType { get; set; }
+    public DateOnly? VisaIssueDate { get; set; }
     public DateOnly? VisaExpiryDate { get; set; }
     public string? WorkPermitNumber { get; set; }
+    public DateOnly? WorkPermitIssueDate { get; set; }
     public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    /// <summary>The residence permit — a different instrument from the work permit.</summary>
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    /// <summary>
+    /// Who came with them. ⚠ On the DETAIL read only — the list read stays a summary, and a screen
+    /// that needs the members must fetch the record rather than bind to a row.
+    /// </summary>
+    public List<ExpatriateFamilyMemberDto> FamilyMembers { get; set; } = new();
+}
+
+/// <summary>A family member accompanying an expatriate assignee.</summary>
+public class ExpatriateFamilyMemberDto
+{
+    public Guid Id { get; set; }
+    public Guid ExpatriateAssignmentId { get; set; }
+    public string FullName { get; set; } = string.Empty;
+    public DependentRelationship Relationship { get; set; }
+    public string? RelationshipDescription { get; set; }
+    public Gender? Gender { get; set; }
+    public string? GenderDescription { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+    public string? PassportNumber { get; set; }
+    public DateOnly? PassportExpiryDate { get; set; }
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+    public DateOnly? ArrivalDate { get; set; }
+    public DateOnly? DepartureDate { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateExpatriateFamilyMemberDto
+{
+    [Required]
+    public Guid ExpatriateAssignmentId { get; set; }
+
+    [Required]
+    [MaxLength(150)]
+    public string FullName { get; set; } = string.Empty;
+
+    public DependentRelationship Relationship { get; set; }
+
+    /// <summary>Used when Relationship is Other — the same pairing EmployeeDependent uses.</summary>
+    [MaxLength(100)]
+    public string? RelationshipDescription { get; set; }
+
+    public Gender? Gender { get; set; }
+
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
+    public DateOnly? DateOfBirth { get; set; }
+
+    [MaxLength(100)]
+    public string? PassportNumber { get; set; }
+    public DateOnly? PassportExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    public DateOnly? ArrivalDate { get; set; }
+    public DateOnly? DepartureDate { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class UpdateExpatriateFamilyMemberDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    [Required]
+    [MaxLength(150)]
+    public string FullName { get; set; } = string.Empty;
+
+    public DependentRelationship Relationship { get; set; }
+
+    /// <summary>Used when Relationship is Other — the same pairing EmployeeDependent uses.</summary>
+    [MaxLength(100)]
+    public string? RelationshipDescription { get; set; }
+
+    public Gender? Gender { get; set; }
+
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
+    public DateOnly? DateOfBirth { get; set; }
+
+    [MaxLength(100)]
+    public string? PassportNumber { get; set; }
+    public DateOnly? PassportExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    public DateOnly? ArrivalDate { get; set; }
+    public DateOnly? DepartureDate { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
 }
 
 public class CreateExpatriateAssignmentDto
@@ -1224,12 +1403,19 @@ public class CreateExpatriateAssignmentDto
     [MaxLength(100)]
     public string? VisaType { get; set; }
 
+    public DateOnly? VisaIssueDate { get; set; }
     public DateOnly? VisaExpiryDate { get; set; }
 
     [MaxLength(100)]
     public string? WorkPermitNumber { get; set; }
 
+    public DateOnly? WorkPermitIssueDate { get; set; }
     public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
 }
 
 public class UpdateExpatriateAssignmentDto
@@ -1245,9 +1431,14 @@ public class UpdateExpatriateAssignmentDto
     public bool? FamilyAccompanying { get; set; }
     public string? AssignmentObjective { get; set; }
     public string? VisaType { get; set; }
+    public DateOnly? VisaIssueDate { get; set; }
     public DateOnly? VisaExpiryDate { get; set; }
     public string? WorkPermitNumber { get; set; }
+    public DateOnly? WorkPermitIssueDate { get; set; }
     public DateOnly? WorkPermitExpiryDate { get; set; }
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
 }
 
 /// <summary>
@@ -1397,6 +1588,15 @@ public class EmployeeRefereeDetailDto : EmployeeRefereeListDto
     public bool IsContacted { get; set; }
     public DateTime? ContactedDate { get; set; }
     public string? ReferenceNotes { get; set; }
+
+    // ── The written reference ─────────────────────────────────────────────────
+    // ⚠ Read-side only. There is no way to SET these from a DTO: the letter arrives through the
+    // upload endpoint and the gate fills them in. `hasLetter` exists so a screen can show the
+    // download affordance without having to reason about which of three ids means "present".
+    public bool HasLetter { get; set; }
+    public string? LetterFileName { get; set; }
+    public string? LetterMimeType { get; set; }
+    public long? LetterFileSizeBytes { get; set; }
 }
 
 public class CreateEmployeeRefereeDto
@@ -1484,6 +1684,21 @@ public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
     public string? EmployerAddress { get; set; }
     public string? EmployerPhone { get; set; }
     public decimal? MonthlyIncome { get; set; }
+
+    /// <summary>⚠ What they stand surety FOR — distinct from MonthlyIncome, which is what they earn.</summary>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>The currency that amount is stated in. Null means HR's configured default.</summary>
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    // The photograph. Read-side only; it arrives through the upload endpoint.
+    public bool HasPhoto { get; set; }
+    public string? PhotoFileName { get; set; }
+    public string? PhotoMimeType { get; set; }
+    public long? PhotoFileSizeBytes { get; set; }
 
     public string? NationalIdType { get; set; }
     public string? NationalIdNumberMasked { get; set; }
@@ -1578,6 +1793,29 @@ public class CreateEmployeeGuarantorDto
     public string? Notes { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// What the guarantor undertakes to cover, in the tenant's default currency.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The photograph is NOT here and must never be: it arrives through
+    /// <c>POST api/hr/Employees/guarantors/{id}/photo</c> and the gate sets its identifiers. A
+    /// file field on a JSON DTO is the sink D-10, D-14 and D-39 each had to remove.
+    /// </remarks>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>
+    /// The currency the surety is stated in — refused unless FINANCE holds it.
+    /// </summary>
+    /// <remarks>
+    /// Null means the tenant's configured HR default, so existing rows keep meaning what they meant.
+    /// </remarks>
+    [MaxLength(3)]
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
 }
 
 public class UpdateEmployeeGuarantorDto
@@ -1616,6 +1854,29 @@ public class UpdateEmployeeGuarantorDto
     public string? Notes { get; set; }
     public DateTime? LastContactDate { get; set; }
     public bool? IsActive { get; set; }
+
+    /// <summary>
+    /// What the guarantor undertakes to cover, in the tenant's default currency.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The photograph is NOT here and must never be: it arrives through
+    /// <c>POST api/hr/Employees/guarantors/{id}/photo</c> and the gate sets its identifiers. A
+    /// file field on a JSON DTO is the sink D-10, D-14 and D-39 each had to remove.
+    /// </remarks>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>
+    /// The currency the surety is stated in — refused unless FINANCE holds it.
+    /// </summary>
+    /// <remarks>
+    /// Null means the tenant's configured HR default, so existing rows keep meaning what they meant.
+    /// </remarks>
+    [MaxLength(3)]
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
 }
 
 // ─── Bank + Branch Reference DTOs ────────────────────────────────────────────
@@ -1957,6 +2218,15 @@ public class EmployeePositionDto
 
     public bool RequiresCertification { get; set; }
     public bool RequiresGuarantor { get; set; }
+
+    /// <summary>How much surety the post requires, where RequiresGuarantor is set.</summary>
+    /// <remarks>⚠ Null with RequiresGuarantor true means "a guarantor, amount unspecified" — a
+    /// legitimate state that the compliance read reports without judging the sum.</remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>Validated against Finance's currency master. Null means HR's default.</summary>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; }
 
     public bool IsActive { get; set; }
@@ -2013,6 +2283,15 @@ public class CreateEmployeePositionDto : IValidatableObject
 
     public bool RequiresCertification { get; set; } = false;
     public bool RequiresGuarantor { get; set; } = false;
+
+    /// <summary>How much surety the post requires, where RequiresGuarantor is set.</summary>
+    /// <remarks>⚠ Null with RequiresGuarantor true means "a guarantor, amount unspecified" — a
+    /// legitimate state that the compliance read reports without judging the sum.</remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>Validated against Finance's currency master. Null means HR's default.</summary>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
@@ -2075,6 +2354,15 @@ public class UpdateEmployeePositionDto : IValidatableObject
     public int? NoticePeriodMonths { get; set; }
     public bool RequiresCertification { get; set; } = false;
     public bool RequiresGuarantor { get; set; } = false;
+
+    /// <summary>How much surety the post requires, where RequiresGuarantor is set.</summary>
+    /// <remarks>⚠ Null with RequiresGuarantor true means "a guarantor, amount unspecified" — a
+    /// legitimate state that the compliance read reports without judging the sum.</remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>Validated against Finance's currency master. Null means HR's default.</summary>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
     public bool IsActive { get; set; } = true;
 

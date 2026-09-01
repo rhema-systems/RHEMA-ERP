@@ -30,8 +30,10 @@ public class EmployeeService : IEmployeeService
         ILocationRepository locationRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        HrCurrencyBridge currencies,
         ILogger<EmployeeService> logger)
     {
+        _currencies = currencies;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -44,6 +46,10 @@ public class EmployeeService : IEmployeeService
     // The ApplicationDbContext is registered without a tenant, so its global tenant
     // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
     // this service scopes reads/writes to the current tenant explicitly.
+    // Finance owns what a currency IS; HR says which one it uses. A bare three-letter code nothing
+    // validates is how travel became able to file a claim in "XYZ" and total it.
+    private readonly HrCurrencyBridge _currencies;
+
     private Guid GetTenantId()
     {
         var tenantId = _currentUserProvider.TenantId;
@@ -1563,7 +1569,13 @@ public class EmployeeService : IEmployeeService
     public async Task<ExpatriateAssignmentDetailDto?> GetExpatriateAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<ExpatriateAssignment>();
-        var entity = await repo.GetQueryable().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var entity = await repo.GetQueryable()
+            .Include(x => x.Country)
+            // ⚠ Without this the detail read returns an EMPTY family for an assignment that has
+            // one, and the panel says "nobody accompanied them". A detail read that drops the very
+            // collection its screen exists to show is the D-09 shape, met eight times in this module.
+            .Include(x => x.FamilyMembers)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         return entity?.ToDetailDto();
     }
 
@@ -1583,7 +1595,10 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable()
+            .Include(x => x.Country)
+            .Include(x => x.FamilyMembers)
+            .FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDetailDto();
     }
 
@@ -1598,8 +1613,91 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
+        // ⚠ FamilyMembers included here too, or the UPDATE response reports an empty family while
+        // the read beside it resolves one — the stale-navigation-on-a-write-response shape, which
+        // has been found five times in this module and never once by reading the code.
+        var reloaded = await repo.GetQueryable()
+            .Include(x => x.Country)
+            .Include(x => x.FamilyMembers)
+            .FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDetailDto();
+    }
+
+    // ── Expatriate family members ────────────────────────────────────────────
+    //
+    // ⚠ `FamilyAccompanying` was a bare bool: the record could assert a family had come and never
+    // say who. Each accompanying person needs their own residence permit on their own clock.
+
+    public async Task<IEnumerable<ExpatriateFamilyMemberDto>> GetExpatriateFamilyMembersAsync(
+        Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var items = await _unitOfWork.Repository<ExpatriateFamilyMember>().GetQueryable()
+            .Where(m => m.ExpatriateAssignmentId == assignmentId && m.TenantId == tenantId)
+            .OrderBy(m => m.FullName)
+            .ToListAsync(cancellationToken);
+        return items.Select(m => m.ToDto()).ToList();
+    }
+
+    public async Task<ExpatriateFamilyMemberDto> AddExpatriateFamilyMemberAsync(
+        CreateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        var assignment = await _unitOfWork.Repository<ExpatriateAssignment>().GetQueryable()
+            .FirstOrDefaultAsync(a => a.Id == dto.ExpatriateAssignmentId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException("Expatriate assignment not found.");
+
+        var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant and the DbContext auto-stamp is inert.
+        entity.TenantId = tenantId;
+
+        await _unitOfWork.Repository<ExpatriateFamilyMember>().AddAsync(entity);
+
+        // Recording a family member IS the statement that family accompanied them, so the flag
+        // follows the facts rather than waiting for somebody to tick it separately and disagree.
+        if (!assignment.FamilyAccompanying)
+        {
+            assignment.FamilyAccompanying = true;
+            await _unitOfWork.Repository<ExpatriateAssignment>().UpdateAsync(assignment);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<ExpatriateFamilyMemberDto> UpdateExpatriateFamilyMemberAsync(
+        UpdateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var repo = _unitOfWork.Repository<ExpatriateFamilyMember>();
+        var entity = await repo.GetQueryable()
+            .FirstOrDefaultAsync(m => m.Id == dto.Id && m.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException("Family member not found.");
+
+        dto.Apply(entity);
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> RemoveExpatriateFamilyMemberAsync(
+        Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var repo = _unitOfWork.Repository<ExpatriateFamilyMember>();
+        var entity = await repo.GetQueryable()
+            .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, cancellationToken);
+        if (entity == null) return false;
+
+        // ⚠ The FamilyAccompanying flag is NOT cleared when the last member is removed. Somebody
+        // whose family went home still travelled with one, and the assignment record should keep
+        // saying so; the members list is what answers "who is here now".
+        await repo.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<bool> RemoveExpatriateAssignmentAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1917,6 +2015,9 @@ public class EmployeeService : IEmployeeService
     {
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
+        // optional: a guarantor may be recorded with no amount, and then no currency either.
+        await _currencies.RequireKnownCurrencyAsync(
+            dto.AmountGuaranteedCurrencyCode, cancellationToken, optional: true);
 
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = dto.ToEntity();
@@ -1942,6 +2043,8 @@ public class EmployeeService : IEmployeeService
     public async Task<EmployeeGuarantorDetailDto> UpdateGuarantorAsync(UpdateEmployeeGuarantorDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        await _currencies.RequireKnownCurrencyAsync(
+            dto.AmountGuaranteedCurrencyCode, cancellationToken, optional: true);
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Guarantor not found.");

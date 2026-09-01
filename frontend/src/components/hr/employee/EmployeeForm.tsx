@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
@@ -42,6 +43,10 @@ export const employeeSchema = z.object({
   dateOfBirth: opt,
   maritalStatus: opt,
   religion: opt,
+  genderDescription: opt,
+  hometown: opt,
+  hasDisability: z.boolean(),
+  disabilityDescription: opt,
   bloodType: opt,
   isExpatriate: z.boolean(),
   emailAddress: z.string().email('Invalid email address'),
@@ -86,6 +91,10 @@ export const emptyEmployee: EmployeeFormValues = {
   dateOfBirth: '',
   maritalStatus: '',
   religion: '',
+  genderDescription: '',
+  hometown: '',
+  hasDisability: false,
+  disabilityDescription: '',
   bloodType: '',
   isExpatriate: false,
   emailAddress: '',
@@ -358,6 +367,40 @@ export function EmployeeForm({
               <Field label="Religion" htmlFor="religion">
                 <Input id="religion" {...form.register('religion')} />
               </Field>
+              <Field label="Hometown" htmlFor="hometown">
+                <Input id="hometown" {...form.register('hometown')} />
+              </Field>
+              {/* Only asked when it means something. The enum offered "Other" and then had nowhere
+                  to say what other meant, which makes the option a dead end for whoever picks it. */}
+              {form.watch('gender') === 'Other' && (
+                <Field label="Describe gender" htmlFor="genderDescription">
+                  <Input id="genderDescription" {...form.register('genderDescription')} />
+                </Field>
+              )}
+            </div>
+
+            {/* ⚠ The EMPLOYEE's own disability. The one on a dependant is a different fact about a
+                different person and is edited on the Dependants tab; neither replaces the other. */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="hasDisability"
+                  checked={!!form.watch('hasDisability')}
+                  onCheckedChange={(v) => form.setValue('hasDisability', v === true)}
+                />
+                <Label htmlFor="hasDisability" className="cursor-pointer">
+                  This employee has a disability
+                </Label>
+              </div>
+              {form.watch('hasDisability') && (
+                <Field label="Disability" htmlFor="disabilityDescription">
+                  <Input
+                    id="disabilityDescription"
+                    placeholder="What the employee has told you, in their words where possible"
+                    {...form.register('disabilityDescription')}
+                  />
+                </Field>
+              )}
             </div>
           </Section>
 
