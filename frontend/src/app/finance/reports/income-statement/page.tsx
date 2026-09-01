@@ -52,6 +52,9 @@ export default function IncomeStatementPage() {
     const [dimensionLoadError, setDimensionLoadError] = useState<string | null>(null);
     const [report, setReport] = useState<IncomeStatementReportDto | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const hasPublishedDefaultLayout = layouts.some((layout) =>
+        layout.accountingBookCode === bookClassification && layout.isDefault
+    );
 
     useEffect(() => {
         loadInitialReport();
@@ -260,7 +263,11 @@ export default function IncomeStatementPage() {
                             <Select value={layoutSelection} onValueChange={setLayoutSelection}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="default">Default layout</SelectItem>
+                                    <SelectItem value="default">
+                                        {hasPublishedDefaultLayout
+                                            ? 'Default published layout'
+                                            : 'Default layout — not configured (uses legacy)'}
+                                    </SelectItem>
                                     {layouts
                                         .filter((layout) => layout.accountingBookCode === bookClassification)
                                         .map((layout) => (
@@ -292,6 +299,11 @@ export default function IncomeStatementPage() {
                     {segmentLoadError && <div className="mt-4 text-sm text-amber-700">{segmentLoadError}</div>}
                     {dimensionLoadError && <div className="mt-4 text-sm text-amber-700">{dimensionLoadError}</div>}
                     {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
+                    {!running && layoutSelection === 'default' && !hasPublishedDefaultLayout && (
+                        <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                            No active published default Income Statement layout exists for {bookClassification}. The report is using legacy account classification.
+                        </div>
+                    )}
                     <AppliedReportSegmentFilters
                         dimensions={reportingDimensions}
                         appliedFilters={appliedSegmentFilters}

@@ -855,6 +855,17 @@ export const navigationItems: NavItem[] = [
             icon: LayoutDashboard,
           },
           {
+            title: 'Statement Layouts',
+            href: '/finance/reports/layouts',
+            icon: BookTemplate,
+            permissions: [
+              'Finance.Read',
+              'Finance.Reports.Layouts.Manage',
+              'Finance.Reports.Layouts.Publish',
+            ],
+            accessMode: 'any',
+          },
+          {
             title: 'Ad Hoc Report Builder',
             href: '/reports/financial/ad-hoc',
             icon: ListFilter,
