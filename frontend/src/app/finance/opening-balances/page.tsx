@@ -40,8 +40,10 @@ import { GovernedOpeningSources } from '@/components/finance/opening-balances/Go
 import { DEFAULT_ACCOUNTING_BOOKS, getAccountingBookName, isAccountEligibleForBook } from '@/lib/finance/accounting-books';
 import { canLoadOpeningBalanceQueries, canPostOpeningBalanceBatch, hasCompleteGovernedOpeningHeader, isOpeningBalanceBatchImmutable, openingBalanceQueryKeys } from '@/lib/finance/opening-balance-governance';
 import type { CreateOpeningStockAdjustmentDto, GovernedInventoryOpeningResult } from '@/lib/finance/opening-balance-governance';
+import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
 import { cn, formatCurrency } from '@/lib/utils';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { financeService } from '@/services/finance.service';
 import type { Account, AccountingBook, CreateBankAccountOpeningBalanceDto, CreateResidualGlEquityOpeningBalanceDto, FiscalPeriod, OpeningBalanceBatch, OpeningBalanceDiagnostic, OpeningBalanceValidationResult } from '@/types/finance';
 import { useAuth } from '@/hooks/use-auth';
 import { useTenant } from '@/contexts/TenantContext';
@@ -174,6 +176,11 @@ export default function OpeningBalancesPage() {
         amount: '', exchangeRateId: '', exchangeRate: '1', taxableBase: '', netPaidAmount: '',
         certificateNumber: '', certificateDate: '',
     });
+    const [specializedRateEvidence, setSpecializedRateEvidence] = useState({
+        isLoading: false,
+        isError: false,
+        message: 'Functional currency — no exchange-rate evidence required.',
+    });
     const [header, setHeader] = useState({
         batchNumber: '',
         sourceReference: '',
@@ -212,6 +219,12 @@ export default function OpeningBalancesPage() {
         queryKey: openingBalanceQueryKeys.settings(currentTenantCode),
         queryFn: () => financeDataService.getFinanceSettings(),
         enabled: queryScopeEnabled,
+    });
+
+    const currenciesQuery = useQuery({
+        queryKey: ['finance', 'opening-balances', 'currencies', currentTenantCode],
+        queryFn: () => financeDataService.getCurrencies({ isActive: true }),
+        enabled: queryScopeEnabled && canPrepareOpeningBalances,
     });
 
     const diagnosticsQuery = useQuery({
@@ -279,6 +292,99 @@ export default function OpeningBalancesPage() {
             .filter(account => isAccountEligibleForBook(account, header.bookClassification))
             .sort((a, b) => `${a.accountNumber || a.accountCode}`.localeCompare(`${b.accountNumber || b.accountCode}`));
     }, [accountsQuery.data, header.bookClassification]);
+
+    const functionalCurrencyCode = (
+        specializedOptionsQuery.data?.functionalCurrencyCode
+        || settingsQuery.data?.baseCurrency
+        || BASE_CURRENCY
+    ).trim().toUpperCase();
+    const activeCurrencies = useMemo(() => {
+        const currencies = currenciesQuery.data ?? [];
+        return [...currencies].sort((a, b) => a.currencyCode.localeCompare(b.currencyCode));
+    }, [currenciesQuery.data]);
+    const isSpecializedAdvance = specialized.kind === 'supplierAdvance' || specialized.kind === 'customerAdvance';
+    const specializedCurrencyCode = specialized.currencyCode.trim().toUpperCase();
+    const specializedRateRequired = isSpecializedAdvance
+        && specializedCurrencyCode.length === 3
+        && specializedCurrencyCode !== functionalCurrencyCode;
+
+    useEffect(() => {
+        if (!isSpecializedAdvance) {
+            return;
+        }
+
+        if (specializedCurrencyCode.length !== 3) {
+            setSpecialized(current => ({ ...current, exchangeRateId: '', exchangeRate: '' }));
+            setSpecializedRateEvidence({
+                isLoading: false,
+                isError: true,
+                message: 'Select an active currency to resolve its approved exchange rate.',
+            });
+            return;
+        }
+
+        if (!header.openingDate || !settingsQuery.data) {
+            setSpecialized(current => ({ ...current, exchangeRateId: '', exchangeRate: '' }));
+            setSpecializedRateEvidence({
+                isLoading: true,
+                isError: false,
+                message: 'Loading Finance policy…',
+            });
+            return;
+        }
+
+        let cancelled = false;
+        setSpecialized(current => ({ ...current, exchangeRateId: '', exchangeRate: '' }));
+        setSpecializedRateEvidence({
+            isLoading: true,
+            isError: false,
+            message: specializedCurrencyCode === functionalCurrencyCode
+                ? 'Confirming functional currency…'
+                : 'Resolving approved exchange-rate evidence…',
+        });
+
+        void loadApprovedSettlementRate(
+            {
+                module: specialized.kind === 'supplierAdvance' ? 'AP' : 'AR',
+                transactionCurrency: specializedCurrencyCode,
+                functionalCurrency: functionalCurrencyCode,
+                settlementDate: new Date(`${header.openingDate}T00:00:00`),
+                settings: settingsQuery.data,
+            },
+            (code, query) => financeService.getCurrentExchangeRate(code, query),
+        ).then(snapshot => {
+            if (cancelled) return;
+            setSpecialized(current => ({
+                ...current,
+                exchangeRateId: snapshot.exchangeRateId || '',
+                exchangeRate: String(snapshot.rate),
+            }));
+            setSpecializedRateEvidence({
+                isLoading: false,
+                isError: false,
+                message: snapshot.isFunctionalCurrency
+                    ? `${functionalCurrencyCode} is the functional currency — no exchange-rate record is required.`
+                    : `${snapshot.source} · ${snapshot.quoteSide} Daily · ${snapshot.effectiveDate}`,
+            });
+        }).catch(error => {
+            if (cancelled) return;
+            setSpecialized(current => ({ ...current, exchangeRateId: '', exchangeRate: '' }));
+            setSpecializedRateEvidence({
+                isLoading: false,
+                isError: true,
+                message: error instanceof Error ? error.message : 'Approved exchange rate unavailable.',
+            });
+        });
+
+        return () => { cancelled = true; };
+    }, [
+        functionalCurrencyCode,
+        header.openingDate,
+        isSpecializedAdvance,
+        settingsQuery.data,
+        specialized.kind,
+        specializedCurrencyCode,
+    ]);
 
     useEffect(() => {
         if (currentBatch || openPeriods.length === 0) {
@@ -507,6 +613,14 @@ export default function OpeningBalancesPage() {
         }
         if (specialized.kind === 'arWithholding' && !tax?.receivableAccountId) {
             toast({ title: 'WHT receivable account required', description: 'The selected tax has no receivable account mapping.', variant: 'destructive' });
+            return;
+        }
+        if (isSpecializedAdvance && (!specializedCurrencyCode || specializedRateEvidence.isLoading || specializedRateEvidence.isError)) {
+            toast({ title: 'Approved exchange rate required', description: specializedRateEvidence.message, variant: 'destructive' });
+            return;
+        }
+        if (specializedRateRequired && (!specialized.exchangeRateId || Number(specialized.exchangeRate) <= 0)) {
+            toast({ title: 'Approved exchange rate required', description: specializedRateEvidence.message, variant: 'destructive' });
             return;
         }
 
@@ -1691,7 +1805,7 @@ export default function OpeningBalancesPage() {
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 <div className="space-y-2">
                                     <Label>Opening type</Label>
-                                    <Select value={specialized.kind} onValueChange={value => setSpecialized(current => ({ ...current, kind: value as SpecializedOpeningKind, partyId: '', taxId: '' }))}>
+                                    <Select value={specialized.kind} onValueChange={value => setSpecialized(current => ({ ...current, kind: value as SpecializedOpeningKind, partyId: '', taxId: '', exchangeRateId: '' }))}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="supplierAdvance">Unapplied supplier advance</SelectItem>
@@ -1725,15 +1839,35 @@ export default function OpeningBalancesPage() {
                                 {(specialized.kind === 'supplierAdvance' || specialized.kind === 'customerAdvance') && <>
                                     <div className="space-y-2">
                                         <Label>Currency</Label>
-                                        <Input maxLength={3} value={specialized.currencyCode} onChange={event => setSpecialized(current => ({ ...current, currencyCode: event.target.value.toUpperCase() }))} />
+                                        <Select value={specialized.currencyCode} onValueChange={value => setSpecialized(current => ({ ...current, currencyCode: value, exchangeRateId: '' }))}>
+                                            <SelectTrigger><SelectValue placeholder="Select active currency" /></SelectTrigger>
+                                            <SelectContent>
+                                                {activeCurrencies.map(currency => (
+                                                    <SelectItem key={currency.id} value={currency.currencyCode}>
+                                                        {currency.currencyCode} · {currency.currencyName}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Approved exchange-rate ID</Label>
-                                        <Input value={specialized.exchangeRateId} onChange={event => setSpecialized(current => ({ ...current, exchangeRateId: event.target.value }))} placeholder="Required only for foreign currency" />
+                                        <Label>Approved exchange rate</Label>
+                                        <Input
+                                            readOnly
+                                            aria-label="Approved exchange rate"
+                                            value={specializedRateEvidence.isLoading ? 'Resolving…' : specialized.exchangeRate || 'Unavailable'}
+                                            className={cn('bg-muted', specializedRateEvidence.isError && 'border-destructive text-destructive')}
+                                        />
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Exchange rate</Label>
-                                        <Input type="number" min="0.000001" step="0.000001" value={specialized.exchangeRate} onChange={event => setSpecialized(current => ({ ...current, exchangeRate: event.target.value }))} />
+                                    <div className="space-y-2 lg:col-span-1">
+                                        <Label>Rate evidence</Label>
+                                        <div className={cn(
+                                            'min-h-10 rounded-md border bg-muted/50 px-3 py-2 text-sm',
+                                            specializedRateEvidence.isError ? 'border-destructive text-destructive' : 'text-muted-foreground',
+                                        )}>
+                                            {specializedRateEvidence.isLoading && <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />}
+                                            {specializedRateEvidence.message}
+                                        </div>
                                     </div>
                                 </>}
                                 {(specialized.kind === 'apWithholding' || specialized.kind === 'arWithholding') && <div className="space-y-2">
@@ -1754,7 +1888,7 @@ export default function OpeningBalancesPage() {
                                     <div className="space-y-2"><Label>Certificate date</Label><Input type="date" value={specialized.certificateDate} onChange={event => setSpecialized(current => ({ ...current, certificateDate: event.target.value }))} /></div>
                                 </>}
                             </div>
-                            <Button onClick={handleCreateSpecializedBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || specializedOptionsQuery.isLoading}>
+                            <Button onClick={handleCreateSpecializedBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || specializedOptionsQuery.isLoading || (isSpecializedAdvance && (specializedRateEvidence.isLoading || specializedRateEvidence.isError || (specializedRateRequired && !specialized.exchangeRateId)))}>
                                 {busyAction === 'specialized' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
                                 Prepare controlled batch
                             </Button>
