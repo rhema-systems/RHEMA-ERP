@@ -551,7 +551,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 totalTaxAmount: 0,
                 withholdingTaxAmount: 0,
                 grandTotal: subtotal,
-                netPayable: subtotal,
+                estimatedCashPayable: subtotal,
                 taxList: []
             };
         }
@@ -604,13 +604,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         // Compute separate withholding tax deduction based on withholdingTaxRate
         const withholdingTaxAmount = subtotal * (watchWithholdingTaxRate / 100);
         const grandTotal = subtotal + totalTaxAmount; // subtotal + standard taxes
-        const netPayable = grandTotal - withholdingTaxAmount; // WHT is a deduction
+        const estimatedCashPayable = grandTotal - withholdingTaxAmount;
 
         return {
             totalTaxAmount,
             withholdingTaxAmount,
             grandTotal,
-            netPayable,
+            estimatedCashPayable,
             taxList: Object.entries(breakdowns).map(([code, data]) => ({ code, ...data }))
         };
     };
@@ -1599,14 +1599,20 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 </div>
                                 {taxEstimate.withholdingTaxAmount > 0 && (
                                     <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Withholding Tax Deduction ({watchWithholdingTaxRate}%):</span>
+                                        <span>Estimated WHT at payment ({watchWithholdingTaxRate}%):</span>
                                         <span className="font-medium text-red-600">-{formatAmountWithCurrency(taxEstimate.withholdingTaxAmount)}</span>
                                     </div>
                                 )}
                                 <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
-                                    <span>Net Payable:</span>
-                                    <span className="text-primary">{formatAmountWithCurrency(taxEstimate.netPayable)}</span>
+                                    <span>Gross Invoice Total:</span>
+                                    <span>{formatAmountWithCurrency(taxEstimate.grandTotal)}</span>
                                 </div>
+                                {taxEstimate.withholdingTaxAmount > 0 && (
+                                    <div className="flex justify-between w-72 text-sm font-semibold text-primary">
+                                        <span>Est. Cash Payable after WHT:</span>
+                                        <span>{formatAmountWithCurrency(taxEstimate.estimatedCashPayable)}</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </CardContent>

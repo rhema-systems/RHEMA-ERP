@@ -31,6 +31,7 @@ import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/use-auth';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { WorkflowEntitySummaryDto } from '@/types/workflow';
@@ -129,7 +130,23 @@ export default function VendorInvoiceDetailsPage() {
             toast({ title: 'Success', description: 'Vendor invoice submitted for approval.' });
         },
         onError: (error: any) => {
-            toast({ title: 'Error', description: error.message || 'Failed to submit for approval', variant: 'destructive' });
+            const message = error.message || 'Failed to submit for approval';
+            const budgetCellRequired = message.includes('requires an adopted Finance budget cell');
+            toast({
+                title: budgetCellRequired ? 'Budget cell required' : 'Error',
+                description: budgetCellRequired
+                    ? 'Edit the invoice and select an adopted Finance budget cell for the affected expense line.'
+                    : message,
+                variant: 'destructive',
+                action: budgetCellRequired ? (
+                    <ToastAction
+                        altText="Edit invoice to select a budget cell"
+                        onClick={() => router.push(`/finance/ap/invoices/${id}/edit`)}
+                    >
+                        Edit Invoice
+                    </ToastAction>
+                ) : undefined,
+            });
         },
     });
 
