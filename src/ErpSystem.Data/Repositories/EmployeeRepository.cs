@@ -478,8 +478,24 @@ namespace ErpSystem.Data.Repositories
         {
             var currentYear = DateTime.UtcNow.Year.ToString();
 
-            // EmployeeNumber is expected to be formatted as YYYY#### (zero-padded), so string Max works.
-            var maxEmployeeNumber = await BaseQuery()
+            // ⚠ Scans EVERY row, tombstones included — deliberately, and NOT through BaseQuery().
+            //
+            // BaseQuery() filters `!IsDeleted`, while IX_Employee_Tenant_EmployeeNumber is NOT
+            // filtered and therefore still holds the numbers of soft-deleted employees. Scanning
+            // only live rows handed the newest deleted employee's number straight back to the next
+            // create, which the index then rejected — as a 500, from SaveChanges, on the most
+            // ordinary path in HR.
+            //
+            // It is deterministic, not a race: delete the most recently created employee and NO
+            // further employee can be created for the rest of the calendar year. Reproduced
+            // 2026-09-01 by a probe that created one employee and deleted it; the next create broke.
+            //
+            // This makes the scan agree with the index. It does not make it atomic — two
+            // simultaneous creates can still pick the same number. The durable fix is
+            // INumberSequenceService, which is atomic per tenant and is lane 3b's work.
+            var maxEmployeeNumber = await _dbSet
+                .AsNoTracking()
+                .IgnoreQueryFilters()
                 .Where(e => e.EmployeeNumber.StartsWith(currentYear))
                 .Select(e => e.EmployeeNumber)
                 .DefaultIfEmpty()
