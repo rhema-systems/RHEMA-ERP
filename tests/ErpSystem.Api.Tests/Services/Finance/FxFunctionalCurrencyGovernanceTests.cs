@@ -427,6 +427,50 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-ExchangeRates")]
+    [Trait("Category", "Workflow")]
+    public async Task ExchangeRateSubmissionShouldNotChangeApprovedSchedule()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        var approved = SeedExchangeRate(
+            db,
+            tenantId,
+            "GHS",
+            "USD",
+            12.5m,
+            new DateTime(2024, 12, 15));
+        await db.SaveChangesAsync();
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("ExchangeRate", It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var service = CreateExchangeRateService(db, tenantId, workflow.Object);
+
+        var submitted = await service.CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 11.2m,
+            EffectiveDate = new DateTime(2026, 9, 1),
+            RateType = ExchangeRateType.Daily.ToString(),
+            QuoteSide = ExchangeRateQuoteSide.Mid.ToString(),
+            RateSource = "Bank of Ghana"
+        });
+
+        submitted.ApprovalStatus.Should().Be(RateApprovalStatus.Pending.ToString());
+        approved.EndDate.Should().BeNull();
+        approved.ApprovalStatus.Should().Be(RateApprovalStatus.Approved);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
     public async Task PostingCapturesRateSnapshotLocksRateAndEmitsAudit()

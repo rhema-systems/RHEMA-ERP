@@ -248,6 +248,7 @@
     <Compile Include="Services\Finance\ArCollectionFollowUpServiceTests.cs" />
     <Compile Include="Services\Finance\SupplierDebitNoteFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
+    <Compile Include="Services\Finance\ExchangeRateScheduleLifecycleTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />

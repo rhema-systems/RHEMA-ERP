@@ -16,11 +16,13 @@ using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
+using ErpSystem.Api.Services.Finance.MultiCurrency;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -787,7 +789,12 @@ public class FinanceApprovalsController : ControllerBase
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
-            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            var isolationLevel = Normalize(entityType) == Normalize("ExchangeRate")
+                ? IsolationLevel.Serializable
+                : IsolationLevel.ReadCommitted;
+            await using var transaction = await _db.Database.BeginTransactionAsync(
+                isolationLevel,
+                cancellationToken);
             try
             {
                 var result = await ProcessAndApplyAsync();
@@ -1640,28 +1647,32 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("ExchangeRate"))
         {
-            var rate = await _db.ExchangeRates.FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
+            var scheduleResult = await ExchangeRateScheduleLifecycle.ApproveAsync(
+                _db,
+                tenantId,
+                entityId,
+                userId,
+                comments,
+                now,
                 cancellationToken);
-            if (rate == null || rate.ApprovalStatus == RateApprovalStatus.Approved)
+            if (scheduleResult == null)
             {
                 return;
             }
 
-            rate.ApprovalStatus = RateApprovalStatus.Approved;
-            rate.ApprovalDate = now;
-            rate.ApprovedByUserId = userId;
-            rate.Comments = comments ?? rate.Comments;
-            rate.ModifiedDate = now;
-            rate.ModifiedByUserId = userId;
-            await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FX",
                 "ExchangeRate",
-                rate.Id,
+                entityId,
                 FinanceAuditEvents.FinanceWorkflowApproved,
-                new { rate.ApprovalStatus, rate.ApprovalDate, rate.ApprovedByUserId },
+                new
+                {
+                    ApprovalStatus = RateApprovalStatus.Approved,
+                    ApprovalDate = now,
+                    ApprovedByUserId = userId,
+                    Schedule = scheduleResult
+                },
                 comments,
                 cancellationToken);
             return;
@@ -2167,26 +2178,26 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("ExchangeRate"))
         {
-            var rate = await _db.ExchangeRates.FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
+            var rejected = await ExchangeRateScheduleLifecycle.RejectAsync(
+                _db,
+                tenantId,
+                entityId,
+                userId,
+                reason ?? "Exchange rate rejected without a recorded reason.",
+                now,
                 cancellationToken);
-            if (rate == null)
+            if (!rejected)
             {
                 return;
             }
 
-            rate.ApprovalStatus = RateApprovalStatus.Rejected;
-            rate.Comments = AppendReason(rate.Comments, reason);
-            rate.ModifiedDate = now;
-            rate.ModifiedByUserId = userId;
-            await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FX",
                 "ExchangeRate",
-                rate.Id,
+                entityId,
                 FinanceAuditEvents.FinanceWorkflowRejected,
-                new { rate.ApprovalStatus, rate.Comments },
+                new { ApprovalStatus = RateApprovalStatus.Rejected, Reason = reason },
                 reason,
                 cancellationToken);
             return;

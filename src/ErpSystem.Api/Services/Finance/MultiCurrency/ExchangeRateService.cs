@@ -246,13 +246,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (!targetCurrencyExists)
                 throw new ArgumentException($"Target currency '{targetCurrencyCode}' not found.");
 
-            await EnsureNoOverlappingRateAsync(
+            await EnsureSubmissionDoesNotConflictAsync(
                 baseCurrencyCode,
                 targetCurrencyCode,
                 rateType,
                 quoteSide,
                 dto.EffectiveDate.Date,
                 dto.ExpiryDate?.Date,
+                approvalStatus,
                 excludeId: null,
                 cancellationToken);
 
@@ -300,6 +301,12 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (rate == null)
                 throw new ArgumentException($"Exchange rate with ID '{id}' not found.");
 
+            if (rate.ApprovalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved)
+            {
+                throw new InvalidOperationException(
+                    "Approved exchange rates are immutable. Submit a new rate to change the approved schedule.");
+            }
+
             if (await IsRateUsedAsync(rate, cancellationToken))
             {
                 await RecordExchangeRateAuditAsync(
@@ -321,13 +328,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 : RateApprovalStatus.Pending;
             ValidateRateWindow(dto.Rate, rate.EffectiveDate, dto.ExpiryDate);
             await ValidateClosingRateDateAsync(rateType, rate.EffectiveDate, cancellationToken);
-            await EnsureNoOverlappingRateAsync(
+            await EnsureSubmissionDoesNotConflictAsync(
                 rate.BaseCurrencyCode,
                 rate.TargetCurrencyCode,
                 rateType,
                 quoteSide,
                 rate.EffectiveDate.Date,
                 dto.ExpiryDate?.Date,
+                approvalStatus,
                 excludeId: rate.Id,
                 cancellationToken);
 
@@ -410,13 +418,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         : RateApprovalStatus.Pending;
                     ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
                     await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
-                    await EnsureNoOverlappingRateAsync(
+                    await EnsureSubmissionDoesNotConflictAsync(
                         baseCurrencyCode,
                         targetCurrencyCode,
                         rateType,
                         quoteSide,
                         dto.EffectiveDate.Date,
                         dto.ExpiryDate?.Date,
+                        approvalStatus,
                         excludeId: null,
                         cancellationToken);
 
@@ -586,18 +595,20 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 .AnyAsync(cancellationToken);
         }
 
-        private async Task EnsureNoOverlappingRateAsync(
+        private async Task EnsureSubmissionDoesNotConflictAsync(
             string baseCurrencyCode,
             string targetCurrencyCode,
             ExchangeRateType rateType,
             ExchangeRateQuoteSide quoteSide,
             DateTime effectiveDate,
             DateTime? expiryDate,
+            RateApprovalStatus approvalStatus,
             Guid? excludeId,
             CancellationToken cancellationToken)
         {
             var start = effectiveDate.Date;
             var end = expiryDate?.Date ?? DateTime.MaxValue.Date;
+            var submittedForWorkflow = approvalStatus == RateApprovalStatus.Pending;
             var overlapExists = await _unitOfWork.Repository<ExchangeRate>()
                 .GetQueryable(r => r.TenantId == TenantId
                     && !r.IsDeleted
@@ -606,14 +617,22 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     && r.TargetCurrencyCode == targetCurrencyCode
                     && r.RateType == rateType
                     && r.QuoteSide == quoteSide
-                    && r.EffectiveDate.Date <= end
-                    && (r.EndDate == null || r.EndDate.Value.Date >= start))
+                    && (submittedForWorkflow
+                        ? r.ApprovalStatus == RateApprovalStatus.Pending
+                            && r.EffectiveDate.Date == start
+                        : (r.ApprovalStatus == RateApprovalStatus.Approved
+                                || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                            && r.EffectiveDate.Date <= end
+                            && (r.EndDate == null || r.EndDate.Value.Date >= start)))
                 .AnyAsync(cancellationToken);
 
             if (overlapExists)
             {
+                var conflict = submittedForWorkflow
+                    ? "A pending exchange-rate submission already has the same effective date"
+                    : "Exchange rate range overlaps an existing approved rate";
                 throw new InvalidOperationException(
-                    $"Exchange rate range overlaps an existing {baseCurrencyCode}/{targetCurrencyCode} {rateType}/{quoteSide} rate for this tenant.");
+                    $"{conflict} for {baseCurrencyCode}/{targetCurrencyCode} {rateType}/{quoteSide} in this tenant.");
             }
         }
 
