@@ -66,6 +66,9 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("AllocationRunBatch"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
+        // Exchange-rate changes already use the Finance workflow and outcome handlers below.
+        // Keep them in this allowlist so assigned reviewers can actually see and action them.
+        Normalize("ExchangeRate"),
         Normalize("OpeningBalanceBatch"),
         Normalize("FixedAsset"),
         Normalize("AssetDepreciationSchedule"),
@@ -2656,7 +2659,7 @@ public class FinanceApprovalsController : ControllerBase
         => (approval.ApproverId.HasValue && approval.ApproverId.Value == currentUserId)
            || (!string.IsNullOrWhiteSpace(approval.ApproverRole) && roles.Contains(approval.ApproverRole));
 
-    private static bool IsFinanceEntity(string? entityType)
+    internal static bool IsFinanceEntity(string? entityType)
         => FinanceWorkflowEntityKeys.Contains(Normalize(entityType));
 
     internal static string ResolveDetailHref(string? entityType, Guid entityId, string? displayUrl)
