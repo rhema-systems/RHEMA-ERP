@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeService } from '@/services/finance.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
@@ -132,8 +131,8 @@ export default function NewVendorPaymentPage() {
     const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     const { data: suppliersData } = useQuery({
-        queryKey: ['business-partners', 'ap-suppliers'],
-        queryFn: () => businessPartnerService.getPartners({ pageSize: 100 }),
+        queryKey: ['finance', 'ap', 'entry-suppliers'],
+        queryFn: () => accountsPayableService.getInvoiceSupplierEntryOptions(),
     });
 
     const { data: bankAccounts } = useQuery({
@@ -256,13 +255,10 @@ export default function NewVendorPaymentPage() {
             tax.applicability === TaxApplicability.Both
         )
     );
-    const supplierOptions = (suppliersData?.items ?? []).filter((partner: BusinessPartnerDto) =>
-        ['supplier', 'contractor', 'both'].includes((partner.partnerType ?? '').toLowerCase()) &&
-        !partner.isBlacklisted
-    );
+    const supplierOptions = suppliersData ?? [];
     const lockedSupplierName =
         linkedInvoice?.supplierName ||
-        supplierOptions.find((supplier) => supplier.id === selectedSupplierId)?.partnerName ||
+        supplierOptions.find((supplier) => supplier.id === selectedSupplierId)?.name ||
         'Linked supplier';
 
     useEffect(() => {
@@ -750,8 +746,8 @@ export default function NewVendorPaymentPage() {
                                         <SelectContent>
                                             {supplierOptions.map((supplier) => (
                                                 <SelectItem key={supplier.id} value={supplier.id}>
-                                                    {supplier.partnerName}
-                                                    {supplier.partnerCode ? ` (${supplier.partnerCode})` : ''}
+                                                    {supplier.name}
+                                                    {supplier.code ? ` (${supplier.code})` : ''}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

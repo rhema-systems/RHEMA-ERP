@@ -6225,11 +6225,26 @@ namespace ErpSystem.Api.Services.Finance.AP
         private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
         {
             var supplierRepository = _unitOfWork.Repository<Supplier>();
+            var directSupplier = await supplierRepository
+                .GetQueryable(s =>
+                    s.TenantId == TenantId &&
+                    !s.IsDeleted &&
+                    s.IsActive &&
+                    s.Id == supplierOrBusinessPartnerId)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (directSupplier != null)
+            {
+                if (directSupplier.IsBlacklisted || string.Equals(directSupplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Supplier '{directSupplier.Name}' is not eligible for AP payment entry.");
+                return directSupplier;
+            }
+
             Guid canonicalSupplierId;
             if (_apSupplierIdentityService != null)
             {
                 // Payment entry is a Finance command, so it may create the durable exact-ID/code
-                // bridge. It must never name-match or create a Procurement supplier master.
+                // bridge and AP's internal Supplier projection from an approved Business Partner.
+                // It must never pair identities by mutable name or email.
                 canonicalSupplierId = (await _apSupplierIdentityService.ResolveAsync(
                     supplierOrBusinessPartnerId, cancellationToken)).SupplierId;
             }

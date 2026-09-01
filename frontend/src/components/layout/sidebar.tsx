@@ -451,21 +451,14 @@ export const navigationItems: NavItem[] = [
             href: '/finance/ap/dashboard',
             icon: LayoutDashboard,
           },
-          /* Procurement and Inventory own supplier masters, purchase orders, approvals,
-           * and physical receipt workflows. Finance consumes their accounting evidence.
           {
             title: 'Suppliers',
-            href: '/procurement/business-partners?partnerType=Supplier',
+            href: '/finance/ap/suppliers',
             icon: Users,
-            permissions: [
-              'Finance.Read',
-              'Finance.Admin',
-              'procurement.records.read',
-              'procurement.supplier.manage',
-              'procurement.supplier.review',
-            ],
-            accessMode: 'any',
+            permissions: ['Finance.Read'],
           },
+          /* Procurement and Inventory own supplier masters, purchase orders, approvals,
+           * and physical receipt workflows. Finance consumes their accounting evidence.
           {
             title: 'Purchase Orders',
             href: '/finance/ap/purchase-orders',

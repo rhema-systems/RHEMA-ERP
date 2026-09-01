@@ -49,6 +49,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IProcurementAcceptedSupplyService? _acceptedSupply;
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
+        private readonly IApSupplierIdentityService? _apSupplierIdentityService;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
@@ -65,7 +66,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IProcurementControlEventService? procurementControlEvents = null,
             IProcurementAcceptedSupplyService? acceptedSupply = null,
             IFinanceBudgetCommitmentService? budgetCommitments = null,
-            IFinanceSourceDimensionService? sourceDimensions = null)
+            IFinanceSourceDimensionService? sourceDimensions = null,
+            IApSupplierIdentityService? apSupplierIdentityService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -82,6 +84,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _acceptedSupply = acceptedSupply;
             _budgetCommitments = budgetCommitments;
             _sourceDimensions = sourceDimensions;
+            _apSupplierIdentityService = apSupplierIdentityService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -3974,86 +3977,32 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(s =>
                     s.TenantId == TenantId &&
                     !s.IsDeleted &&
+                    s.IsActive &&
                     s.Id == supplierOrBusinessPartnerId)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (supplier != null)
             {
+                if (supplier.IsBlacklisted || string.Equals(supplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Supplier '{supplier.Name}' is not eligible for AP invoice entry.");
                 return supplier;
             }
 
-            var partner = await _unitOfWork.Repository<BusinessPartner>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    !p.IsDeleted &&
-                    p.Id == supplierOrBusinessPartnerId)
-                .FirstOrDefaultAsync(cancellationToken);
+            if (_apSupplierIdentityService == null)
+                throw new InvalidOperationException(
+                    "The Finance AP supplier identity bridge is unavailable; Business Partner translation cannot proceed safely.");
 
-            if (partner == null)
-            {
-                throw new KeyNotFoundException($"Supplier or business partner with Id '{supplierOrBusinessPartnerId}' not found.");
-            }
-
-            if (string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Customer business partners cannot be used for AP supplier invoices.");
-            }
-
-            if (partner.IsBlacklisted)
-            {
-                throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP supplier invoices.");
-            }
-
-            supplier = await supplierRepository
+            var identity = await _apSupplierIdentityService.ResolveAsync(
+                supplierOrBusinessPartnerId, cancellationToken);
+            return await supplierRepository
                 .GetQueryable(s =>
                     s.TenantId == TenantId &&
                     !s.IsDeleted &&
-                    (s.Id == partner.Id ||
-                     s.SupplierCode == partner.PartnerCode ||
-                     s.Name == partner.PartnerName))
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (supplier != null)
-            {
-                return supplier;
-            }
-
-            supplier = new Supplier
-            {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                SupplierCode = string.IsNullOrWhiteSpace(partner.PartnerCode)
-                    ? $"BP-{partner.Id.ToString("N")[..8].ToUpperInvariant()}"
-                    : partner.PartnerCode,
-                Name = partner.PartnerName,
-                SupplierType = partner.PartnerType.Contains("Manufacturer", StringComparison.OrdinalIgnoreCase)
-                    ? "Manufacturer"
-                    : "Vendor",
-                Address = partner.PhysicalAddress ?? partner.MailingAddress,
-                City = partner.PhysicalCity ?? partner.MailingCity,
-                State = partner.PhysicalState ?? partner.MailingState,
-                Country = partner.PhysicalCountry ?? partner.MailingCountry,
-                ZipCode = partner.PhysicalPostalCode ?? partner.MailingPostalCode,
-                Phone = partner.PrimaryPhone,
-                Email = partner.PrimaryEmail,
-                Website = partner.Website,
-                PrimaryContactName = partner.PrimaryContactName,
-                PrimaryContactTitle = partner.PrimaryContactTitle,
-                PrimaryContactPhone = partner.PrimaryPhone,
-                PrimaryContactEmail = partner.PrimaryEmail,
-                TaxId = partner.TaxIdentificationNumber ?? partner.VATNumber,
-                PaymentTerms = partner.PaymentTerms ?? "Net 30",
-                PaymentTermId = partner.PaymentTermId,
-                IsActive = partner.IsActive,
-                IsPreferred = partner.IsPreferred,
-                Status = partner.IsActive ? "Active" : "Inactive",
-                Notes = $"Auto-created from business partner {partner.PartnerCode} for AP supplier invoice entry.",
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = UserName
-            };
-
-            await supplierRepository.AddAsync(supplier);
-            return supplier;
+                    s.IsActive &&
+                    s.Id == identity.SupplierId)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The resolved AP supplier identity is not active in this tenant.");
         }
 
         public async Task<bool> IsDuplicateAsync(Guid supplierId, string? supplierInvoiceNumber, DateTime invoiceDate, Guid? excludeId = null, CancellationToken cancellationToken = default)

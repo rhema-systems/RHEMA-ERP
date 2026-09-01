@@ -2724,6 +2724,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     (p.PartnerType == "Supplier" || p.PartnerType == "Contractor" || p.PartnerType == "Both"))
                 .ToListAsync(cancellationToken);
 
+            var identityLinks = await _unitOfWork.Repository<ApSupplierIdentityLink>()
+                .GetQueryable(link => link.TenantId == TenantId && !link.IsDeleted)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
             var selectedIds = requestedSupplierIds.Count > 0
                 ? requestedSupplierIds.ToHashSet()
                 : await GetSupplierIdsWithLedgerActivityAsync(endExclusive, cancellationToken);
@@ -2733,6 +2738,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 var supplier = suppliers.FirstOrDefault(s => s.Id == id);
                 var partner = partners.FirstOrDefault(p => p.Id == id);
+
+                var identityLink = identityLinks.SingleOrDefault(link =>
+                    link.SupplierId == id || link.BusinessPartnerId == id);
+                if (supplier == null && identityLink != null)
+                    supplier = suppliers.SingleOrDefault(item => item.Id == identityLink.SupplierId);
+                if (partner == null && identityLink != null)
+                    partner = partners.SingleOrDefault(item => item.Id == identityLink.BusinessPartnerId);
 
                 if (supplier == null && partner != null)
                     supplier = FindMatchingSupplier(partner, suppliers);
@@ -2982,24 +2994,18 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static Supplier? FindMatchingSupplier(BusinessPartner partner, IEnumerable<Supplier> suppliers)
         {
-            return suppliers.FirstOrDefault(s =>
+            return suppliers.SingleOrDefault(s =>
                 s.Id == partner.Id ||
-                string.Equals(s.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(s.Name, partner.PartnerName, StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrWhiteSpace(s.Email) &&
-                 !string.IsNullOrWhiteSpace(partner.PrimaryEmail) &&
-                 string.Equals(s.Email, partner.PrimaryEmail, StringComparison.OrdinalIgnoreCase)));
+                (!string.IsNullOrWhiteSpace(partner.PartnerCode) &&
+                 string.Equals(s.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase)));
         }
 
         private static BusinessPartner? FindMatchingSupplierPartner(Supplier supplier, IEnumerable<BusinessPartner> partners)
         {
-            return partners.FirstOrDefault(p =>
+            return partners.SingleOrDefault(p =>
                 p.Id == supplier.Id ||
-                string.Equals(p.PartnerCode, supplier.SupplierCode, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(p.PartnerName, supplier.Name, StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrWhiteSpace(p.PrimaryEmail) &&
-                 !string.IsNullOrWhiteSpace(supplier.Email) &&
-                 string.Equals(p.PrimaryEmail, supplier.Email, StringComparison.OrdinalIgnoreCase)));
+                (!string.IsNullOrWhiteSpace(supplier.SupplierCode) &&
+                 string.Equals(p.PartnerCode, supplier.SupplierCode, StringComparison.OrdinalIgnoreCase)));
         }
 
         private static decimal AmountForLedgerCurrency(

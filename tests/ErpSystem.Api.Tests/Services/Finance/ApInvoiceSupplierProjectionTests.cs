@@ -1,5 +1,6 @@
 using System.Reflection;
 using ErpSystem.Api.Controllers.Finance;
+using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
@@ -113,6 +114,43 @@ public sealed class ApInvoiceSupplierProjectionTests
             Name = usdPartner.PartnerName,
             Currency = "USD"
         }, configuration => configuration.Excluding(item => item.PaymentTermId));
+    }
+
+    [Fact]
+    [Trait("Category", "AccountsPayable")]
+    public async Task FirstApCommand_ShouldMaterializeAndLinkApprovedPartnerWithoutNameMatching()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var partner = Partner(tenantId, "BP-SUP-001", "Controlled Supplier", "USD");
+        db.BusinessPartners.Add(partner);
+        await db.SaveChangesAsync();
+
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.SetupGet(item => item.HasActiveTransaction).Returns(true);
+        unitOfWork.Setup(item => item.AcquireTransactionLockAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+        currentUser.SetupGet(item => item.UserId).Returns(userId.ToString());
+        currentUser.SetupGet(item => item.UserName).Returns("finance-maker");
+
+        var result = await new ApSupplierIdentityService(
+                db, unitOfWork.Object, currentUser.Object)
+            .ResolveByBusinessPartnerAsync(partner.Id);
+
+        result.BusinessPartnerId.Should().Be(partner.Id);
+        var supplier = await db.Suppliers.SingleAsync();
+        supplier.Id.Should().Be(result.SupplierId);
+        supplier.SupplierCode.Should().Be(partner.PartnerCode);
+        supplier.Name.Should().Be(partner.PartnerName);
+        supplier.Notes.Should().Contain("Finance AP projection");
+        var link = await db.ApSupplierIdentityLinks.SingleAsync();
+        link.BusinessPartnerId.Should().Be(partner.Id);
+        link.SupplierId.Should().Be(supplier.Id);
+        link.MappingSource.Should().Be("BusinessPartnerProjection");
     }
 
     [Fact]

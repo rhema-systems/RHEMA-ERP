@@ -22,7 +22,6 @@ import { useToast } from '@/components/ui/use-toast';
 import { calculateSupplierDebitNoteLine } from '@/lib/finance/supplier-debit-note';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { accountsPayableService } from '@/services/accountsPayableService';
-import { businessPartnerService } from '@/services/businessPartnerService';
 import { financeService } from '@/services/finance.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
@@ -113,18 +112,28 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
     enabled: Boolean(noteId),
   });
   const { data: suppliers = [] } = useQuery({
-    queryKey: ['active-supplier-partners'],
-    queryFn: () => businessPartnerService.getActivePartners('Supplier'),
+    queryKey: ['finance', 'ap', 'entry-suppliers', 'debit-notes'],
+    queryFn: async () =>
+      (await accountsPayableService.getInvoiceSupplierEntryOptions()).filter(
+        (supplier) => Boolean(supplier.businessPartnerId)
+      ),
   });
+  const selectedSupplierOption = suppliers.find(
+    (supplier) => supplier.businessPartnerId === vendorId
+  );
   const supplierIdentityQuery = useQuery({
     queryKey: ['ap-supplier-identity', vendorId],
     queryFn: () => accountsPayableService.getApSupplierIdentity(vendorId),
-    enabled: Boolean(vendorId),
+    enabled: Boolean(vendorId && !selectedSupplierOption),
   });
   const resolvedSupplierId =
-    supplierIdentityQuery.data?.businessPartnerId === vendorId
+    selectedSupplierOption?.supplierId ??
+    (supplierIdentityQuery.data?.businessPartnerId === vendorId
       ? supplierIdentityQuery.data.supplierId
-      : undefined;
+      : undefined);
+  const willCreateApIdentity = Boolean(
+    selectedSupplierOption?.businessPartnerId && !selectedSupplierOption.supplierId
+  );
   const { data: invoicePage } = useQuery({
     queryKey: ['posted-supplier-invoices', vendorId, resolvedSupplierId],
     queryFn: () =>
@@ -442,8 +451,11 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
               </SelectTrigger>
               <SelectContent>
                 {suppliers.map((supplier) => (
-                  <SelectItem key={supplier.id} value={supplier.id}>
-                    {supplier.partnerCode} — {supplier.partnerName}
+                  <SelectItem
+                    key={supplier.id}
+                    value={supplier.businessPartnerId as string}
+                  >
+                    {supplier.code} — {supplier.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -476,12 +488,18 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
                 ))}
               </SelectContent>
             </Select>
-            {vendorId && supplierIdentityQuery.isPending && (
+            {vendorId && !selectedSupplierOption && supplierIdentityQuery.isPending && (
               <p className="text-xs text-muted-foreground">
                 Resolving the Finance partner to its AP supplier identity…
               </p>
             )}
-            {vendorId && supplierIdentityQuery.isError && (
+            {willCreateApIdentity && (
+              <p className="text-xs text-muted-foreground">
+                This approved Business Partner has no AP activity yet. Finance will create its
+                controlled AP identity when the first debit note is saved.
+              </p>
+            )}
+            {vendorId && !selectedSupplierOption && supplierIdentityQuery.isError && (
               <p className="text-xs text-destructive">
                 Posted invoices are unavailable until this business partner has
                 one unambiguous AP supplier identity.

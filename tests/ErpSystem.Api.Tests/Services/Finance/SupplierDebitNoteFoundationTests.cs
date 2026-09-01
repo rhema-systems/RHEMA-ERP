@@ -264,6 +264,45 @@ public sealed class SupplierDebitNoteFoundationTests
     }
 
     [Fact]
+    [Trait("Category", "Architecture")]
+    public void ApSupplierEntryUsesOneGovernedFinanceIdentityBoundary()
+    {
+        var root = FindRepositoryRoot();
+        var identityService = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApSupplierIdentityService.cs"));
+        identityService.Should().Contain("BusinessPartnerLifecyclePolicy.IsOperationallyApproved");
+        identityService.Should().Contain("BuildFinanceSupplierProjection(partner)");
+        identityService.Should().Contain("BusinessPartnerProjection");
+        identityService.Should().NotContain("partner.PartnerName ==");
+
+        var invoiceService = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "VendorInvoiceService.cs"));
+        invoiceService.Should().Contain("_apSupplierIdentityService.ResolveAsync");
+        invoiceService.Should().NotContain("s.Name == partner.PartnerName");
+        invoiceService.Should().NotContain("Auto-created from business partner");
+
+        var reportsService = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApReportsService.cs"));
+        reportsService.Should().Contain("Repository<ApSupplierIdentityLink>");
+        reportsService.Should().NotContain("string.Equals(s.Name, partner.PartnerName");
+        reportsService.Should().NotContain("string.Equals(p.PrimaryEmail, supplier.Email");
+
+        var paymentPage = File.ReadAllText(Path.Combine(
+            root, "frontend", "src", "app", "finance", "ap", "payments", "create", "page.tsx"));
+        paymentPage.Should().Contain("getInvoiceSupplierEntryOptions");
+        paymentPage.Should().NotContain("businessPartnerService.getPartners");
+
+        var supplierRegister = File.ReadAllText(Path.Combine(
+            root, "frontend", "src", "app", "finance", "ap", "suppliers", "page.tsx"));
+        supplierRegister.Should().Contain("Linked on first use");
+        supplierRegister.Should().Contain("Legacy AP supplier");
+
+        var sidebar = File.ReadAllText(Path.Combine(
+            root, "frontend", "src", "components", "layout", "sidebar.tsx"));
+        sidebar.Should().Contain("href: '/finance/ap/suppliers'");
+    }
+
+    [Fact]
     [Trait("Category", "FinanceSecurity")]
     public void LifecycleMutationsUsePurposeSpecificPermissions()
     {
@@ -461,11 +500,21 @@ public sealed class SupplierDebitNoteFoundationTests
 
     private static string FindRepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
-            directory = directory.Parent;
-        return directory?.FullName
-               ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+        var configuredRoot = Environment.GetEnvironmentVariable("RHEMA_REPOSITORY_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot) &&
+            Directory.Exists(Path.Combine(configuredRoot, "src")))
+            return Path.GetFullPath(configuredRoot);
+
+        foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = new DirectoryInfo(start);
+            while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
+                directory = directory.Parent;
+            if (directory != null)
+                return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the repository root.");
     }
 
     private sealed class TestableMigration : AddSupplierDebitNoteLifecycleAndApplications
