@@ -1011,6 +1011,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
                                ErpSystem.Core.Services.HR.ReferenceDimensionService>();
 
+            // The identification-expiry sweep. ⚠ The SERVICE and its HOST are registered together
+            // on purpose: lane 1 found two HR engines that existed, had endpoints, and had never
+            // run because nothing hosted them.
+            services.AddScoped<ErpSystem.Core.Services.HR.IIdentificationExpiryReminderService,
+                               ErpSystem.Core.Services.HR.IdentificationExpiryReminderService>();
+
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
             services.AddScoped<IOrganizationLevelService, OrganizationLevelService>();
@@ -2305,6 +2311,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // employee has never acknowledged. Sweep logic is scoped (IProbationReminderService) so
             // run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.ProbationReminderBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.HR.IdentificationExpiryReminderBackgroundService>();
 
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();

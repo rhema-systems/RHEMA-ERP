@@ -411,3 +411,82 @@ where we chose transparency on TDC's behalf.
 **Not affected either way:** meeting notes are already restricted to HR and the meeting's chair, and
 cross-references to disciplinary cases, safety incidents and improvement plans are already visible to
 HR alone.
+
+## How should staff numbers be issued? *(raised 2026-09-01)*
+
+**Where this came from.** Lane 3b set out to make staff numbering configurable. It had been
+behaviour rather than configuration: the format `{year}{sequence:D4}` was compiled into
+`EmployeeRepository`, and whether HR could type their own number was decided by whether the field
+happened to be left blank. Neither was a decision anybody had made.
+
+**What we now know, and it is the reason these questions exist.** TDC's real employee list uses
+**two different formats** — permanent staff are numbered as bare digits, contract staff carry a
+prefix (of the shape `ABC123`). That is not visible in this database: **1,401 of its 1,507 employee
+rows are accumulated test fixtures**, and the 106 that remain are system-generated. So the questions
+below cannot be answered by looking at the system, and the answers are being asked for rather than
+inferred.
+
+**What has been built to the answer's shape, not to a guess.** `StaffNumberFormat` is a table with
+one row per register per tenant — name, prefix, separator, whether the year appears, sequence width,
+suffix — so any of these answers is configuration rather than a code change. What it cannot decide
+for itself is below.
+
+### 1. What exactly are the two formats?
+
+We have the shape but not the specifics, and the difference matters because it is what keeps the two
+registers from ever colliding:
+
+- **Permanent** — how many digits? Is it zero-padded? Does the sequence ever restart, or does it
+  climb for ever?
+- **Contract** — is the prefix always the same three letters, or does it vary by project, site or
+  contracting company? **If it varies, that is a different design**: the prefix stops being a
+  property of the register and becomes a property of the engagement, and the rule needs to be
+  selected by something other than employment type.
+
+### 2. Does a contract employee who becomes permanent get a new number?
+
+⚠ **This is the load-bearing question.** Both answers are defensible and they build differently:
+
+- **They keep it.** Then a staff number records *which register somebody entered by*, not what they
+  are today — and no report may infer employment type from the shape of the number. This is what is
+  built today, because renumbering would orphan the ~750 references to `EmployeeNumber` across HR,
+  Payroll, Maintenance and Appraisal.
+- **They are renumbered.** Then the system needs a "previously known as" trail, and every module
+  holding a staff number needs to follow the change. That is a materially larger feature and it is
+  not built.
+
+### 3. Are there more than two registers?
+
+Casual or site labour, expatriates, seconded staff, apprentices — do any of these carry their own
+numbering? The table supports as many as TDC has; we only need to know which exist.
+
+### 4. When a manual number is typed, should the system check its shape?
+
+> **Partly settled 2026-09-01.** The *import* half of this question is answered by design rather
+> than by a setting: a data load goes through its own path that accepts numbers exactly as given
+> **and advances the register's counter past the highest it loaded**. There is no mode to toggle
+> before an import and none to remember to toggle back — a mode that must be restored is a mode that
+> gets left wrong. What remains open is only the question below, about numbers typed by hand during
+> ordinary day-to-day entry.
+
+If contract numbers are `ABC123` and HR types `XYZ999`, should that be refused?
+
+- **Refuse** — the format is a rule, and a number outside it is an error.
+- **Accept** — manual entry exists precisely because some numbers come from elsewhere (a payroll
+  bureau, a legacy register) and will not match anything we describe.
+
+Accept is the safer default and is what we would build absent an answer, but it means the recorded
+format is documentation rather than enforcement.
+
+### 5. ⚠ What should the counter start from? *(a migration question, not a preference)*
+
+**This one will bite on the day TDC's real staff are loaded.** The system's counter starts at 1
+unless told otherwise, so the first new permanent hire after go-live would be issued **00001** while
+TDC's existing staff are already numbered in the ten-thousands. Every register's counter must be
+**seeded from the highest number already in use** as part of the data load.
+
+So: for each register, what is the highest number currently issued? And should the counter continue
+from there, or start at a deliberate round number so that system-issued numbers are visibly distinct
+from historical ones?
+
+---
