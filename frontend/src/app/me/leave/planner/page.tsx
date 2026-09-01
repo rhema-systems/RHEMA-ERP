@@ -96,7 +96,7 @@ export default function MyLeavePlannerPage() {
         startDate: f.startDate,
         endDate: f.endDate,
         notes: f.notes || null,
-        plannedBy: employeeId,
+        // plannedBy is stamped server-side from the token (finish-plan lane 4).
         year: new Date(f.startDate).getFullYear(),
       };
       return f.id ? leavePlanService.update(f.id, payload) : leavePlanService.create(payload);

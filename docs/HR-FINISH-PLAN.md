@@ -39,10 +39,26 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
-▶ **Recommended next: lane 4** (leave · training · succession · recruitment feedback). Lane 6's
-buildable rows are closed as of 2026-09-01 — two of its seven were stale, one was verified not
-live, and the four real ones are built. Lanes 3b and **3a-ii** are closed — all four caller-supplied image
-paths are gone, and the seal and signature are versioned instruments rather than settings fields.
+▶ **Lane 4 is DONE (2026-09-01): 54 + 32 + 33 assertions, each twice** (see § Lane 4 for the
+row-by-row verification). Lane 6's buildable rows are closed — two of its
+seven were stale, one was verified not live, and the four real ones are built. Lanes 3b and
+**3a-ii** are closed — all four caller-supplied image paths are gone, and the seal and signature are
+versioned instruments rather than settings fields.
+
+⚠ **FOUND 2026-09-01 by lane 4's harness, and it is the lane's real finding: two Employee-FK actor
+columns were being fed the LOGIN's user id by the screens.** `LeaveAdjustment.PerformedBy` and
+`LeavePlan.PlannedBy` are required foreign keys to `Employees`. The adjustments screen, the plans
+screen and the self-service planner all sent `user.id` — a value that is never an employee id — so
+no adjustment or plan raised from any screen had ever been saved (both creates 500 on the old
+build; `LeaveAdjustments` was empty). A third writer, the year-end forfeiture, posted `Guid.Empty`
+into the same column, so that endpoint had never succeeded either. All three now stamp the actor
+from the token; an unlinked account is refused with a message. **The lesson generalises the
+discipline one: "the token's id reaching the service is not the actor being stored" — here the
+actor never reached the service at all, and nothing static could see it because the write compiled,
+the payload validated, and only the database said no.**
+
+▶ **After lane 4 closes, the next unblocked work is lane 8a's prerequisites or the remaining 3d /
+2c rows; lane 2's memo still gates the money decisions.**
 
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
 `GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job
@@ -672,54 +688,83 @@ and the section F rows are ticked in the ledger with the commit that closed them
 
 ---
 
-## Lane 4 — Leave · Training · Succession · Recruitment feedback · 2 slices
+## Lane 4 — Leave · Training · Succession · Recruitment feedback · ✅ **DONE 2026-09-01** · 54 + 32 + 33 assertions ×2
 
-Thirteen feedback rows plus the four manpower-budget endpoints, mostly UI over endpoints that
-already work. ⚠ Every one is `<unverified>` — several name client methods as dead code, and "no UI
-caller" has been wrong before.
+Thirteen feedback rows plus the four manpower-budget endpoints. **Verified row by row before
+building, per the standing rule: 10 as described, 1 understated-then-wrong, 2 STALE.** Harness:
+`dev-harness/hr-finish-lane4/` (three scripts, README there). Before-evidence against the old
+build: adjustment create **500**, plan create **500**, completion verify passed with no certificate.
+Green twice against the rebuilt API: leave **54**, training **32**, succession **33** (read-only).
+
+⚠ **Source caveat.** The "five pre-port feedback documents" the ledger's section F cites are not
+on disk under `D:\Rhema\TDC ERPS` (scanned every .docx/.md/.txt/.pdf there); the rows were
+introduced in b08b577d without a citation. Two rows needed an interpretation, stated below as
+assumptions — confirm them with TDC at the next demo.
 
 ### Leave
 
-- [ ] Adjustment form does not show the employee's balance.
-- [ ] Reliever clashes are not visible on the plan.
-- [ ] Free-text field still labelled "Reason", not "Remarks" — cosmetic.
-- [ ] Leave request numbering still uses a max+1 scan → move to `INumberSequenceService`, seeded
-      from the table's current maximum so it keeps issuing after the numbers already in the wild.
-      **Assert create → delete → create**; a create-then-create pair passes on the broken code.
+- [x] **Adjustment form shows the employee's balance** — a `BalancePreview` inside the form reads
+      `GET employee/{id}/balances` for the chosen employee/type/year (the row the Balances screen
+      reads) and previews the balance after the signed `days`. ⚠ **While building it: the form sent
+      `performedBy: user.id`.** `PerformedBy` is a required Employee FK — see the finding above.
+      Now stamped from the token on both create paths (`AddAdjustmentAsync` and the standalone
+      one — the half-fix shape checked), DTO property removed, forfeiture writer fixed too.
+- [x] **Reliever clashes are visible on the plan** — `LeavePlanDto.RelieverClashes` from three
+      sources (the reliever's own plan, their own live leave request, another plan in the window
+      naming them), on every plan read, batched per list. `GET hr/leave-plans/reliever-clashes`
+      answers the form before the plan exists; the register shows a red badge with the reasons.
+      Advisory, not a gate. Second reliever now editable on the desk form (it was silently nulled
+      on every edit). `PlannedBy` had the same user-id defect; stamped from the token, kept on edit.
+- [x] Free-text field labelled **"Remarks"** — the adjustment form, its column and its search
+      placeholder (the entity's own remark said this was the intent).
+- [x] **Leave request numbering on `INumberSequenceService`** (`LEAVE-REQ`, year-bucketed,
+      `LV{year}{seq:D6}` preserved). Seeded once per tenant-year from the table's highest number
+      **including deleted rows**, via `AdvanceToAtLeastAsync`. Harness asserts create → SQL
+      soft-delete → create issues N+1 (no endpoint deletes a leave request). The old scan re-issued a
+      deleted row's number and the retry loop recomputed the same collision.
 
 ### Training
 
-- [ ] **Bulk nomination has no UI** — ⚠ re-verified, and the row was *understated* rather than
-      wrong. `setBulkResult` is declared at `NomineesPanel.tsx:63` with **no call site anywhere**,
-      and there is no `bulkNominate` client method — but `bulkResult` **is rendered** at lines
-      158-166, listing the created count and every skipped row with its reason. The result display
-      was built and the action never was. Build the action; the display is waiting for it.
-- [x] ~~Bulk completion has no UI and no client method~~ — **FALSE, struck 2026-08-31.**
-      `BulkCompletionPanel.tsx` calls `trainingCompletionService.bulkRecord` (line 89) and is
-      mounted at `schedules/[id]/page.tsx:364` with a readOnly guard for cancelled schedules.
-- [x] ~~Nominee availability check never shown~~ — **FALSE, struck 2026-08-31.** Wired at
-      `NomineesPanel.tsx:314` onto `checkAvailability`, which renders the conflicts. Closure lane 2
-      built it. ⚠ **The generator already held a `DONE` for this controller while this row and the
-      endpoint disposition beside it both still said `BUILD`** — two dispositions on one controller
-      disagreeing, and the ledger rendered both. That is the argument for lane 0's re-verification
-      existing at all.
-- [ ] No "Training Activities" grouped screen.
-- [ ] Mentoring still inside the Training menu — wants its own nav section.
-- [ ] Certificate does not gate completion — a per-program flag.
+- [x] **Bulk nomination dialog** — ⚠ the row was understated in one direction and wrong in the
+      other: `bulkCreate` (client) and `POST training-nominations/bulk` existed; only the action
+      was missing. "Nominate several": multi-employee badge picker, one type, one justification,
+      an availability check across the batch, result rendered by the panel that had been waiting.
+      ⚠ Seats are taken at APPROVAL, not at nomination, on both paths — the dialog says so.
+- [x] ~~Bulk completion~~ / ~~Nominee availability check~~ — struck 2026-08-31, false.
+- [x] **"Training Activities" grouped screen** — _assumption_: the desk twin of My Training. One
+      employee's nominations, requests, completions, certificates and mandatory compliance on one
+      screen (`/hr/training/activities`), every read a per-employee endpoint that already existed.
+      Nav entry under Training, card on the Training landing.
+- [x] **Mentoring is its own nav section** — top-level "Mentoring" (pairs + programmes), removed
+      from the Training children; routes unchanged; card on the HR landing.
+- [x] **Certificate gates completion** — _assumption_: a PASSED completion of a programme flagged
+      `ProvidesCertificate` (the per-programme flag, which nothing had ever read) cannot be
+      VERIFIED until an active certificate exists for the nomination; a failed completion and a
+      programme without a certificate are not held; a revoked certificate does not count. The
+      verify dialog says so up front (`programProvidesCertificate` on the DTO). Refusal surfaces as
+      422 via the exception middleware, like "already verified".
 
 ### Succession
 
-- [ ] Criteria candidate search has no screen — `successionSearchService.searchCandidates` has no
-      caller.
-- [ ] Candidate age and service-years-left are not displayed, though the API returns both.
+- [x] **Criteria candidate search screen** — `CandidateSearchPanel`, hosted standalone at
+      `/hr/succession/candidate-search` (nav: Find Candidates) and inside a plan's Candidates tab
+      locked to the plan's post and excluding its candidates; a result row pre-fills the nominate
+      form. Payloads and shape probed first (33 assertions, all green on the current build).
+- [x] **Candidate age and service-years-left displayed** — two columns on the plan's candidate
+      table; the by-plan read already carried both.
 
 ### Recruitment / manpower budgets
 
-- [ ] Menu still reads "Manpower Budgets" → "Manpower Recruitment Budget".
-- [ ] **`PUT` and `DELETE api/JobAnalysis/budgets/{}`** have no caller.
-- [ ] **`PUT` and `DELETE api/JobAnalysis/lines/{}`** have no caller. Surfaced when the whole
-      JobAnalysis controller was enumerated and never scheduled: a manpower budget can be created
-      and approved but **not edited or deleted**.
+- [x] Menu reads **"Manpower Recruitment Budgets"** — sidebar, HR landing, list and new-page titles.
+- [x] ~~`PUT`/`DELETE api/JobAnalysis/budgets/{}` have no caller~~ — **STALE, struck 2026-09-01.**
+      Wired in 2efd553c: the detail page calls `updateBudget` and `deleteBudget`; the ledger's own
+      C2 checklist had ticked both.
+- [x] ~~`PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller~~ — **STALE, struck 2026-09-01.**
+      Same commit: `updateBudgetLine` and `deleteBudgetLine` on the detail page.
+
+**Done when:** the three harnesses are green twice against the rebuilt API, the regression trio
+(`w3 slice5-leave`, `portal slice4`, `training run3`) still passes, the counts are recorded here
+and in the harness README, and the two assumptions are put to TDC.
 
 ---
 

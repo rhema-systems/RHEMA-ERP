@@ -180,8 +180,10 @@ export interface CreateLeaveAdjustmentRequest {
   year: number;
   days: number;
   reasonCodeId?: string | null;
+  /** Free text — labelled "Remarks" on the screen, beside the reason code. */
   reason: string;
-  performedBy: string;
+  // performedBy is stamped server-side from the token (finish-plan lane 4). The screen used to send
+  // the login's user id, which is never an employee id, and the Employee foreign key refused it.
   adjustmentDate?: string | null;
 }
 
@@ -256,6 +258,24 @@ export interface LeavePlan {
   approvedById?: string | null;
   approvedDate?: string | null;
   rejectionReason?: string | null;
+  /**
+   * Why the named reliever(s) may not be free over the plan's dates — their own plans, their own
+   * live leave requests, or another plan in the window that already names them. Empty when clear.
+   * Advisory: the plan can still be saved and approved. (Finish-plan lane 4.)
+   */
+  relieverClashes: LeaveRelieverClash[];
+}
+
+/** One reason a reliever is not free over a leave plan's dates. Shape probed from GET /hr/leave-plans. */
+export interface LeaveRelieverClash {
+  relieverId: string;
+  relieverName: string;
+  /** 1 = reliever, 2 = second reliever. */
+  slot: number;
+  source: 'LeavePlan' | 'LeaveRequest' | 'RelieverOnAnotherPlan';
+  description: string;
+  fromDate: string;
+  toDate: string;
 }
 
 export interface CreateLeavePlanRequest {
@@ -270,7 +290,8 @@ export interface CreateLeavePlanRequest {
   relieverId?: string | null;
   secondRelieverId?: string | null;
   notes?: string | null;
-  plannedBy: string;
+  // plannedBy is stamped server-side from the token (finish-plan lane 4); it is an Employee
+  // foreign key and both screens used to send the login's user id.
   year: number;
 }
 

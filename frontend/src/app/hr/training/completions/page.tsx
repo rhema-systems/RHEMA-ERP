@@ -161,7 +161,20 @@ export default function TrainingCompletionsPage() {
                 : ''}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-2">
+          <div className="space-y-3 py-2">
+            {target?.isPassed && target.programProvidesCertificate && (
+              // The certificate gates the completion: the server refuses to verify a passed
+              // completion of a certificate-bearing programme until one has been issued. Say so
+              // here, with the door to the screen that issues it, rather than after the refusal.
+              <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                &quot;{target.programName}&quot; issues a certificate. If none has been issued for
+                this nomination yet, verification is refused — issue it first from{' '}
+                <a className="underline" href={`/hr/training/nominations/${target.nominationId}`}>
+                  the nomination
+                </a>
+                .
+              </p>
+            )}
             <TextareaField form={form} name="verificationNotes" label="Notes" rows={3} />
           </div>
           <DialogFooter>

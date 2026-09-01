@@ -556,6 +556,11 @@ export interface TrainingCompletion {
   employeeName: string;
   employeeNumber: string;
   programName: string;
+  /**
+   * The programme issues a certificate, so a PASSED completion cannot be verified until one has
+   * been issued for the nomination (finish-plan lane 4). Probed from GET /training-completions.
+   */
+  programProvidesCertificate?: boolean;
   completionDate: string;
   status: TrainingCompletionStatus;
   finalScore?: number | null;

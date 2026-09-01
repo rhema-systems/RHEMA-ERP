@@ -229,13 +229,23 @@ public class LeaveAdjustmentDto
     public string   PerformedByName  { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Add an adjustment against a known balance.
+/// </summary>
+/// <remarks>
+/// ⚠ Finish-plan lane 4 (2026-09-01): <c>PerformedBy</c> is no longer accepted from the caller. It is
+/// an Employee foreign key, and the desk screen was sending the LOGIN's user id — a value that is
+/// never an employee id — so every adjustment raised from the screen failed on the constraint. The
+/// service now stamps the acting employee from the token; a caller-supplied value would have been
+/// forgeable in any case.
+/// </remarks>
 public class CreateLeaveAdjustmentDto
 {
     public Guid     LeaveBalanceId { get; set; }
     public decimal  Days           { get; set; }
     public Guid?    ReasonCodeId   { get; set; }
+    /// <summary>Free-text remarks. Labelled "Remarks" in the UI, beside the reason code.</summary>
     public string   Reason         { get; set; } = string.Empty;
-    public Guid     PerformedBy    { get; set; }
 }
 
 /// <summary>Create a leave adjustment from scratch — no balance ID needed.</summary>
@@ -247,8 +257,9 @@ public class CreateLeaveAdjustmentStandaloneDto
     public int       Year           { get; set; }
     public decimal   Days           { get; set; }
     public Guid?     ReasonCodeId   { get; set; }
+    /// <summary>Free-text remarks. Labelled "Remarks" in the UI, beside the reason code.</summary>
     public string    Reason         { get; set; } = string.Empty;
-    public Guid      PerformedBy    { get; set; }
+    // PerformedBy is stamped from the token — see CreateLeaveAdjustmentDto.
     public DateTime? AdjustmentDate { get; set; }
 }
 
@@ -327,6 +338,33 @@ public class LeavePlanDto
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public string? RejectionReason { get; set; }
+
+    /// <summary>
+    /// Why the named reliever(s) may not actually be available over this plan's dates. Empty when
+    /// nothing overlaps, or when no reliever is named. Advisory — a plan with clashes can still be
+    /// saved and approved; what the register must never do is stay silent about them.
+    /// </summary>
+    /// <remarks>
+    /// Finish-plan lane 4 (2026-09-01). TDC's demo feedback: "reliever clashes are not visible on
+    /// the plan". Filled by the service from three sources — the reliever's own leave plans, the
+    /// reliever's own leave requests, and other plans in the same window that name the same
+    /// reliever — so a reliever who is away, or already covering for somebody else, shows up.
+    /// </remarks>
+    public List<LeaveRelieverClashDto> RelieverClashes { get; set; } = new();
+}
+
+/// <summary>One reason a reliever is not free over a leave plan's dates.</summary>
+public class LeaveRelieverClashDto
+{
+    public Guid RelieverId { get; set; }
+    public string RelieverName { get; set; } = string.Empty;
+    /// <summary>Which slot the clashing reliever holds on the plan being described: 1 or 2.</summary>
+    public int Slot { get; set; }
+    /// <summary><c>LeavePlan</c>, <c>LeaveRequest</c> or <c>RelieverOnAnotherPlan</c>.</summary>
+    public string Source { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateOnly FromDate { get; set; }
+    public DateOnly ToDate { get; set; }
 }
 
 public class CreateLeavePlanDto
@@ -342,7 +380,9 @@ public class CreateLeavePlanDto
     public Guid? RelieverId { get; set; }
     public Guid? SecondRelieverId { get; set; }
     public string? Notes { get; set; }
-    public Guid PlannedBy { get; set; }
+    // PlannedBy is an Employee foreign key stamped from the token (finish-plan lane 4). Both screens
+    // used to send the LOGIN's user id here, which is never an employee id. On update the original
+    // planner is kept.
     public int Year { get; set; }
 }
 

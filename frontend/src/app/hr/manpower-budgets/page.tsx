@@ -64,7 +64,7 @@ export default function ManpowerBudgetsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Manpower budgets"
+        title="Manpower recruitment budgets"
         description="How many posts each unit is authorised to hold, and what they cost (FR-HR-135)."
         actions={
           <Link href="/hr/manpower-budgets/new">
@@ -96,7 +96,7 @@ export default function ManpowerBudgetsPage() {
           ) : rows.length === 0 ? (
             <EmptyState
               icon={Banknote}
-              title="No manpower budgets"
+              title="No manpower recruitment budgets"
               description="A budget authorises headcount for a unit and a fiscal year."
             />
           ) : (

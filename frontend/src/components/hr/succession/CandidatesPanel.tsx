@@ -16,6 +16,7 @@ import {
   Plus,
   Star,
   Paperclip,
+  Search,
   Target,
   Users,
 } from 'lucide-react';
@@ -41,6 +42,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { SuccessionDocumentsPanel } from '@/components/hr/succession/SuccessionDocumentsPanel';
+import { CandidateSearchPanel } from '@/components/hr/succession/CandidateSearchPanel';
 import { useToast } from '@/hooks/use-toast';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import {
@@ -139,6 +141,14 @@ export function CandidatesPanel({
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [nominating, setNominating] = useState(false);
+  /**
+   * Finish-plan lane 4: the criteria search, hosted here pre-filled with this plan's post and
+   * excluding people already on it. Picking a result carries the employee (and their years of
+   * service) into the nominate form. `nomineeLabel` is what the picker shows for a pre-filled id —
+   * without it, a programmatic setValue leaves the search box blank.
+   */
+  const [searching, setSearching] = useState(false);
+  const [nomineeLabel, setNomineeLabel] = useState<string | null>(null);
   const [assessing, setAssessing] = useState<SuccessionCandidate | null>(null);
   const [assessNotes, setAssessNotes] = useState('');
   const [recommend, setRecommend] = useState(true);
@@ -298,8 +308,14 @@ export function CandidatesPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={() => { form.setValue('rank', rows.length + 1); setNominating(true); }}>
+      <div className="flex justify-end gap-2">
+        {canWrite && (
+          <Button variant="outline" onClick={() => setSearching(true)}>
+            <Search className="mr-2 h-4 w-4" />
+            Find candidates
+          </Button>
+        )}
+        <Button onClick={() => { setNomineeLabel(null); form.setValue('rank', rows.length + 1); setNominating(true); }}>
           <Plus className="mr-2 h-4 w-4" />
           Nominate a successor
         </Button>
@@ -319,6 +335,9 @@ export function CandidatesPanel({
                 <TableRow>
                   <TableHead className="w-24">Rank</TableHead>
                   <TableHead>Candidate</TableHead>
+                  {/* Finish-plan lane 4: the API always returned both; the table showed neither. */}
+                  <TableHead className="text-right">Age</TableHead>
+                  <TableHead className="text-right">Service left</TableHead>
                   <TableHead>Readiness</TableHead>
                   <TableHead>Performance</TableHead>
                   <TableHead>Potential</TableHead>
@@ -374,6 +393,12 @@ export function CandidatesPanel({
                           Recommended{c.recommendedByName ? ` by ${c.recommendedByName}` : ''}
                         </div>
                       )}
+                    </TableCell>
+                    <TableCell className="text-right">{c.age ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      {c.serviceYearsLeft == null
+                        ? '—'
+                        : `${c.serviceYearsLeft} yr${c.serviceYearsLeft === 1 ? '' : 's'}`}
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={READINESS_TONE[c.currentReadiness] ?? ''}>
@@ -514,6 +539,31 @@ export function CandidatesPanel({
         </DialogContent>
       </Dialog>
 
+      {/* ── Find candidates ──────────────────────────────────────────────────── */}
+      <Dialog open={searching} onOpenChange={setSearching}>
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Find candidates for {plan.positionTitle}</DialogTitle>
+            <DialogDescription>
+              Scored against this post&apos;s competency requirements. People already on the plan
+              are left out. Picking someone opens the nominate form with them filled in.
+            </DialogDescription>
+          </DialogHeader>
+          <CandidateSearchPanel
+            lockedPositionId={plan.positionId}
+            defaults={{ targetPositionId: plan.positionId, excludePlanId: plan.id }}
+            onPick={(row) => {
+              form.setValue('employeeId', row.employeeId, { shouldValidate: true });
+              form.setValue('yearsWithCompany', row.yearsOfService ?? 0);
+              form.setValue('rank', rows.length + 1);
+              setNomineeLabel(`${row.employeeName} (${row.employeeNumber})`);
+              setSearching(false);
+              setNominating(true);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* ── Nominate ─────────────────────────────────────────────────────────── */}
       <Dialog open={nominating} onOpenChange={setNominating}>
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
@@ -530,7 +580,13 @@ export function CandidatesPanel({
             onSubmit={form.handleSubmit((v) => nominate.mutate(v))}
           >
             <FieldRow>
-              <EmployeePickerField form={form} name="employeeId" label="Employee" required />
+              <EmployeePickerField
+                form={form}
+                name="employeeId"
+                label="Employee"
+                required
+                initialLabel={nomineeLabel}
+              />
               <SelectField form={form} name="type" label="Candidate type" required options={options(CANDIDATE_TYPES)} />
             </FieldRow>
             <FieldRow>

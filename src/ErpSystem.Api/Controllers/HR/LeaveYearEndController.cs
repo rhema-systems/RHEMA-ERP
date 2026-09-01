@@ -57,8 +57,17 @@ namespace ErpSystem.Api.Controllers.HR
             if (year < 2000)
                 return BadRequest(new { message = "A valid year is required." });
 
-            var result = await _yearEndService.ProcessForfeitureAsync(year, asOf, employeeId);
-            return Ok(result);
+            try
+            {
+                var result = await _yearEndService.ProcessForfeitureAsync(year, asOf, employeeId);
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // An admin account not linked to an employee cannot be the forfeiture's actor
+                // (PerformedBy is an Employee foreign key) — say so rather than 500.
+                return BadRequest(new { message = ex.Message });
+            }
         }
     }
 }

@@ -1097,9 +1097,13 @@ export const navigationItems: NavItem[] = [
         title: 'Training',
         href: '/hr/training',
         icon: GraduationCap,
+        //
+        // Finish-plan lane 4 (2026-09-01): Training Activities is the per-employee grouped view TDC
+        // asked for; Mentoring moved out to its own section below — TDC's feedback was that it did
+        // not belong inside the Training menu.
         children: [
           { title: 'Enrollments', href: '/hr/training/enrollments', icon: Route, permissions: ['HR.Training.Read'] },
-          { title: 'Mentoring', href: '/hr/training/mentoring', icon: Handshake, permissions: ['HR.Training.Read'] },
+          { title: 'Training Activities', href: '/hr/training/activities', icon: Activity, permissions: ['HR.Training.Read'] },
           { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp, permissions: ['HR.Training.Read'] },
           { title: 'Schedules', href: '/hr/training/schedules', icon: CalendarClock },
           { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList },
@@ -1108,6 +1112,19 @@ export const navigationItems: NavItem[] = [
           { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp },
           { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard },
           { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert, permissions: ['HR.Training.Read'] },
+        ],
+      },
+      {
+        // Finish-plan lane 4 (2026-09-01). Mentoring was a child of Training; TDC's demo feedback
+        // wanted it as its own section. The routes are unchanged (the desk register is still under
+        // /hr/training/mentoring, the schemes under Administration) — what moved is where the
+        // navigation puts them. A mentee's own pairs stay in the portal (/me/mentoring).
+        title: 'Mentoring',
+        href: '/hr/training/mentoring',
+        icon: Handshake,
+        children: [
+          { title: 'Mentoring Pairs', href: '/hr/training/mentoring', icon: Handshake, permissions: ['HR.Training.Read'] },
+          { title: 'Programmes', href: '/administration/hr/training/mentoring', icon: Settings, permissions: ['HR.Training.Read'] },
         ],
       },
       {
@@ -1272,7 +1289,9 @@ export const navigationItems: NavItem[] = [
         // Area 18. FR-HR-135 names the chain: Department Head → HR → Managing Director. An approved
         // budget is not only a plan — it sets the establishment (D-2), which then gates whether a
         // vacancy may be opened at all (FR-HR-136).
-        title: 'Manpower Budgets',
+        // Finish-plan lane 4: TDC's name for it is the Manpower Recruitment Budget — the plan of
+        // posts to recruit against, not a payroll budget.
+        title: 'Manpower Recruitment Budgets',
         href: '/hr/manpower-budgets',
         icon: Banknote,
       },
@@ -1368,6 +1387,9 @@ export const navigationItems: NavItem[] = [
           // Calibration sessions and the nine box. Separate from plans and pools because a session
           // is an EVENT with a close, not a register: finalizing freezes it for good.
           { title: 'Talent Reviews', href: '/hr/succession/reviews', icon: Grid3x3 },
+          // Finish-plan lane 4: the criteria search had an endpoint and a client method since
+          // area 13 and no screen. Also hosted inside a plan's Candidates tab.
+          { title: 'Find Candidates', href: '/hr/succession/candidate-search', icon: Search },
           { title: 'Dashboard', href: '/hr/succession/dashboard', icon: LayoutDashboard },
         ],
         // No "my succession" entry, and there must never be one: readiness, retention risk and

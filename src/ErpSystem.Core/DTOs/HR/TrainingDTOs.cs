@@ -1388,6 +1388,13 @@ public class TrainingCompletionDto : BaseDto
 
     public string ProgramName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The programme issues a certificate, so a PASSED completion cannot be verified until one has
+    /// been issued for the nomination (finish-plan lane 4). Lets the verify dialog say so up front
+    /// instead of leaving the refusal to explain itself.
+    /// </summary>
+    public bool ProgramProvidesCertificate { get; set; }
+
     public DateTime CompletionDate { get; set; }
     public TrainingCompletionStatus Status { get; set; }
     public string StatusName => Status.ToString();

@@ -1115,6 +1115,7 @@ public static class TrainingMappingExtensions
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
             ProgramName = entity.Nomination?.Schedule?.Program?.ProgramName ?? string.Empty,
+            ProgramProvidesCertificate = entity.Nomination?.Schedule?.Program?.ProvidesCertificate ?? false,
             CompletionDate = entity.CompletionDate,
             Status = entity.Status,
             FinalScore = entity.FinalScore,

@@ -311,6 +311,12 @@ const AREAS = [
     icon: GraduationCap,
   },
   {
+    title: 'Mentoring',
+    description: 'Mentoring schemes, the pairs on them, and their session logs.',
+    href: '/hr/training/mentoring',
+    icon: Users,
+  },
+  {
     title: 'Service Bonds',
     description:
       'Service obligations from sponsored training — who owes time, who owes money, and what has been settled.',
@@ -377,7 +383,7 @@ const AREAS = [
     icon: Briefcase,
   },
   {
-    title: 'Manpower Budgets',
+    title: 'Manpower Recruitment Budgets',
     description: 'Planned headcount and cost against the establishment.',
     href: '/hr/manpower-budgets',
     icon: Calculator,

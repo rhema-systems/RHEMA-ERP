@@ -81,7 +81,7 @@ export default function NewManpowerBudgetPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="New manpower budget"
+        title="New manpower recruitment budget"
         description="Authorise headcount and its cost for a unit and a fiscal year."
         backHref="/hr/manpower-budgets"
         actions={

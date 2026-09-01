@@ -86,6 +86,33 @@ public class LeavePlansController : ControllerBase
         return Ok(await _service.GetByYearAsync(year));
     }
 
+    /// <summary>
+    /// Is this reliever actually free over these dates? The plan form asks before saving; the
+    /// register carries the same answer on each row as <c>relieverClashes</c>.
+    /// </summary>
+    /// <remarks>
+    /// Finish-plan lane 4 (2026-09-01). Deliberately on the class-level InternalOnly gate rather
+    /// than a leave permission: an employee planning their own leave chooses their own reliever and
+    /// needs this answer as much as the desk does. What it discloses — that a colleague is away over
+    /// a window — is what naming them as reliever already presumes.
+    /// </remarks>
+    [HttpGet("reliever-clashes")]
+    [ProducesResponseType(typeof(IReadOnlyList<LeaveRelieverClashDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IReadOnlyList<LeaveRelieverClashDto>>> GetRelieverClashes(
+        [FromQuery] Guid relieverId,
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
+        [FromQuery] Guid? excludePlanId = null)
+    {
+        if (relieverId == Guid.Empty)
+            return BadRequest(new { message = "A reliever is required." });
+        if (endDate < startDate)
+            return BadRequest(new { message = "End date cannot be before the start date." });
+
+        return Ok(await _service.GetRelieverClashesAsync(relieverId, startDate, endDate, excludePlanId));
+    }
+
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(LeavePlanDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

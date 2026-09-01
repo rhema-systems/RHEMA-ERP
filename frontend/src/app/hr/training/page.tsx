@@ -16,6 +16,7 @@ import {
   Route,
   Handshake,
   TrendingUp,
+  Activity,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -43,6 +44,12 @@ export default function TrainingHomePage() {
               description: 'Who is on which learning path, and how far along.',
               href: '/hr/training/enrollments',
               icon: Route,
+            },
+            {
+              title: 'Training Activities',
+              description: 'One employee’s nominations, requests, completions, certificates and mandatory training, together.',
+              href: '/hr/training/activities',
+              icon: Activity,
             },
             {
               title: 'Mentoring',
