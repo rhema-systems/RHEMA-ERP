@@ -175,6 +175,20 @@ unchanged.
 7. Certify Finance and operational adapters individually.
 8. Enable mandatory enforcement by account/source only after certification.
 
+### Finance-owned settlement expansion
+
+The next certified settlement slice is deliberately limited to Finance-owned vendor payments,
+customer payments/receipts, direct Cash payments, direct Cash receipts and cash/bank transfers.
+It captures stable source-line evidence for allocations, advances, direct offsets and both transfer
+legs. Invoice settlements inherit the exact originating invoice-line combinations; discounts,
+withholding, fees, write-offs and realised FX must remain split over those combinations with the
+final deterministic allocation carrying any rounding residual.
+
+Bank deposits, returned cheques, reconciliation adjustments, fixed-asset settlement and payment
+paths produced by another module remain later dimension-expansion candidates. They require their
+own route identity, additive Finance adapter/contract, consumer tests and governed certification;
+sharing an underlying Finance service does not certify them implicitly.
+
 ## Acceptance criteria
 
 - Two postings to the same GL account can carry different dimension sets.
