@@ -37,6 +37,16 @@ export interface ExternalEstateRequestDocument {
   fileName?: string | null;
 }
 
+export interface ExternalEstateRequestsPage {
+  items: ExternalEstateServiceRequest[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+}
+
 export interface ExternalPropertyPortfolio {
   customers: Array<{ id: string; partnerName: string; customerAccountNumber?: string | null }>;
   properties: Array<{
@@ -134,6 +144,14 @@ interface ApiResponse<T> {
   success: boolean;
   data: T;
   message?: string;
+  pagination?: {
+    page: number;
+    pageSize: number;
+    totalCount: number;
+    totalPages: number;
+    hasPreviousPage: boolean;
+    hasNextPage: boolean;
+  };
 }
 
 class ExternalEstateServicesService {
@@ -149,6 +167,33 @@ class ExternalEstateServicesService {
       ApiResponse<ExternalEstateServiceRequest[]>
     >('/estate/external/requests');
     return response.data || [];
+  }
+
+  async getMyRequestsPage(query: {
+    page: number;
+    pageSize: number;
+    source?: 'estateServices' | 'all';
+  }): Promise<ExternalEstateRequestsPage> {
+    const params = new URLSearchParams({
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+    });
+    if (query.source && query.source !== 'all') {
+      params.set('source', query.source);
+    }
+
+    const response = await apiService.get<
+      ApiResponse<ExternalEstateServiceRequest[]>
+    >(`/estate/external/requests?${params.toString()}`);
+    return {
+      items: response.data || [],
+      page: response.pagination?.page ?? query.page,
+      pageSize: response.pagination?.pageSize ?? query.pageSize,
+      totalCount: response.pagination?.totalCount ?? response.data?.length ?? 0,
+      totalPages: response.pagination?.totalPages ?? 1,
+      hasPreviousPage: response.pagination?.hasPreviousPage ?? query.page > 1,
+      hasNextPage: response.pagination?.hasNextPage ?? false,
+    };
   }
 
   async getMyProperties(): Promise<ExternalPropertyPortfolio> {
