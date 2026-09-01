@@ -35,6 +35,8 @@ public partial class AddFinanceSettlementDimensions : Migration
                 FunctionalAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
                 ExchangeRateId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                 ExchangeRate = table.Column<decimal>(type: "decimal(18,6)", nullable: false),
+                ComparisonExchangeRateId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                ComparisonExchangeRate = table.Column<decimal>(type: "decimal(18,6)", nullable: true),
                 EvidenceVersion = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false, defaultValue: "1.0"),
                 IsFinalResidualRecipient = table.Column<bool>(type: "bit", nullable: false),
                 RoundingResidualTransactionAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),

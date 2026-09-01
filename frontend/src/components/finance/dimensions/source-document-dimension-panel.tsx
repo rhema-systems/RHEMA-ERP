@@ -14,6 +14,7 @@ import {
 } from './transaction-dimension-editor';
 import type {
   FinanceDimensionCertificationState,
+  FinanceSettlementDimensionComponent,
   FinanceSourceDocumentDimension,
 } from '@/types/finance';
 
@@ -201,6 +202,47 @@ export function SourceDocumentDimensionEvidence({
           {warning}
         </p>
       ))}
+    </div>
+  );
+}
+
+export function SettlementDimensionEvidence({
+  evidence = [],
+}: {
+  evidence?: FinanceSettlementDimensionComponent[];
+}) {
+  if (evidence.length === 0) return null;
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium">Settlement dimension evidence</h3>
+        <Badge variant="outline">{evidence.length} component lines</Badge>
+      </div>
+      <div className="space-y-2">
+        {evidence.map((item) => (
+          <div key={item.id} className="rounded-md bg-muted/40 p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium">{item.componentType}</span>
+              {item.evidenceFrozenAt && <Badge variant="secondary">Frozen evidence</Badge>}
+            </div>
+            <p className="mt-1 text-muted-foreground">
+              {item.transactionCurrencyCode} {item.transactionAmount.toFixed(2)} · Functional{' '}
+              {item.functionalAmount.toFixed(2)}
+              {item.isFinalResidualRecipient ? ' · final residual line' : ''}
+            </p>
+            <p className="mt-1">
+              {item.dimensionValues.length
+                ? item.dimensionValues
+                    .map(
+                      (value) =>
+                        `${value.dimensionCode} (${value.dimensionName}): ${value.valueCode} — ${value.valueName}`,
+                    )
+                    .join(' · ')
+                : 'No dimensions assigned'}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

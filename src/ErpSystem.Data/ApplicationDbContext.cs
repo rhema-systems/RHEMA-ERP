@@ -5521,7 +5521,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<SupplierDebitNoteApplication>(entity =>
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
         builder.Entity<FinanceSettlementDimensionComponent>(entity =>
-            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
+        {
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.ComparisonExchangeRate).HasColumnType("decimal(18,6)");
+        });
         ConfigureSalesAllocationPrecision(builder);
         builder.ApplyConfiguration(new AccountBalanceConfiguration());
 

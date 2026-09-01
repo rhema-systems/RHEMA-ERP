@@ -230,6 +230,62 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
         return result;
     }
 
+    public async Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolvePostingDimensionsAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
+        Guid postingAccountId,
+        DateTime postingDate,
+        CancellationToken cancellationToken = default)
+    {
+        var assignments = await LoadAssignmentsAsync(producer, sourceDocumentId, cancellationToken);
+        var assignment = assignments.SingleOrDefault(item => item.SourceLineId == sourceLineId)
+            ?? throw new InvalidOperationException(
+                "The source line has no trusted Finance dimension provenance.");
+        IReadOnlyList<FinancePostingDimensionValueDto> inherited;
+        if (assignment.FinanceDimensionSnapshotId is Guid snapshotId)
+        {
+            inherited = await _db.FinanceDimensionSnapshotItems.AsNoTracking()
+                .Where(item => item.TenantId == TenantId
+                    && item.FinanceDimensionSnapshotId == snapshotId && !item.IsDeleted)
+                .OrderBy(item => item.DimensionCodeSnapshot)
+                .Select(item => new FinancePostingDimensionValueDto
+                {
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    ValueCode = item.DimensionValueCodeSnapshot
+                })
+                .ToArrayAsync(cancellationToken);
+        }
+        else if (assignment.FinanceDimensionSetId is Guid setId)
+        {
+            inherited = await ValuesForSetAsync(setId, cancellationToken);
+        }
+        else
+        {
+            inherited = Array.Empty<FinancePostingDimensionValueDto>();
+        }
+
+        var rules = await _dimensions.GetSourceLineRulesAsync(
+            producer, postingAccountId, postingDate, cancellationToken);
+        var serverOwnedCodes = rules.Where(item => item.RuleType is "Fixed" or "Prohibited")
+            .Select(item => item.FinanceDimensionDefinition.Code)
+            .ToHashSet(StringComparer.Ordinal);
+        var eligible = inherited.Where(item => !serverOwnedCodes.Contains(item.DimensionCode)).ToArray();
+        var resolved = await _dimensions.ResolveSourceLineAsync(
+            producer, postingAccountId, postingDate, eligible,
+            await CertificationStateAsync(producer, cancellationToken),
+            refreshPersistedFixedValues: true,
+            cancellationToken);
+        if (resolved.ReadinessWarnings.Any(message =>
+                message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "Required Finance dimensions are missing from a derived source posting line.");
+        await _db.SaveChangesAsync(cancellationToken);
+        return resolved.DimensionSet is null
+            ? Array.Empty<FinancePostingDimensionValueDto>()
+            : ToPostingValues(resolved.DimensionSet.Items);
+    }
+
     public async Task MarkBudgetEvidenceCurrentAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,

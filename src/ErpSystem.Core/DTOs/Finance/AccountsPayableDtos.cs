@@ -600,6 +600,9 @@ public class VendorPaymentDto
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
     public List<SupplierDebitNoteApplicationDto> SupplierDebitNoteApplications { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+    public IReadOnlyList<FinanceSettlementDimensionComponentDto> SettlementDimensions { get; set; } =
+        Array.Empty<FinanceSettlementDimensionComponentDto>();
 }
 
 /// <summary>
@@ -654,6 +657,13 @@ public class VendorPaymentCreateDto
     public DateTime? WithholdingCertificateDate { get; set; }
 
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// Optional document default and, for an unallocated supplier advance, its authoritative
+    /// economic-line dimensions. Allocated invoice dimensions are inherited server-side and
+    /// cannot be supplied through this payload.
+    /// </summary>
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 
     /// <summary>
     /// Optional: allocations to create immediately with the payment.

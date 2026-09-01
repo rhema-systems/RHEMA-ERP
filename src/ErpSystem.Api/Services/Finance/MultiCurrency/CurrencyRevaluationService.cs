@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -24,6 +25,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
     private readonly IFinancePostingEngine _financePostingEngine;
     private readonly ILogger<CurrencyRevaluationService> _logger;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IFinancePaymentDimensionAdapter? _paymentDimensions;
 
     public CurrencyRevaluationService(
         ApplicationDbContext context,
@@ -31,7 +33,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         ITenantSettingsService tenantSettingsService,
         IFinancePostingEngine financePostingEngine,
         ILogger<CurrencyRevaluationService> logger,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IFinancePaymentDimensionAdapter? paymentDimensions = null)
     {
         _context = context;
         _currentUserService = currentUserService;
@@ -39,6 +42,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         _financePostingEngine = financePostingEngine;
         _logger = logger;
         _financeAuditService = financeAuditService;
+        _paymentDimensions = paymentDimensions;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -687,17 +691,35 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             : await ResolveRequiredFxAccountAsync(tenantId, settings.RealizedFxLossAccountId, "realized FX loss account", FinanceAuditEvents.FxPostingBlockedInvalidConfiguration, cancellationToken);
 
         var amount = Math.Abs(delta);
-        var postingLines = gainLossType == "Loss"
-            ? new[]
-            {
-                BuildFunctionalPostingLine(gainLossAccount.Id, $"AP realized FX loss - {payment.PaymentNumber}", amount, 0m, 1, "FX-Realized-Loss"),
-                BuildFunctionalPostingLine(basis.ControlAccountId, $"AP realized FX loss - {payment.PaymentNumber}", 0m, amount, 2, "FX-AP-Control")
-            }
-            : new[]
-            {
-                BuildFunctionalPostingLine(basis.ControlAccountId, $"AP realized FX gain - {payment.PaymentNumber}", amount, 0m, 1, "FX-AP-Control"),
-                BuildFunctionalPostingLine(gainLossAccount.Id, $"AP realized FX gain - {payment.PaymentNumber}", 0m, amount, 2, "FX-Realized-Gain")
-            };
+        var dimensionEvidence = await RequireApRealizedFxDimensionEvidenceAsync(
+            payment.Id, allocation.Id, delta, cancellationToken);
+        var postingLines = new List<FinancePostingLineDto>();
+        var lineNumber = 1;
+        if (gainLossType == "Gain")
+            postingLines.Add(BuildFunctionalPostingLine(
+                basis.ControlAccountId, $"AP realized FX gain - {payment.PaymentNumber}",
+                amount, 0m, lineNumber++, "FX-AP-Control"));
+        foreach (var component in dimensionEvidence)
+        {
+            var componentAmount = Math.Abs(component.FunctionalAmount);
+            var dimensions = _paymentDimensions is null
+                ? Array.Empty<FinancePostingDimensionValueDto>()
+                : await _paymentDimensions.ResolveVendorPostingDimensionsAsync(
+                    component.Id, gainLossAccount.Id, payment.PaymentDate, cancellationToken);
+            postingLines.Add(BuildFunctionalPostingLine(
+                gainLossAccount.Id,
+                $"AP realized FX {gainLossType.ToLowerInvariant()} - {payment.PaymentNumber}",
+                gainLossType == "Loss" ? componentAmount : 0m,
+                gainLossType == "Gain" ? componentAmount : 0m,
+                lineNumber++,
+                gainLossType == "Loss" ? "FX-Realized-Loss" : "FX-Realized-Gain",
+                component.OriginatingSourceLineId,
+                dimensions));
+        }
+        if (gainLossType == "Loss")
+            postingLines.Add(BuildFunctionalPostingLine(
+                basis.ControlAccountId, $"AP realized FX loss - {payment.PaymentNumber}",
+                0m, amount, lineNumber, "FX-AP-Control"));
 
         await RecordFxAuditAsync(
             FinanceAuditEvents.RealizedFxCalculated,
@@ -872,17 +894,35 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             : await ResolveRequiredFxAccountAsync(tenantId, settings.RealizedFxLossAccountId, "realized FX loss account", FinanceAuditEvents.FxPostingBlockedInvalidConfiguration, cancellationToken);
 
         var amount = Math.Abs(delta);
-        var postingLines = gainLossType == "Gain"
-            ? new[]
-            {
-                BuildFunctionalPostingLine(basis.ControlAccountId, $"AR realized FX gain - {payment.PaymentNumber}", amount, 0m, 1, "FX-AR-Control"),
-                BuildFunctionalPostingLine(gainLossAccount.Id, $"AR realized FX gain - {payment.PaymentNumber}", 0m, amount, 2, "FX-Realized-Gain")
-            }
-            : new[]
-            {
-                BuildFunctionalPostingLine(gainLossAccount.Id, $"AR realized FX loss - {payment.PaymentNumber}", amount, 0m, 1, "FX-Realized-Loss"),
-                BuildFunctionalPostingLine(basis.ControlAccountId, $"AR realized FX loss - {payment.PaymentNumber}", 0m, amount, 2, "FX-AR-Control")
-            };
+        var dimensionEvidence = await RequireArRealizedFxDimensionEvidenceAsync(
+            payment.Id, allocation.Id, delta, cancellationToken);
+        var postingLines = new List<FinancePostingLineDto>();
+        var lineNumber = 1;
+        if (gainLossType == "Gain")
+            postingLines.Add(BuildFunctionalPostingLine(
+                basis.ControlAccountId, $"AR realized FX gain - {payment.PaymentNumber}",
+                amount, 0m, lineNumber++, "FX-AR-Control"));
+        foreach (var component in dimensionEvidence)
+        {
+            var componentAmount = Math.Abs(component.FunctionalAmount);
+            var dimensions = _paymentDimensions is null
+                ? Array.Empty<FinancePostingDimensionValueDto>()
+                : await _paymentDimensions.ResolveCustomerPostingDimensionsAsync(
+                    component.Id, gainLossAccount.Id, payment.PaymentDate, cancellationToken);
+            postingLines.Add(BuildFunctionalPostingLine(
+                gainLossAccount.Id,
+                $"AR realized FX {gainLossType.ToLowerInvariant()} - {payment.PaymentNumber}",
+                gainLossType == "Loss" ? componentAmount : 0m,
+                gainLossType == "Gain" ? componentAmount : 0m,
+                lineNumber++,
+                gainLossType == "Loss" ? "FX-Realized-Loss" : "FX-Realized-Gain",
+                component.OriginatingSourceLineId,
+                dimensions));
+        }
+        if (gainLossType == "Loss")
+            postingLines.Add(BuildFunctionalPostingLine(
+                basis.ControlAccountId, $"AR realized FX loss - {payment.PaymentNumber}",
+                0m, amount, lineNumber, "FX-AR-Control"));
 
         await RecordFxAuditAsync(
             FinanceAuditEvents.RealizedFxCalculated,
@@ -1374,22 +1414,97 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         };
     }
 
+    private async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>>
+        RequireApRealizedFxDimensionEvidenceAsync(
+            Guid paymentId,
+            Guid allocationId,
+            decimal expectedSignedAmount,
+            CancellationToken cancellationToken)
+    {
+        if (_paymentDimensions is null)
+            return new[]
+            {
+                new FinanceSettlementDimensionComponentDto
+                {
+                    SettlementSourceLineId = allocationId,
+                    OriginatingSourceLineId = allocationId,
+                    ComponentType = FinanceSettlementComponentType.RealizedFx,
+                    FunctionalAmount = expectedSignedAmount,
+                    TransactionCurrencyCode = "FX",
+                    ExchangeRate = 1m
+                }
+            };
+        var rows = (await _paymentDimensions.GetVendorPaymentAsync(paymentId, cancellationToken))
+            .Where(item => item.SettlementSourceLineId == allocationId
+                && item.ComponentType == FinanceSettlementComponentType.RealizedFx)
+            .OrderBy(item => item.OriginatingSourceLineId)
+            .ToArray();
+        RequireRealizedFxEvidence(rows, expectedSignedAmount, allocationId);
+        return rows;
+    }
+
+    private async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>>
+        RequireArRealizedFxDimensionEvidenceAsync(
+            Guid paymentId,
+            Guid allocationId,
+            decimal expectedSignedAmount,
+            CancellationToken cancellationToken)
+    {
+        if (_paymentDimensions is null)
+            return new[]
+            {
+                new FinanceSettlementDimensionComponentDto
+                {
+                    SettlementSourceLineId = allocationId,
+                    OriginatingSourceLineId = allocationId,
+                    ComponentType = FinanceSettlementComponentType.RealizedFx,
+                    FunctionalAmount = expectedSignedAmount,
+                    TransactionCurrencyCode = "FX",
+                    ExchangeRate = 1m
+                }
+            };
+        var rows = (await _paymentDimensions.GetCustomerPaymentAsync(paymentId, cancellationToken))
+            .Where(item => item.SettlementSourceLineId == allocationId
+                && item.ComponentType == FinanceSettlementComponentType.RealizedFx)
+            .OrderBy(item => item.OriginatingSourceLineId)
+            .ToArray();
+        RequireRealizedFxEvidence(rows, expectedSignedAmount, allocationId);
+        return rows;
+    }
+
+    private static void RequireRealizedFxEvidence(
+        IReadOnlyCollection<FinanceSettlementDimensionComponentDto> evidence,
+        decimal expectedSignedAmount,
+        Guid allocationId)
+    {
+        if (evidence.Count == 0)
+            throw new InvalidOperationException(
+                $"Realized FX dimension evidence is missing for settlement allocation {allocationId}.");
+        if (RoundMoney(evidence.Sum(item => item.FunctionalAmount)) != RoundMoney(expectedSignedAmount))
+            throw new InvalidOperationException(
+                $"Realized FX dimension evidence is stale for settlement allocation {allocationId}.");
+    }
+
     private static FinancePostingLineDto BuildFunctionalPostingLine(
         Guid accountId,
         string description,
         decimal debitAmount,
         decimal creditAmount,
         int lineNumber,
-        string tag)
+        string tag,
+        Guid? sourceDocumentLineId = null,
+        IReadOnlyList<FinancePostingDimensionValueDto>? dimensions = null)
     {
         return new FinancePostingLineDto
         {
             AccountId = accountId,
+            SourceDocumentLineId = sourceDocumentLineId,
             Description = description,
             DebitAmount = RoundMoney(debitAmount),
             CreditAmount = RoundMoney(creditAmount),
             LineNumber = lineNumber,
-            TransactionTag = tag
+            TransactionTag = tag,
+            Dimensions = dimensions ?? Array.Empty<FinancePostingDimensionValueDto>()
         };
     }
 

@@ -20,13 +20,16 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
     private const string EvidenceVersion = "1.0";
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly FinanceDimensionAdministrationService _dimensions;
 
     public FinanceSettlementDimensionService(
         ApplicationDbContext db,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        FinanceDimensionAdministrationService dimensions)
     {
         _db = db;
         _currentUser = currentUser;
+        _dimensions = dimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -108,6 +111,8 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
             entity.FunctionalAmount = item.FunctionalAmount;
             entity.ExchangeRateId = item.ExchangeRateId;
             entity.ExchangeRate = item.ExchangeRate;
+            entity.ComparisonExchangeRateId = item.ComparisonExchangeRateId;
+            entity.ComparisonExchangeRate = item.ComparisonExchangeRate;
             entity.EvidenceVersion = EvidenceVersion;
             entity.IsFinalResidualRecipient = item.IsFinalResidualRecipient;
             entity.RoundingResidualTransactionAmount = item.RoundingResidualTransactionAmount;
@@ -122,6 +127,76 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
         return await GetAsync(producer, sourceDocumentId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolvePostingDimensionsAsync(
+        FinancePostingProducerContext producer,
+        Guid componentEvidenceId,
+        Guid postingAccountId,
+        DateTime postingDate,
+        CancellationToken cancellationToken = default)
+    {
+        var route = RequireSettlementRoute(producer);
+        var evidence = await _db.FinanceSettlementDimensionComponents.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == componentEvidenceId
+                && item.TenantId == TenantId
+                && item.RouteId == route.Id
+                && !item.IsDeleted,
+                cancellationToken)
+            ?? throw new KeyNotFoundException("Settlement dimension component evidence was not found for this tenant and route.");
+        var inherited = evidence.FinanceDimensionSnapshotId.HasValue
+            ? await _db.FinanceDimensionSnapshotItems.AsNoTracking()
+                .Where(item => item.TenantId == TenantId
+                    && item.FinanceDimensionSnapshotId == evidence.FinanceDimensionSnapshotId.Value
+                    && !item.IsDeleted)
+                .OrderBy(item => item.DimensionCodeSnapshot)
+                .Select(item => new FinancePostingDimensionValueDto
+                {
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    ValueCode = item.DimensionValueCodeSnapshot
+                })
+                .ToArrayAsync(cancellationToken)
+            : evidence.FinanceDimensionSetId.HasValue
+                ? await _db.FinanceDimensionSetItems.AsNoTracking()
+                    .Where(item => item.TenantId == TenantId
+                        && item.FinanceDimensionSetId == evidence.FinanceDimensionSetId.Value
+                        && !item.IsDeleted)
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .Select(item => new FinancePostingDimensionValueDto
+                    {
+                        DimensionCode = item.DimensionCodeSnapshot,
+                        ValueCode = item.DimensionValueCodeSnapshot
+                    })
+                    .ToArrayAsync(cancellationToken)
+                : Array.Empty<FinancePostingDimensionValueDto>();
+        var rules = await _dimensions.GetSourceLineRulesAsync(
+            producer, postingAccountId, postingDate, cancellationToken);
+        var serverOwnedCodes = rules.Where(item => item.RuleType is "Fixed" or "Prohibited")
+            .Select(item => item.FinanceDimensionDefinition.Code)
+            .ToHashSet(StringComparer.Ordinal);
+        var eligible = inherited.Where(item => !serverOwnedCodes.Contains(item.DimensionCode)).ToArray();
+        var state = await GetCertificationStateAsync(route, cancellationToken);
+        var resolved = await _dimensions.ResolveSourceLineAsync(
+            producer,
+            postingAccountId,
+            postingDate,
+            eligible,
+            state,
+            refreshPersistedFixedValues: true,
+            cancellationToken);
+        if (resolved.ReadinessWarnings.Any(message =>
+                message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "Required Finance dimensions are missing from a derived settlement posting line.");
+        if (resolved.DimensionSet is null)
+            return Array.Empty<FinancePostingDimensionValueDto>();
+        await _db.SaveChangesAsync(cancellationToken);
+        return resolved.DimensionSet.Items.OrderBy(item => item.DimensionCodeSnapshot)
+            .Select(item => new FinancePostingDimensionValueDto
+            {
+                DimensionCode = item.DimensionCodeSnapshot,
+                ValueCode = item.DimensionValueCodeSnapshot
+            }).ToArray();
+    }
+
     public async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> GetAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
@@ -130,7 +205,9 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
         var route = RequireSettlementRoute(producer);
         var rows = await _db.FinanceSettlementDimensionComponents.AsNoTracking()
             .Include(item => item.FinanceDimensionSet)
+                .ThenInclude(item => item!.Items)
             .Include(item => item.FinanceDimensionSnapshot)
+                .ThenInclude(item => item!.Items)
             .Where(item => item.TenantId == TenantId
                 && item.RouteId == route.Id
                 && item.SourceDocumentId == sourceDocumentId
@@ -199,11 +276,6 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
     {
         if (allocation.SettlementSourceLineId == Guid.Empty)
             throw new InvalidOperationException("Every settlement allocation requires a stable source-line id.");
-        if (allocation.ExchangeRate <= 0m)
-            throw new InvalidOperationException("Settlement exchange-rate evidence must be greater than zero.");
-        var currency = allocation.TransactionCurrencyCode?.Trim().ToUpperInvariant();
-        if (currency?.Length != 3)
-            throw new InvalidOperationException("Settlement transaction currency must be a three-character code.");
         var origins = allocation.OriginatingLines
             .OrderBy(item => item.OriginatingSourceLineId)
             .ToArray();
@@ -217,6 +289,11 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
 
         foreach (var component in components.OrderBy(item => item.ComponentType))
         {
+            var currency = component.TransactionCurrencyCode?.Trim().ToUpperInvariant();
+            if (currency?.Length != 3)
+                throw new InvalidOperationException("Settlement component currency must be a three-character code.");
+            if (component.ExchangeRate <= 0m || component.ComparisonExchangeRate is <= 0m)
+                throw new InvalidOperationException("Settlement component exchange-rate evidence must be greater than zero.");
             var transactionShares = Allocate(component.TransactionAmount, origins);
             var functionalShares = Allocate(component.FunctionalAmount, origins);
             for (var index = 0; index < origins.Length; index++)
@@ -237,8 +314,10 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
                     currency,
                     transactionShares[index].Amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
                     functionalShares[index].Amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
-                    allocation.ExchangeRateId?.ToString("N") ?? "NONE",
-                    allocation.ExchangeRate.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture),
+                    component.ExchangeRateId?.ToString("N") ?? "NONE",
+                    component.ExchangeRate.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture),
+                    component.ComparisonExchangeRateId?.ToString("N") ?? "NONE",
+                    component.ComparisonExchangeRate?.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture) ?? "NONE",
                     transactionShares[index].Residual.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
                     functionalShares[index].Residual.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)));
                 yield return new DesiredComponent(
@@ -252,8 +331,10 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
                     currency,
                     transactionShares[index].Amount,
                     functionalShares[index].Amount,
-                    allocation.ExchangeRateId,
-                    allocation.ExchangeRate,
+                    component.ExchangeRateId,
+                    component.ExchangeRate,
+                    component.ComparisonExchangeRateId,
+                    component.ComparisonExchangeRate,
                     index == origins.Length - 1,
                     transactionShares[index].Residual,
                     functionalShares[index].Residual,
@@ -343,11 +424,37 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
             ?? item.FinanceDimensionSet?.DisplayValue,
         DimensionHash = item.FinanceDimensionSnapshot?.CombinationHashSnapshot
             ?? item.FinanceDimensionSet?.CombinationHash,
+        DimensionValues = item.FinanceDimensionSnapshot?.Items
+            .Where(value => !value.IsDeleted)
+            .OrderBy(value => value.DimensionCodeSnapshot)
+            .Select(value => new FinanceSourceDimensionValueDto
+            {
+                DimensionCode = value.DimensionCodeSnapshot,
+                DimensionName = value.DimensionNameSnapshot,
+                ValueCode = value.DimensionValueCodeSnapshot,
+                ValueName = value.DimensionValueNameSnapshot,
+                RuleType = value.RuleTypeSnapshot,
+                IsReadOnly = true
+            }).ToArray()
+            ?? item.FinanceDimensionSet?.Items
+                .Where(value => !value.IsDeleted)
+                .OrderBy(value => value.DimensionCodeSnapshot)
+                .Select(value => new FinanceSourceDimensionValueDto
+                {
+                    DimensionCode = value.DimensionCodeSnapshot,
+                    DimensionName = value.DimensionNameSnapshot,
+                    ValueCode = value.DimensionValueCodeSnapshot,
+                    ValueName = value.DimensionValueNameSnapshot,
+                    IsReadOnly = true
+                }).ToArray()
+            ?? Array.Empty<FinanceSourceDimensionValueDto>(),
         TransactionCurrencyCode = item.TransactionCurrencyCode,
         TransactionAmount = item.TransactionAmount,
         FunctionalAmount = item.FunctionalAmount,
         ExchangeRateId = item.ExchangeRateId,
         ExchangeRate = item.ExchangeRate,
+        ComparisonExchangeRateId = item.ComparisonExchangeRateId,
+        ComparisonExchangeRate = item.ComparisonExchangeRate,
         IsFinalResidualRecipient = item.IsFinalResidualRecipient,
         RoundingResidualTransactionAmount = item.RoundingResidualTransactionAmount,
         RoundingResidualFunctionalAmount = item.RoundingResidualFunctionalAmount,
@@ -374,6 +481,8 @@ public sealed class FinanceSettlementDimensionService : IFinanceSettlementDimens
         decimal FunctionalAmount,
         Guid? ExchangeRateId,
         decimal ExchangeRate,
+        Guid? ComparisonExchangeRateId,
+        decimal? ComparisonExchangeRate,
         bool IsFinalResidualRecipient,
         decimal RoundingResidualTransactionAmount,
         decimal RoundingResidualFunctionalAmount,

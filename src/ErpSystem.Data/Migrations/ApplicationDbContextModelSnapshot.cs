@@ -15166,6 +15166,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("ComponentType")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("ComparisonExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("ComparisonExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ContractVersion")
                         .IsRequired()
                         .HasMaxLength(20)

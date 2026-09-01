@@ -25,4 +25,11 @@ public interface IFinanceSettlementDimensionService
         Guid sourceDocumentId,
         IReadOnlyCollection<Guid> authoritativeSettlementSourceLineIds,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolvePostingDimensionsAsync(
+        FinancePostingProducerContext producer,
+        Guid componentEvidenceId,
+        Guid postingAccountId,
+        DateTime postingDate,
+        CancellationToken cancellationToken = default);
 }

@@ -4,8 +4,13 @@ namespace ErpSystem.Core.DTOs.Finance;
 
 public sealed record FinanceSettlementComponentAmountInput(
     FinanceSettlementComponentType ComponentType,
+    string TransactionCurrencyCode,
     decimal TransactionAmount,
-    decimal FunctionalAmount);
+    decimal FunctionalAmount,
+    Guid? ExchangeRateId,
+    decimal ExchangeRate,
+    Guid? ComparisonExchangeRateId = null,
+    decimal? ComparisonExchangeRate = null);
 
 public sealed record FinanceSettlementOriginLineInput(
     Guid OriginatingSourceLineId,
@@ -21,9 +26,6 @@ public sealed record FinanceSettlementAllocationInput(
     Guid SettlementSourceLineId,
     Guid? SettlementAllocationId,
     Guid? OriginatingDocumentId,
-    string TransactionCurrencyCode,
-    Guid? ExchangeRateId,
-    decimal ExchangeRate,
     IReadOnlyList<FinanceSettlementComponentAmountInput> Components,
     IReadOnlyList<FinanceSettlementOriginLineInput> OriginatingLines);
 
@@ -39,11 +41,15 @@ public sealed class FinanceSettlementDimensionComponentDto
     public Guid? FinanceDimensionSnapshotId { get; set; }
     public string? DimensionCombination { get; set; }
     public string? DimensionHash { get; set; }
+    public IReadOnlyList<FinanceSourceDimensionValueDto> DimensionValues { get; set; } =
+        Array.Empty<FinanceSourceDimensionValueDto>();
     public string TransactionCurrencyCode { get; set; } = string.Empty;
     public decimal TransactionAmount { get; set; }
     public decimal FunctionalAmount { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public decimal ExchangeRate { get; set; }
+    public Guid? ComparisonExchangeRateId { get; set; }
+    public decimal? ComparisonExchangeRate { get; set; }
     public bool IsFinalResidualRecipient { get; set; }
     public decimal RoundingResidualTransactionAmount { get; set; }
     public decimal RoundingResidualFunctionalAmount { get; set; }

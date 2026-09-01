@@ -1,5 +1,5 @@
 import type { ControlledDocumentIssueSummary } from '@/types/controlled-documents';
-import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+import type { FinanceSettlementDimensionComponent, FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
 
 export interface Customer {
     id: string;
@@ -187,6 +187,8 @@ export interface CustomerPayment {
     bouncedReason?: string;
     createdAt: string;
     allocations?: PaymentAllocation[];
+    financeDimensions?: FinanceSourceDocumentDimension;
+    settlementDimensions?: FinanceSettlementDimensionComponent[];
 }
 
 export interface PaymentCreateRequest {
@@ -216,6 +218,7 @@ export interface PaymentCreateRequest {
     notes?: string;
     isCreditNote?: boolean;
     allocations?: InvoiceAllocationRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface PaymentAllocation {

@@ -46,6 +46,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const paymentSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
@@ -148,6 +150,8 @@ export default function NewReceiptPage() {
     // retain its own native amount and approved functional conversion.
     const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
     const [vatWithholdingAllocations, setVatWithholdingAllocations] = useState<Record<string, number>>({});
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Fetch customers
     const { data: customersData } = useQuery({
@@ -519,6 +523,11 @@ export default function NewReceiptPage() {
                 paymentDate: data.paymentDate.toISOString(),
                 transactionReference: data.referenceNumber,
                 allocations: allocationRows.length > 0 ? allocationRows : undefined,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: [],
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
 
             toast({ title: 'Success', description: 'Customer receipt recorded successfully' });
@@ -536,6 +545,12 @@ export default function NewReceiptPage() {
 
     const currentAmount = form.watch('totalAmount');
     const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const hasSettlementAllocations = [
+        allocations,
+        discountAllocations,
+        withholdingAllocations,
+        vatWithholdingAllocations,
+    ].some(values => Object.values(values).some(amount => Number(amount) > 0));
     // Remaining receipt cash is a payment-currency figure, never a sum of mixed invoice values.
     const totalAllocated = outstandingInvoices?.reduce((sum, invoice) => {
         const invoiceAmount = Number(allocations[invoice.id]) || 0;
@@ -889,6 +904,38 @@ export default function NewReceiptPage() {
                         </Button>
                     </CardFooter>
                 </Card>
+
+                {!existingAdvancePaymentId && (
+                    <Card className="md:col-span-3">
+                        <CardHeader>
+                            <CardTitle>Finance coding dimensions</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'AR',
+                                    sourceDocumentType: 'CustomerPayment',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.ar.customer-payments.manual',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(form.watch('paymentDate') || new Date(), 'yyyy-MM-dd')}
+                                lines={hasSettlementAllocations
+                                    ? []
+                                    : [{ id: 'customer-advance', accountLabel: 'Customer advance (server-resolved account)' }]}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={{}}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={() => undefined}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                disabled={isSubmitting}
+                            />
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Allocation Section */}
                 <Card className="md:col-span-2">

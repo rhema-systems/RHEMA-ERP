@@ -56,6 +56,15 @@ public sealed class FinanceSettlementDimensionComponent : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1m;
 
+    /// <summary>
+    /// Optional second approved rate needed to reproduce cross-currency cash-versus-invoice or
+    /// historical-carrying-versus-settlement comparisons, including realised FX.
+    /// </summary>
+    public Guid? ComparisonExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? ComparisonExchangeRate { get; set; }
+
     [Required, MaxLength(20)]
     public string EvidenceVersion { get; set; } = "1.0";
 

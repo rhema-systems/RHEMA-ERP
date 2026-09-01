@@ -573,13 +573,48 @@ export interface FinanceSourceDocumentDimension {
     budgetEvidenceUpdatedAt?: string;
 }
 
+export type FinanceSettlementComponentType =
+    | 'Principal'
+    | 'Discount'
+    | 'WithholdingTax'
+    | 'VatWithholdingTax'
+    | 'Fee'
+    | 'WriteOff'
+    | 'RealizedFx';
+
+export interface FinanceSettlementDimensionComponent {
+    id: string;
+    settlementSourceLineId: string;
+    settlementAllocationId?: string;
+    originatingDocumentId?: string;
+    originatingSourceLineId?: string;
+    componentType: FinanceSettlementComponentType;
+    financeDimensionSetId?: string;
+    financeDimensionSnapshotId?: string;
+    dimensionCombination?: string;
+    dimensionHash?: string;
+    dimensionValues: FinanceSourceDimensionValue[];
+    transactionCurrencyCode: string;
+    transactionAmount: number;
+    functionalAmount: number;
+    exchangeRateId?: string;
+    exchangeRate: number;
+    comparisonExchangeRateId?: string;
+    comparisonExchangeRate?: number;
+    isFinalResidualRecipient: boolean;
+    roundingResidualTransactionAmount: number;
+    roundingResidualFunctionalAmount: number;
+    evidenceHash: string;
+    evidenceFrozenAt?: string;
+}
+
 export interface FinanceDimensionRouteCertification {
     routeId: FinanceDimensionRouteId;
     producerModule: string;
     sourceRoute: string;
     documentType: string;
     contractVersion: string;
-    grain: 'JournalLine' | 'SourceDocumentLine';
+    grain: 'JournalLine' | 'SourceDocumentLine' | 'SettlementAllocationLine';
     supportsDocumentDefaults: boolean;
     owner: string;
     notes: string;

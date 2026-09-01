@@ -1,4 +1,4 @@
-import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+import type { FinanceSettlementDimensionComponent, FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
 
 export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
@@ -489,6 +489,8 @@ export interface VendorPayment {
     createdAt: string;
     allocations: VendorPaymentAllocation[];
     supplierDebitNoteApplications?: SupplierDebitNoteApplication[];
+    financeDimensions?: FinanceSourceDocumentDimension;
+    settlementDimensions?: FinanceSettlementDimensionComponent[];
 }
 
 export interface SupplierDebitNoteLine {
@@ -659,6 +661,7 @@ export interface VendorPaymentCreateRequest {
     withholdingCertificateDate?: string;
     notes?: string;
     allocations?: VendorPaymentAllocationCreateRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface VendorPaymentAllocation {

@@ -51,6 +51,8 @@ import {
     VendorPaymentReadinessControl,
 } from '@/components/finance/VendorPaymentReadinessControl';
 import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const paymentSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
@@ -126,6 +128,8 @@ export default function NewVendorPaymentPage() {
     const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
     const [withholdingCalculation, setWithholdingCalculation] = useState<WhtCalculationResult | null>(null);
     const [isCalculatingWithholding, setIsCalculatingWithholding] = useState(false);
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     const { data: suppliersData } = useQuery({
         queryKey: ['business-partners', 'ap-suppliers'],
@@ -571,6 +575,11 @@ export default function NewVendorPaymentPage() {
                 withholdingTaxAmount: requiresServerFunctionalWithholding ? 0 : totalWithholdingTax,
                 withholdingTaxBaseAmount: requiresServerFunctionalWithholding ? 0 : verifiedWithholding?.taxableBase ?? 0,
                 allocations: paymentAllocations.length > 0 ? paymentAllocations : undefined,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: [],
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
 
             toast({ title: 'Success', description: 'Vendor payment recorded successfully' });
@@ -1129,6 +1138,37 @@ export default function NewVendorPaymentPage() {
                         )}
                     </CardContent>
                 </Card>
+                {!existingAdvancePaymentId && (
+                    <Card className="md:col-span-3">
+                        <CardHeader><CardTitle>Finance coding dimensions</CardTitle></CardHeader>
+                        <CardContent>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'AP',
+                                    sourceDocumentType: 'VendorPayment',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.ap.vendor-payments.manual',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(form.watch('paymentDate') || new Date(), 'yyyy-MM-dd')}
+                                lines={Object.values(allocations).some(amount => Number(amount) > 0)
+                                    || Object.values(discountAllocations).some(amount => Number(amount) > 0)
+                                    || Object.values(withholdingAllocations).some(amount => Number(amount) > 0)
+                                    ? []
+                                    : [{ id: 'supplier-advance', accountLabel: 'Supplier advance (server-resolved account)' }]}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={{}}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={() => undefined}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                disabled={isSubmitting}
+                            />
+                        </CardContent>
+                    </Card>
+                )}
             </div>
         </div>
     );

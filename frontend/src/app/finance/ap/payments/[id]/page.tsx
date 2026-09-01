@@ -47,6 +47,10 @@ import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-outpu
 import { workflowApiService } from '@/services/workflow-api.service';
 import { InvoicePaymentSodControl } from '@/components/finance/InvoicePaymentSodControl';
 import { SupplierDebitNoteApplicationsCard } from '@/components/finance/ap/SupplierDebitNoteApplicationsCard';
+import {
+    SettlementDimensionEvidence,
+    SourceDocumentDimensionEvidence,
+} from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
@@ -627,6 +631,11 @@ export default function VendorPaymentDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <div className="no-print space-y-4">
+                <SourceDocumentDimensionEvidence evidence={payment.financeDimensions} />
+                <SettlementDimensionEvidence evidence={payment.settlementDimensions} />
+            </div>
 
             {payment.journalEntryId && (
                 <Card className="no-print">
