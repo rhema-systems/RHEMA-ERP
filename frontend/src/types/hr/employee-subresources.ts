@@ -318,7 +318,12 @@ export interface EmployeeSkill {
   certificationDate?: string | null;
   certificationExpiryDate?: string | null;
   certificationNumber?: string | null;
+  /** Free text, kept for certifiers that are not in the catalogue. */
   certifyingBody?: string | null;
+  /** The catalogued certifier, where there is one. */
+  certifyingBodyId?: string | null;
+  /** Resolved by the server — the reads Include the body, so this is not a silent null. */
+  certifyingBodyName?: string | null;
   isVerified: boolean;
   isCertificationExpired: boolean;
   notes?: string | null;
@@ -333,6 +338,7 @@ export interface CreateEmployeeSkillRequest {
   certificationExpiryDate?: string | null;
   certificationNumber?: string | null;
   certifyingBody?: string | null;
+  certifyingBodyId?: string | null;
   notes?: string | null;
 }
 
@@ -345,6 +351,12 @@ export interface UpdateEmployeeSkillRequest {
   certificationExpiryDate?: string | null;
   certificationNumber?: string | null;
   certifyingBody?: string | null;
+  /**
+   * ⚠ Applied UNCONDITIONALLY by the service, unlike every other field here. Those treat null as
+   * "unchanged", which means they can never be cleared; for a picker that would be a trap, so this
+   * one is always sent and null genuinely means "no catalogued body".
+   */
+  certifyingBodyId?: string | null;
   notes?: string | null;
   isVerified?: boolean;
 }

@@ -102,7 +102,9 @@ import {
   Phone,
   Swords,
   BookTemplate,
+  BadgeCheck,
   Hash,
+  ListOrdered,
   Landmark,
   HardHat,
   Bandage,
@@ -3118,6 +3120,11 @@ export const navigationItems: NavItem[] = [
           // manpower budget, and this is the one place that chain can be bypassed.
           { title: 'Establishment', href: '/administration/hr/establishment', icon: ShieldCheck },
           { title: 'Qualifications', href: '/administration/hr/qualifications', icon: GraduationCap },
+          // Lane 3b. The RANK a qualification sits on — QualificationType is a category and cannot
+          // answer "is a Master's above a Diploma", which is what shortlisting and succession ask.
+          { title: 'Qualification Levels', href: '/administration/hr/qualification-levels', icon: ListOrdered },
+          // Lane 3b. Who certified a skill, as a catalogue rather than free text on every row.
+          { title: 'Certifying Bodies', href: '/administration/hr/certifying-bodies', icon: BadgeCheck },
           { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
           // The vocabulary an employee's document file and a position's requirements both speak.
           { title: 'Document Types', href: '/administration/hr/document-types', icon: FileText },

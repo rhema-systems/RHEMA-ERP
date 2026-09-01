@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 
@@ -779,6 +779,10 @@ public static class EmployeeMappingExtensions
             CertificationExpiryDate = s.CertificationExpiryDate,
             CertificationNumber = s.CertificationNumber,
             CertifyingBody = s.CertifyingBody,
+            CertifyingBodyId = s.CertifyingBodyId,
+            // ⚠ Resolved from the navigation, so the READ has to Include CertifyingBodyRef. A name
+            // declared on a DTO and populated by nothing is this module's most repeated defect.
+            CertifyingBodyName = s.CertifyingBodyRef?.Name,
             IsVerified = s.IsVerified,
             IsCertificationExpired = s.CertificationExpiryDate.HasValue && s.CertificationExpiryDate < DateOnly.FromDateTime(DateTime.UtcNow),
             Notes = s.Notes
@@ -795,6 +799,7 @@ public static class EmployeeMappingExtensions
             CertificationExpiryDate = dto.CertificationExpiryDate,
             CertificationNumber = dto.CertificationNumber,
             CertifyingBody = dto.CertifyingBody,
+            CertifyingBodyId = dto.CertifyingBodyId,
             Notes = dto.Notes,
             IsCertified = dto.CertificationDate.HasValue
         };
@@ -808,6 +813,12 @@ public static class EmployeeMappingExtensions
         if (dto.CertificationExpiryDate.HasValue) s.CertificationExpiryDate = dto.CertificationExpiryDate;
         if (dto.CertificationNumber != null) s.CertificationNumber = dto.CertificationNumber;
         if (dto.CertifyingBody != null) s.CertifyingBody = dto.CertifyingBody;
+        // ⚠ Applied UNCONDITIONALLY, unlike its neighbours, and that is deliberate. Every other
+        // field here treats null as "not supplied", which means none of them can ever be CLEARED.
+        // For a free-text box that is merely annoying; for a picker it is a trap — choose the wrong
+        // certifying body once and there would be no way back to "none". The sole caller is the
+        // skill form, which posts the whole record, so "absent" and "cleared" are the same intent.
+        s.CertifyingBodyId = dto.CertifyingBodyId;
         if (dto.Notes != null) s.Notes = dto.Notes;
         if (dto.IsVerified.HasValue) s.IsVerified = dto.IsVerified.Value;
     }

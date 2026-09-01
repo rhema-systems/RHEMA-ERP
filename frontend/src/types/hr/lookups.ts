@@ -34,6 +34,15 @@ export interface Qualification {
   type: QualificationType;
   issuingAuthority?: string | null;
   isActive: boolean;
+  /**
+   * Which rung of the ladder this sits on. Null means unranked.
+   *
+   * ⚠ Not a substitute for `type`, which is a CATEGORY and cannot rank anything.
+   */
+  qualificationLevelId?: string | null;
+  /** Resolved by the server — the read Includes the level so this is never a silent null. */
+  qualificationLevelName?: string | null;
+  qualificationLevelRank?: number | null;
 }
 
 /** The backend uses the same DTO for create and update. */
@@ -44,6 +53,7 @@ export interface QualificationRequest {
   type: QualificationType;
   issuingAuthority?: string | null;
   isActive: boolean;
+  qualificationLevelId?: string | null;
 }
 
 // ── Identification types — api/hr/IdentificationTypes ───────────────────────────

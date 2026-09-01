@@ -1189,6 +1189,9 @@ public class EmployeeService : IEmployeeService
         var repo = _unitOfWork.Repository<EmployeeSkill>();
         var items = await repo.GetQueryable()
             .Include(s => s.Skill)
+            // ⚠ The DTO reports the catalogued certifier's NAME, so every read that builds one has to
+            // load it — including the re-reads after a write, or the response contradicts the list.
+            .Include(s => s.CertifyingBodyRef)
             .Where(s => s.EmployeeId == employeeId)
             .OrderByDescending(s => s.IsVerified)
             .ThenByDescending(s => s.SkillLevel)
@@ -1215,7 +1218,7 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1231,7 +1234,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1258,7 +1261,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1273,7 +1276,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 

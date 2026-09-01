@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
@@ -169,6 +169,13 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var tenantId = GetTenantId();
         var entity = await _jobDescriptionRepository.GetQueryable()
+            // ⚠ SPLIT, not one query. Thirteen sibling collections hang off a job description, and a
+            // single-query include materialises their CARTESIAN PRODUCT — the row count is the
+            // collections multiplied together, not added. It crossed the 30-second command timeout
+            // as fixtures accumulated, and by 2026-09-01 this endpoint returned 500 for every one of
+            // the tenant's 46 documents. Nothing had changed in the code; the data had grown into it,
+            // which is why it passed its own suite when the area closed.
+            .AsSplitQuery()
             .WithLookups()
             .Include(jd => jd.DutyItems)
             .Include(jd => jd.Responsibilities).ThenInclude(r => r.Qualifications).ThenInclude(q => q.Qualification)

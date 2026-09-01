@@ -44,7 +44,13 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.Qualifications)
                 .Include(e => e.ContractDetails)
                 .Include(e => e.Skills)
-                    .ThenInclude(es => es.Skill);
+                    .ThenInclude(es => es.Skill)
+                // ⚠ Paired with the skill include on purpose. EmployeeSkillDto reports the catalogued
+                // certifier's name, and an uneven include — the dedicated skills read resolving it
+                // while the employee detail does not — is how the same row shows a body on one screen
+                // and a blank on another.
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.CertifyingBodyRef);
         }
 
         private IQueryable<Employee> WithFullProfileIncludes(IQueryable<Employee> query)
@@ -70,6 +76,8 @@ namespace ErpSystem.Data.Repositories
                     .ThenInclude(q => q.Country)
                 .Include(e => e.Skills)
                     .ThenInclude(es => es.Skill)
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.CertifyingBodyRef)
 
                 // Documents & history
                 .Include(e => e.IdentificationCards)

@@ -39,8 +39,16 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
-▶ **Recommended next: lane 3b's last two lookups** — the certifying-body and qualification-level
-admin screens plus their two pickers. Everything they need exists; only the screens are missing.
+▶ **Recommended next: lane 3a-ii or lane 6.** Lane 3b is closed.
+
+⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
+`GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job
+descriptions** — a 30-second SQL command timeout. Thirteen sibling collections hang off a job
+description and the read materialised their CARTESIAN PRODUCT in one query. Nothing in the code had
+changed; the data grew into it, which is exactly why area 17/18 could close with its own suite green.
+Fixed with `.AsSplitQuery()`, the house remedy already used 109 times in this codebase.
+**The lesson: a suite that passed at closure does not stay passed — this class of defect arrives
+with row counts, and nothing in the endpoint audit or the coverage instruments can see it coming.**
 
 _(previous note)_ ▶ **finish lane 3b's UI.** Its whole backend landed 2026-09-01 and the expiry
 sweep has its screen, but **five backend surfaces still have no caller**: the certifying-body and
@@ -58,7 +66,7 @@ data-corruption hazard sitting behind a screen nobody has built yet, not a polis
 | Next | Why | Needs a build? |
 | --- | --- | --- |
 | ~~**Lane 5b**~~ — section E is **as done as it can be** | **47 of 49 fields.** Criteria 34 ×2, class 3 **69 ×2**, visa 41 ×2. The last 2 (`BenefitTierId`) need an employee-policy editor, which is **D-13 — a deferral by decision, not a gap**. Nothing here is buildable without reopening that. → pick **3b**, **3d**, **3a-ii** or **lane 6** next. | — |
-| **Lane 3b** — reference-data dimensions | **Two of three dimensions closed.** ID-type lead days + the expiry sweep and its screen ✅ (39 ×2); staff numbering — settings screen, counter panel and the import door — ✅ (49 ×2). **Owed: the certifying-body and qualification-level admin screens, and the two pickers that consume them** (a level picker on qualifications, a certifying-body picker on skills). Their backends and client methods already exist and have no caller. Both migrations applied. ⚠ One decision owed — see § 3b. | yes |
+| ~~**Lane 3b**~~ — reference-data dimensions · ✅ **COMPLETE 2026-09-01** | All three dimensions and both pickers. 39 ×2 + 49 ×2 + 40 ×2. _(was: two of three closed)_ ** ID-type lead days + the expiry sweep and its screen ✅ (39 ×2); staff numbering — settings screen, counter panel and the import door — ✅ (49 ×2). **Owed: the certifying-body and qualification-level admin screens, and the two pickers that consume them** (a level picker on qualifications, a certifying-body picker on skills). Their backends and client methods already exist and have no caller. Both migrations applied. ⚠ One decision owed — see § 3b. | yes |
 | ~~**Lane 3d**~~ — guards and pickers | ✅ **Both schema-free rows done 2026-09-01** (35 assertions ×2). What remains in 3d needs schema or TDC: the exit-interview question set, the labour-law checklist, and bulk benefit application (the excluded `docs/HR/` programme). | — |
 | **Lane 6** — buildable residues | Travel's caller-supplied exchange rate onto Finance (`HrCurrencyBridge` now exists for exactly this), `getCasesForSource`, the portal feedback form. | some |
 
@@ -432,14 +440,30 @@ pair (`HrIdentificationExpirySweep`). Both are applied.
       <br>⚠ **Self-inflicted, caught before the screen:** `EmployeeName`/`EmployeeNumber` were
       declared on the item DTO and set by nothing. Fifth instance of that shape in this module. The
       join is LEFT on purpose — a card outliving its employee row is the case HR most needs.
-- [ ] Certification bodies are free text (`EmployeeSkill.CertifyingBody`) — should be a lookup.
-      <br>Backend done (`CertifyingBody`, in `ReferenceDimensionsController`); **the picker on the
-      skills form and the admin lookup screen are still owed.**
-- [ ] Qualification level is not a dimension. ⚠ `QualificationType` is a **category**, not an
-      academic level — and area 17's closure slice already proved that enum is wider than the TS
-      union claimed. Read the enum before designing the ladder.
-      <br>Backend done (`QualificationLevel`, ranked); **the level picker on the qualification form
-      and the admin lookup screen are still owed.**
+- [x] Certification bodies are free text (`EmployeeSkill.CertifyingBody`) — ✅ **DONE 2026-09-01.**
+      Admin screen at `/administration/hr/certifying-bodies`, picker on the employee skills tab.
+      <br>The free-text column **stays beside** the lookup rather than being replaced: existing rows
+      are free text, and a genuinely one-off certifier does not deserve a catalogue row. The list
+      shows the catalogued name and falls back to the text.
+- [x] Qualification level is not a dimension — ✅ **DONE 2026-09-01.** Admin screen at
+      `/administration/hr/qualification-levels`, picker on the qualification MASTER form (the level
+      lives on `Qualification`, not on `EmployeeQualification`), and a Level column on the
+      catalogue list so the value can be read as well as written.
+      <br>⚠ `QualificationType` is a **category**, not a rank; the two coexist and neither
+      substitutes for the other.
+- [x] **Both dimensions were unreachable, which is the finding.** `Qualification.QualificationLevelId`
+      and `EmployeeSkill.CertifyingBodyId` existed as columns with FKs, indexes and entity docs — and
+      appeared on **no DTO at all**. Settable nowhere, readable nowhere. The lookups' own CRUD was
+      complete, so an audit counting endpoints saw nothing wrong. **40 assertions ×2**
+      (`hr-probation/run-lane3b-lookups.mjs`); sections B and D exist to prove the value survives a
+      round trip through the records the pickers write to.
+      <br>⚠ Both resolved names are asserted on **every** read that returns them, including the
+      employee DETAIL as well as the dedicated skills list — an uneven `.Include` is how the same row
+      shows a certifier on one screen and a blank on another. Four repository reads and two employee
+      include chains were corrected.
+      <br>⚠ `CertifyingBodyId` is applied **unconditionally** in `Apply`, unlike every neighbour.
+      Those treat null as "not supplied", so none of them can ever be CLEARED — tolerable for a text
+      box, a trap for a picker.
 - [x] Staff number auto/manual is behaviour, not configuration — ✅ **DONE 2026-09-01 (backend +
       UI) · 49 assertions ×2** (`hr-probation/run-lane3b-staffnumbers.mjs`).
       The settings screen is at `/administration/hr/settings/staff-numbering` (HR Settings → Staff

@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Maintenance;
 
@@ -840,7 +840,24 @@ public class EmployeeSkillDto
     public DateOnly? CertificationDate { get; set; }
     public DateOnly? CertificationExpiryDate { get; set; }
     public string? CertificationNumber { get; set; }
+
+    /// <summary>
+    /// Who certified the skill, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Kept ALONGSIDE <see cref="CertifyingBodyId"/>, not replaced. Existing rows are free text
+    /// and dropping the column would discard them, and a genuinely one-off certifier does not
+    /// deserve a catalogue row. A screen should show the catalogued name where there is one and
+    /// fall back to this.
+    /// </remarks>
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued body that certified this skill, where there is one.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
+    /// <summary>Resolved name of that body — set, not declared and forgotten.</summary>
+    public string? CertifyingBodyName { get; set; }
+
     public bool IsVerified { get; set; }
     public bool IsCertificationExpired { get; set; }
     public string? Notes { get; set; }
@@ -861,6 +878,10 @@ public class UpdateEmployeeSkillDto
     public DateOnly? CertificationExpiryDate { get; set; }
     public string? CertificationNumber { get; set; }
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
     public string? Notes { get; set; }
     public bool? IsVerified { get; set; }
 }
@@ -882,6 +903,10 @@ public class CreateEmployeeSkillDto
     public DateOnly? CertificationExpiryDate { get; set; }
     public string? CertificationNumber { get; set; }
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
     public string? Notes { get; set; }
 }
 
@@ -2584,6 +2609,20 @@ public class QualificationCatalogueDto
     public QualificationType Type { get; set; }
     public string? IssuingAuthority { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>Where this sits on the academic / professional ladder, when it sits on one.</summary>
+    /// <remarks>
+    /// ⚠ <see cref="Type"/> is a CATEGORY — Education, Certification, License, Membership — and
+    /// cannot answer "is a Master's higher than a Diploma", which is what shortlisting and
+    /// succession need. The level is the rank; the two are not substitutes.
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
+
+    /// <summary>Resolved name of the rung, so a list does not need a second call to be readable.</summary>
+    public string? QualificationLevelName { get; set; }
+
+    /// <summary>The rung's rank, so a caller can order by ladder rather than by name.</summary>
+    public int? QualificationLevelRank { get; set; }
 }
 
 public class CreateQualificationCatalogueDto
@@ -2603,6 +2642,15 @@ public class CreateQualificationCatalogueDto
 
     [MaxLength(200)]
     public string? IssuingAuthority { get; set; }
+
+    /// <summary>
+    /// Which rung of the ladder this qualification sits on. Null means unranked.
+    /// </summary>
+    /// <remarks>
+    /// Nullable on purpose: a membership or a short course has a kind but no level, and forcing one
+    /// would invent a comparison the organisation does not actually make.
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
 
     public bool IsActive { get; set; } = true;
 }
