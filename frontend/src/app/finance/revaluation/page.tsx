@@ -1,286 +1,217 @@
-﻿'use client';
+'use client';
 
-import React, { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, CheckCircle, Loader2, RefreshCw, RotateCcw, TriangleAlert } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { DollarSign, RefreshCw, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
+import { financeService } from '@/services/finance.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import type { Currency, CurrencyRevaluationPreviewDto, FinanceSettings, JournalEntry } from '@/types/finance';
 
-// MOCK DATA for Preview
-const MOCK_PREVIEW_RESULTS = [
-    { accountCode: '1100', accountName: 'Accounts Receivable', currency: 'USD', foreignBalance: 10000, oldRate: 12.5, newRate: 13.0, oldBase: 125000, newBase: 130000, adjustment: 5000, type: 'Gain' },
-    { accountCode: '2000', accountName: 'Accounts Payable', currency: 'USD', foreignBalance: -5000, oldRate: 12.5, newRate: 13.0, oldBase: -62500, newBase: -65000, adjustment: -2500, type: 'Loss' },
-];
+const emptyGuid = '00000000-0000-0000-0000-000000000000';
+
+function messageFrom(error: unknown, fallback: string) {
+    return error instanceof Error && error.message ? error.message : fallback;
+}
 
 export default function CurrencyRevaluationPage() {
-    const router = useRouter();
-    const [step, setStep] = useState(1); // 1: Parameters, 2: Preview, 3: Result
-    const [isLoading, setIsLoading] = useState(false);
-
-    const [params, setParams] = useState({
-        revaluationDate: new Date().toISOString().split('T')[0],
+    const { toast } = useToast();
+    const [step, setStep] = useState<1 | 2 | 3>(1);
+    const [busy, setBusy] = useState(false);
+    const [loadingSetup, setLoadingSetup] = useState(true);
+    const [settings, setSettings] = useState<FinanceSettings | null>(null);
+    const [currencies, setCurrencies] = useState<Currency[]>([]);
+    const [preview, setPreview] = useState<CurrencyRevaluationPreviewDto | null>(null);
+    const [postedJournal, setPostedJournal] = useState<JournalEntry | null>(null);
+    const [parameters, setParameters] = useState({
+        revaluationDate: new Date().toISOString().slice(0, 10),
         currencyCode: 'all',
-        rateType: 'MonthEnd',
-        unrealizedGainLossAccount: '7000', // Mock ID
+        revaluationType: 'Month-End',
     });
 
-    const handlePreview = () => {
-        setIsLoading(true);
-        // Simulate API call
-        setTimeout(() => {
-            setIsLoading(false);
+    useEffect(() => {
+        let active = true;
+        void Promise.all([
+            financeDataService.getFinanceSettings(),
+            financeDataService.getCurrencies({ isActive: true }),
+        ])
+            .then(([financeSettings, activeCurrencies]) => {
+                if (!active) return;
+                setSettings(financeSettings);
+                setCurrencies(activeCurrencies.filter(currency => !currency.isBaseCurrency));
+            })
+            .catch(error => toast({
+                title: 'Revaluation setup could not be loaded',
+                description: messageFrom(error, 'Refresh the page and verify your Finance permissions.'),
+                variant: 'destructive',
+            }))
+            .finally(() => { if (active) setLoadingSetup(false); });
+        return () => { active = false; };
+    }, [toast]);
+
+    const request = useMemo(() => ({
+        revaluationDate: parameters.revaluationDate,
+        revaluationType: parameters.revaluationType,
+        currencyCode: parameters.currencyCode === 'all' ? undefined : parameters.currencyCode,
+        unrealizedGainLossAccountId: settings?.unrealizedFxGainAccountId || settings?.unrealizedGainLossAccountId || emptyGuid,
+    }), [parameters, settings]);
+
+    const configurationReady = Boolean(
+        (settings?.unrealizedFxGainAccountId || settings?.unrealizedGainLossAccountId)
+        && settings?.unrealizedFxLossAccountId,
+    );
+
+    const handlePreview = async () => {
+        try {
+            setBusy(true);
+            setPreview(await financeService.previewRevaluation(request));
+            setPostedJournal(null);
             setStep(2);
-        }, 1000);
+        } catch (error) {
+            toast({
+                title: 'Live revaluation preview failed',
+                description: messageFrom(error, 'Verify the closing rate, open period and FX account configuration.'),
+                variant: 'destructive',
+            });
+        } finally {
+            setBusy(false);
+        }
     };
 
-    const handlePost = () => {
-        setIsLoading(true);
-        // Simulate API call
-        setTimeout(() => {
-            setIsLoading(false);
+    const handlePost = async () => {
+        try {
+            setBusy(true);
+            const journal = await financeService.runRevaluation({ ...request, previewOnly: false });
+            setPostedJournal(journal);
             setStep(3);
-        }, 1000);
+            toast({ title: 'FX revaluation posted', description: journal.journalEntryNumber });
+        } catch (error) {
+            toast({
+                title: 'Revaluation posting failed',
+                description: messageFrom(error, 'The posting engine rejected the revaluation.'),
+                variant: 'destructive',
+            });
+        } finally {
+            setBusy(false);
+        }
     };
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-GH', {
-            style: 'currency',
-            currency: 'GHS',
-        }).format(Math.abs(amount));
+    const reset = () => {
+        setPreview(null);
+        setPostedJournal(null);
+        setStep(1);
     };
+
+    const formatMoney = (amount: number, currency = settings?.baseCurrency || 'GHS') =>
+        new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(amount);
 
     return (
         <div className="space-y-6">
-            {/* Page Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-                        <RefreshCw className="h-8 w-8" />
-                        Currency Revaluation
-                    </h1>
-                    <p className="text-muted-foreground">
-                        Revalue foreign currency accounts and post unrealized gains/losses
-                    </p>
-                </div>
+            <div>
+                <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight"><RefreshCw className="h-8 w-8" />Currency Revaluation</h1>
+                <p className="text-muted-foreground">Preview live posted FX exposures and post the controlled unrealized gain/loss journal.</p>
             </div>
 
-            {/* Breadcrumbs */}
             <Breadcrumb>
                 <BreadcrumbList>
-                    <BreadcrumbItem>
-                        <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
-                    </BreadcrumbItem>
+                    <BreadcrumbItem><BreadcrumbLink href="/finance">Finance</BreadcrumbLink></BreadcrumbItem>
                     <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                        <BreadcrumbLink href="/finance">Finance</BreadcrumbLink>
-                    </BreadcrumbItem>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                        <BreadcrumbPage>Revaluation</BreadcrumbPage>
-                    </BreadcrumbItem>
+                    <BreadcrumbItem><BreadcrumbPage>Currency Revaluation</BreadcrumbPage></BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
 
-            {/* Steps Indicator */}
-            <div className="flex items-center justify-center space-x-4 mb-8">
-                <div className={`flex items-center gap-2 ${step >= 1 ? 'text-primary font-bold' : 'text-muted-foreground'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${step >= 1 ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground'}`}>1</div>
-                    <span>Parameters</span>
-                </div>
-                <div className={`w-16 h-0.5 ${step >= 2 ? 'bg-primary' : 'bg-muted'}`} />
-                <div className={`flex items-center gap-2 ${step >= 2 ? 'text-primary font-bold' : 'text-muted-foreground'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${step >= 2 ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground'}`}>2</div>
-                    <span>Preview</span>
-                </div>
-                <div className={`w-16 h-0.5 ${step >= 3 ? 'bg-primary' : 'bg-muted'}`} />
-                <div className={`flex items-center gap-2 ${step >= 3 ? 'text-primary font-bold' : 'text-muted-foreground'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${step >= 3 ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground'}`}>3</div>
-                    <span>Result</span>
-                </div>
+            <div className="mx-auto flex max-w-2xl items-center justify-center gap-4">
+                {(['Parameters', 'Live preview', 'Posted'] as const).map((label, index) => {
+                    const number = (index + 1) as 1 | 2 | 3;
+                    return <div key={label} className="contents">
+                        {index > 0 ? <div className={`h-0.5 w-14 ${step >= number ? 'bg-primary' : 'bg-muted'}`} /> : null}
+                        <div className={`flex items-center gap-2 ${step >= number ? 'font-semibold text-primary' : 'text-muted-foreground'}`}>
+                            <span className={`flex h-8 w-8 items-center justify-center rounded-full border-2 ${step >= number ? 'border-primary bg-primary text-primary-foreground' : ''}`}>{number}</span>
+                            <span className="hidden sm:inline">{label}</span>
+                        </div>
+                    </div>;
+                })}
             </div>
 
-            {/* Step 1: Parameters */}
-            {step === 1 && (
-                <Card className="max-w-4xl mx-auto">
-                    <CardHeader>
-                        <CardTitle>Revaluation Parameters</CardTitle>
-                        <CardDescription>Select criteria for currency revaluation</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="date">Revaluation Date</Label>
-                                <Input
-                                    id="date"
-                                    type="date"
-                                    value={params.revaluationDate}
-                                    onChange={(e) => setParams({ ...params, revaluationDate: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="rateType">Rate Type</Label>
-                                <Select
-                                    value={params.rateType}
-                                    onValueChange={(value) => setParams({ ...params, rateType: value })}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="MonthEnd">Month End</SelectItem>
-                                        <SelectItem value="QuarterEnd">Quarter End</SelectItem>
-                                        <SelectItem value="YearEnd">Year End</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+            {step === 1 ? <Card className="mx-auto max-w-4xl">
+                <CardHeader>
+                    <CardTitle>Revaluation parameters</CardTitle>
+                    <CardDescription>The preview reads current posted AR, AP and foreign-bank exposures. It does not create accounting entries.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    {!loadingSetup && !configurationReady ? <Alert variant="destructive">
+                        <TriangleAlert className="h-4 w-4" /><AlertTitle>FX gain/loss configuration incomplete</AlertTitle>
+                        <AlertDescription>Configure separate unrealized FX gain and loss accounts in Finance Settings before posting.</AlertDescription>
+                    </Alert> : null}
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2">
+                            <Label htmlFor="revaluation-date">Revaluation date</Label>
+                            <Input id="revaluation-date" type="date" value={parameters.revaluationDate} onChange={event => setParameters(current => ({ ...current, revaluationDate: event.target.value }))} />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="currency">Currency</Label>
-                            <Select
-                                value={params.currencyCode}
-                                onValueChange={(value) => setParams({ ...params, currencyCode: value })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Currencies</SelectItem>
-                                    <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                    <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                </SelectContent>
+                            <Label>Closing rate type</Label>
+                            <Select value={parameters.revaluationType} onValueChange={value => setParameters(current => ({ ...current, revaluationType: value }))}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent><SelectItem value="Month-End">Month End</SelectItem><SelectItem value="Quarter-End">Quarter End</SelectItem><SelectItem value="Year-End">Year End</SelectItem></SelectContent>
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="account">Unrealized Gain/Loss Account</Label>
-                            <Select
-                                value={params.unrealizedGainLossAccount}
-                                onValueChange={(value) => setParams({ ...params, unrealizedGainLossAccount: value })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
+                            <Label>Currency scope</Label>
+                            <Select value={parameters.currencyCode} onValueChange={value => setParameters(current => ({ ...current, currencyCode: value }))}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="7000">7000 - Unrealized Gain/Loss (Expense)</SelectItem>
-                                    <SelectItem value="4500">4500 - Unrealized Gain/Loss (Revenue)</SelectItem>
+                                    <SelectItem value="all">All foreign currencies</SelectItem>
+                                    {currencies.map(currency => <SelectItem key={currency.id} value={currency.currencyCode}>{currency.currencyCode} — {currency.currencyName}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
+                    </div>
+                    <Alert><TriangleAlert className="h-4 w-4" /><AlertTitle>Live accounting data</AlertTitle><AlertDescription>Only posted transactions dated on or before the selected date are included. A matching approved closing rate and an open fiscal period are required.</AlertDescription></Alert>
+                    <div className="flex justify-end"><Button onClick={handlePreview} disabled={busy || loadingSetup || !parameters.revaluationDate}>
+                        {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Preview live exposures{!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
+                    </Button></div>
+                </CardContent>
+            </Card> : null}
 
-                        <Alert>
-                            <AlertTriangle className="h-4 w-4" />
-                            <AlertTitle>Important</AlertTitle>
-                            <AlertDescription>
-                                This process will calculate unrealized gains and losses for all open foreign currency items and generate a reversing journal entry.
-                            </AlertDescription>
-                        </Alert>
-
-                        <div className="pt-4 flex justify-end">
-                            <Button onClick={handlePreview} disabled={isLoading}>
-                                {isLoading ? 'Calculating...' : 'Preview Results'}
-                                {!isLoading && <ArrowRight className="ml-2 h-4 w-4" />}
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Step 2: Preview */}
-            {step === 2 && (
-                <div className="space-y-6">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Revaluation Preview</CardTitle>
-                            <CardDescription>Review calculated adjustments before posting</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="rounded-md border">
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="border-b bg-muted/50">
-                                            <th className="p-3 text-left font-medium">Account</th>
-                                            <th className="p-3 text-left font-medium">Currency</th>
-                                            <th className="p-3 text-right font-medium">Foreign Bal</th>
-                                            <th className="p-3 text-right font-medium">Old Rate</th>
-                                            <th className="p-3 text-right font-medium">New Rate</th>
-                                            <th className="p-3 text-right font-medium">Old Base</th>
-                                            <th className="p-3 text-right font-medium">New Base</th>
-                                            <th className="p-3 text-right font-medium">Adjustment</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {MOCK_PREVIEW_RESULTS.map((row, index) => (
-                                            <tr key={index} className="border-b last:border-0 hover:bg-muted/50">
-                                                <td className="p-3">
-                                                    <div className="font-semibold">{row.accountCode}</div>
-                                                    <div className="text-muted-foreground text-xs">{row.accountName}</div>
-                                                </td>
-                                                <td className="p-3">{row.currency}</td>
-                                                <td className="p-3 text-right">{row.foreignBalance.toLocaleString()}</td>
-                                                <td className="p-3 text-right">{row.oldRate.toFixed(4)}</td>
-                                                <td className="p-3 text-right">{row.newRate.toFixed(4)}</td>
-                                                <td className="p-3 text-right">{row.oldBase.toLocaleString()}</td>
-                                                <td className="p-3 text-right">{row.newBase.toLocaleString()}</td>
-                                                <td className="p-3 text-right font-bold">
-                                                    <span className={row.adjustment > 0 ? 'text-green-600' : 'text-red-600'}>
-                                                        {formatCurrency(row.adjustment)}
-                                                    </span>
-                                                    <Badge variant="outline" className="ml-2 text-xs">
-                                                        {row.type}
-                                                    </Badge>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr className="bg-muted/50 font-bold">
-                                            <td colSpan={7} className="p-3 text-right">Net Adjustment:</td>
-                                            <td className="p-3 text-right text-green-600">
-                                                {formatCurrency(2500)} (Gain)
-                                            </td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-
-                            <div className="flex justify-between mt-6">
-                                <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
-                                <Button onClick={handlePost} disabled={isLoading}>
-                                    {isLoading ? 'Posting...' : 'Post Revaluation'}
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
+            {step === 2 && preview ? <div className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-4">
+                    <Card><CardHeader className="pb-2"><CardDescription>Exposures</CardDescription><CardTitle>{preview.exposureCount}</CardTitle></CardHeader></Card>
+                    <Card><CardHeader className="pb-2"><CardDescription>Total gains</CardDescription><CardTitle className="text-green-600">{formatMoney(preview.totalGainAmount, preview.functionalCurrencyCode)}</CardTitle></CardHeader></Card>
+                    <Card><CardHeader className="pb-2"><CardDescription>Total losses</CardDescription><CardTitle className="text-red-600">{formatMoney(preview.totalLossAmount, preview.functionalCurrencyCode)}</CardTitle></CardHeader></Card>
+                    <Card><CardHeader className="pb-2"><CardDescription>Net gain/(loss)</CardDescription><CardTitle>{formatMoney(preview.netGainLossAmount, preview.functionalCurrencyCode)}</CardTitle></CardHeader></Card>
                 </div>
-            )}
-
-            {/* Step 3: Result */}
-            {step === 3 && (
-                <Card className="max-w-md mx-auto text-center py-8">
-                    <CardContent className="space-y-4">
-                        <div className="flex justify-center">
-                            <CheckCircle className="h-16 w-16 text-green-500" />
-                        </div>
-                        <h2 className="text-2xl font-bold">Revaluation Posted!</h2>
-                        <p className="text-muted-foreground">
-                            Journal Entry <strong>JE-2024-006</strong> has been created successfully.
-                        </p>
-                        <div className="pt-4 space-x-4">
-                            <Button variant="outline" onClick={() => setStep(1)}>
-                                Start New Revaluation
-                            </Button>
-                            <Button onClick={() => router.push('/finance/journal-entries')}>
-                                View Journal Entries
-                            </Button>
-                        </div>
+                <Card>
+                    <CardHeader><CardTitle>Live revaluation preview</CardTitle><CardDescription>{preview.batchNumber} · As at {new Date(preview.revaluationDate).toLocaleDateString()}</CardDescription></CardHeader>
+                    <CardContent className="space-y-5">
+                        {preview.lines.length === 0 ? <Alert><CheckCircle className="h-4 w-4" /><AlertTitle>No adjustment required</AlertTitle><AlertDescription>No eligible posted foreign-currency exposure produced a gain or loss at the selected closing rate.</AlertDescription></Alert> :
+                            <div className="overflow-x-auto rounded-md border"><table className="w-full text-sm">
+                                <thead className="bg-muted/50"><tr><th className="p-3 text-left">Account</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Currency</th><th className="p-3 text-right">Foreign balance</th><th className="p-3 text-right">Carrying value</th><th className="p-3 text-right">Previous rate</th><th className="p-3 text-right">Closing rate</th><th className="p-3 text-right">Revalued value</th><th className="p-3 text-right">Adjustment</th></tr></thead>
+                                <tbody>{preview.lines.map(line => <tr key={`${line.accountId}-${line.transactionCurrency}-${line.sourceModule}`} className="border-t">
+                                    <td className="p-3"><div className="font-mono font-semibold">{line.accountNumber}</div><div className="text-xs text-muted-foreground">{line.accountName}</div></td>
+                                    <td className="p-3"><Badge variant="outline">{line.sourceModule}</Badge></td><td className="p-3 font-medium">{line.transactionCurrency}</td>
+                                    <td className="p-3 text-right font-mono">{line.foreignCurrencyBalance.toLocaleString()}</td><td className="p-3 text-right font-mono">{line.carryingFunctionalAmount.toLocaleString()}</td>
+                                    <td className="p-3 text-right font-mono">{line.previousRate.toFixed(6)}</td><td className="p-3 text-right font-mono">{line.closingExchangeRate.toFixed(6)}</td><td className="p-3 text-right font-mono">{line.revaluedFunctionalAmount.toLocaleString()}</td>
+                                    <td className="p-3 text-right"><span className={line.gainLossType === 'Gain' ? 'font-semibold text-green-600' : 'font-semibold text-red-600'}>{formatMoney(Math.abs(line.gainLossAmount), line.functionalCurrencyCode)}</span><Badge variant="outline" className="ml-2">{line.gainLossType}</Badge></td>
+                                </tr>)}</tbody>
+                            </table></div>}
+                        <div className="flex justify-between"><Button variant="outline" onClick={() => setStep(1)}>Back</Button><Button onClick={handlePost} disabled={busy || preview.lines.length === 0 || !configurationReady}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Post revaluation journal</Button></div>
                     </CardContent>
                 </Card>
-            )}
+            </div> : null}
+
+            {step === 3 && postedJournal ? <Card className="mx-auto max-w-xl text-center"><CardContent className="space-y-4 py-10">
+                <CheckCircle className="mx-auto h-16 w-16 text-green-500" /><h2 className="text-2xl font-bold">Revaluation posted</h2>
+                <p className="text-muted-foreground">The live posting engine created journal <strong>{postedJournal.journalEntryNumber}</strong>.</p>
+                <div className="grid grid-cols-2 gap-3 rounded-md border p-4 text-left"><div><div className="text-xs text-muted-foreground">Posting status</div><div className="font-semibold">{postedJournal.postingStatus}</div></div><div><div className="text-xs text-muted-foreground">Journal total</div><div className="font-semibold">{formatMoney(postedJournal.totalDebitAmount)}</div></div></div>
+                <div className="flex justify-center gap-3 pt-2"><Button variant="outline" onClick={reset}><RotateCcw className="mr-2 h-4 w-4" />Start another</Button><Button asChild><a href={`/finance/journal-entries/${postedJournal.id}`}>View journal entry</a></Button></div>
+            </CardContent></Card> : null}
         </div>
     );
 }

@@ -832,6 +832,8 @@ export interface FinanceSettings {
     accountSeparator?: string;
     retainedEarningsAccountId?: string;
     unrealizedGainLossAccountId?: string;
+    unrealizedFxGainAccountId?: string;
+    unrealizedFxLossAccountId?: string;
     realizedGainLossAccountId?: string;
     suspenseAccountId?: string;
     controlAccountArId?: string;
@@ -2303,6 +2305,33 @@ export interface RevaluationResultDto {
     totalAdjustment: number;
     unrealizedGain: number;
     unrealizedLoss: number;
+}
+
+export interface CurrencyRevaluationPreviewDto {
+    batchNumber: string;
+    revaluationDate: string;
+    functionalCurrencyCode: string;
+    totalGainAmount: number;
+    totalLossAmount: number;
+    netGainLossAmount: number;
+    exposureCount: number;
+    lines: CurrencyRevaluationPreviewLineDto[];
+}
+
+export interface CurrencyRevaluationPreviewLineDto {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    sourceModule: string;
+    transactionCurrency: string;
+    functionalCurrencyCode: string;
+    foreignCurrencyBalance: number;
+    carryingFunctionalAmount: number;
+    previousRate: number;
+    closingExchangeRate: number;
+    revaluedFunctionalAmount: number;
+    gainLossAmount: number;
+    gainLossType: string;
 }
 
 export interface RevaluationDetailDto {

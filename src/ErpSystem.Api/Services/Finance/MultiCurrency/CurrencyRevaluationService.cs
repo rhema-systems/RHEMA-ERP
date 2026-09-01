@@ -71,6 +71,67 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         return BuildPreviewJournal(batch, request);
     }
 
+    public async Task<CurrencyRevaluationPreviewDto> PreviewCurrencyRevaluationAsync(
+        RevaluationRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var previewRequest = new RevaluationRequestDto
+        {
+            RevaluationDate = request.RevaluationDate,
+            RevaluationType = request.RevaluationType,
+            CurrencyCode = request.CurrencyCode,
+            UnrealizedGainLossAccountId = request.UnrealizedGainLossAccountId,
+            PreviewOnly = true
+        };
+        var batch = await RunUnrealizedRevaluationAsync(previewRequest, cancellationToken);
+        var accountIds = batch.Lines.Select(line => line.AccountId).Distinct().ToArray();
+        var accounts = await _context.Accounts
+            .AsNoTracking()
+            .Where(account => account.TenantId == TenantId && accountIds.Contains(account.Id))
+            .Select(account => new { account.Id, account.AccountNumber, account.AccountName })
+            .ToDictionaryAsync(account => account.Id, cancellationToken);
+
+        return new CurrencyRevaluationPreviewDto
+        {
+            BatchNumber = batch.BatchNumber,
+            RevaluationDate = batch.RevaluationDate,
+            FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
+            TotalGainAmount = batch.TotalGainAmount,
+            TotalLossAmount = batch.TotalLossAmount,
+            NetGainLossAmount = batch.NetGainLossAmount,
+            ExposureCount = batch.Lines.Count,
+            Lines = batch.Lines
+                .OrderBy(line => line.SourceModule)
+                .ThenBy(line => line.AccountId)
+                .ThenBy(line => line.TransactionCurrency)
+                .Select(line =>
+                {
+                    accounts.TryGetValue(line.AccountId, out var account);
+                    return new CurrencyRevaluationPreviewLineDto
+                    {
+                        AccountId = line.AccountId,
+                        AccountNumber = account?.AccountNumber ?? line.AccountId.ToString("N")[..8],
+                        AccountName = account?.AccountName ?? line.SourceModule,
+                        SourceModule = line.SourceModule,
+                        TransactionCurrency = line.TransactionCurrency,
+                        FunctionalCurrencyCode = line.FunctionalCurrencyCode,
+                        ForeignCurrencyBalance = line.ForeignCurrencyBalance,
+                        CarryingFunctionalAmount = line.CarryingFunctionalAmount,
+                        PreviousRate = line.ForeignCurrencyBalance == 0m
+                            ? 0m
+                            : decimal.Round(line.CarryingFunctionalAmount / line.ForeignCurrencyBalance, 6, MidpointRounding.AwayFromZero),
+                        ClosingExchangeRate = line.ClosingExchangeRate,
+                        RevaluedFunctionalAmount = line.RevaluedFunctionalAmount,
+                        GainLossAmount = line.GainLossAmount,
+                        GainLossType = line.GainLossType
+                    };
+                })
+                .ToList()
+        };
+    }
+
     public async Task<IReadOnlyList<JournalEntry>> GetRevaluationHistoryAsync(
         DateTime startDate,
         DateTime endDate,

@@ -209,6 +209,21 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        [HttpPost("revaluation/preview")]
+        public async Task<IActionResult> PreviewRevaluation([FromBody] RevaluationRequestDto requestDto)
+        {
+            try
+            {
+                requestDto.PreviewOnly = true;
+                var preview = await _revaluationService.PreviewCurrencyRevaluationAsync(requestDto);
+                return Ok(preview);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         /// <summary>
         /// Generates a Balance Sheet (Statement of Financial Position) as of the specified date.
         /// </summary>

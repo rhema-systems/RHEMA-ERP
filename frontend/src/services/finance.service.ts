@@ -38,6 +38,7 @@ import type {
   // Response Types
   PaginatedResponse,
   TrendAnalysisDto,
+  CurrencyRevaluationPreviewDto,
 } from '@/types/finance';
 
 /**
@@ -65,6 +66,8 @@ export interface FinanceSettings {
   baseCurrency: string;
   retainedEarningsAccountId?: string;
   unrealizedGainLossAccountId?: string;
+  unrealizedFxGainAccountId?: string;
+  unrealizedFxLossAccountId?: string;
   realizedGainLossAccountId?: string;
   suspenseAccountId?: string;
   discountAllowedAccountId?: string;
@@ -1030,15 +1033,18 @@ class FinanceService {
   /**
    * Run currency revaluation
    */
-  async runRevaluation(request: RevaluationRequestDto): Promise<RevaluationResultDto> {
-    return apiService.post<RevaluationResultDto>(`${this.baseUrl}/revaluation`, request);
+  async runRevaluation(request: RevaluationRequestDto): Promise<JournalEntry> {
+    return apiService.post<JournalEntry>(`${this.baseUrl}/revaluation`, request);
   }
 
   /**
    * Preview revaluation (no posting)
    */
-  async previewRevaluation(request: Omit<RevaluationRequestDto, 'previewOnly'>): Promise<RevaluationResultDto> {
-    return this.runRevaluation({ ...request, previewOnly: true });
+  async previewRevaluation(request: Omit<RevaluationRequestDto, 'previewOnly'>): Promise<CurrencyRevaluationPreviewDto> {
+    return apiService.post<CurrencyRevaluationPreviewDto>(`${this.baseUrl}/revaluation/preview`, {
+      ...request,
+      previewOnly: true,
+    });
   }
 
   // ==========================================

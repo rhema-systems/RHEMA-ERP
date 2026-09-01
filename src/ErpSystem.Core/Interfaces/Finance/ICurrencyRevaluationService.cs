@@ -24,6 +24,13 @@ namespace ErpSystem.Core.Interfaces.Finance
             CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Calculates live foreign-currency exposures without persisting a batch or journal.
+        /// </summary>
+        Task<CurrencyRevaluationPreviewDto> PreviewCurrencyRevaluationAsync(
+            RevaluationRequestDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Gets the history of revaluation journal entries for a specific period.
         /// </summary>
         /// <param name="startDate">Start date of the period</param>
