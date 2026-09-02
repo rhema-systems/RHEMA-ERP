@@ -3501,6 +3501,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("RecurringJournalOccurrences");
             entity.HasIndex(e => new { e.TenantId, e.TemplateId, e.ScheduledDate }).IsUnique().HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.Status, e.EffectiveDate });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalStatus, e.ReversalDueDate });
             entity.HasOne(e => e.Template).WithMany(e => e.Occurrences).HasForeignKey(e => e.TemplateId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry).WithOne(e => e.RecurringOccurrence).HasForeignKey<RecurringJournalOccurrence>(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);

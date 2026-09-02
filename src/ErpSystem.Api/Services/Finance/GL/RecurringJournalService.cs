@@ -59,7 +59,8 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var exceptionCounts = await _db.RecurringJournalOccurrences.AsNoTracking()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted && ids.Contains(item.TemplateId) &&
                 (item.Status == RecurringJournalOccurrenceStatus.Failed ||
-                 item.Status == RecurringJournalOccurrenceStatus.SubmissionFailed))
+                 item.Status == RecurringJournalOccurrenceStatus.SubmissionFailed ||
+                 item.ReversalStatus == RecurringJournalReversalStatus.Failed))
             .GroupBy(item => item.TemplateId)
             .Select(group => new { TemplateId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.TemplateId, item => item.Count, cancellationToken);
@@ -240,6 +241,15 @@ public sealed class RecurringJournalService : IRecurringJournalService
         occurrence.ReviewedAt = DateTime.UtcNow;
         occurrence.ReviewedByUserId = reviewerId;
         occurrence.ReviewComment = comment.Trim();
+        if (occurrence.ReversalDueDate.HasValue)
+        {
+            // The approval screen explicitly tells the checker that this decision
+            // authorises both this occurrence and its exact mechanical reversal.
+            occurrence.ReversalStatus = RecurringJournalReversalStatus.Scheduled;
+            occurrence.ReversalAuthorizedAt = occurrence.ReviewedAt;
+            occurrence.ReversalAuthorizedByUserId = reviewerId;
+            occurrence.ReversalError = null;
+        }
         occurrence.UpdatedAt = DateTime.UtcNow;
         occurrence.UpdatedBy = _currentUser.UserName;
         occurrence.LastModifiedById = reviewerId;
@@ -568,6 +578,10 @@ public sealed class RecurringJournalService : IRecurringJournalService
         ScheduledDate = item.ScheduledDate, EffectiveDate = item.EffectiveDate, Status = item.Status,
         JournalEntryId = item.JournalEntryId, ReversalJournalEntryId = item.ReversalJournalEntryId,
         ReversalDueDate = item.ReversalDueDate, AttemptCount = item.AttemptCount, GeneratedAt = item.GeneratedAt,
+        ReversalStatus = item.ReversalStatus, ReversalAuthorizedAt = item.ReversalAuthorizedAt,
+        ReversalAuthorizedByUserId = item.ReversalAuthorizedByUserId, ReversalAttemptCount = item.ReversalAttemptCount,
+        ReversalLastAttemptAt = item.ReversalLastAttemptAt, ReversalError = item.ReversalError,
+        ReversalPostingEventId = item.ReversalPostingEventId, ReversalProcessedBy = item.ReversalProcessedBy,
         ReviewedAt = item.ReviewedAt, ReviewedByUserId = item.ReviewedByUserId, ReviewComment = item.ReviewComment,
         PostedAt = item.PostedAt, PostedByUserId = item.PostedByUserId, ReversedAt = item.ReversedAt,
         ErrorMessage = item.ErrorMessage, AdjustmentExplanation = item.AdjustmentExplanation
@@ -812,6 +826,9 @@ public sealed class RecurringJournalGenerationProcessor
                         ReversalDueDate = await ResolveReversalDueDateAsync(template, effective, cancellationToken),
                         CreatedAt = DateTime.UtcNow, CreatedBy = actor
                     };
+                    occurrence.ReversalStatus = occurrence.ReversalDueDate.HasValue
+                        ? RecurringJournalReversalStatus.PendingAuthorization
+                        : RecurringJournalReversalStatus.NotApplicable;
                     _db.RecurringJournalOccurrences.Add(occurrence);
                     template.GeneratedOccurrenceCount++;
                     template.LastGeneratedDueDate = scheduled;

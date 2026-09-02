@@ -9,6 +9,7 @@ public enum RecurrenceFrequency { Daily, Weekly, SemiMonthly, Monthly, Quarterly
 public enum BusinessDayConvention { NoAdjustment, NextBusinessDay, PreviousBusinessDay }
 public enum RecurringJournalOccurrenceStatus { Due, Generating, SubmissionFailed, PendingApproval, Approved, Posted, Failed, WaiverPending, Waived, Superseded }
 public enum RecurringJournalReversalRule { None, NextCalendarDay, FirstDayOfNextFiscalPeriod, DayOffset }
+public enum RecurringJournalReversalStatus { NotApplicable, PendingAuthorization, Scheduled, Processing, Failed, Posted }
 
 /// <summary>Versioned standing instruction. It never posts directly to the ledger.</summary>
 public sealed class RecurringJournalTemplate : TenantEntity
@@ -99,6 +100,14 @@ public sealed class RecurringJournalOccurrence : TenantEntity
     public DateTime? PostedAt { get; set; }
     public Guid? PostedByUserId { get; set; }
     public DateOnly? ReversalDueDate { get; set; }
+    public RecurringJournalReversalStatus ReversalStatus { get; set; } = RecurringJournalReversalStatus.NotApplicable;
+    public DateTime? ReversalAuthorizedAt { get; set; }
+    public Guid? ReversalAuthorizedByUserId { get; set; }
+    public int ReversalAttemptCount { get; set; }
+    public DateTime? ReversalLastAttemptAt { get; set; }
+    [MaxLength(2000)] public string? ReversalError { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    [MaxLength(100)] public string? ReversalProcessedBy { get; set; }
     public DateTime? ReversedAt { get; set; }
     [MaxLength(2000)] public string? ErrorMessage { get; set; }
     [MaxLength(1000)] public string? AdjustmentExplanation { get; set; }

@@ -22507,8 +22507,34 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateOnly?>("ReversalDueDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTime?>("ReversalAuthorizedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReversalAuthorizedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ReversalAttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReversalError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("ReversalLastAttemptAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid?>("ReversalJournalEntryId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReversalProcessedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ReversalStatus")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("ReversedAt")
                         .HasColumnType("datetime2");
@@ -22573,6 +22599,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TemplateId");
 
                     b.HasIndex("TenantId", "Status", "EffectiveDate");
+
+                    b.HasIndex("TenantId", "ReversalStatus", "ReversalDueDate");
 
                     b.HasIndex("TenantId", "TemplateId", "ScheduledDate")
                         .IsUnique()

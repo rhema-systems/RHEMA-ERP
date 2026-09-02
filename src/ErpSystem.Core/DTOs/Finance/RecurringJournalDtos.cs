@@ -72,6 +72,14 @@ public sealed class RecurringJournalOccurrenceDto
     public Guid? JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
     public DateOnly? ReversalDueDate { get; set; }
+    public RecurringJournalReversalStatus ReversalStatus { get; set; }
+    public DateTime? ReversalAuthorizedAt { get; set; }
+    public Guid? ReversalAuthorizedByUserId { get; set; }
+    public int ReversalAttemptCount { get; set; }
+    public DateTime? ReversalLastAttemptAt { get; set; }
+    public string? ReversalError { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public string? ReversalProcessedBy { get; set; }
     public int AttemptCount { get; set; }
     public DateTime? GeneratedAt { get; set; }
     public DateTime? ReviewedAt { get; set; }
@@ -137,6 +145,14 @@ public sealed class RecurringJournalGenerationResultDto
 {
     public int TemplateCount { get; set; }
     public int GeneratedCount { get; set; }
+    public int ExistingCount { get; set; }
+    public int FailedCount { get; set; }
+}
+
+public sealed class RecurringJournalReversalProcessingResultDto
+{
+    public int CandidateCount { get; set; }
+    public int PostedCount { get; set; }
     public int ExistingCount { get; set; }
     public int FailedCount { get; set; }
 }
