@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance.FixedAssets
 {
@@ -101,6 +102,25 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public string? ProductionEvidenceNotes { get; set; }
 
         public DateTime? PlacedInServiceDateSnapshot { get; set; }
+
+        /// <summary>
+        /// Immutable timing evidence used by the calculation. These values are copied to the
+        /// schedule so later asset-policy or fiscal-calendar changes do not rewrite history.
+        /// </summary>
+        public DepreciationConvention DepreciationConventionSnapshot { get; set; } = DepreciationConvention.FullMonth;
+
+        [Column(TypeName = "decimal(18,8)")]
+        public decimal ConventionFactor { get; set; } = 1m;
+
+        [MaxLength(80)]
+        public string ConventionBasis { get; set; } = "Unprorated";
+
+        public DateTime? ConventionEligibleFromDate { get; set; }
+        public DateTime? ConventionEligibleToDate { get; set; }
+        public DateTime? FiscalPeriodStartDateSnapshot { get; set; }
+        public DateTime? FiscalPeriodEndDateSnapshot { get; set; }
+        public DateTime? FiscalYearStartDateSnapshot { get; set; }
+        public DateTime? FiscalYearEndDateSnapshot { get; set; }
 
         // --- Status ---
 

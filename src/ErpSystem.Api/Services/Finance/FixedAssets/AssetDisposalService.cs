@@ -192,6 +192,8 @@ public class AssetDisposalService : IAssetDisposalService
             FinalDepreciationEligibleDays = finalDepreciation.EligibleDays,
             FinalDepreciationProrationBasis = finalDepreciation.ProrationBasis,
             FinalDepreciationMethodSnapshot = bookValue.DepreciationMethod,
+            FinalDepreciationConventionSnapshot = finalDepreciation.Calculation.Convention,
+            FinalDepreciationConventionFactor = finalDepreciation.Calculation.ConventionFactor,
             FinalDepreciationScheduleId = finalDepreciation.Amount > 0m ? Guid.NewGuid() : null,
             FinalDepreciationProductionUnits = finalDepreciation.Calculation.PeriodProductionUnits,
             FinalDepreciationDiminishingRatePercent = finalDepreciation.Calculation.EffectiveDiminishingBalanceRatePercent,
@@ -1378,13 +1380,6 @@ public class AssetDisposalService : IAssetDisposalService
         }
 
         var disposalDay = disposalDate.Date;
-        var startDate = new[] { fiscalPeriod.StartDate.Date, placedInService.Value.Date }
-            .Max();
-        if (bookValue.LastDepreciationDate.HasValue)
-        {
-            startDate = new[] { startDate, bookValue.LastDepreciationDate.Value.Date.AddDays(1) }.Max();
-        }
-
         var usage = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
             ? new FixedAssetProductionUsageDto
             {
@@ -1401,15 +1396,39 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Final production usage may only be supplied for a units-of-production asset.");
         }
 
-        var calculation = FixedAssetDepreciationCalculator.Calculate(bookValue, usage);
+        var fiscalYear = fiscalPeriod.FiscalYear
+            ?? throw new InvalidOperationException("Disposal fiscal period is not linked to an authoritative fiscal year.");
+        var priorFiscalYearConventionFactor = bookValue.DepreciationConvention == DepreciationConvention.HalfYear
+            ? await _context.AssetDepreciationSchedules
+                .Where(schedule => schedule.TenantId == TenantId &&
+                    schedule.FixedAssetId == asset.Id &&
+                    schedule.BookClassification == bookValue.BookClassification &&
+                    schedule.IsPosted && !schedule.IsDeleted && !schedule.IsReversed &&
+                    schedule.AssetDisposalId == null &&
+                    schedule.FiscalPeriod.FiscalYearId == fiscalYear.Id &&
+                    schedule.FiscalPeriod.EndDate < fiscalPeriod.StartDate)
+                .SumAsync(schedule => schedule.ConventionFactor)
+            : 0m;
+        var calculation = FixedAssetDepreciationCalculator.Calculate(
+            bookValue,
+            usage,
+            new DepreciationTimingContext(
+                fiscalPeriod.StartDate,
+                fiscalPeriod.EndDate,
+                fiscalYear.StartDate,
+                fiscalYear.EndDate,
+                placedInService.Value,
+                bookValue.LastDepreciationDate,
+                disposalDay,
+                priorFiscalYearConventionFactor));
         var periodDays = (fiscalPeriod.EndDate.Date - fiscalPeriod.StartDate.Date).Days + 1;
-        var eligibleDays = startDate > disposalDay ? 0 : (disposalDay - startDate).Days + 1;
-        var basis = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
-            ? "ProductionUsage"
-            : "ActualDaysInclusive";
-        var wholeAssetAmount = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
-            ? calculation.DepreciationAmount
-            : RoundMoney(calculation.DepreciationAmount * eligibleDays / periodDays);
+        var fromDate = calculation.EligibleFromDate;
+        var toDate = calculation.EligibleToDate;
+        var eligibleDays = fromDate.HasValue && toDate.HasValue && fromDate <= toDate
+            ? (toDate.Value.Date - fromDate.Value.Date).Days + 1
+            : 0;
+        var basis = calculation.ConventionBasis;
+        var wholeAssetAmount = calculation.DepreciationAmount;
         wholeAssetAmount = Math.Min(wholeAssetAmount, RoundMoney(bookValue.NetBookValue - bookValue.ResidualValue));
 
         // For a partial/component disposal, only the portion leaving service receives final
@@ -1424,12 +1443,16 @@ public class AssetDisposalService : IAssetDisposalService
 
         return new FinalDepreciationPreparation(
             Math.Max(0m, amount),
-            eligibleDays == 0 ? null : startDate,
-            eligibleDays == 0 ? null : disposalDay,
+            eligibleDays == 0 ? null : fromDate,
+            eligibleDays == 0 ? null : toDate,
             periodDays,
             eligibleDays,
             basis,
-            calculation);
+            calculation,
+            fiscalPeriod.StartDate.Date,
+            fiscalPeriod.EndDate.Date,
+            fiscalYear.StartDate.Date,
+            fiscalYear.EndDate.Date);
     }
 
     private static void ValidateApprovedFinalDepreciation(
@@ -1444,6 +1467,8 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.FinalDepreciationEligibleDays != current.EligibleDays ||
             disposal.FinalDepreciationProrationBasis != current.ProrationBasis ||
             disposal.FinalDepreciationMethodSnapshot != currentMethod ||
+            disposal.FinalDepreciationConventionSnapshot != current.Calculation.Convention ||
+            disposal.FinalDepreciationConventionFactor != current.Calculation.ConventionFactor ||
             disposal.FinalDepreciationProductionUnits != current.Calculation.PeriodProductionUnits ||
             disposal.FinalDepreciationDiminishingRatePercent != current.Calculation.EffectiveDiminishingBalanceRatePercent ||
             disposal.FinalDepreciationLifetimeProductionCapacity != current.Calculation.LifetimeProductionCapacity ||
@@ -1758,6 +1783,15 @@ public class AssetDisposalService : IAssetDisposalService
             // satisfying the existing unique asset/period/book/sequence constraint.
             CorrectionSequence = ResolveDisposalScheduleSequence(asset, disposal),
             PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
+            DepreciationConventionSnapshot = finalDepreciation.Calculation.Convention,
+            ConventionFactor = finalDepreciation.Calculation.ConventionFactor,
+            ConventionBasis = finalDepreciation.Calculation.ConventionBasis,
+            ConventionEligibleFromDate = finalDepreciation.Calculation.EligibleFromDate,
+            ConventionEligibleToDate = finalDepreciation.Calculation.EligibleToDate,
+            FiscalPeriodStartDateSnapshot = finalDepreciation.FiscalPeriodStartDate,
+            FiscalPeriodEndDateSnapshot = finalDepreciation.FiscalPeriodEndDate,
+            FiscalYearStartDateSnapshot = finalDepreciation.FiscalYearStartDate,
+            FiscalYearEndDateSnapshot = finalDepreciation.FiscalYearEndDate,
             ApprovalStatus = "ApprovedWithDisposal",
             ApprovedAt = disposal.ApprovedAt,
             ApprovedById = disposal.ApprovedById,
@@ -1775,7 +1809,11 @@ public class AssetDisposalService : IAssetDisposalService
         // Although derecognition immediately zeroes the book, these counters remain meaningful
         // historical evidence and make the final schedule consistent with ordinary depreciation.
         bookValue.AccumulatedProductionUnits = finalDepreciation.Calculation.CumulativeProductionUnitsAfter;
-        bookValue.LastDepreciationDate = disposal.DisposalDate.Date;
+        // A partial disposal's final charge belongs only to the portion leaving service. The
+        // retained book has not yet been depreciated for this period and must remain eligible for
+        // its complete convention-aware ordinary run.
+        if (disposal.DisposalScope == AssetDisposalScope.WholeAsset)
+            bookValue.LastDepreciationDate = disposal.DisposalDate.Date;
 
         _context.AssetTransactions.Add(new AssetTransaction
         {
@@ -2341,6 +2379,7 @@ public class AssetDisposalService : IAssetDisposalService
     {
         var date = accountingDate.Date;
         return await _context.FiscalPeriods
+            .Include(p => p.FiscalYear)
             .FirstOrDefaultAsync(p => p.TenantId == TenantId && !p.IsDeleted && p.StartDate <= date && p.EndDate >= date);
     }
 
@@ -2634,6 +2673,8 @@ public class AssetDisposalService : IAssetDisposalService
             FinalDepreciationPeriodDays = d.FinalDepreciationPeriodDays,
             FinalDepreciationEligibleDays = d.FinalDepreciationEligibleDays,
             FinalDepreciationProrationBasis = d.FinalDepreciationProrationBasis,
+            FinalDepreciationConventionSnapshot = d.FinalDepreciationConventionSnapshot,
+            FinalDepreciationConventionFactor = d.FinalDepreciationConventionFactor,
             FinalDepreciationMethodSnapshot = d.FinalDepreciationMethodSnapshot,
             FinalDepreciationScheduleId = d.FinalDepreciationScheduleId,
             FinalDepreciationProductionUnits = d.FinalDepreciationProductionUnits,
@@ -2726,7 +2767,11 @@ public class AssetDisposalService : IAssetDisposalService
         int PeriodDays,
         int EligibleDays,
         string ProrationBasis,
-        DepreciationCalculation Calculation);
+        DepreciationCalculation Calculation,
+        DateTime FiscalPeriodStartDate,
+        DateTime FiscalPeriodEndDate,
+        DateTime FiscalYearStartDate,
+        DateTime FiscalYearEndDate);
 
     private sealed record RevaluationSurplusTransferPreparation(
         Guid? RevaluationSurplusAccountId,

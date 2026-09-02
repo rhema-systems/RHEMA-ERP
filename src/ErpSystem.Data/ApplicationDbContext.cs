@@ -4231,6 +4231,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.CumulativeProductionUnitsAfter).HasColumnType("decimal(18,4)");
             entity.Property(e => e.ProductionEvidenceReference).HasMaxLength(200);
             entity.Property(e => e.ProductionEvidenceNotes).HasMaxLength(1000);
+            entity.Property(e => e.ConventionFactor).HasColumnType("decimal(18,8)");
+            entity.Property(e => e.ConventionBasis).HasMaxLength(80);
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification, e.CorrectionSequence }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetDepreciationRunId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });

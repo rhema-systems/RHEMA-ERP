@@ -154,11 +154,11 @@ public sealed class FixedAssetDisposalFoundationTests
         var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
 
         var lines = await PostedLinesAsync(db);
-        completed.FinalDepreciationAmount.Should().Be(32.26m);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 32.26m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 0m, CreditAmount = 32.26m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.26m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 967.74m, CreditAmount = 0m });
+        completed.FinalDepreciationAmount.Should().Be(32.88m);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 32.88m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 0m, CreditAmount = 32.88m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.88m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 967.12m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1200m });
     }
 
@@ -175,11 +175,11 @@ public sealed class FixedAssetDisposalFoundationTests
         var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture, 1100m));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.26m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.88m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.ProceedsClearing.Id, DebitAmount = 1100m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1200m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.GainOnDisposal.Id, DebitAmount = 0m, CreditAmount = 132.26m });
-        completed.GainOrLoss.Should().Be(132.26m);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.GainOnDisposal.Id, DebitAmount = 0m, CreditAmount = 132.88m });
+        completed.GainOrLoss.Should().Be(132.88m);
     }
 
     [Fact]
@@ -195,9 +195,9 @@ public sealed class FixedAssetDisposalFoundationTests
         var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture, 900m));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.26m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.88m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.ProceedsClearing.Id, DebitAmount = 900m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 67.74m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 67.12m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1200m });
     }
 
@@ -386,10 +386,10 @@ public sealed class FixedAssetDisposalFoundationTests
         completed.DisposalScope.Should().Be(AssetDisposalScope.PartialPortion);
         completed.DisposedPortionPercent.Should().Be(25m);
         completed.AcquisitionCostAllocated.Should().Be(300m);
-        completed.AccumulatedDepreciationAtDisposal.Should().Be(58.07m);
-        completed.NetBookValueAtDisposal.Should().Be(241.93m);
+        completed.AccumulatedDepreciationAtDisposal.Should().Be(58.22m);
+        completed.NetBookValueAtDisposal.Should().Be(241.78m);
         completed.RemainingAcquisitionCostAfterDisposal.Should().Be(900m);
-        completed.FinalDepreciationAmount.Should().Be(8.07m);
+        completed.FinalDepreciationAmount.Should().Be(8.22m);
         completed.RemainingAccumulatedDepreciationAfterDisposal.Should().Be(150m);
         completed.RemainingNetBookValueAfterDisposal.Should().Be(750m);
 
@@ -401,9 +401,9 @@ public sealed class FixedAssetDisposalFoundationTests
         asset.BookValues.Single().AccumulatedDepreciation.Should().Be(150m);
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 8.07m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 58.07m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 241.93m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 8.22m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 58.22m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 241.78m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 300m });
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetPartialDisposalAllocationCalculated)).Should().Be(1);
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetPartialDisposalAllocationPosted)).Should().Be(1);
@@ -418,7 +418,8 @@ public sealed class FixedAssetDisposalFoundationTests
             PostToGl = false
         });
         retainedSchedules.Should().ContainSingle();
-        retainedSchedules.Single().DepreciationAmount.Should().Be(75m);
+        retainedSchedules.Single().DepreciationAmount.Should().Be(76.44m);
+        retainedSchedules.Single().ConventionEligibleFromDate.Should().Be(new DateTime(2026, 7, 1));
     }
 
     [Fact]
@@ -612,14 +613,16 @@ public sealed class FixedAssetDisposalFoundationTests
 
         var requested = await services.Disposals.RequestDisposalAsync(RequestWriteOff(fixture.Asset.Id), fixture.RequestedBy.Id);
 
-        // July has 31 days and the disposal date is inclusive, so 10/31 of the normal GHS 100
-        // monthly straight-line charge is the immutable maker-checker snapshot.
-        requested.FinalDepreciationAmount.Should().Be(32.26m);
+        // Actual-days uses 10 eligible days over the tenant's 365-day fiscal year against the
+        // annualised straight-line charge: GHS 100 × 12 × 10/365.
+        requested.FinalDepreciationAmount.Should().Be(32.88m);
         requested.FinalDepreciationFromDate.Should().Be(new DateTime(2026, 7, 1));
         requested.FinalDepreciationToDate.Should().Be(new DateTime(2026, 7, 10));
         requested.FinalDepreciationEligibleDays.Should().Be(10);
         requested.FinalDepreciationPeriodDays.Should().Be(31);
         requested.FinalDepreciationProrationBasis.Should().Be("ActualDaysInclusive");
+        requested.FinalDepreciationConventionSnapshot.Should().Be(DepreciationConvention.ActualDays);
+        requested.FinalDepreciationConventionFactor.Should().Be(0.32876712m);
 
         var approved = await services.Disposals.ApproveDisposalAsync(
             requested.Id,
@@ -629,7 +632,9 @@ public sealed class FixedAssetDisposalFoundationTests
 
         var schedule = await db.AssetDepreciationSchedules.SingleAsync(s => s.AssetDisposalId == completed.Id);
         schedule.Id.Should().Be(completed.FinalDepreciationScheduleId!.Value);
-        schedule.DepreciationAmount.Should().Be(32.26m);
+        schedule.DepreciationAmount.Should().Be(32.88m);
+        schedule.DepreciationConventionSnapshot.Should().Be(DepreciationConvention.ActualDays);
+        schedule.ConventionFactor.Should().Be(0.32876712m);
         schedule.IsPosted.Should().BeTrue();
         schedule.JournalEntryId.Should().Be(completed.JournalEntryId);
         schedule.PostingEventId.Should().Be(completed.PostingEventId);
@@ -712,8 +717,8 @@ public sealed class FixedAssetDisposalFoundationTests
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.RevaluationSurplus.Id, DebitAmount = 300m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.RetainedEarnings.Id, DebitAmount = 0m, CreditAmount = 300m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1500m });
-        completed.FinalDepreciationAmount.Should().Be(41.94m);
-        completed.GainOrLoss.Should().Be(-1258.06m);
+        completed.FinalDepreciationAmount.Should().Be(42.74m);
+        completed.GainOrLoss.Should().Be(-1257.26m);
         completed.RevaluationSurplusTransferAmount.Should().Be(300m);
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetDisposalRevaluationSurplusTransferred)).Should().Be(1);
     }
@@ -814,7 +819,7 @@ public sealed class FixedAssetDisposalFoundationTests
         completed.ProceedsCurrencyCode.Should().Be("USD");
         completed.ProceedsFunctionalAmount.Should().Be(1500m);
         completed.ProceedsExchangeRateId.Should().Be(rate.Id);
-        completed.GainOrLoss.Should().Be(532.26m);
+        completed.GainOrLoss.Should().Be(532.88m);
         proceedsLine.DebitAmount.Should().Be(1500m);
         proceedsLine.TransactionCurrency.Should().Be("USD");
         proceedsLine.TransactionDebitAmount.Should().Be(100m);
@@ -1225,7 +1230,7 @@ public sealed class FixedAssetDisposalFoundationTests
             UsefulLifeMonths = 12,
             ResidualValue = 0m,
             DepreciationMethod = depreciationMethod,
-            DepreciationConvention = DepreciationConvention.FullMonth,
+            DepreciationConvention = DepreciationConvention.ActualDays,
             LifetimeProductionCapacity = lifetimeProductionCapacity,
             Status = status,
             FunctionalCurrencyCode = "GHS",
@@ -1254,7 +1259,7 @@ public sealed class FixedAssetDisposalFoundationTests
             UsefulLifeMonths = 12,
             RemainingUsefulLifeMonths = 10,
             DepreciationMethod = depreciationMethod,
-            DepreciationConvention = DepreciationConvention.FullMonth,
+            DepreciationConvention = DepreciationConvention.ActualDays,
             LifetimeProductionCapacity = lifetimeProductionCapacity,
             PlacedInServiceDate = asset.PlacedInServiceDate,
             CapitalizationDate = asset.CapitalizationDate,
@@ -1432,11 +1437,29 @@ public sealed class FixedAssetDisposalFoundationTests
 
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId, DateTime start, DateTime end, string code, bool isOpen)
     {
+        var fiscalYear = db.FiscalYears.Local.FirstOrDefault(year => year.TenantId == tenantId)
+            ?? new FiscalYear
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FiscalYearName = "Fiscal Year 2026",
+                FiscalYearCode = $"FY26-{tenantId.ToString("N")[..4]}",
+                Year = 2026,
+                StartDate = new DateTime(2026, 1, 1),
+                EndDate = new DateTime(2026, 12, 31),
+                TotalDays = 365,
+                NumberOfPeriods = 12,
+                Status = "Open",
+                IsActive = true
+            };
+        if (db.Entry(fiscalYear).State == EntityState.Detached)
+            db.FiscalYears.Add(fiscalYear);
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
+            FiscalYear = fiscalYear,
             PeriodName = code,
             PeriodCode = $"{code}-{tenantId.ToString("N")[..4]}",
             PeriodNumber = start.Month,

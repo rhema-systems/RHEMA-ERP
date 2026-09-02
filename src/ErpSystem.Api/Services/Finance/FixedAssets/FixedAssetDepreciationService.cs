@@ -62,8 +62,11 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
     {
         var tenantId = TenantId;
         var fiscalPeriod = await _context.FiscalPeriods
+            .Include(p => p.FiscalYear)
             .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Id == dto.FiscalPeriodId, cancellationToken)
             ?? throw new KeyNotFoundException("Fiscal period not found.");
+        var fiscalYear = fiscalPeriod.FiscalYear
+            ?? throw new InvalidOperationException("Fiscal period is not linked to an authoritative fiscal year.");
 
         var postingDate = (dto.PostingDate ?? fiscalPeriod.EndDate).Date;
         if (fiscalPeriod.IsLocked || !fiscalPeriod.IsOpen)
@@ -218,7 +221,18 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                     throw new InvalidOperationException("Units-of-production depreciation requires the configured depreciation-run approval workflow before GL posting.");
                 }
                 var productionUsage = ResolveProductionUsage(dto, asset, bookValue);
-                var calculation = FixedAssetDepreciationCalculator.Calculate(bookValue, productionUsage);
+                var placedInServiceDate = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate
+                    ?? throw new InvalidOperationException("Fixed asset book value must have a placed-in-service date before depreciation can run.");
+                var calculation = FixedAssetDepreciationCalculator.Calculate(
+                    bookValue,
+                    productionUsage,
+                    new DepreciationTimingContext(
+                        fiscalPeriod.StartDate,
+                        fiscalPeriod.EndDate,
+                        fiscalYear.StartDate,
+                        fiscalYear.EndDate,
+                        placedInServiceDate,
+                        bookValue.LastDepreciationDate));
                 var depreciationAmount = calculation.DepreciationAmount;
                 if (depreciationAmount <= 0m)
                 {
@@ -268,6 +282,15 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                     ProductionEvidenceNotes = calculation.ProductionEvidenceNotes,
                     CorrectionSequence = correctionSequence,
                     PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
+                    DepreciationConventionSnapshot = calculation.Convention,
+                    ConventionFactor = calculation.ConventionFactor,
+                    ConventionBasis = calculation.ConventionBasis,
+                    ConventionEligibleFromDate = calculation.EligibleFromDate,
+                    ConventionEligibleToDate = calculation.EligibleToDate,
+                    FiscalPeriodStartDateSnapshot = fiscalPeriod.StartDate.Date,
+                    FiscalPeriodEndDateSnapshot = fiscalPeriod.EndDate.Date,
+                    FiscalYearStartDateSnapshot = fiscalYear.StartDate.Date,
+                    FiscalYearEndDateSnapshot = fiscalYear.EndDate.Date,
                     IsPosted = false,
                     IsProjected = !dto.PostToGl,
                     PostingDate = postingDate,
@@ -546,6 +569,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         var tenantId = TenantId;
         var run = await _context.FixedAssetDepreciationRuns
             .Include(r => r.FiscalPeriod)
+                .ThenInclude(period => period.FiscalYear)
             .Include(r => r.Lines)
                 .ThenInclude(line => line.AccountingBook)
             .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == runId && !r.IsDeleted, cancellationToken)
@@ -622,7 +646,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                      value.BookClassification.Equals(schedule.BookClassification, StringComparison.OrdinalIgnoreCase)))
                 ?? throw new InvalidOperationException("Depreciation run references a fixed asset book value that was not found for this tenant.");
 
-            ValidatePersistedCalculationStillMatchesBook(bookValue, schedule);
+            ValidatePersistedCalculationStillMatchesBook(asset, bookValue, schedule, run.FiscalPeriod);
 
             var expenseAccount = await ResolveDepreciationAccountAsync(
                 asset.Category.DepreciationExpenseAccountId,
@@ -1163,8 +1187,10 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
     }
 
     private static void ValidatePersistedCalculationStillMatchesBook(
+        FixedAsset asset,
         FixedAssetBookValue bookValue,
-        AssetDepreciationSchedule schedule)
+        AssetDepreciationSchedule schedule,
+        FiscalPeriod fiscalPeriod)
     {
         // Workflow approval may take time. Rechecking the calculation assumptions and usage counter
         // at posting prevents an approved schedule from being posted after another process changes
@@ -1181,6 +1207,16 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                 FixedAssetDepreciationCalculator.RoundUnits(schedule.LifetimeProductionCapacitySnapshot) ||
              FixedAssetDepreciationCalculator.RoundUnits(bookValue.AccumulatedProductionUnits) !=
                 FixedAssetDepreciationCalculator.RoundUnits(schedule.CumulativeProductionUnitsBefore));
+        var placedInServiceDate = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate;
+        var fiscalYear = fiscalPeriod.FiscalYear;
+        var timingAssumptionsChanged =
+            bookValue.DepreciationConvention != schedule.DepreciationConventionSnapshot ||
+            placedInServiceDate?.Date != schedule.PlacedInServiceDateSnapshot?.Date ||
+            fiscalPeriod.StartDate.Date != schedule.FiscalPeriodStartDateSnapshot?.Date ||
+            fiscalPeriod.EndDate.Date != schedule.FiscalPeriodEndDateSnapshot?.Date ||
+            fiscalYear == null ||
+            fiscalYear.StartDate.Date != schedule.FiscalYearStartDateSnapshot?.Date ||
+            fiscalYear.EndDate.Date != schedule.FiscalYearEndDateSnapshot?.Date;
 
         if (bookValue.DepreciationMethod != schedule.DepreciationMethodSnapshot ||
             RoundMoney(bookValue.NetBookValue) != RoundMoney(schedule.NetBookValueBefore) ||
@@ -1188,7 +1224,8 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             RoundMoney(bookValue.ResidualValue) != RoundMoney(schedule.ResidualValueSnapshot) ||
             bookValue.UsefulLifeMonths != schedule.UsefulLifeMonthsSnapshot ||
             diminishingRateChanged ||
-            productionAssumptionsChanged)
+            productionAssumptionsChanged ||
+            timingAssumptionsChanged)
         {
             throw new InvalidOperationException("Fixed asset depreciation assumptions or carrying values changed after calculation. Reverse/cancel the pending run and recalculate before posting.");
         }
@@ -1371,6 +1408,15 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             ProductionEvidenceReference = schedule.ProductionEvidenceReference,
             ProductionEvidenceNotes = schedule.ProductionEvidenceNotes,
             PlacedInServiceDateSnapshot = schedule.PlacedInServiceDateSnapshot,
+            DepreciationConventionSnapshot = schedule.DepreciationConventionSnapshot,
+            ConventionFactor = schedule.ConventionFactor,
+            ConventionBasis = schedule.ConventionBasis,
+            ConventionEligibleFromDate = schedule.ConventionEligibleFromDate,
+            ConventionEligibleToDate = schedule.ConventionEligibleToDate,
+            FiscalPeriodStartDateSnapshot = schedule.FiscalPeriodStartDateSnapshot,
+            FiscalPeriodEndDateSnapshot = schedule.FiscalPeriodEndDateSnapshot,
+            FiscalYearStartDateSnapshot = schedule.FiscalYearStartDateSnapshot,
+            FiscalYearEndDateSnapshot = schedule.FiscalYearEndDateSnapshot,
             IsPosted = schedule.IsPosted,
             PostedDate = schedule.PostedDate,
             PostingDate = schedule.PostingDate,

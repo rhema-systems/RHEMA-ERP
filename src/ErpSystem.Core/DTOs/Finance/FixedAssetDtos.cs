@@ -446,6 +446,15 @@ public class AssetDepreciationScheduleDto
     public string? ProductionEvidenceReference { get; set; }
     public string? ProductionEvidenceNotes { get; set; }
     public DateTime? PlacedInServiceDateSnapshot { get; set; }
+    public DepreciationConvention DepreciationConventionSnapshot { get; set; }
+    public decimal ConventionFactor { get; set; }
+    public string ConventionBasis { get; set; } = string.Empty;
+    public DateTime? ConventionEligibleFromDate { get; set; }
+    public DateTime? ConventionEligibleToDate { get; set; }
+    public DateTime? FiscalPeriodStartDateSnapshot { get; set; }
+    public DateTime? FiscalPeriodEndDateSnapshot { get; set; }
+    public DateTime? FiscalYearStartDateSnapshot { get; set; }
+    public DateTime? FiscalYearEndDateSnapshot { get; set; }
     public bool IsPosted { get; set; }
     public DateTime? PostedDate { get; set; }
     public DateTime? PostingDate { get; set; }
@@ -681,6 +690,8 @@ public class AssetDisposalDto
     public int FinalDepreciationPeriodDays { get; set; }
     public int FinalDepreciationEligibleDays { get; set; }
     public string? FinalDepreciationProrationBasis { get; set; }
+    public DepreciationConvention? FinalDepreciationConventionSnapshot { get; set; }
+    public decimal FinalDepreciationConventionFactor { get; set; }
     public DepreciationMethod? FinalDepreciationMethodSnapshot { get; set; }
     public Guid? FinalDepreciationScheduleId { get; set; }
     public decimal FinalDepreciationProductionUnits { get; set; }
