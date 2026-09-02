@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -108,6 +109,18 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         var rows = await BuildExposureQuery(effectiveDate, minimumDaysOverdue: 1)
             .ToListAsync(cancellationToken);
 
+        var nativeTotals = rows
+            .GroupBy(item => NormalizeCurrency(item.CurrencyCode))
+            .OrderBy(group => group.Key)
+            .Select(group => new ArCollectionCurrencyTotalDto
+            {
+                CurrencyCode = group.Key,
+                OutstandingAmount = RoundMoney(group.Sum(item => item.OutstandingAmount)),
+                PromisedAmount = RoundMoney(group.Sum(item => Math.Min(item.PromisedAmount, item.OutstandingAmount)))
+            })
+            .ToList();
+        var functionalSummary = BuildFunctionalSummary(rows);
+
         return new ArCollectionSummaryDto
         {
             AsOfDate = effectiveDate,
@@ -123,8 +136,11 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
                 item.PromisedPayDate.HasValue &&
                 item.PromisedPayDate.Value.Date < effectiveDate &&
                 item.OutstandingAmount > 0),
-            TotalOutstanding = rows.Sum(item => item.OutstandingAmount),
-            TotalPromised = rows.Sum(item => Math.Min(item.PromisedAmount, item.OutstandingAmount))
+            NativeCurrencyTotals = nativeTotals,
+            FunctionalCurrencyCode = functionalSummary.CurrencyCode,
+            FunctionalOutstandingTotal = functionalSummary.OutstandingTotal,
+            FunctionalPromisedTotal = functionalSummary.PromisedTotal,
+            FunctionalTotalUnavailableReason = functionalSummary.UnavailableReason
         };
     }
 
@@ -188,6 +204,16 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
                 activity.IsPrimaryTask &&
                 activity.InvoiceId.HasValue)
             .ToDictionaryAsync(activity => activity.InvoiceId!.Value, cancellationToken);
+        var exposurePartnerIds = exposures.Select(exposure => exposure.CounterpartyId).Distinct().ToList();
+        var validPartnerIds = (await _db.BusinessPartners.AsNoTracking()
+            .Where(partner =>
+                partner.TenantId == tenantId &&
+                !partner.IsDeleted &&
+                exposurePartnerIds.Contains(partner.Id) &&
+                (partner.PartnerType == "Customer" || partner.PartnerType == "Both"))
+            .Select(partner => partner.Id)
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
 
         foreach (var exposure in exposures)
         {
@@ -231,6 +257,12 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
                     existing.LastModifiedById = actorId;
                     result.RefreshedCount++;
                 }
+                continue;
+            }
+
+            if (!validPartnerIds.Contains(exposure.CounterpartyId))
+            {
+                result.SkippedUnresolvedPartnerCount++;
                 continue;
             }
 
@@ -481,7 +513,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         if (string.IsNullOrWhiteSpace(request.Message))
             throw new InvalidOperationException("A reminder record requires the message or contact note that was prepared or dispatched.");
         var channel = NormalizeReminderChannel(request.Channel);
-        var recipient = Clean(request.Recipient, 250) ?? ResolveRecipient(task, channel);
+        var recipient = Clean(request.Recipient, 250) ?? await ResolveRecipientAsync(task, channel, cancellationToken);
         if (!channel.Equals("Internal", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(recipient))
             throw new InvalidOperationException("An external reminder requires a recorded recipient address, number, or contact reference.");
 
@@ -565,9 +597,9 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
                   balance.OutstandingAmount > 0 &&
                   balance.DueDate.HasValue &&
                   balance.DueDate.Value.Date <= dueCutoff
-            join customerCandidate in _db.Set<Customer>().AsNoTracking().Where(item => item.TenantId == tenantId && !item.IsDeleted)
-                on balance.CounterpartyId equals customerCandidate.Id into customerJoin
-            from customer in customerJoin.DefaultIfEmpty()
+            join partnerCandidate in _db.BusinessPartners.AsNoTracking().Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                on balance.CounterpartyId equals partnerCandidate.Id into partnerJoin
+            from partner in partnerJoin.DefaultIfEmpty()
             join taskCandidate in tasks on balance.SourceDocumentId equals taskCandidate.InvoiceId into taskJoin
             from task in taskJoin.DefaultIfEmpty()
             join assigneeCandidate in _db.Users.AsNoTracking() on task.AssignedToId equals assigneeCandidate.Id into assigneeJoin
@@ -576,15 +608,24 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             {
                 SettlementBalanceId = balance.Id,
                 CustomerId = balance.CounterpartyId,
-                CustomerCode = customer == null ? string.Empty : customer.CustomerCode,
-                CustomerName = customer == null ? "Unknown customer" : customer.CustomerName,
-                CustomerEmail = customer == null ? null : customer.Email,
-                CustomerPhone = customer == null ? null : customer.Phone,
+                CustomerCode = partner == null ? string.Empty : partner.PartnerCode,
+                CustomerName = partner == null ? "Unresolved business partner" : partner.PartnerName,
+                CustomerEmail = partner == null ? null : partner.PrimaryEmail,
+                CustomerPhone = partner == null ? null : partner.PrimaryPhone,
+                CustomerAddress = partner == null ? null : partner.PhysicalAddress,
+                CustomerCity = partner == null ? null : partner.PhysicalCity,
+                CustomerState = partner == null ? null : partner.PhysicalState,
+                CustomerCountry = partner == null ? null : partner.PhysicalCountry,
+                CustomerPostalCode = partner == null ? null : partner.PhysicalPostalCode,
+                IsPartnerResolved = partner != null,
                 InvoiceId = balance.SourceDocumentId,
                 InvoiceNumber = balance.SourceDocumentNumber,
                 TransactionDate = balance.TransactionDate,
                 DueDate = balance.DueDate!.Value,
                 CurrencyCode = balance.DocumentCurrencyCode,
+                FunctionalCurrencyCode = balance.FunctionalCurrencyCode,
+                OriginalDocumentAmount = balance.OriginalDocumentAmount,
+                OriginalFunctionalAmount = balance.OriginalFunctionalAmount,
                 OutstandingAmount = balance.OutstandingAmount,
                 TaskId = task == null ? null : task.Id,
                 TaskReference = task == null ? string.Empty : task.ReferenceNumber,
@@ -622,7 +663,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             .OrderByDescending(item => item.LastRebuiltAt)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("The task's posted AR settlement evidence is unavailable. Rebuild the settlement read model before continuing.");
-        var customer = await _db.Set<Customer>().AsNoTracking()
+        var partner = await _db.BusinessPartners.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == task.CustomerId && item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
         var assignee = task.AssignedToId.HasValue
             ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(item => item.Id == task.AssignedToId.Value, cancellationToken)
@@ -634,15 +675,24 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         {
             SettlementBalanceId = balance.Id,
             CustomerId = balance.CounterpartyId,
-            CustomerCode = customer?.CustomerCode ?? string.Empty,
-            CustomerName = customer?.CustomerName ?? "Unknown customer",
-            CustomerEmail = customer?.Email,
-            CustomerPhone = customer?.Phone,
+            CustomerCode = partner?.PartnerCode ?? string.Empty,
+            CustomerName = partner?.PartnerName ?? "Unresolved business partner",
+            CustomerEmail = partner?.PrimaryEmail,
+            CustomerPhone = partner?.PrimaryPhone,
+            CustomerAddress = partner?.PhysicalAddress,
+            CustomerCity = partner?.PhysicalCity,
+            CustomerState = partner?.PhysicalState,
+            CustomerCountry = partner?.PhysicalCountry,
+            CustomerPostalCode = partner?.PhysicalPostalCode,
+            IsPartnerResolved = partner != null,
             InvoiceId = balance.SourceDocumentId,
             InvoiceNumber = balance.SourceDocumentNumber,
             TransactionDate = balance.TransactionDate,
             DueDate = balance.DueDate ?? balance.TransactionDate,
             CurrencyCode = balance.DocumentCurrencyCode,
+            FunctionalCurrencyCode = balance.FunctionalCurrencyCode,
+            OriginalDocumentAmount = balance.OriginalDocumentAmount,
+            OriginalFunctionalAmount = balance.OriginalFunctionalAmount,
             OutstandingAmount = balance.OutstandingAmount,
             TaskId = task.Id,
             TaskReference = task.ReferenceNumber,
@@ -726,7 +776,6 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
 
     private async Task<CollectionActivity> LoadTaskAsync(Guid taskId, CancellationToken cancellationToken) =>
         await _db.CollectionActivities
-            .Include(item => item.Customer)
             .SingleOrDefaultAsync(item =>
                 item.Id == taskId &&
                 item.TenantId == TenantId &&
@@ -841,6 +890,15 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             CustomerName = row.CustomerName,
             CustomerEmail = row.CustomerEmail,
             CustomerPhone = row.CustomerPhone,
+            CustomerAddress = row.CustomerAddress,
+            CustomerCity = row.CustomerCity,
+            CustomerState = row.CustomerState,
+            CustomerCountry = row.CustomerCountry,
+            CustomerPostalCode = row.CustomerPostalCode,
+            IsPartnerResolved = row.IsPartnerResolved,
+            PartnerResolutionMessage = row.IsPartnerResolved
+                ? null
+                : "The business partner linked to this posted invoice could not be resolved in the current tenant.",
             InvoiceId = row.InvoiceId,
             InvoiceNumber = row.InvoiceNumber,
             TransactionDate = row.TransactionDate,
@@ -956,13 +1014,75 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         task.LastModifiedById = actorId;
     }
 
-    private static string? ResolveRecipient(CollectionActivity task, string channel) => channel switch
+    private async Task<string?> ResolveRecipientAsync(
+        CollectionActivity task,
+        string channel,
+        CancellationToken cancellationToken)
     {
-        "Email" => task.Customer?.Email,
-        "SMS" or "Phone" => task.Customer?.Phone,
-        "Letter" or "Visit" => task.Customer?.Address,
-        _ => task.AssignedToId?.ToString()
-    };
+        if (channel.Equals("Internal", StringComparison.OrdinalIgnoreCase))
+            return task.AssignedToId?.ToString();
+
+        var partner = await _db.BusinessPartners.AsNoTracking()
+            .Where(item => item.Id == task.CustomerId && item.TenantId == TenantId && !item.IsDeleted)
+            .Select(item => new
+            {
+                item.PrimaryEmail,
+                item.PrimaryPhone,
+                item.PhysicalAddress
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return channel switch
+        {
+            "Email" => partner?.PrimaryEmail,
+            "SMS" or "Phone" => partner?.PrimaryPhone,
+            "Letter" or "Visit" => partner?.PhysicalAddress,
+            _ => null
+        };
+    }
+
+    private static FunctionalSummary BuildFunctionalSummary(IReadOnlyList<ExposureRow> rows)
+    {
+        if (rows.Count == 0)
+            return new FunctionalSummary(null, null, null, "No overdue exposure is available to total.");
+
+        var functionalCurrencies = rows
+            .Select(item => NormalizeCurrency(item.FunctionalCurrencyCode))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (functionalCurrencies.Count != 1 || functionalCurrencies[0] == "UNSPECIFIED")
+            return new FunctionalSummary(null, null, null, "The exposures do not share one authoritative functional currency.");
+
+        decimal outstandingTotal = 0m;
+        decimal promisedTotal = 0m;
+        foreach (var row in rows)
+        {
+            if (row.OriginalDocumentAmount <= 0m || row.OriginalFunctionalAmount <= 0m)
+            {
+                return new FunctionalSummary(
+                    functionalCurrencies[0],
+                    null,
+                    null,
+                    $"Historical functional-currency evidence is unavailable for invoice {row.InvoiceNumber}.");
+            }
+
+            var historicalPostingRatio = row.OriginalFunctionalAmount / row.OriginalDocumentAmount;
+            outstandingTotal += row.OutstandingAmount * historicalPostingRatio;
+            promisedTotal += Math.Min(row.PromisedAmount, row.OutstandingAmount) * historicalPostingRatio;
+        }
+
+        return new FunctionalSummary(
+            functionalCurrencies[0],
+            RoundMoney(outstandingTotal),
+            RoundMoney(promisedTotal),
+            null);
+    }
+
+    private static string NormalizeCurrency(string? currencyCode) =>
+        string.IsNullOrWhiteSpace(currencyCode) ? "UNSPECIFIED" : currencyCode.Trim().ToUpperInvariant();
+
+    private static decimal RoundMoney(decimal amount) =>
+        Math.Round(amount, 2, MidpointRounding.AwayFromZero);
 
     private Guid CurrentUserIdRequired() =>
         Guid.TryParse(_currentUser.UserId, out var id) && id != Guid.Empty
@@ -991,11 +1111,20 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         public string CustomerName { get; init; } = string.Empty;
         public string? CustomerEmail { get; init; }
         public string? CustomerPhone { get; init; }
+        public string? CustomerAddress { get; init; }
+        public string? CustomerCity { get; init; }
+        public string? CustomerState { get; init; }
+        public string? CustomerCountry { get; init; }
+        public string? CustomerPostalCode { get; init; }
+        public bool IsPartnerResolved { get; init; }
         public Guid InvoiceId { get; init; }
         public string InvoiceNumber { get; init; } = string.Empty;
         public DateTime TransactionDate { get; init; }
         public DateTime DueDate { get; init; }
         public string CurrencyCode { get; init; } = "GHS";
+        public string FunctionalCurrencyCode { get; init; } = "GHS";
+        public decimal OriginalDocumentAmount { get; init; }
+        public decimal OriginalFunctionalAmount { get; init; }
         public decimal OutstandingAmount { get; init; }
         public Guid? TaskId { get; init; }
         public string TaskReference { get; init; } = string.Empty;
@@ -1011,4 +1140,10 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         public DateTime? LastActivityAt { get; init; }
         public byte[]? RowVersion { get; init; }
     }
+
+    private sealed record FunctionalSummary(
+        string? CurrencyCode,
+        decimal? OutstandingTotal,
+        decimal? PromisedTotal,
+        string? UnavailableReason);
 }
