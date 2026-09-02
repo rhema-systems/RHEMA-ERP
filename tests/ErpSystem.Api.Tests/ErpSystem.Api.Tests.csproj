@@ -182,6 +182,7 @@
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
     <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\InvoiceTradeDiscountPolicyTests.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />

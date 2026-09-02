@@ -331,8 +331,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var lineDto in dto.LineItems)
             {
-                var lineGross = lineDto.Quantity * lineDto.UnitPrice;
-                var lineDiscount = lineGross * (lineDto.DiscountPercentage / 100);
+                var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice);
+                var lineDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
+                    lineGross,
+                    lineDto.DiscountPercentage,
+                    "AP invoice line");
                 var lineNet = lineGross - lineDiscount;
                 var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, supplier.Id, dto.IsOpeningBalance, cancellationToken);
 
@@ -542,8 +545,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var lineDto in dto.LineItems)
             {
-                var lineGross = lineDto.Quantity * lineDto.UnitPrice;
-                var lineDiscount = lineGross * (lineDto.DiscountPercentage / 100);
+                var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice);
+                var lineDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
+                    lineGross,
+                    lineDto.DiscountPercentage,
+                    "AP invoice line");
                 var lineNet = lineGross - lineDiscount;
                 var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, invoice.SupplierId, dto.IsOpeningBalance, cancellationToken);
 
@@ -2758,7 +2764,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             var postingLines = new List<FinancePostingLineDto>();
-            Guid? discountAccountId = null;
             var lineNumber = 1;
 
             foreach (var line in activeLines)
@@ -2771,6 +2776,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 if (line.DiscountAmount < 0m || line.TaxAmount < 0m)
                     throw new InvalidOperationException("AP invoice line discount and tax amounts cannot be negative.");
+
+                var expectedTradeDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
+                    line.Quantity * line.UnitPrice,
+                    line.DiscountPercentage,
+                    "AP invoice line");
+                if (RoundMoney(line.DiscountAmount) != expectedTradeDiscount)
+                    throw new InvalidOperationException("AP invoice line trade discount evidence does not match its percentage and gross amount.");
 
                 if (clearsGrv)
                 {
@@ -2844,10 +2856,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                     accountCache,
                     cancellationToken);
 
+                var netDebitAmount = RoundMoney(grossAmount - line.DiscountAmount);
+                if (netDebitAmount <= 0m)
+                {
+                    continue;
+                }
+
                 var expenseLine = BuildPostingLine(
                     debitAccountId,
                     $"AP invoice {invoice.InvoiceNumber} - {line.Description}",
-                    debitForeignAmount: grossAmount,
+                    debitForeignAmount: netDebitAmount,
                     creditForeignAmount: 0m,
                     invoiceCurrency,
                     functionalCurrency,
@@ -2859,28 +2877,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                 expenseLine.SourceDocumentLineId = line.Id;
                 ApplySourceDimensions(expenseLine, line, sourceLineDimensions);
                 postingLines.Add(expenseLine);
-
-                if (line.DiscountAmount > 0m)
-                {
-                    discountAccountId ??= settings.DiscountReceivedAccountId
-                        ?? throw new InvalidOperationException("Purchase discount received account is not configured for this tenant.");
-                    await ResolvePostingAccountAsync(discountAccountId.Value, "purchase discount received account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
-
-                    var discountLine = BuildPostingLine(
-                        discountAccountId.Value,
-                        $"Purchase discount - {invoice.InvoiceNumber} - {line.Description}",
-                        debitForeignAmount: 0m,
-                        creditForeignAmount: line.DiscountAmount,
-                        invoiceCurrency,
-                        functionalCurrency,
-                        exchangeRate,
-                        invoice.InvoiceDate,
-                        invoice.InvoiceNumber,
-                        lineNumber++,
-                        "AP-Discount");
-                    ApplySourceDimensions(discountLine, line, sourceLineDimensions);
-                    postingLines.Add(discountLine);
-                }
             }
 
             var taxSnapshotLines = new List<FinanceTaxCalculationSnapshotDto>();

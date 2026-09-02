@@ -270,6 +270,7 @@ public class VendorInvoiceLineItemCreateDto
     public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public decimal TaxRate { get; set; }
     public string? TaxCode { get; set; }
+    [Range(typeof(decimal), "0", "100")]
     public decimal DiscountPercentage { get; set; }
     public string? Unit { get; set; }
 }

@@ -103,13 +103,14 @@ public sealed class ApInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task LineDiscounts_ShouldRetainEachOriginatingSourceDimensionCombination()
+    public async Task LineTradeDiscounts_ShouldReduceExpenseAndRetainSourceDimensionCombinations()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
         {
             var original = invoice.LineItems.Single();
+            original.DiscountPercentage = 10m;
             original.DiscountAmount = 10m;
             invoice.LineItems.Add(new VendorInvoiceLineItem
             {
@@ -121,6 +122,7 @@ public sealed class ApInvoicePostingMigrationTests
                 Description = "Implementation services",
                 Quantity = 1m,
                 UnitPrice = 50m,
+                DiscountPercentage = 10m,
                 DiscountAmount = 5m,
                 CreatedAt = DateTime.UtcNow.AddSeconds(1),
                 CreatedBy = "seed"
@@ -157,11 +159,16 @@ public sealed class ApInvoicePostingMigrationTests
             CancellationToken.None
         })!;
 
-        var discounts = request.Lines.Where(line => line.TransactionTag == "AP-Discount").ToList();
-        discounts.Should().HaveCount(2);
-        discounts.Single(line => line.SourceDocumentLineId == firstLine.Id)
+        request.Lines.Should().NotContain(line => line.TransactionTag == "AP-Discount");
+        var expenses = request.Lines.Where(line => line.TransactionTag == "AP-Expense").ToList();
+        expenses.Should().HaveCount(2);
+        expenses.Single(line => line.SourceDocumentLineId == firstLine.Id)
+            .TransactionDebitAmount.Should().Be(90m);
+        expenses.Single(line => line.SourceDocumentLineId == firstLine.Id)
             .Dimensions.Should().ContainSingle(value => value.DimensionCode == "DEPARTMENT" && value.ValueCode == "FIN");
-        discounts.Single(line => line.SourceDocumentLineId == secondLine.Id)
+        expenses.Single(line => line.SourceDocumentLineId == secondLine.Id)
+            .TransactionDebitAmount.Should().Be(45m);
+        expenses.Single(line => line.SourceDocumentLineId == secondLine.Id)
             .Dimensions.Should().ContainSingle(value => value.DimensionCode == "DEPARTMENT" && value.ValueCode == "OPS");
     }
 
