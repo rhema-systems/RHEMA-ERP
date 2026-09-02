@@ -149,6 +149,7 @@
     <Compile Include="Services\Finance\FinanceSettlementDimensionServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionsApArMigrationTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionRouteConsumerContractTests.cs" />
+    <Compile Include="Services\Finance\ExternalFinanceDimensionAdapterContractTests.cs" />
     <Compile Include="Services\Finance\FinanceOwnedSourceDimensionReadinessProviderTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionReportingFilterTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />

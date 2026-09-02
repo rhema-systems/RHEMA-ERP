@@ -824,6 +824,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceDimensionService, ErpSystem.Api.Services.Finance.GL.FinanceSourceDimensionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSettlementDimensionService, ErpSystem.Api.Services.Finance.GL.FinanceSettlementDimensionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePaymentDimensionAdapter, ErpSystem.Api.Services.Finance.GL.FinancePaymentDimensionAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IExternalFinancePostingAdapter, ErpSystem.Api.Services.Finance.GL.ExternalFinancePostingAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
                 new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
                     provider.GetRequiredService<ApplicationDbContext>(),
@@ -846,6 +847,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceReturnedCheque));
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider,
                 ErpSystem.Api.Services.Finance.GL.FinanceReconciliationAdjustmentDimensionReadinessProvider>();
+            foreach (var externalRoute in Enum.GetValues<ErpSystem.Core.Finance.Integration.FinanceExternalProducerContractId>())
+            {
+                var routeId = ErpSystem.Core.Finance.Integration.FinanceExternalProducerContractCatalog
+                    .GetRequired(externalRoute).RouteId;
+                services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                    new ErpSystem.Api.Services.Finance.GL.ExternalProducerDimensionReadinessProvider(
+                        provider.GetRequiredService<ApplicationDbContext>(), routeId));
+            }
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchSpreadsheetService, ErpSystem.Api.Services.Finance.GL.JournalBatchSpreadsheetService>();
             // Recurring journals extend the existing GL posting pipeline. The

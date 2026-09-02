@@ -200,10 +200,26 @@ marked `Required` must be satisfied before posting even during optional capture;
 by `Optional` rules remain optional. Historical adjustment rows without the trusted route provenance
 remain legacy evidence and are not silently certified.
 
-Fixed-asset settlement and payment paths produced by another module remain separate
-dimension-expansion candidates. They require their own route identity, additive Finance
-adapter/contract, consumer tests and governed certification; sharing an underlying Finance service
-does not certify them implicitly.
+### External producer adapter boundary
+
+Non-Finance posting producers now have compiled, additive Finance contracts rather than inheriting
+the identity of an underlying manual AP, AR or GL service. Route IDs 61–77 distinguish accepted
+Procurement receipts, Inventory adjustments/landed cost/disposal proceeds, QS certificates, Estate
+billing/acquisitions, Legal transfer fees, Maintenance work-order billing, HR payroll, and the two
+supplier-return milestones. Sales credit notes retain their existing route 30.
+
+`IExternalFinancePostingAdapter` accepts only independently approved server-to-server evidence. It
+validates the authenticated tenant, registered contract, source-document and unique source-line
+identities, accounts, balanced positive amounts, currency/rate evidence and SHA-256 source evidence.
+Finance then resolves account rules, canonical dimension sets and immutable line snapshots and posts
+with a server-derived producer context and idempotency scope. External callers cannot select a manual
+Finance route or stored dimension-set ID.
+
+All external routes deploy as `CaptureOptional`. Their provisional readiness providers are tenant
+scoped and intentionally retain a `PRODUCER_ADOPTION_CENSUS_REQUIRED` blocker: assignment-only
+discovery cannot prove that every external source document used the adapter. Promotion remains
+fail-closed until the owning module adopts its specific contract and supplies authoritative census
+and consumer tests. No producer-module implementation was changed by this Finance expansion.
 
 ## Acceptance criteria
 

@@ -220,7 +220,18 @@ public static class FinanceIntegrationContractCatalog
             "IVendorInvoiceService and IFinanceBudgetCommitmentService",
             "VendorInvoice",
             null,
-            "Direct budget-controlled expense lines select an adopted Finance Budget Entry, reserve before the existing AP approval workflow, release on rejection and consume atomically with central GL posting. Opening, PO/GRV, Inventory and Fixed Asset lines are excluded to prevent duplicate commitments.")
+            "Direct budget-controlled expense lines select an adopted Finance Budget Entry, reserve before the existing AP approval workflow, release on rejection and consume atomically with central GL posting. Opening, PO/GRV, Inventory and Fixed Asset lines are excluded to prevent duplicate commitments."),
+        new(
+            "FIN-INT-017",
+            "Approved external producer to dimension-aware Finance posting",
+            "Procurement, Inventory, Sales, Quantity Survey, Estate, Legal, Maintenance and HR",
+            "Finance / AP, AR and General Ledger",
+            FinanceIntegrationContractStatus.Available,
+            "1.0",
+            "IExternalFinancePostingAdapter",
+            "Resolved from FinanceExternalProducerContractCatalog",
+            null,
+            "Each producer semantic has a distinct compiled route. Finance validates tenant, approval, accounts, balanced amounts, currency/rate and stable line provenance, then freezes canonical dimension evidence and posts idempotently. CaptureOptional does not imply producer adoption; Enforced promotion remains blocked until the producer supplies an authoritative tenant-scoped document census.")
     ];
 
     public static FinanceIntegrationContractDefinition GetRequired(string id)
