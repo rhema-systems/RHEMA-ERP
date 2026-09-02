@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0502 feedback, completion and acceptance lifecycle for the governed CIV-0501 task overlay.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow")]
 public partial class AddCivilEngineeringDirectTaskFeedbackWorkflow : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

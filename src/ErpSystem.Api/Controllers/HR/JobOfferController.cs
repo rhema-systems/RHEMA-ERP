@@ -380,7 +380,7 @@ public class JobOfferController : ControllerBase
     }
 
     /// <summary>Streams the issued offer letter.</summary>
-    [HttpGet("{id:guid}/letter")]
+    [HttpGet("{id:guid}/download-letter")]
     public Task<IActionResult> DownloadLetter(Guid id, CancellationToken ct = default)
         => DownloadLetterAsync(id, signed: false, ct);
 

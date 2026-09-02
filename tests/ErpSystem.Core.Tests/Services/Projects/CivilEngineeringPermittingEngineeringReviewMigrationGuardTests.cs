@@ -10,7 +10,6 @@ public sealed class CivilEngineeringPermittingEngineeringReviewMigrationGuardTes
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821143000_AddCivilEngineeringPermittingEngineeringReviews.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lineage")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle")
@@ -24,7 +23,7 @@ public sealed class CivilEngineeringPermittingEngineeringReviewMigrationGuardTes
             .And.Contain("AFTER INSERT AS")
             .And.Contain("ProjectCivilDevelopmentApprovalFiles approvalFile")
             .And.NotContain("ProjectCivilDevelopmentApprovalFiles file ON");
-        metadata.Should().Contain("20260821143000_AddCivilEngineeringPermittingEngineeringReviews");
+        sql.Should().Contain("[Migration(\"20260821143000_AddCivilEngineeringPermittingEngineeringReviews\")]");
     }
 
     private static string FindRoot()

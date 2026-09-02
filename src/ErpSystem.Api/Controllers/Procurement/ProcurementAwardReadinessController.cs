@@ -19,6 +19,7 @@ public sealed class ProcurementAwardReadinessController : ControllerBase
         _service = service;
 
     [HttpGet("latest")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetLatest(
         [FromQuery] ProcurementAwardReadinessSourceType sourceType,
         [FromQuery] Guid sourceId,
@@ -38,6 +39,7 @@ public sealed class ProcurementAwardReadinessController : ControllerBase
         });
 
     [HttpGet("history")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetHistory(
         [FromQuery] ProcurementAwardReadinessSourceType sourceType,
         [FromQuery] Guid sourceId,
@@ -56,6 +58,7 @@ public sealed class ProcurementAwardReadinessController : ControllerBase
         });
 
     [HttpGet("sod-status")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetEvaluatorAwardApproverSodStatus(
         [FromQuery] ProcurementAwardReadinessSourceType sourceType,
         [FromQuery] Guid sourceId,
@@ -71,6 +74,7 @@ public sealed class ProcurementAwardReadinessController : ControllerBase
         });
 
     [HttpPost("evaluate")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public Task<IActionResult> Evaluate(
         [FromQuery] ProcurementAwardReadinessSourceType sourceType,
         [FromQuery] Guid sourceId,

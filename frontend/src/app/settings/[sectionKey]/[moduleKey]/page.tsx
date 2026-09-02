@@ -7,6 +7,7 @@ interface SettingsModuleRouteProps {
     moduleKey: string;
   }>;
 }
+
 export default async function SettingsModuleRoute({ params }: SettingsModuleRouteProps) {
   const { sectionKey, moduleKey } = await params;
 

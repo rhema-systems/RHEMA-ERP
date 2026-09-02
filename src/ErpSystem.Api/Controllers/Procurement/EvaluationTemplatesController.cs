@@ -64,11 +64,13 @@ public class EvaluationTemplatesController : ControllerBase
     /// </summary>
     [HttpGet("dropdown")]
     [Authorize(Policy = "procurement.records.read")]
-    public async Task<ActionResult<IEnumerable<EvaluationTemplateListItemDto>>> GetForDropdown()
+    public async Task<ActionResult<IEnumerable<EvaluationTemplateListItemDto>>> GetForDropdown(
+        [FromQuery] string? category = null,
+        [FromQuery] string? tenderType = null)
     {
         try
         {
-            var templates = await _service.GetActiveForDropdownAsync();
+            var templates = await _service.GetActiveForDropdownAsync(category, tenderType);
             return Ok(templates);
         }
         catch (Exception ex)
@@ -235,7 +237,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Validate that criteria weights sum to 100
     /// </summary>
     [HttpGet("{id}/validate-weights")]
-    [Authorize(Policy = "procurement.records.read")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<bool>> ValidateWeights(Guid id)
     {
         try
@@ -250,3 +252,4 @@ public class EvaluationTemplatesController : ControllerBase
         }
     }
 }
+

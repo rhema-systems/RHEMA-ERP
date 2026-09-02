@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Repairs the initially published Civil Engineering template so it is backed by
 /// the existing central DMS access and retention governance records.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821220000_AddCivilEngineeringDmsGovernanceBaseline")]
 public partial class AddCivilEngineeringDmsGovernanceBaseline : Migration
 {
     private const string TemplateCode = "TDC-CIV-ENGINEERING-FILE";

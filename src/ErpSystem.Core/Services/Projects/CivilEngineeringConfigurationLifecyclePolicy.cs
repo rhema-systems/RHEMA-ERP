@@ -22,6 +22,7 @@ public static class CivilEngineeringConfigurationLifecyclePolicy
     public static int NextVersion(IEnumerable<CivilEngineeringConfigurationProfile> versions) =>
         versions.Select(item => item.Version).DefaultIfEmpty().Max() + 1;
 }
+
 public class CivilEngineeringConfigurationException(string message) : Exception(message);
 public sealed class CivilEngineeringConfigurationNotFoundException(string message) : CivilEngineeringConfigurationException(message);
 public sealed class CivilEngineeringConfigurationConflictException(string message) : CivilEngineeringConfigurationException(message);
@@ -29,3 +30,4 @@ public sealed class CivilEngineeringConfigurationValidationException(string mess
 {
     public CivilEngineeringValidationResultDto Validation { get; } = validation;
 }
+

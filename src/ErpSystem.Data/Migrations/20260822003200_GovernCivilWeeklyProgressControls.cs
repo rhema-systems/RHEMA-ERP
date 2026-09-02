@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// milestone, recovery-action and management-correction lineage. Historical reports remain
 /// immutable and readable; only new reports opt into the governed progress-control envelope.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003200_GovernCivilWeeklyProgressControls")]
 public partial class GovernCivilWeeklyProgressControls : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

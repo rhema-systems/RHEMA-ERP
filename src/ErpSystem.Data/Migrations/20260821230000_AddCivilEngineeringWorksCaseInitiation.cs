@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// Works/Engineering Case initiation provenance. It deliberately does not introduce a parallel
 /// request store: project design continues to own the downstream lifecycle.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821230000_AddCivilEngineeringWorksCaseInitiation")]
 public partial class AddCivilEngineeringWorksCaseInitiation : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

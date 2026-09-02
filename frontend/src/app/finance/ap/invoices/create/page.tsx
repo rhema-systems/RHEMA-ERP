@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -49,7 +49,6 @@ import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { purchasingService } from '@/services/purchasingService';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
@@ -59,10 +58,20 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
+import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
+import { useTenant } from '@/contexts/TenantContext';
+import type { ApBudgetCell } from '@/types/ap';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import {
+    toFinancePostingDimensionValues,
+    toFinanceSourceDimensionFormState,
+} from '@/lib/finance/source-document-dimensions';
 
 const lineItemSchema = z.object({
+    sourceLineId: z.string().uuid(),
     lineItemType: z.enum(['Expense', 'Product', 'Inventory']).default('Expense'),
     glAccountId: z.string().optional(),
+    budgetEntryId: z.string().optional(),
     inventoryItemId: z.string().optional(),
     warehouseId: z.string().optional(),
     purchaseOrderItemId: z.string().optional(),
@@ -85,6 +94,7 @@ const invoiceSchema = z.object({
     paymentTermId: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
+    exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
     notes: z.string().optional(),
@@ -98,13 +108,19 @@ const invoiceSchema = z.object({
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 
-export default function CreateVendorInvoicePage() {
+export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const preselectedPurchaseOrderId = searchParams.get('purchaseOrderId');
     const { toast } = useToast();
+    const { currentTenantCode } = useTenant();
+    const exchangeRateRequestId = useRef(0);
+    const editHydratedRef = useRef(false);
+    const editBudgetCellsLoadedRef = useRef(false);
+    const suppressPurchaseOrderHydrationRef = useRef(false);
+    const isEditMode = Boolean(editInvoiceId);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
 
@@ -119,31 +135,41 @@ export default function CreateVendorInvoicePage() {
     // GL Account combobox state
     const [glAccountOpenIndex, setGlAccountOpenIndex] = useState<number | null>(null);
     const [glAccountSearch, setGlAccountSearch] = useState('');
+    const [budgetCellsByLine, setBudgetCellsByLine] = useState<Record<string, ApBudgetCell[]>>({});
+    const [budgetCellsLoading, setBudgetCellsLoading] = useState<Record<string, boolean>>({});
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Inventory Item combobox state
     const [inventoryItemOpenIndex, setInventoryItemOpenIndex] = useState<number | null>(null);
     const [inventoryItemSearch, setInventoryItemSearch] = useState('');
 
     // Queries
-    const { data: suppliersData, isLoading: suppliersLoading } = useQuery({
-        queryKey: ['active-ap-supplier-business-partners'],
+    const {
+        data: suppliersData,
+        isLoading: suppliersLoading,
+        error: suppliersError,
+    } = useQuery({
+        queryKey: ['ap-invoice-suppliers'],
         queryFn: async () => {
-            const partners = await businessPartnerService.getActivePartners();
-            const payablePartners = (partners || [])
-                .filter((partner: any) => String(partner.partnerType || '').toLowerCase() !== 'customer')
-                .map((partner: any) => ({
-                    ...partner,
-                    name: partner.name || partner.partnerName || partner.companyName || 'Unknown supplier',
-                    code: partner.code || partner.partnerCode || '',
-                }))
-                .sort((a: any, b: any) => a.name.localeCompare(b.name));
-
-            return {
-                items: Array.from(
-                    new Map(payablePartners.map((partner: any) => [partner.id, partner])).values()
-                )
-            };
+            // AP commands persist Supplier.Id. Use Finance's tenant-scoped projection of the
+            // Procurement-owned Supplier master; BusinessPartner.Id is a different identity.
+            const suppliers = await accountsPayableService.getInvoiceSuppliers();
+            return { items: suppliers };
         },
+    });
+
+    const {
+        data: editInvoice,
+        isLoading: editInvoiceLoading,
+        error: editInvoiceError,
+    } = useQuery({
+        queryKey: ['vendor-invoice', editInvoiceId],
+        queryFn: () => editInvoiceId
+            ? accountsPayableService.getInvoice(editInvoiceId)
+            : Promise.reject(new Error('An invoice id is required for editing.')),
+        enabled: isEditMode,
     });
 
     const { data: glAccountsData, isLoading: glAccountsLoading } = useQuery({
@@ -172,6 +198,12 @@ export default function CreateVendorInvoicePage() {
     const { data: warehousesData } = useQuery({
         queryKey: ['warehouses'],
         queryFn: () => inventoryManagementService.getWarehouses(),
+    });
+
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings', currentTenantCode, 'ap-invoice-rate-policy'],
+        queryFn: () => financeService.getSettings(),
+        enabled: Boolean(currentTenantCode),
     });
 
     const { data: purchaseOrdersData, isLoading: purchaseOrdersLoading } = useQuery({
@@ -245,6 +277,7 @@ export default function CreateVendorInvoicePage() {
             paymentTermId: '',
             currencyCode: 'GHS',
             exchangeRate: 1.0,
+            exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
             isOpeningBalance: defaultOpeningBalance,
@@ -252,17 +285,25 @@ export default function CreateVendorInvoicePage() {
             withholdingTaxRate: 0,
             notes: '',
             lineItems: [
-                { lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }
+                { sourceLineId: crypto.randomUUID(), lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }
             ],
         },
     });
 
     const watchInvoiceDate = form.watch('invoiceDate');
+    const watchInvoiceDateTime = watchInvoiceDate?.getTime();
     useEffect(() => {
         if (watchInvoiceDate) {
             form.setValue('exchangeRateDate', watchInvoiceDate);
         }
     }, [watchInvoiceDate]);
+
+    useEffect(() => {
+        setBudgetCellsByLine({});
+        form.getValues('lineItems').forEach((_, index) => {
+            form.setValue(`lineItems.${index}.budgetEntryId`, undefined);
+        });
+    }, [form, watchInvoiceDateTime]);
 
     const { fields, append, remove } = useFieldArray({
         control: form.control,
@@ -283,6 +324,173 @@ export default function CreateVendorInvoicePage() {
     const selectedWithholdingTax = withholdingTaxOptions.find(tax => tax.id === watchWithholdingTaxId);
     const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(selectedWithholdingTax?.rate || 0);
     const watchLineItems = form.watch('lineItems') || [];
+
+    const loadBudgetCells = async (
+        lineKey: string,
+        index: number,
+        accountId: string,
+        preserveBudgetEntryId?: string
+    ) => {
+        if (!preserveBudgetEntryId) {
+            form.setValue(`lineItems.${index}.budgetEntryId`, undefined);
+        }
+        setBudgetCellsByLine(current => ({ ...current, [lineKey]: [] }));
+        if (!accountId || !watchInvoiceDate) return;
+        setBudgetCellsLoading(current => ({ ...current, [lineKey]: true }));
+        try {
+            const cells = await accountsPayableService.getInvoiceBudgetCells(
+                format(watchInvoiceDate, 'yyyy-MM-dd'),
+                accountId
+            );
+            setBudgetCellsByLine(current => ({ ...current, [lineKey]: cells }));
+            if (preserveBudgetEntryId) {
+                form.setValue(`lineItems.${index}.budgetEntryId`, preserveBudgetEntryId);
+            }
+        } catch (error: any) {
+            toast({
+                title: 'Budget cells unavailable',
+                description: error.message || 'Unable to load adopted Finance budget cells for this account.',
+                variant: 'destructive',
+            });
+        } finally {
+            setBudgetCellsLoading(current => ({ ...current, [lineKey]: false }));
+        }
+    };
+
+    useEffect(() => {
+        if (!isEditMode || !editInvoice || !suppliersData?.items || editHydratedRef.current) return;
+
+        const supplier = suppliersData.items.find(item => item.id === editInvoice.supplierId);
+        if (!supplier) return;
+
+        editHydratedRef.current = true;
+        editBudgetCellsLoadedRef.current = false;
+        setSelectedSupplier(supplier);
+        setSelectedPurchaseOrderId(editInvoice.purchaseOrderId || '');
+        suppressPurchaseOrderHydrationRef.current = Boolean(editInvoice.purchaseOrderId);
+        const dimensionState = toFinanceSourceDimensionFormState(editInvoice.financeDimensions);
+        setDefaultDimensionValues(dimensionState.defaultValues);
+        setLineDimensionValues(dimensionState.lineValues);
+        setApplyDefaultToAll(false);
+
+        const invoiceDate = new Date(editInvoice.invoiceDate);
+        const dueDate = editInvoice.dueDate
+            ? new Date(editInvoice.dueDate)
+            : addDays(invoiceDate, editInvoice.paymentTermsDays || 30);
+
+        form.reset({
+            supplierId: editInvoice.supplierId,
+            supplierInvoiceNumber: editInvoice.supplierInvoiceNumber || '',
+            purchaseOrderId: editInvoice.purchaseOrderId || undefined,
+            acceptedSupplyKind: editInvoice.acceptedSupplyKind,
+            acceptedSupplySourceId: editInvoice.acceptedSupplySourceId,
+            invoiceDate,
+            dueDate,
+            paymentTermId: editInvoice.paymentTermId || '',
+            currencyCode: editInvoice.currencyCode || 'GHS',
+            exchangeRate: editInvoice.exchangeRate || 1,
+            exchangeRateId: editInvoice.exchangeRateId,
+            exchangeRateDate: invoiceDate,
+            exchangeRateSource: editInvoice.exchangeRateId ? 'Approved rate' : 'Daily',
+            notes: editInvoice.notes || '',
+            reference: editInvoice.reference || '',
+            taxGroupId: 'none',
+            withholdingTaxId: editInvoice.withholdingTaxId || 'none',
+            withholdingTaxRate: editInvoice.withholdingTaxRate || 0,
+            isOpeningBalance: editInvoice.isOpeningBalance,
+            lineItems: editInvoice.lineItems.map(line => ({
+                sourceLineId: line.id,
+                lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Product' | 'Inventory',
+                glAccountId: line.glAccountId,
+                budgetEntryId: line.budgetEntryId,
+                inventoryItemId: line.inventoryItemId,
+                warehouseId: line.warehouseId,
+                purchaseOrderItemId: line.purchaseOrderItemId,
+                description: line.description,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                taxGroupId: line.taxGroupId || 'none',
+                discountPercentage: line.discountPercentage || 0,
+                unit: line.unit,
+            })),
+        });
+    }, [editInvoice, form, isEditMode, suppliersData]);
+
+    useEffect(() => {
+        if (!isEditMode || !editInvoice || !editHydratedRef.current || editBudgetCellsLoadedRef.current) return;
+        if (fields.length !== editInvoice.lineItems.length) return;
+
+        editBudgetCellsLoadedRef.current = true;
+        editInvoice.lineItems.forEach((line, index) => {
+            if (line.glAccountId) {
+                void loadBudgetCells(fields[index].id, index, line.glAccountId, line.budgetEntryId);
+            }
+        });
+    }, [editInvoice, fields, isEditMode]);
+
+    const applyInvoiceExchangeRate = async (currencyCode: string) => {
+        const requestId = ++exchangeRateRequestId.current;
+        const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+        const isOpeningBalance = form.getValues('isOpeningBalance');
+
+        if (isOpeningBalance) {
+            // Clear the prior date/currency evidence before the async lookup so Save cannot race
+            // with a stale approved-rate identity while the new historical rate is loading.
+            form.setValue('exchangeRateId', undefined);
+            if (!financeSettings) {
+                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
+            }
+            let snapshot;
+            try {
+                snapshot = await loadApprovedInvoiceRate(
+                    {
+                        module: 'AP',
+                        transactionCurrency: currencyCode,
+                        functionalCurrency,
+                        invoiceDate: form.getValues('invoiceDate'),
+                        settings: financeSettings,
+                    },
+                    (code, query) => financeService.getCurrentExchangeRate(code, query)
+                );
+            } catch (error) {
+                if (requestId !== exchangeRateRequestId.current) return;
+                throw error;
+            }
+            if (requestId !== exchangeRateRequestId.current) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            form.setValue('exchangeRateSource', snapshot.source);
+            return;
+        }
+
+        form.setValue('exchangeRateId', undefined);
+        if (currencyCode === functionalCurrency) {
+            form.setValue('exchangeRate', 1);
+            form.setValue('exchangeRateSource', 'Daily');
+            return;
+        }
+
+        let rateObj;
+        try {
+            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+        } catch (error) {
+            if (requestId !== exchangeRateRequestId.current) return;
+            throw error;
+        }
+        if (requestId !== exchangeRateRequestId.current) return;
+        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
+        form.setValue('exchangeRateId', rateObj.id);
+        form.setValue('exchangeRateSource', 'Daily');
+    };
+
+    useEffect(() => {
+        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
+            console.error('Failed to resolve governed AP opening-invoice rate', error);
+            form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRateSource', 'Unavailable');
+        });
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
 
     useEffect(() => {
         if (!watchIsOpeningBalance) return;
@@ -455,24 +663,17 @@ export default function CreateVendorInvoicePage() {
             }
             if (supplier.currency) {
                 form.setValue('currencyCode', supplier.currency);
-                if (supplier.currency === 'GHS') {
+                try {
+                    await applyInvoiceExchangeRate(supplier.currency);
+                } catch (err) {
+                    console.error("Failed to fetch exchange rate for supplier currency", err);
+                    form.setValue('exchangeRateId', undefined);
                     form.setValue('exchangeRate', 1.0);
-                    form.setValue('exchangeRateSource', 'Daily');
-                } else {
-                    try {
-                        const rateObj = await financeService.getCurrentExchangeRate(supplier.currency);
-                        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                        form.setValue('exchangeRateSource', 'Daily');
-                    } catch (err) {
-                        console.error("Failed to fetch exchange rate for supplier currency", err);
-                        form.setValue('exchangeRate', 1.0);
-                        form.setValue('exchangeRateSource', 'Custom');
-                    }
+                    form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
                 form.setValue('currencyCode', 'GHS');
-                form.setValue('exchangeRate', 1.0);
-                form.setValue('exchangeRateSource', 'Daily');
+                await applyInvoiceExchangeRate('GHS');
             }
         }
     };
@@ -487,6 +688,12 @@ export default function CreateVendorInvoicePage() {
 
     useEffect(() => {
         if (!selectedPurchaseOrder) return;
+        if (suppressPurchaseOrderHydrationRef.current) {
+            // The saved draft is authoritative while editing. Loading its PO must not replace
+            // existing invoice lines with today's remaining PO quantities.
+            suppressPurchaseOrderHydrationRef.current = false;
+            return;
+        }
         if (selectedPurchaseOrder.procurementCategory === 'Works') {
             toast({
                 title: 'Use the QS certificate handoff',
@@ -499,6 +706,7 @@ export default function CreateVendorInvoicePage() {
         form.setValue('currencyCode', selectedPurchaseOrder.currency || 'GHS');
         form.setValue('exchangeRate', 1);
         form.setValue('lineItems', selectedPurchaseOrder.items.map(item => ({
+            sourceLineId: crypto.randomUUID(),
             lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Expense',
             inventoryItemId: item.inventoryItemId || undefined,
             warehouseId: item.warehouseId || undefined,
@@ -554,25 +762,37 @@ export default function CreateVendorInvoicePage() {
                 });
                 return;
             }
-            await accountsPayableService.createInvoice({
+            const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            const request = {
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
+                exchangeRateId: data.exchangeRateId,
                 // The backend resolves rate/account again from this tax id. Sending the displayed
                 // values keeps the compatibility DTO descriptive but grants them no authority.
                 withholdingTaxId: isOpeningBalance || data.withholdingTaxId === 'none' ? null : data.withholdingTaxId,
                 withholdingTaxRate: isOpeningBalance ? 0 : watchWithholdingTaxRate,
                 withholdingTaxAccountId: isOpeningBalance ? null : selectedWithholdingTax?.taxPayableAccountId || null,
                 isOpeningBalance,
-                acceptedSupplyKind: serviceCategory ? 'ServiceCompletion' : undefined,
-                acceptedSupplySourceId: serviceCategory ? data.acceptedSupplySourceId : undefined,
+                acceptedSupplyKind: serviceCategory ? ('ServiceCompletion' as const) : data.acceptedSupplyKind,
+                acceptedSupplySourceId: data.acceptedSupplySourceId,
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
                     return {
+                        id: item.sourceLineId,
                         lineItemType: item.lineItemType,
                         glAccountId: item.glAccountId || null,
+                        budgetEntryId: item.budgetEntryId || null,
                         purchaseOrderItemId: item.purchaseOrderItemId || null,
                         description: item.description,
                         quantity: Number(item.quantity),
@@ -584,25 +804,114 @@ export default function CreateVendorInvoicePage() {
                         inventoryItemId: item.inventoryItemId || null,
                         warehouseId: item.warehouseId || null,
                     } as any;
-                })
-            });
+                }),
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: data.lineItems.flatMap(item => {
+                        const accountId = !isOpeningBalance
+                            && !data.purchaseOrderId
+                            && item.lineItemType === 'Expense'
+                            ? item.glAccountId
+                            : undefined;
+                        return accountId ? [{
+                            sourceLineId: item.sourceLineId,
+                            accountId,
+                            dimensions: toFinancePostingDimensionValues(lineDimensionValues[item.sourceLineId] || {}),
+                        }] : [];
+                    }),
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
+            };
+
+            if (isEditMode && editInvoice) {
+                await accountsPayableService.updateInvoice(editInvoice.id, {
+                    ...request,
+                    id: editInvoice.id,
+                    receivedDate: editInvoice.receivedDate,
+                    paymentTermsDays: editInvoice.paymentTermsDays,
+                    earlyPaymentDiscountPercentage: editInvoice.earlyPaymentDiscountPercentage,
+                    earlyPaymentDiscountDueDate: editInvoice.earlyPaymentDiscountDueDate,
+                    withholdingCertificateNumber: editInvoice.withholdingCertificateNumber,
+                    withholdingCertificateDate: editInvoice.withholdingCertificateDate,
+                    matchingType: editInvoice.matchingType,
+                    expenseAccountId: editInvoice.expenseAccountId,
+                    apAccountId: editInvoice.apAccountId,
+                });
+            } else {
+                await accountsPayableService.createInvoice(request);
+            }
 
             toast({
                 title: 'Success',
-                description: 'Vendor invoice created successfully',
+                description: isEditMode
+                    ? 'Vendor invoice updated successfully'
+                    : 'Vendor invoice created successfully',
             });
 
-            router.push('/finance/ap/invoices');
+            router.push(isEditMode && editInvoice
+                ? `/finance/ap/invoices/${editInvoice.id}`
+                : '/finance/ap/invoices');
         } catch (error: any) {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to create vendor invoice',
+                description: error.message || `Failed to ${isEditMode ? 'update' : 'create'} vendor invoice`,
                 variant: 'destructive',
             });
         } finally {
             setIsSubmitting(false);
         }
     };
+
+    const editSupplierMissing = Boolean(
+        isEditMode &&
+        editInvoice &&
+        suppliersData &&
+        !suppliersData.items.some(item => item.id === editInvoice.supplierId)
+    );
+
+    if (
+        isEditMode &&
+        (editInvoiceLoading || !editHydratedRef.current) &&
+        !editInvoiceError &&
+        !suppliersError &&
+        !editSupplierMissing
+    ) {
+        return (
+            <div className="flex min-h-[50vh] items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
+
+    if (isEditMode && (editInvoiceError || suppliersError || editSupplierMissing)) {
+        return (
+            <div className="mx-auto max-w-2xl space-y-4 p-8">
+                <h1 className="text-2xl font-bold">Unable to edit vendor invoice</h1>
+                <p className="text-muted-foreground">
+                    {(editInvoiceError as Error | undefined)?.message ||
+                        (suppliersError as Error | undefined)?.message ||
+                        (editSupplierMissing
+                            ? 'The invoice supplier is not available in the current tenant.'
+                            : 'The invoice could not be loaded.')}
+                </p>
+                <Button variant="outline" onClick={() => router.push('/finance/ap/invoices')}>
+                    Back to invoices
+                </Button>
+            </div>
+        );
+    }
+
+    if (isEditMode && editInvoice && !['Draft', 'Rejected'].includes(editInvoice.status)) {
+        return (
+            <div className="mx-auto max-w-2xl space-y-4 p-8">
+                <h1 className="text-2xl font-bold">Invoice can no longer be edited</h1>
+                <p className="text-muted-foreground">Only Draft or Rejected invoices may be changed.</p>
+                <Button variant="outline" onClick={() => router.push(`/finance/ap/invoices/${editInvoice.id}`)}>
+                    View invoice
+                </Button>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8 p-8 max-w-[1400px] mx-auto">
@@ -611,9 +920,11 @@ export default function CreateVendorInvoicePage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Vendor Invoice</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {isEditMode ? `Edit ${editInvoice?.invoiceNumber || 'Vendor Invoice'}` : 'Record Vendor Invoice'}
+                    </h1>
                     <p className="text-muted-foreground">
-                        Enter a bill received from a supplier.
+                        {isEditMode ? 'Update this draft without losing its accounting evidence.' : 'Enter a bill received from a supplier.'}
                     </p>
                 </div>
             </div>
@@ -633,6 +944,7 @@ export default function CreateVendorInvoicePage() {
                                         role="combobox"
                                         aria-expanded={supplierComboOpen}
                                         className="w-full justify-between"
+                                        disabled={isEditMode}
                                     >
                                         {selectedSupplier
                                             ? `${selectedSupplier.name} (${selectedSupplier.code})`
@@ -792,19 +1104,13 @@ export default function CreateVendorInvoicePage() {
                                         value={field.value} 
                                         onValueChange={async (val) => {
                                             field.onChange(val);
-                                            if (val === 'GHS') {
+                                            try {
+                                                await applyInvoiceExchangeRate(val);
+                                            } catch (err) {
+                                                console.error("Failed to fetch exchange rate for currency", err);
+                                                form.setValue('exchangeRateId', undefined);
                                                 form.setValue('exchangeRate', 1.0);
-                                                form.setValue('exchangeRateSource', 'Daily');
-                                            } else {
-                                                try {
-                                                    const rateObj = await financeService.getCurrentExchangeRate(val);
-                                                    form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                                                    form.setValue('exchangeRateSource', 'Daily');
-                                                } catch (err) {
-                                                    console.error("Failed to fetch exchange rate for currency", err);
-                                                    form.setValue('exchangeRate', 1.0);
-                                                    form.setValue('exchangeRateSource', 'Custom');
-                                                }
+                                                form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
                                     >
@@ -822,18 +1128,25 @@ export default function CreateVendorInvoicePage() {
                             />
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="space-y-2">
                                 <Label className="text-amber-600 font-semibold">Exchange Rate to Base Currency</Label>
                                 <Input 
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
+                                    readOnly={watchIsOpeningBalance}
+                                    aria-readonly={watchIsOpeningBalance}
                                     {...form.register('exchangeRate', {
-                                        onChange: () => form.setValue('exchangeRateSource', 'Custom')
+                                        onChange: () => {
+                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
+                                        }
                                     })} 
                                 />
-                                <span className="text-[11px] text-muted-foreground block mt-1">1 {watchCurrencyCode} = {form.watch('exchangeRate')} GHS</span>
+                                <span className="text-[11px] text-muted-foreground block mt-1">
+                                    1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
+                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                </span>
                             </div>
                         )}
 
@@ -905,7 +1218,7 @@ export default function CreateVendorInvoicePage() {
                             </span>
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 lg:col-span-3 space-y-4">
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -917,7 +1230,7 @@ export default function CreateVendorInvoicePage() {
                                             render={({ field }) => (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
                                                             <CalendarIcon className="mr-2 h-3 w-3" />
                                                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                                                         </Button>
@@ -935,18 +1248,22 @@ export default function CreateVendorInvoicePage() {
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                    <SelectTrigger className="h-10 text-xs">
-                                                        <SelectValue placeholder="Select FX Source" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="Daily">Daily</SelectItem>
-                                                        <SelectItem value="Spot">Spot</SelectItem>
-                                                        <SelectItem value="Official">Official</SelectItem>
-                                                        <SelectItem value="Market">Market</SelectItem>
-                                                        <SelectItem value="Custom">Custom</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                watchIsOpeningBalance ? (
+                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
+                                                ) : (
+                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
+                                                        <SelectTrigger className="h-10 text-xs">
+                                                            <SelectValue placeholder="Select FX Source" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Daily">Daily</SelectItem>
+                                                            <SelectItem value="Spot">Spot</SelectItem>
+                                                            <SelectItem value="Official">Official</SelectItem>
+                                                            <SelectItem value="Market">Market</SelectItem>
+                                                            <SelectItem value="Custom">Custom</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )
                                             )}
                                         />
                                     </div>
@@ -990,11 +1307,46 @@ export default function CreateVendorInvoicePage() {
                     </CardContent>
                 </Card>
 
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Finance coding dimensions</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <SourceDocumentDimensionPanel
+                            context={{
+                                sourceModule: 'AP',
+                                sourceDocumentType: 'VendorInvoice',
+                                postingAction: 'Post',
+                                sourceRoute: 'finance.ap.vendor-invoices.manual',
+                                contractVersion: '1.0',
+                            }}
+                            effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
+                            lines={watchLineItems.map((item) => ({
+                                id: item.sourceLineId,
+                                accountId: !watchIsOpeningBalance
+                                    && !selectedPurchaseOrderId
+                                    && item.lineItemType === 'Expense'
+                                    ? item.glAccountId
+                                    : undefined,
+                                accountLabel: item.description || undefined,
+                            }))}
+                            defaultValues={defaultDimensionValues}
+                            lineValues={lineDimensionValues}
+                            onDefaultValuesChange={(values) => {
+                                setDefaultDimensionValues(values);
+                                setApplyDefaultToAll(false);
+                            }}
+                            onLineValuesChange={setLineDimensionValues}
+                            onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        />
+                    </CardContent>
+                </Card>
+
                 {/* Line Items Card */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>
@@ -1002,6 +1354,9 @@ export default function CreateVendorInvoicePage() {
                         <div className="space-y-4">
                             {fields.map((field, index) => {
                                 const lineItemType = form.watch(`lineItems.${index}.lineItemType`);
+                                const selectedGlAccount = glAccountsData?.items?.find(
+                                    (account: any) => account.id === form.watch(`lineItems.${index}.glAccountId`)
+                                );
                                 return (
                                     <div key={field.id} className="grid grid-cols-12 gap-4 items-end border-b pb-4">
                                         <div className="col-span-2 space-y-2">
@@ -1029,7 +1384,7 @@ export default function CreateVendorInvoicePage() {
                                                     <Controller
                                                         control={form.control}
                                                         name={`lineItems.${index}.glAccountId`}
-                                                        render={({ field }) => (
+                                                        render={({ field: accountField }) => (
                                                             <Popover
                                                                 open={glAccountOpenIndex === index}
                                                                 onOpenChange={(open) => { setGlAccountOpenIndex(open ? index : null); if (!open) setGlAccountSearch(''); }}
@@ -1037,7 +1392,7 @@ export default function CreateVendorInvoicePage() {
                                                                 <PopoverTrigger asChild>
                                                                     <Button variant="outline" role="combobox" className="w-full justify-between text-left font-medium line-clamp-1 h-10 px-3">
                                                                         <span className="truncate text-sm">
-                                                                            {getAccountDisplay(field.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
+                                                                            {getAccountDisplay(accountField.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
                                                                         </span>
                                                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                                                     </Button>
@@ -1052,7 +1407,8 @@ export default function CreateVendorInvoicePage() {
                                                                                     <div
                                                                                         key={account.id}
                                                                                         onClick={() => {
-                                                                                            field.onChange(account.id);
+                                                                                            accountField.onChange(account.id);
+                                                                                            void loadBudgetCells(field.id, index, account.id);
                                                                                             if (!form.getValues(`lineItems.${index}.description`)) {
                                                                                                 form.setValue(`lineItems.${index}.description`, account.accountName);
                                                                                             }
@@ -1074,6 +1430,41 @@ export default function CreateVendorInvoicePage() {
                                                             </Popover>
                                                         )}
                                                     />
+                                                    {(budgetCellsLoading[field.id]
+                                                        || (budgetCellsByLine[field.id]?.length ?? 0) > 0
+                                                        || selectedGlAccount?.budgetTrackingEnabled) && (
+                                                        <Controller
+                                                            control={form.control}
+                                                            name={`lineItems.${index}.budgetEntryId`}
+                                                            render={({ field: budgetField }) => (
+                                                                <Select
+                                                                    value={budgetField.value}
+                                                                    onValueChange={budgetField.onChange}
+                                                                    disabled={budgetCellsLoading[field.id] || (budgetCellsByLine[field.id]?.length ?? 0) === 0}
+                                                                >
+                                                                    <SelectTrigger className="mt-2 h-auto min-h-10 text-left">
+                                                                        <SelectValue placeholder={budgetCellsLoading[field.id]
+                                                                            ? 'Loading budget cells...'
+                                                                            : (budgetCellsByLine[field.id]?.length ?? 0) === 0
+                                                                                ? 'No adopted budget cell'
+                                                                                : 'Select adopted budget cell'} />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {(budgetCellsByLine[field.id] || []).map(cell => (
+                                                                            <SelectItem key={cell.budgetEntryId} value={cell.budgetEntryId}>
+                                                                                <span className="flex flex-col">
+                                                                                    <span>{cell.dimensionAssignments.map(item => `${item.dimensionCode}: ${item.valueCode}`).join(' · ') || 'Account total'}</span>
+                                                                                    <span className="text-xs text-muted-foreground">
+                                                                                        {cell.fiscalPeriodCode} · {formatCurrency(cell.availableAmount, cell.functionalCurrencyCode)} available
+                                                                                    </span>
+                                                                                </span>
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        />
+                                                    )}
                                                 </div>
                                                 <div className="col-span-2 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
@@ -1251,11 +1642,15 @@ export default function CreateVendorInvoicePage() {
                         <Button variant="outline" type="button" onClick={() => router.back()}>Cancel</Button>
                         <Button type="submit" disabled={isSubmitting}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Record Invoice
+                            {isEditMode ? 'Save Changes' : 'Record Invoice'}
                         </Button>
                     </CardFooter>
                 </Card>
             </form>
         </div>
     );
+}
+
+export default function CreateVendorInvoicePage() {
+    return <VendorInvoiceFormPage />;
 }

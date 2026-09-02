@@ -99,15 +99,18 @@ public class InvoiceCreateDto
     public string? Notes { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public Guid? PaymentTermId { get; set; }
     public decimal DiscountAmount { get; set; }
     public Guid? TaxGroupId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class InvoiceLineItemCreateDto
 {
+    public Guid? Id { get; set; }
     public string LineItemType { get; set; } = "Product";
     public Guid? ProductId { get; set; }
     public Guid? GLAccountId { get; set; }
@@ -132,8 +135,10 @@ public class InvoiceUpdateDto
     public Guid? TaxGroupId { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemUpdateDto> LineItems { get; set; } = new();
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class InvoiceLineItemUpdateDto

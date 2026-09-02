@@ -10,7 +10,6 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821170000_AddCivilEngineeringDirectTaskControls.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDirectTaskControls_Lineage")
             .And.Contain("TR_ProjectCivilDirectTaskControls_Lifecycle")
@@ -23,7 +22,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
             .And.Contain("CentralDocumentVersions")
             .And.Contain("OPENJSON(decision.ValueJson,'$.assigneeRoleIds')")
             .And.Contain("AFTER INSERT AS");
-        metadata.Should().Contain("20260821170000_AddCivilEngineeringDirectTaskControls");
+        sql.Should().Contain("[Migration(\"20260821170000_AddCivilEngineeringDirectTaskControls\")]");
     }
 
     [Fact]
@@ -31,7 +30,6 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("ProjectCivilDirectTaskFeedbackEntries")
             .And.Contain("IX_ProjectCivilDirectTaskFeedbackEntries_TenantId_TaskId_ClientRequestId")
@@ -45,7 +43,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
             .And.NotContain("version.IsCurrent=1")
             .And.Contain("LastFeedbackClientRequestId")
             .And.Contain("Invalid Civil direct-task lifecycle transition");
-        metadata.Should().Contain("20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow");
+        sql.Should().Contain("[Migration(\"20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow\")]");
     }
 
     [Fact]
@@ -53,7 +51,6 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821190000_AddCivilEngineeringUrgentTaskControls.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDirectTaskControls_UrgentPath")
             .And.Contain("UrgentEscalationClientRequestId")
@@ -62,7 +59,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
             .And.Contain("urgentResponseHours")
             .And.Contain("Civil urgent-task path and escalation lineage are immutable")
             .And.Contain("CK_ProjectCivilDirectTaskControls_UrgentPath");
-        metadata.Should().Contain("20260821190000_AddCivilEngineeringUrgentTaskControls");
+        sql.Should().Contain("[Migration(\"20260821190000_AddCivilEngineeringUrgentTaskControls\")]");
     }
 
     [Fact]
@@ -70,7 +67,6 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821200000_AddCivilEngineeringMobileFieldFeedback.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("MeasurementValue decimal(18,4)")
             .And.Contain("MeasurementUnitId uniqueidentifier")
@@ -81,7 +77,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
             .And.Contain("unit.TenantId=value.TenantId")
             .And.Contain("unit.IsActive=1")
             .And.Contain("DATEADD(day,-31,value.CreatedAt)");
-        metadata.Should().Contain("20260821200000_AddCivilEngineeringMobileFieldFeedback");
+        sql.Should().Contain("[Migration(\"20260821200000_AddCivilEngineeringMobileFieldFeedback\")]");
     }
 
     private static string FindRoot()

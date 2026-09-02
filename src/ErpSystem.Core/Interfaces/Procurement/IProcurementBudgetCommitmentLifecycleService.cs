@@ -14,6 +14,9 @@ public interface IProcurementBudgetCommitmentLifecycleService
     Task<ProcurementBudgetCommitmentLedgerEntry> UtilizeContractCertificateAsync(
         Guid contractId, Guid certificateId, string certificateReference, decimal amount,
         string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementBudgetCommitmentLedgerEntry?> ReleaseUnusedContractAsync(
+        Guid contractId, string correlationId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class ProcurementBudgetCommitmentLifecycleException(string code, string message)

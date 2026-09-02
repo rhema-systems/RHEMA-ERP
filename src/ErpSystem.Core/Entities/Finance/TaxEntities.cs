@@ -417,6 +417,9 @@ namespace ErpSystem.Core.Entities.Finance
         [Required]
         public Guid DocumentId { get; set; }
 
+        /// <summary>Optional source-document line for exact tax-component lineage.</summary>
+        public Guid? DocumentLineId { get; set; }
+
         /// <summary>
         /// Tax ID
         /// </summary>
@@ -427,6 +430,9 @@ namespace ErpSystem.Core.Entities.Finance
         /// Tax group ID (if calculated via group)
         /// </summary>
         public Guid? TaxGroupId { get; set; }
+
+        /// <summary>Immutable posting account selected for this tax component.</summary>
+        public Guid? PostingAccountId { get; set; }
 
         /// <summary>
         /// Base amount

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0503 controlled urgent-task SLA, notification-escalation and immutable escalation lineage.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821190000_AddCivilEngineeringUrgentTaskControls")]
 public partial class AddCivilEngineeringUrgentTaskControls : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

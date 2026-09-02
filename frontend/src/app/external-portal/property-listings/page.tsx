@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CheckCircle2,
   FileText,
+  Paperclip,
   Filter,
   Home,
   ImageIcon,
@@ -33,12 +34,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/hooks/use-toast';
 import {
   externalEstateListingsService,
   type ExternalCustomerProfile,
   type ExternalEstateListing,
   type ExternalListingRequest,
 } from '@/services/external-estate-listings.service';
+import {
+  procedureCaseService,
+  type ProcedureCaseSubmissionDocumentRequirement,
+} from '@/services/procedure-case.service';
 
 type ListingIntent = 'Sale' | 'Rent';
 
@@ -215,6 +221,7 @@ function ListingStat({
 }
 
 export default function ExternalPropertyListingsPage() {
+  const { toast } = useToast();
   const [customerProfiles, setCustomerProfiles] = React.useState<
     ExternalCustomerProfile[]
   >([]);
@@ -229,6 +236,10 @@ export default function ExternalPropertyListingsPage() {
     React.useState<ListingIntent>('Rent');
   const [offerAmount, setOfferAmount] = React.useState('');
   const [message, setMessage] = React.useState('');
+  const [documentRequirements, setDocumentRequirements] = React.useState<
+    ProcedureCaseSubmissionDocumentRequirement[]
+  >([]);
+  const [submissionFiles, setSubmissionFiles] = React.useState<Record<string, File>>({});
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [createdRequest, setCreatedRequest] =
@@ -253,6 +264,29 @@ export default function ExternalPropertyListingsPage() {
   const requestOptions = React.useMemo(
     () => availableIntents(selected),
     [selected]
+  );
+  const activeRequestIntent = requestOptions.includes(requestIntent)
+    ? requestIntent
+    : defaultIntent(selected);
+
+  const visibleDocumentRequirements = React.useMemo(
+    () =>
+      documentRequirements.filter((requirement) => {
+        if (requirement.appliesTo === 'All' || requirement.appliesTo === activeRequestIntent) {
+          return true;
+        }
+        if (requirement.appliesTo) {
+          return false;
+        }
+
+        // Compatibility for workflow versions saved before applicability was introduced.
+        const name = requirement.name.toLowerCase();
+        if (activeRequestIntent === 'Sale') {
+          return !name.includes('rental') && !name.includes('tenancy');
+        }
+        return !name.includes('purchase') && !name.includes('financing');
+      }),
+    [activeRequestIntent, documentRequirements]
   );
 
   const loadListings = React.useCallback(async () => {
@@ -305,12 +339,31 @@ export default function ExternalPropertyListingsPage() {
   }, []);
 
   React.useEffect(() => {
+    let mounted = true;
+    void procedureCaseService
+      .getSubmissionDocumentRequirements(
+        'PropertyManagement',
+        'EstatePropertyManagementListingApplication'
+      )
+      .then((requirements) => {
+        if (mounted) setDocumentRequirements(requirements);
+      })
+      .catch(() => {
+        if (mounted) setDocumentRequirements([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
     void loadListings();
   }, [loadListings]);
 
   React.useEffect(() => {
     setRequestIntent(defaultIntent(selected));
     setOfferAmount('');
+    setSubmissionFiles({});
     setCreatedRequest(null);
   }, [selected?.id, selected?.externalListingType]);
 
@@ -323,7 +376,7 @@ export default function ExternalPropertyListingsPage() {
       return;
     }
     if (
-      requestIntent === 'Sale' &&
+      activeRequestIntent === 'Sale' &&
       (!offerAmount || Number(offerAmount) <= 0)
     ) {
       setError('Enter a positive bid amount before submitting your bid.');
@@ -337,18 +390,47 @@ export default function ExternalPropertyListingsPage() {
       const created = await externalEstateListingsService.createRequest(
         selected.id,
         {
-          requestType: requestIntent,
+          requestType: activeRequestIntent,
           businessPartnerId: selectedCustomer.id,
           offerAmount:
-            requestIntent === 'Sale' ? Number(offerAmount) : undefined,
+            activeRequestIntent === 'Sale' ? Number(offerAmount) : undefined,
           message: message.trim(),
         }
       );
+      const documents = created.documents || [];
+      for (const requirement of visibleDocumentRequirements) {
+        const file = submissionFiles[requirement.name];
+        const document = documents.find(
+          (item) => item.providedBy === 'Customer' && item.name === requirement.name
+        );
+        if (file && !document) {
+          throw new Error(
+            `${requirement.name} could not be linked to the submitted request. Open the request and upload it again.`
+          );
+        }
+        if (file && document) {
+          await externalEstateListingsService.uploadCustomerIntakeDocument(
+            created.id,
+            document.id,
+            file
+          );
+        }
+      }
       setCreatedRequest(created);
+      toast({
+        title: 'Request submitted',
+        description: `${created.referenceNumber || created.title} is now in ${created.currentStageName}.`,
+        variant: 'success',
+      });
       setMessage('');
+      setSubmissionFiles({});
       await loadListings();
-    } catch {
-      setError('Could not submit request for this listing.');
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Could not submit request for this listing.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -501,7 +583,7 @@ export default function ExternalPropertyListingsPage() {
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-slate-50">
-                      {requestIntent === 'Sale' ? (
+                      {activeRequestIntent === 'Sale' ? (
                         <Building2 className="h-5 w-5 text-blue-700" />
                       ) : (
                         <Home className="h-5 w-5 text-blue-700" />
@@ -557,13 +639,13 @@ export default function ExternalPropertyListingsPage() {
 
                   <div className="rounded-md bg-slate-50 p-4">
                     <div className="text-xs text-slate-500">
-                      {requestIntent === 'Sale'
+                      {activeRequestIntent === 'Sale'
                         ? 'Sale price'
                         : 'Rent per month'}
                     </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
                       {formatMoney(
-                        requestIntent === 'Sale'
+                        activeRequestIntent === 'Sale'
                           ? (selected.externalSalePrice ??
                               selected.externalListingPrice)
                           : (selected.externalMonthlyRent ??
@@ -572,7 +654,7 @@ export default function ExternalPropertyListingsPage() {
                       )}
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
-                      {requestIntent === 'Rent'
+                      {activeRequestIntent === 'Rent'
                         ? `${formatLeaseTerm(
                             selected.externalLeaseTermMonths
                           )} · billing starts after agreement and move-in`
@@ -636,7 +718,7 @@ export default function ExternalPropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Request type</Label>
                     <Select
-                      value={requestIntent}
+                      value={activeRequestIntent}
                       onValueChange={(value) =>
                         setRequestIntent(value as ListingIntent)
                       }
@@ -682,7 +764,7 @@ export default function ExternalPropertyListingsPage() {
                       />
                     </div>
                   </div>
-                  {requestIntent === 'Sale' ? (
+                  {activeRequestIntent === 'Sale' ? (
                     <div className="space-y-2">
                       <Label>
                         Bid amount ({selected.externalListingCurrency || 'GHS'})
@@ -707,13 +789,52 @@ export default function ExternalPropertyListingsPage() {
                       placeholder="Preferred viewing time, financing, lease period, or other notes."
                     />
                   </div>
-                  <Button className="w-full" disabled={isSubmitting}>
+                  {visibleDocumentRequirements.length > 0 ? (
+                  <div className="space-y-3 rounded-md border p-4">
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="h-4 w-4 text-blue-700" />
+                      <Label>Supporting documents</Label>
+                    </div>
+                    {visibleDocumentRequirements.map((requirement, index) => (
+                      <div key={requirement.name} className="space-y-2">
+                        <Label
+                          htmlFor={`submission-document-${index}`}
+                          className="text-sm font-normal"
+                        >
+                          {requirement.name}{requirement.isMandatory ? ' *' : ''}
+                        </Label>
+                        <Input
+                          id={`submission-document-${index}`}
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          required={requirement.isMandatory}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            setSubmissionFiles((current) => {
+                              const next = { ...current };
+                              if (file) next[requirement.name] = file;
+                              else delete next[requirement.name];
+                              return next;
+                            });
+                          }}
+                        />
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-500">
+                      Attach available evidence now. Additional documents can be requested during review.
+                    </p>
+                  </div>
+                  ) : null}
+                  <Button
+                    className="w-full"
+                    disabled={isSubmitting || requestOptions.length === 0}
+                  >
                     {isSubmitting ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Send className="mr-2 h-4 w-4" />
                     )}
-                    {requestIntent === 'Sale' ? 'Submit bid' : 'Submit request'}
+                    {activeRequestIntent === 'Sale' ? 'Submit bid' : 'Submit request'}
                   </Button>
                 </form>
                 )}

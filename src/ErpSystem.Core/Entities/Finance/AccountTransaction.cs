@@ -30,6 +30,18 @@ public class AccountTransaction : BusinessEntity
     public Guid JournalEntryId { get; set; }
 
     /// <summary>
+    /// Immutable transaction-level financial classifications. Null preserves compatibility for
+    /// legacy posting producers until their Finance adapters are dimension-certified.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
+    /// <summary>
+    /// Exact immutable dimension/rule evidence for this posting line.  The canonical set remains
+    /// useful for aggregation, but this snapshot is authoritative for historical display/audit.
+    /// </summary>
+    public Guid? FinanceDimensionSnapshotId { get; set; }
+
+    /// <summary>
     /// Transaction date (posting date to GL).
     /// Must fall within an open fiscal period.
     /// </summary>
@@ -153,6 +165,12 @@ public class AccountTransaction : BusinessEntity
     public Guid? SourceDocumentId { get; set; }
 
     /// <summary>
+    /// Immutable line-level origin within the source document. Operational modules retain their
+    /// source records while Finance uses this lineage for exact corrective postings and audit.
+    /// </summary>
+    public Guid? SourceDocumentLineId { get; set; }
+
+    /// <summary>
     /// Source document type for reference and reporting.
     /// Examples: "Invoice", "Payment", "Journal Entry", "Asset Depreciation"
     /// </summary>
@@ -256,6 +274,12 @@ public class AccountTransaction : BusinessEntity
     /// </summary>
     [MaxLength(200)]
     public string? SegmentString { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSetId))]
+    public FinanceDimensionSet? FinanceDimensionSet { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSnapshotId))]
+    public FinanceDimensionSnapshot? FinanceDimensionSnapshot { get; set; }
 
     // ========================================================================
     // REVALUATION TRACKING (Section 3.2.5 - IAS 21 Currency Revaluation)

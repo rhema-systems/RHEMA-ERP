@@ -12,7 +12,6 @@ public sealed class CivilEngineeringMigrationWorkbenchGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
         var upMigration = migration[..migration.IndexOf("protected override void Down", StringComparison.Ordinal)];
         var sqlBlocks = upMigration.Split("migrationBuilder.Sql(\"\"\"", StringSplitOptions.None).Skip(1).ToList();
@@ -39,7 +38,7 @@ public sealed class CivilEngineeringMigrationWorkbenchGuardTests
         sqlBlocks.Where(value => value.Contains("CREATE TRIGGER", StringComparison.Ordinal))
             .Should().OnlyContain(value => Count(value, "CREATE TRIGGER") == 1,
                 "SQL Server requires CREATE TRIGGER to be the first statement in its migration batch");
-        metadata.Should().Contain($"Migration(\"{MigrationId}\")");
+        migration.Should().Contain($"[Migration(\"{MigrationId}\")]");
         preflight.Should().Contain($"GUARD_COVERAGE|{MigrationId}");
     }
 

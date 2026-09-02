@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -24,6 +25,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -47,6 +50,7 @@ import {
   EstateManagedAssetType,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
+import { assetMatchesWorkspacePrefill } from './property-workspace-utils';
 
 const statusLabels: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.LandBank]: 'Land bank',
@@ -128,6 +132,7 @@ function getDefaultNextStatus(asset: EstateManagedAsset) {
 function buildHandoverHref(asset: EstateManagedAsset) {
   const reference = asset.propertyFileReference || getPropertyReference(asset);
   const params = new URLSearchParams({
+    assetId: asset.id,
     title: `Move-in / handover - ${asset.name}`,
     referenceNumber: reference,
     applicantName: asset.lesseeName || '',
@@ -151,6 +156,7 @@ function buildHandoverHref(asset: EstateManagedAsset) {
 function buildBillingHref(asset: EstateManagedAsset) {
   const reference = asset.propertyFileReference || getPropertyReference(asset);
   const params = new URLSearchParams({
+    assetId: asset.id,
     title: `Billing action - ${asset.name}`,
     referenceNumber: reference,
     applicantName: asset.lesseeName || '',
@@ -171,10 +177,19 @@ function buildBillingHref(asset: EstateManagedAsset) {
   return `/estate/property-management/EstatePropertyManagementBillingServiceCharge?${params.toString()}`;
 }
 
+function hasLeaseStartEvidence(asset: EstateManagedAsset) {
+  return Boolean(asset.propertyFileReference && (asset.rightOfEntryDate || asset.dateOfTenancy));
+}
+
 export function OccupancyAvailabilityWorkspace() {
+  const searchParams = useSearchParams();
+  const prefillAssetId = searchParams.get('assetId');
+  const prefillReference =
+    searchParams.get('field_propertyUnit') || searchParams.get('referenceNumber');
+  const initialSearch = prefillReference || '';
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
-  const [searchDraft, setSearchDraft] = React.useState('');
-  const [search, setSearch] = React.useState('');
+  const [searchDraft, setSearchDraft] = React.useState(initialSearch);
+  const [search, setSearch] = React.useState(initialSearch);
   const [statusFilter, setStatusFilter] = React.useState('active');
   const [selectedAssetId, setSelectedAssetId] = React.useState('');
   const [nextStatus, setNextStatus] = React.useState<EstateManagedAssetStatus>(
@@ -231,8 +246,14 @@ export function OccupancyAvailabilityWorkspace() {
 
     return assets.filter((asset) => asset.status === Number(statusFilter));
   }, [assets, statusFilter]);
+  const occupancyPages = usePaginatedItems(filteredAssets, 10);
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
+  const selectedNeedsLeaseEvidence = selectedAsset
+    ? (nextStatus === EstateManagedAssetStatus.Leased ||
+        nextStatus === EstateManagedAssetStatus.Occupied) &&
+      !hasLeaseStartEvidence(selectedAsset)
+    : false;
 
   const summary = React.useMemo(
     () => ({
@@ -269,9 +290,26 @@ export function OccupancyAvailabilityWorkspace() {
     setNotes('');
   };
 
+  React.useEffect(() => {
+    if (selectedAssetId || (!prefillAssetId && !prefillReference)) return;
+    const matchedAsset = assets.find((asset) =>
+      assetMatchesWorkspacePrefill(asset, prefillAssetId, prefillReference)
+    );
+    if (matchedAsset) {
+      chooseAsset(matchedAsset);
+    }
+  }, [assets, prefillAssetId, prefillReference, selectedAssetId]);
+
   const saveOccupancy = async () => {
     if (!selectedAsset) {
       toast.error('Select a property or unit first.');
+      return;
+    }
+
+    if (selectedNeedsLeaseEvidence) {
+      toast.error(
+        'Record the signed agreement reference and agreement start / move-in date in Lease Management first.'
+      );
       return;
     }
 
@@ -436,7 +474,7 @@ export function OccupancyAvailabilityWorkspace() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAssets.map((asset) => (
+                    {occupancyPages.items.map((asset) => (
                       <TableRow
                         key={asset.id}
                         className={
@@ -503,6 +541,7 @@ export function OccupancyAvailabilityWorkspace() {
                 </Table>
               </div>
             ) : null}
+            {filteredAssets.length > occupancyPages.pageSize ? <Pagination currentPage={occupancyPages.currentPage} totalPages={occupancyPages.totalPages} totalItems={occupancyPages.totalItems} pageSize={occupancyPages.pageSize} onPageChange={occupancyPages.setCurrentPage} /> : null}
           </CardContent>
         </Card>
 
@@ -593,6 +632,24 @@ export function OccupancyAvailabilityWorkspace() {
               </div>
             )}
 
+            {selectedNeedsLeaseEvidence ? (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-900">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <div>
+                  Marking as leased or occupied requires the signed agreement
+                  reference plus the agreement start / move-in date from Lease
+                  Management.
+                  {selectedAsset ? (
+                    <Button asChild variant="link" size="sm" className="h-auto px-0 py-0 text-xs text-amber-900">
+                      <Link href="/estate/property-management/EstatePropertyManagementLease">
+                        Open Lease Management
+                      </Link>
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-2">
               <Label htmlFor="occupancy-notes">Notes</Label>
               <Textarea
@@ -608,7 +665,7 @@ export function OccupancyAvailabilityWorkspace() {
             <Button
               type="button"
               className="w-full"
-              disabled={!selectedAsset || isSaving}
+              disabled={!selectedAsset || isSaving || selectedNeedsLeaseEvidence}
               onClick={() => void saveOccupancy()}
             >
               {isSaving ? (

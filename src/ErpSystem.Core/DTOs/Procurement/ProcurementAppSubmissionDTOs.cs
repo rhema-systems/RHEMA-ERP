@@ -116,8 +116,10 @@ public sealed class ProcurementAppSubmissionEvidenceDto
 public sealed class RecordProcurementAppExportRequest
 {
     public Guid ProcurementPlanId { get; set; }
+    /// <summary>CSV, JSON or XML. The server generates the package and all other metadata.</summary>
+    public string ExportFormat { get; set; } = "CSV";
+    // Retained for backward-compatible deserialization. Client-supplied values are ignored.
     public string ExportFileName { get; set; } = string.Empty;
-    public string ExportFormat { get; set; } = string.Empty;
     public string ExportTemplateVersion { get; set; } = string.Empty;
     public string ExportChecksumSha256 { get; set; } = string.Empty;
     public string? Notes { get; set; }
@@ -154,11 +156,21 @@ public sealed class RejectProcurementAppRequest
 
 public sealed class ResubmitProcurementAppRequest
 {
+    /// <summary>CSV, JSON or XML. The server regenerates the package and checksum.</summary>
+    public string ExportFormat { get; set; } = "CSV";
+    // Retained for backward-compatible deserialization. Client-supplied values are ignored.
     public string ExportFileName { get; set; } = string.Empty;
-    public string ExportFormat { get; set; } = string.Empty;
     public string ExportTemplateVersion { get; set; } = string.Empty;
     public string ExportChecksumSha256 { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public string RowVersion { get; set; } = string.Empty;
     public List<ProcurementControlEventEvidenceReference> Evidence { get; set; } = new();
+}
+
+public sealed class ProcurementAppExportFileDto
+{
+    public Guid FileUploadRecordId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "application/octet-stream";
+    public string FilePath { get; set; } = string.Empty;
 }

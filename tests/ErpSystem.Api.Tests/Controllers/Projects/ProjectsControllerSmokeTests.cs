@@ -39,6 +39,7 @@ public class ProjectsControllerSmokeTests : IClassFixture<WebApplicationFactory<
         _client = factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseSetting("CandidatePortal:PortalUrl", "https://candidate.test/");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();

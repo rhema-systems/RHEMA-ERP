@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -63,7 +64,29 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
     {
         EnsureInternalReader();
         var source = await ResolveSourceAsync(sourceType, sourceId, null, cancellationToken);
-        var profile = await ResolveProfileAsync(DateTime.UtcNow, cancellationToken);
+        ResolvedProfile profile;
+        try
+        {
+            profile = await ResolveProfileAsync(DateTime.UtcNow, cancellationToken);
+        }
+        catch (ProcurementGhanepsExchangeConflictException exception)
+            when (exception.Code == "GHANEPS_PROFILE_NOT_EFFECTIVE")
+        {
+            return new ProcurementGhanepsExchangeOptionsDto
+            {
+                IsConfigured = false,
+                ConfigurationMessage =
+                    "GHANEPS exchange is optional and has not been configured for this tenant.",
+                SourceType = source.Type,
+                SourceId = source.Id,
+                SourceReference = source.Reference,
+                SourceVariant = source.Variant,
+                BlockedReasons =
+                [
+                    "Configure and publish one effective DEC-009 profile before using GHANEPS exchange."
+                ]
+            };
+        }
         var mappings = profile.Mappings
             .Where(item => MappingApplies(item, source))
             .OrderBy(item => item.EventFamily)
@@ -83,10 +106,14 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         if (!capabilities.Manage)
             blocked.Add("The current actor lacks the required GHANEPS exchange capability.");
         if (mappings.Count == 0)
-            blocked.Add("The effective DEC-009 profile has no applicable mapping for this source.");
+            blocked.Add("Configure an applicable DEC-009 mapping before using GHANEPS exchange.");
 
         return new ProcurementGhanepsExchangeOptionsDto
         {
+            IsConfigured = mappings.Count > 0,
+            ConfigurationMessage = mappings.Count == 0
+                ? "No GHANEPS mapping is configured for this procurement source."
+                : null,
             SourceType = source.Type,
             SourceId = source.Id,
             SourceReference = source.Reference,
@@ -2277,7 +2304,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         CancellationToken cancellationToken)
     {
         EnsureInternalReader();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -2300,7 +2327,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         string reconciliationPermissionCode,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return new Capabilities(true, true, true);
+        if (HasPlatformSuperAdministratorBypass()) return new Capabilities(true, true, true);
         var correlation = $"ghaneps-status-{Guid.NewGuid():N}";
         var manage = await _accessControl.CheckCapabilityAsync(
             new ProcurementAccessCapabilityRequest
@@ -2384,18 +2411,14 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             throw Authorization("An authenticated tenant context is required.");
         if (_currentUser.IsExternalUser)
             throw Authorization("Supplier portal users cannot access the internal GHANEPS exchange register.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
-        throw Authorization("A TDC procurement, internal-audit, or tenant-administration role is required.");
+        throw Authorization("The procurement records read permission is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SystemAdmin") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("Admin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private static bool MappingApplies(
         ProcurementGhanepsConfiguredMappingDto mapping,

@@ -56,7 +56,10 @@ export function ConfirmationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`sm:max-w-[${maxWidth}]`} style={{ maxWidth }}>
+      <DialogContent
+        className="max-h-[calc(100vh-2rem)] overflow-y-auto"
+        style={{ maxWidth }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {variant === "destructive" && (

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search, Edit, Trash2, Eye, Copy, DollarSign, Filter, MoreHorizontal } from 'lucide-react';
@@ -17,6 +18,20 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { priceListService, PriceListDto, CreatePriceListDto, PriceListType, PriceListStatus, PriceListApprovalStatus, getPriceListTypeLabel, getPriceListStatusLabel, getPriceListApprovalStatusLabel, CustomerGroupDto, SupplierGroupDto } from '@/services/priceListService';
+
+type ProblemDetailsPayload = {
+  detail?: string;
+  title?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  const problem = (error as { response?: { data?: ProblemDetailsPayload } })?.response?.data;
+  const detail = problem?.detail || problem?.title || (error instanceof Error ? error.message : fallback);
+  const code = problem?.code || problem?.extensions?.code;
+  return code ? `${detail} (${code})` : detail;
+};
 
 const PriceListTypes = [
   { value: PriceListType.Sales, label: 'Sales' },
@@ -36,6 +51,8 @@ export default function PriceListsPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCopyDialogOpen, setIsCopyDialogOpen] = useState(false);
   const [selectedPriceList, setSelectedPriceList] = useState<PriceListDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PriceListDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [customerGroups, setCustomerGroups] = useState<CustomerGroupDto[]>([]);
   const [supplierGroups, setSupplierGroups] = useState<SupplierGroupDto[]>([]);
   const [formData, setFormData] = useState<CreatePriceListDto>({
@@ -98,15 +115,21 @@ export default function PriceListsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this price list?')) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return false;
+    setDeleting(true);
     try {
-      await priceListService.deletePriceList(id);
+      await priceListService.deletePriceList(deleteTarget.id);
       toast.success('Price list deleted successfully');
-      loadPriceLists();
+      setDeleteTarget(null);
+      await loadPriceLists();
+      return true;
     } catch (error) {
       console.error('Error deleting price list:', error);
-      toast.error('Failed to delete price list');
+      toast.error(getErrorMessage(error, 'Failed to delete price list'));
+      return false;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -238,7 +261,7 @@ export default function PriceListsPage() {
                           <DropdownMenuItem onClick={() => router.push(`/inventory/price-lists/${priceList.id}/edit`)}><Edit className="mr-2 h-4 w-4" />Edit</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openCopyDialog(priceList)}><Copy className="mr-2 h-4 w-4" />Copy</DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(priceList.id)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+                          <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(priceList)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -356,6 +379,17 @@ export default function PriceListsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}
+        title="Delete price list?"
+        description={`Delete ${deleteTarget?.priceListCode || 'this price list'}${deleteTarget?.name ? ` - ${deleteTarget.name}` : ''}? This action cannot be undone.`}
+        confirmText="Delete price list"
+        variant="destructive"
+        onConfirm={confirmDelete}
+        isLoading={deleting}
+      />
     </div>
   );
 }

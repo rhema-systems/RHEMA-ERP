@@ -13,9 +13,20 @@ namespace ErpSystem.Core.Interfaces.Finance
     public interface IJournalEntryService
     {
         /// <summary>
-        /// Retrieves all journal entries (alias for GetAllJournalEntriesAsync).
+        /// Retrieves all journal entries.
         /// </summary>
         Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Retrieves journal entries filtered at the database query.
+        /// </summary>
+        Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+            string? status,
+            DateTime? startDate,
+            DateTime? endDate,
+            Guid? fiscalPeriodId,
+            string? sourceModule,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Retrieves a single journal entry by ID.
@@ -100,6 +111,16 @@ namespace ErpSystem.Core.Interfaces.Finance
             string approvalStatus,
             Guid? approvedByUserId = null,
             string? rejectionReason = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Returns a pending journal approval to Draft while retaining distinct withdrawal metadata.
+        /// The caller coordinates cancellation of the active workflow in the same database transaction.
+        /// </summary>
+        Task WithdrawApprovalAsync(
+            Guid id,
+            Guid withdrawnByUserId,
+            string reason,
             CancellationToken cancellationToken = default);
 
         Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);

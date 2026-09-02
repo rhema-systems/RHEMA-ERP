@@ -355,8 +355,8 @@ public class FiscalPeriod : BusinessEntity
     public bool AllowBackdating { get; set; } = false;
 
     /// <summary>
-    /// Flag indicating if period allows future dating of transactions.
-    /// False = transactions cannot be dated later than period end.
+    /// TRUE when Finance may post transactions dated after the current UTC business date,
+    /// provided the date still falls inside this period. Period open/lock controls remain authoritative.
     /// </summary>
     public bool AllowFutureDating { get; set; } = false;
 

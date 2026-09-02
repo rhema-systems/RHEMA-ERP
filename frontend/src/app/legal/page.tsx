@@ -6,12 +6,14 @@ import {
   ArrowRight,
   BadgeCheck,
   BookOpen,
+  Briefcase,
   FileCheck2,
   FileSignature,
   FileText,
   Gavel,
   Landmark,
   Loader2,
+  MessageSquare,
   Scale,
   ShieldCheck,
 } from 'lucide-react';
@@ -36,11 +38,13 @@ const procedureIcons: Record<
 > = {
   BadgeCheck,
   BookOpen,
+  Briefcase,
   FileCheck2,
   FileSignature,
   FileText,
   Gavel,
   Landmark,
+  MessageSquare,
   Scale,
   ShieldCheck,
 };
@@ -50,11 +54,13 @@ const accentClasses: Record<string, string> = {
   blue: 'text-blue-700 dark:text-blue-300',
   cyan: 'text-cyan-700 dark:text-cyan-300',
   emerald: 'text-emerald-700 dark:text-emerald-300',
+  indigo: 'text-indigo-700 dark:text-indigo-300',
   purple: 'text-purple-700 dark:text-purple-300',
   sky: 'text-sky-700 dark:text-sky-300',
   slate: 'text-slate-700 dark:text-slate-200',
   teal: 'text-teal-700 dark:text-teal-300',
   violet: 'text-violet-700 dark:text-violet-300',
+  zinc: 'text-zinc-700 dark:text-zinc-300',
 };
 
 export default function LegalProceduresPage() {

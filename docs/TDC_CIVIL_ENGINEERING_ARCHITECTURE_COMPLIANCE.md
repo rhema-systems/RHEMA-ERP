@@ -69,12 +69,14 @@ Status meanings:
 
 The current workspace passed the following serialized Civil Engineering gates:
 
-- Core Civil rules, policy, workflow, audit, migration-guard and report-catalogue tests: `215/215` passed with no skips.
-- Civil API controller, authorization, route and service-contract tests: `46/46` passed with no skips after a successful API compilation.
-- Civil frontend catalogue, component and service tests: `26/26` files and `45/45` tests passed.
-- Focused ESLint: `103` Civil/report TypeScript files passed in six Windows-safe batches.
+- Core/shared Civil rules, policy, workflow, audit, migration-guard and report-catalogue tests: `236` passed, `6` SQL-only tests skipped in the non-SQL run, and `0` failed (`242` total).
+- Civil API controller, authorization, route and service-contract tests: `60/60` passed after a successful API compilation with `0` errors.
+- Civil frontend catalogue, component, workflow and service tests: `29/29` files and `58/58` tests passed.
+- Focused ESLint: `115` changed/new Civil, workflow and report TypeScript files passed.
 - Real SQL Server: `6/6` disposable Civil integration suites passed against SQL Server 2022 using integrated authentication. They exercised the actual migration SQL, foreign keys, tenant lineage, lifecycle triggers and append-only history. Cleanup verification found `0` remaining `RhemaERP_Civil*` databases.
-- The supported focused EF-tooling build completed with `0` errors, but repository-wide `has-pending-model-changes` reports combined-model drift. No broad migration was generated because the worktree contains concurrent cross-module changes; that drift must be reconciled and reviewed before a release PR.
+- The release-candidate Data build completed with `0` errors. EF discovered all `38/38` new Civil migrations and `has-pending-model-changes` returned `0`, confirming model/snapshot parity.
+- A full empty-database rehearsal remains blocked before the Civil migrations by the pre-existing historical migration `20260304155434_RecreateHRTables`, whose `AspNetRoles` data operation lacks an entity mapping/explicit column types. The disposable rehearsal database was removed. This is a repository bootstrap defect outside the Civil slice and must be resolved without rewriting an already-applied migration.
+- The repository's full frontend `tsc --noEmit` gate did not return source diagnostics because the TypeScript compiler terminated with its own `Debug Failure: No error for last overload signature` under both Node 22 and Node 20. Focused lint and all selected frontend tests remain green; this tooling failure is retained as an explicit release limitation.
 
 These checks establish an automated implementation baseline. They do not replace published tenant configuration, authenticated browser/API UAT, deployed integration reconciliation or TDC sign-off.
 
@@ -89,6 +91,7 @@ Civil Engineering is not architecture-accepted until:
 5. capital-work and operational-work journeys both reach controlled completion/handover;
 6. QS, Finance, Procurement, Maintenance, Property/Fixed Asset and DMS links reconcile to their authoritative owners;
 7. reports, exports, audit, security, tenant-isolation, retry, stale-row, mobile/offline and NFR checks have retained evidence.
-8. the combined EF model and migration snapshot report no pending changes in the release candidate worktree.
+8. the combined EF model and migration snapshot report no pending changes in the release candidate worktree;
+9. the historical empty-database bootstrap and full frontend compiler gates complete without infrastructure/tool failures.
 
 Deployment alone is not compliance evidence.

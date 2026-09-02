@@ -116,6 +116,7 @@ describe('CivilEngineeringDesignWorkflowPanel', () => {
       entityType: 'PROJECT_DESIGN_REVIEW',
       entityId: 'case-1',
       hasActiveInstance: true,
+      approvalRequired: true,
       currentStepName: 'SCE design review',
       currentStepInstanceId: 'step-1',
       currentStepType: 'Approval',

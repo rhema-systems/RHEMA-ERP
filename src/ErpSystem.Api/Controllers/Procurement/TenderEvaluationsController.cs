@@ -143,6 +143,10 @@ public class TenderEvaluationsController : ControllerBase
         {
             return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -181,6 +185,10 @@ public class TenderEvaluationsController : ControllerBase
         catch (ProcurementEvaluationCommitteeAuthorizationException ex)
         {
             return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
         }
         catch (InvalidOperationException ex)
         {
@@ -221,6 +229,10 @@ public class TenderEvaluationsController : ControllerBase
         {
             return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -259,6 +271,10 @@ public class TenderEvaluationsController : ControllerBase
         catch (ProcurementEvaluationCommitteeAuthorizationException ex)
         {
             return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
         }
         catch (InvalidOperationException ex)
         {
@@ -357,6 +373,10 @@ public class TenderEvaluationsController : ControllerBase
         {
             return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
+        }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning(ex, "Invalid operation calculating QCBS scores for tender {TenderId}", tenderId);
@@ -407,6 +427,19 @@ public class TenderEvaluationsController : ControllerBase
         Extensions =
         {
             ["code"] = code,
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
+
+    private ProblemDetails PaymentAdmissionProblem(TenderBidInitiationValidationException exception) => new()
+    {
+        Status = StatusCodes.Status422UnprocessableEntity,
+        Title = "Bid payment is not eligible for evaluation",
+        Detail = exception.Message,
+        Instance = Request.Path.Value,
+        Extensions =
+        {
+            ["code"] = exception.Code,
             ["correlationId"] = HttpContext.TraceIdentifier
         }
     };

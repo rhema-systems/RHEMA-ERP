@@ -18,9 +18,13 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 export default function BidsPage() {
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canAdministerTender = hasPermission('procurement.tender.administer');
   const [bids, setBids] = useState<TenderBidSummaryDto[]>([]);
   const [tenders, setTenders] = useState<TenderDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,12 +119,13 @@ export default function BidsPage() {
 
   const handleOpenBid = (bidId: string, event: React.MouseEvent) => {
     event.stopPropagation();
+    if (!canAdministerTender) return;
     setBidToOpen(bidId);
     setShowOpenDialog(true);
   };
 
   const confirmOpenBid = async () => {
-    if (!bidToOpen) return;
+    if (!bidToOpen || !canAdministerTender) return false;
 
     try {
       setOpening(true);
@@ -131,13 +136,15 @@ export default function BidsPage() {
       loadBids(); // Reload grid
     } catch (error) {
       console.error('Error opening bid:', error);
-      toast.error('Failed to open bid');
+      toast.error(getProcurementProblemMessage(error, 'Failed to open bid'));
+      return false;
     } finally {
       setOpening(false);
     }
   };
 
   const handleBulkOpenBids = () => {
+    if (!canAdministerTender) return;
     if (tenderFilter === 'all') {
       toast.error('Please select a tender first');
       return;
@@ -146,7 +153,7 @@ export default function BidsPage() {
   };
 
   const confirmBulkOpenBids = async () => {
-    if (tenderFilter === 'all') return;
+    if (tenderFilter === 'all' || !canAdministerTender) return false;
 
     try {
       setBulkOpening(true);
@@ -156,7 +163,8 @@ export default function BidsPage() {
       loadBids(); // Reload grid
     } catch (error) {
       console.error('Error opening bids:', error);
-      toast.error('Failed to open bids');
+      toast.error(getProcurementProblemMessage(error, 'Failed to open bids'));
+      return false;
     } finally {
       setBulkOpening(false);
     }
@@ -225,7 +233,7 @@ export default function BidsPage() {
           <p className="text-gray-500">View and manage all tender bids</p>
         </div>
         <div className="flex gap-2">
-          {tenderFilter !== 'all' && getSubmittedBidsCount() > 0 && (
+          {canAdministerTender && tenderFilter !== 'all' && getSubmittedBidsCount() > 0 && (
             <Button variant="default" onClick={handleBulkOpenBids}>
               <CheckCircle className="h-4 w-4 mr-2" />
               Open All Bids ({getSubmittedBidsCount()})
@@ -335,7 +343,7 @@ export default function BidsPage() {
                       <TableCell>{getStatusBadge(bid.status)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          {bid.status === 'Submitted' && (
+                          {canAdministerTender && bid.status === 'Submitted' && (
                             <Button
                               variant="outline"
                               size="sm"

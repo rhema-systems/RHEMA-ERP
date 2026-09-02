@@ -4,10 +4,13 @@ using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 
@@ -96,6 +99,8 @@ public partial class PhysicalCountService
         if (count.Status != "PendingStoresApproval")
             throw new InvalidOperationException("The count is not awaiting Stores approval.");
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
+        if (request.Approved)
+            await RevalidateRecordedCountEvidenceAsync(count);
 
         StockAdjustmentDetailDto? adjustment = null;
         if (HasLineVariance(count))
@@ -158,6 +163,8 @@ public partial class PhysicalCountService
         if (count.Status != "PendingFinanceApproval")
             throw new InvalidOperationException("The count is not awaiting Finance approval.");
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
+        if (request.Approved)
+            await RevalidateRecordedCountEvidenceAsync(count);
 
         if (request.Approved)
         {
@@ -201,6 +208,8 @@ public partial class PhysicalCountService
         if (count.Status != "PendingAuditAttestation")
             throw new InvalidOperationException("The count is not awaiting Internal Audit attestation.");
         EnsureIndependentActor(count, userId, includeFinance: true, includeAudit: false);
+        if (request.Approved)
+            await RevalidateRecordedCountEvidenceAsync(count);
 
         if (request.Approved)
         {
@@ -247,6 +256,7 @@ public partial class PhysicalCountService
             throw new InvalidOperationException("The Finance Reviewer who approved the variance must perform the governed Finance posting.");
         if (count.InitiatedById == userId || count.CountedById == userId || count.StoresApprovedById == userId || count.AuditAttestedById == userId)
             throw new InvalidOperationException("The initiator, counter, Stores approver, or Internal Audit attestor cannot post this count.");
+        await RevalidateRecordedCountEvidenceAsync(count);
 
         StockAdjustmentDetailDto? posted = null;
         if (HasLineVariance(count))
@@ -497,6 +507,7 @@ public partial class PhysicalCountService
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
         if (!HasLineVariance(count)) return;
+        var evidence = await RevalidateRecordedCountEvidenceAsync(count);
         StockAdjustmentDetailDto adjustment;
         if (count.StockAdjustmentId.HasValue)
         {
@@ -519,6 +530,11 @@ public partial class PhysicalCountService
                 // resolve to the already-rejected adjustment from the previous cycle.
                 IdempotencyKey = $"physical-count:{count.Id:N}:{Hash(operationKey)[..16]}",
                 CorrelationId = $"physical-count:{count.Id:N}",
+                Evidence = evidence.Select(value => new InventoryControlEvidenceRequest
+                {
+                    CentralDocumentVersionId = value.CentralDocumentVersionId,
+                    EvidenceReference = value.EvidenceReference
+                }).ToList(),
                 Items = count.Items.Where(x => x.IsCounted && x.VarianceQuantity != 0).Select(x =>
                     new CreateStockAdjustmentItemDto
                     {
@@ -550,6 +566,129 @@ public partial class PhysicalCountService
         await _countRepository.UpdateAsync(count);
         await _unitOfWork.SaveChangesAsync();
     }
+
+    private async Task<IReadOnlyList<ValidatedPhysicalCountEvidence>> ResolveSubmissionEvidenceAsync(PhysicalCount count)
+    {
+        var versions = await _unitOfWork.Repository<CentralDocumentVersion>().GetQueryable()
+            .Include(value => value.DocumentRecord)
+            .Where(value => value.TenantId == count.TenantId && !value.IsDeleted &&
+                value.DocumentRecord.TenantId == count.TenantId && !value.DocumentRecord.IsDeleted &&
+                value.DocumentRecord.SourceRecordId == count.Id &&
+                (value.DocumentRecord.SourceModule == "Inventory" || value.DocumentRecord.SourceModule == "Inventory and Stores") &&
+                (value.DocumentRecord.SourceEntityType == "PhysicalCount" || value.DocumentRecord.SourceEntityType == "StockTakingEvidence") &&
+                value.DocumentRecord.LifecycleStatus == CentralDocumentEvidenceRules.ActiveLifecycleStatus &&
+                value.DocumentRecord.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
+                value.DocumentRecord.CurrentVersion == value.VersionNumber &&
+                value.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && value.PublishedAt.HasValue &&
+                value.FileUploadRecordId.HasValue)
+            .AsNoTracking()
+            .OrderBy(value => value.DocumentRecord.DocumentReference)
+            .ThenBy(value => value.VersionNumber)
+            .ToListAsync();
+        var cleanUploadIds = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable(value =>
+                value.TenantId == count.TenantId && !value.IsDeleted &&
+                value.VirusScanStatus == FileVirusScanStatus.Clean)
+            .AsNoTracking().Select(value => value.Id).ToListAsync();
+        var clean = cleanUploadIds.ToHashSet();
+        var result = versions.Where(value => clean.Contains(value.FileUploadRecordId!.Value))
+            .Select(value => new ValidatedPhysicalCountEvidence(
+                value.DocumentRecordId,
+                value.Id,
+                value.FileUploadRecordId!.Value,
+                value.DocumentRecord.DocumentReference,
+                value.VersionNumber,
+                $"{count.CountNumber} stock-taking evidence / {value.DocumentRecord.DocumentReference}"))
+            .ToList();
+        if (result.Count == 0)
+            throw new InvalidOperationException(
+                "At least one current published, clean central-DMS stock-taking evidence document linked to this physical count is required before submission.");
+        return result;
+    }
+
+    private async Task<IReadOnlyList<ValidatedPhysicalCountEvidence>> RevalidateRecordedCountEvidenceAsync(PhysicalCount count)
+    {
+        var action = await _unitOfWork.Repository<PhysicalCountAction>().GetQueryable(value =>
+                value.TenantId == count.TenantId && value.PhysicalCountId == count.Id && !value.IsDeleted &&
+                (value.ActionType == PhysicalCountActionType.Submitted || value.ActionType == PhysicalCountActionType.RecountRequired))
+            .AsNoTracking().OrderByDescending(value => value.Sequence).FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException("The physical count has no retained stock-taking evidence submission.");
+        var recorded = ReadEvidence(action.SnapshotJson);
+        if (recorded.Count == 0)
+            throw new InvalidOperationException("The physical-count submission does not retain central-DMS stock-taking evidence.");
+        var versionIds = recorded.Select(value => value.CentralDocumentVersionId).Distinct().ToList();
+        var versions = await _unitOfWork.Repository<CentralDocumentVersion>().GetQueryable()
+            .Include(value => value.DocumentRecord)
+            .Where(value => versionIds.Contains(value.Id) && value.TenantId == count.TenantId && !value.IsDeleted &&
+                value.DocumentRecord.TenantId == count.TenantId && !value.DocumentRecord.IsDeleted &&
+                value.DocumentRecord.SourceRecordId == count.Id &&
+                (value.DocumentRecord.SourceModule == "Inventory" || value.DocumentRecord.SourceModule == "Inventory and Stores") &&
+                (value.DocumentRecord.SourceEntityType == "PhysicalCount" || value.DocumentRecord.SourceEntityType == "StockTakingEvidence") &&
+                value.DocumentRecord.LifecycleStatus == CentralDocumentEvidenceRules.ActiveLifecycleStatus &&
+                value.DocumentRecord.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
+                value.DocumentRecord.CurrentVersion == value.VersionNumber &&
+                value.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && value.PublishedAt.HasValue &&
+                value.FileUploadRecordId.HasValue)
+            .AsNoTracking().ToListAsync();
+        var uploads = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable(value =>
+                value.TenantId == count.TenantId && !value.IsDeleted &&
+                value.VirusScanStatus == FileVirusScanStatus.Clean)
+            .AsNoTracking().Select(value => value.Id).ToListAsync();
+        var currentById = versions.ToDictionary(value => value.Id);
+        var cleanUploads = uploads.ToHashSet();
+        foreach (var item in recorded)
+        {
+            if (!currentById.TryGetValue(item.CentralDocumentVersionId, out var version) ||
+                version.DocumentRecordId != item.CentralDocumentRecordId ||
+                version.FileUploadRecordId != item.FileUploadRecordId ||
+                !cleanUploads.Contains(item.FileUploadRecordId))
+                throw new InvalidOperationException(
+                    "Linked stock-taking evidence must remain the current published, clean central-DMS version owned by this physical count.");
+        }
+        return recorded;
+    }
+
+    private static IReadOnlyList<ValidatedPhysicalCountEvidence> ReadEvidence(string snapshotJson)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotJson))
+            return Array.Empty<ValidatedPhysicalCountEvidence>();
+
+        try
+        {
+            using var document = JsonDocument.Parse(snapshotJson);
+            if (!document.RootElement.TryGetProperty("payload", out var payload) ||
+                !payload.TryGetProperty("evidence", out var evidence) || evidence.ValueKind != JsonValueKind.Array)
+                return Array.Empty<ValidatedPhysicalCountEvidence>();
+            var result = new List<ValidatedPhysicalCountEvidence>();
+            foreach (var item in evidence.EnumerateArray())
+            {
+                if (!item.TryGetProperty("centralDocumentRecordId", out var recordId) ||
+                    !item.TryGetProperty("centralDocumentVersionId", out var versionId) ||
+                    !item.TryGetProperty("fileUploadRecordId", out var uploadId) ||
+                    !recordId.TryGetGuid(out var parsedRecordId) || !versionId.TryGetGuid(out var parsedVersionId) ||
+                    !uploadId.TryGetGuid(out var parsedUploadId)) continue;
+                result.Add(new ValidatedPhysicalCountEvidence(
+                    parsedRecordId,
+                    parsedVersionId,
+                    parsedUploadId,
+                    item.TryGetProperty("documentReference", out var reference) ? reference.GetString() ?? string.Empty : string.Empty,
+                    item.TryGetProperty("versionNumber", out var version) ? version.GetString() ?? string.Empty : string.Empty,
+                    item.TryGetProperty("evidenceReference", out var evidenceReference) ? evidenceReference.GetString() ?? string.Empty : string.Empty));
+            }
+            return result;
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<ValidatedPhysicalCountEvidence>();
+        }
+    }
+
+    private sealed record ValidatedPhysicalCountEvidence(
+        Guid CentralDocumentRecordId,
+        Guid CentralDocumentVersionId,
+        Guid FileUploadRecordId,
+        string DocumentReference,
+        string VersionNumber,
+        string EvidenceReference);
 
     private async Task PopulateScheduledCountItemsAsync(PhysicalCount count, string abcClass)
     {

@@ -31,6 +31,10 @@ public static class PropertyManagementPermissions
     public const string ManageDocuments = "property-management.documents.manage";
     public const string ViewBilling = "property-management.billing.view";
     public const string UsePortal = "property-management.portal.access";
+    public const string AccessDocumentManagement = "document-management.access";
+    public const string ReadDocumentManagement = "document-management.read";
+    public const string AccessDms = "dms.access";
+    public const string ReadDocuments = "documents.read";
 
     public static readonly PropertyManagementPermissionDefinition[] All =
     [
@@ -47,7 +51,11 @@ public static class PropertyManagementPermissions
         new(ManageHandover, "Manage Handover Operations", "Manage move-in, move-out, transfer, keys, access, inspection, clearance, and possession handover records.", Category),
         new(ManageDocuments, "Manage Property Records Index", "Index Property Management documents, classify module metadata, track access and retention, and reference Central DMS records.", Category),
         new(ViewBilling, "View Property Billing Context", "View Property Management billing context, service charge instructions, arrears follow-up, and Finance AR handoff readiness without replacing Finance permissions.", Category),
-        new(UsePortal, "Use Property Portal", "Access tenant/client Property Management self-service views for occupancy, handover, documents, invoice status, uploads, and feedback.", Category)
+        new(UsePortal, "Use Property Portal", "Access tenant/client Property Management self-service views for occupancy, handover, documents, invoice status, uploads, and feedback.", Category),
+        new(AccessDocumentManagement, "Access Central DMS", "Access Central Document Management workspaces used by Estate and Property Management.", "Central Document Management"),
+        new(ReadDocumentManagement, "View Central DMS Records", "View Central Document Management records, templates, versions, and integration queues used by Estate workflows.", "Central Document Management"),
+        new(AccessDms, "Access DMS", "Access shared DMS navigation surfaces.", "Central Document Management"),
+        new(ReadDocuments, "Read Documents", "Read shared document records where the user's source-module role allows access.", "Central Document Management")
     ];
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -61,7 +69,11 @@ public static class PropertyManagementPermissions
         CreateHandoffs,
         ManageUnits,
         ManageOccupancy,
-        ManageHandover
+        ManageHandover,
+        AccessDocumentManagement,
+        ReadDocumentManagement,
+        AccessDms,
+        ReadDocuments
     ];
 
     public static readonly string[] SupervisorNames =
@@ -75,7 +87,11 @@ public static class PropertyManagementPermissions
         ManageUnits,
         ManageOccupancy,
         ManageHandover,
-        ViewBilling
+        ViewBilling,
+        AccessDocumentManagement,
+        ReadDocumentManagement,
+        AccessDms,
+        ReadDocuments
     ];
 
     public static readonly string[] ManagerNames =
@@ -92,6 +108,10 @@ public static class PropertyManagementPermissions
         ManageOccupancy,
         ManageHandover,
         ManageDocuments,
-        ViewBilling
+        ViewBilling,
+        AccessDocumentManagement,
+        ReadDocumentManagement,
+        AccessDms,
+        ReadDocuments
     ];
 }

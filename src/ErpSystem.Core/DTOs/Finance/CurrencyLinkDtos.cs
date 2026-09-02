@@ -58,6 +58,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string TransactionQuoteSide { get; set; } = "Mid";
         public string RevaluationRateType { get; set; } = string.Empty;
         public string RevaluationQuoteSide { get; set; } = "Mid";
+        public DateTime EffectiveDate { get; set; }
+        public DateTime? EffectiveEndDate { get; set; }
         public DateTime? LastRevaluationDate { get; set; }
         public decimal? LastRevaluationRate { get; set; }
         public decimal? LastRevaluationAdjustment { get; set; }

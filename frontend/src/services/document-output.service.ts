@@ -1,5 +1,5 @@
 import { getStoredToken } from '@/services/api.service';
-import type { ControlledDocumentCopyType } from '@/types/controlled-documents';
+import type { ControlledDocumentCopyType, ControlledDocumentIssueSummary } from '@/types/controlled-documents';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -9,6 +9,22 @@ export const DOCUMENT_TYPES = {
   financeCashBankPaymentSlip: 'Finance.CashBank.PaymentSlip',
   financeArCustomerReceipt: 'Finance.AR.CustomerReceipt',
   financeApSupplierStatement: 'Finance.AP.SupplierStatement',
+  financeApAgingReport: 'Finance.AP.AgingReport',
+  financeApCashRequirements: 'Finance.AP.CashRequirements',
+  financeApMatchExceptionReport: 'Finance.AP.MatchExceptionReport',
+  financeApProcurementReconciliation: 'Finance.AP.ProcurementReconciliation',
+  financeArAgingReport: 'Finance.AR.AgingReport',
+  financeArCustomerStatement: 'Finance.AR.CustomerStatement',
+  financeCashPositionReport: 'Finance.Cash.PositionReport',
+  financeTaxInputRegister: 'Finance.Tax.InputRegister',
+  financeTaxOutputRegister: 'Finance.Tax.OutputRegister',
+  financeTaxVatReconciliation: 'Finance.Tax.VatReconciliation',
+  financeTaxWhtPayable: 'Finance.Tax.WhtPayable',
+  financeTaxWhtCertificateRegister: 'Finance.Tax.WhtCertificateRegister',
+  financeTaxWhtCertificate: 'Finance.Tax.WhtCertificate',
+  financeTaxWhtRemittanceRegister: 'Finance.Tax.WhtRemittanceRegister',
+  financeBudgetConsolidated: 'Finance.Budget.Consolidated',
+  financeBudgetScenarioComparison: 'Finance.Budget.ScenarioComparison',
   financeTrialBalance: 'Finance.TrialBalance',
   financeIncomeStatement: 'Finance.IncomeStatement',
   financeBalanceSheet: 'Finance.BalanceSheet',
@@ -33,6 +49,39 @@ type ControlledDocumentIssueOptions = {
 type DocumentParameters = Record<string, string | number | boolean | string[] | null | undefined>;
 
 class DocumentOutputService {
+  async getControlledDocumentIssues(
+    documentType: string,
+    entityId: string
+  ): Promise<ControlledDocumentIssueSummary> {
+    const url = this.buildApiUrl(
+      `/documents/${encodeURIComponent(documentType)}/${encodeURIComponent(entityId)}/issues`
+    );
+    const token = getStoredToken();
+    const response = await fetch(url.toString(), {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!response.ok) {
+      const message = await this.readErrorMessage(response);
+      throw new Error(message || `Failed to load controlled document history (${response.status})`);
+    }
+    return response.json();
+  }
+
+  async downloadRetainedControlledDocument(issueId: string): Promise<void> {
+    const url = this.buildApiUrl(`/documents/controlled-issues/${encodeURIComponent(issueId)}`);
+    const token = getStoredToken();
+    const response = await fetch(url.toString(), {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!response.ok) {
+      const message = await this.readErrorMessage(response);
+      throw new Error(message || `Failed to download retained controlled document (${response.status})`);
+    }
+    const blob = await response.blob();
+    const fileName = this.getFileName(response.headers.get('content-disposition'), `controlled-document-${issueId}.pdf`);
+    this.downloadFile({ blob, fileName, contentType: response.headers.get('content-type') || blob.type || 'application/pdf' });
+  }
+
   async fetchDocument(
     documentType: string,
     entityId: string,
@@ -165,6 +214,14 @@ class DocumentOutputService {
     options: DocumentOptions = {}
   ): Promise<void> {
     const file = await this.fetchReportDocument(documentType, parameters, { ...options, format: options.format || 'pdf' });
+    await this.printFile(file);
+  }
+
+  /**
+   * Prints a PDF already returned by a controlled Finance report endpoint. This lets legacy
+   * report endpoints join the shared isolated-PDF print pipeline without printing the app page.
+   */
+  async printRenderedFile(file: RenderedDocumentFile): Promise<void> {
     await this.printFile(file);
   }
 

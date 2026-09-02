@@ -119,7 +119,7 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
             Path.Combine("src", "ErpSystem.Core", "Services", "Inventory", "InventoryTransferService.cs"),
             Path.Combine("src", "ErpSystem.Core", "Services", "Inventory", "StockAdjustmentService.cs"),
             Path.Combine("src", "ErpSystem.Core", "Services", "Inventory", "InventoryManagementService.cs"),
-            Path.Combine("src", "ErpSystem.Core", "Services", "Maintenance", "WorkOrderPartService.cs"),
+            Path.Combine("src", "ErpSystem.Core", "Services", "Inventory", "InventoryWorkOrderReservationService.cs"),
             Path.Combine("src", "ErpSystem.Core", "Services", "Maintenance", "WorkOrderToolService.cs"),
             Path.Combine("src", "ErpSystem.Api", "Controllers", "Inventory", "WarehouseLocationsController.cs")
         };

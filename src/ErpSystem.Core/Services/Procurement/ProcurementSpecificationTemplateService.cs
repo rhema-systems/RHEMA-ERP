@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -708,7 +709,7 @@ public sealed class ProcurementSpecificationTemplateService : IProcurementSpecif
         string correlationId,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -721,10 +722,10 @@ public sealed class ProcurementSpecificationTemplateService : IProcurementSpecif
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
         throw new ProcurementSpecificationTemplateAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -733,7 +734,7 @@ public sealed class ProcurementSpecificationTemplateService : IProcurementSpecif
             throw new ProcurementSpecificationTemplateAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
 
     private static void ValidateDraftRequest(SaveProcurementSpecificationTemplateRequest request)

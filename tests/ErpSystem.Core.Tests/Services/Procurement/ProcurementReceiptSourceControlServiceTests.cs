@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -71,6 +72,58 @@ public sealed class ProcurementReceiptSourceControlServiceTests
         readiness.Lines.Should().ContainSingle();
         readiness.Lines.Single().PreviouslyReceiptedQuantity.Should().Be(7m);
         readiness.Lines.Single().RemainingQuantity.Should().Be(3.5m);
+    }
+
+    [Fact]
+    public async Task ReadinessUsesPurchaseOrderLineWarehouseWhenHeaderIsEmpty()
+    {
+        await using var fixture = new Fixture();
+        var lineWarehouseId = Guid.NewGuid();
+        fixture.PurchaseOrder.DeliveryWarehouseId = null;
+        fixture.PurchaseOrderItem.WarehouseId = lineWarehouseId;
+        await fixture.SaveAsync();
+
+        var readiness = await fixture.Service.GetReadinessAsync(
+            fixture.PurchaseOrder.Id,
+            "tdc0501-line-warehouse");
+
+        readiness.CanReceive.Should().BeTrue();
+        fixture.Access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.read" &&
+                request.WarehouseId == lineWarehouseId),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateUsesSelectedReceiptWarehouseWhenHeaderIsEmpty()
+    {
+        await using var fixture = new Fixture();
+        var selectedWarehouseId = Guid.NewGuid();
+        fixture.PurchaseOrder.DeliveryWarehouseId = null;
+        fixture.PurchaseOrderItem.WarehouseId = null;
+        await fixture.SaveAsync();
+
+        var snapshot = await fixture.Service.EnforceCreateAsync(
+            fixture.PurchaseOrder,
+            [new ProcurementReceiptSourceLineRequest
+            {
+                PurchaseOrderItemId = fixture.PurchaseOrderItem.Id,
+                WarehouseId = selectedWarehouseId,
+                ReceivedQuantity = 1m
+            }],
+            "PurchaseOrderReceipt",
+            Guid.NewGuid(),
+            "tdc0501-selected-warehouse");
+
+        snapshot.Readiness.CanReceive.Should().BeTrue();
+        fixture.Access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.receive" &&
+                request.WarehouseId == selectedWarehouseId),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -170,7 +223,7 @@ public sealed class ProcurementReceiptSourceControlServiceTests
 
     [Theory]
     [InlineData(ProcurementPurchaseOrderSodRules.ApproveReceiptInspection,
-        "procurement.purchase-order.approve")]
+        "procurement.inventory.receive")]
     [InlineData("PostPurchaseOrderReceiptToInventory",
         "procurement.inventory.receive")]
     public async Task ReceiptRevalidationUsesPermissionForTheRequestedAction(
@@ -194,6 +247,30 @@ public sealed class ProcurementReceiptSourceControlServiceTests
     }
 
     [Fact]
+    public async Task ReceiptRevalidationUsesSavedReceivingLocationWarehouse()
+    {
+        await using var fixture = new Fixture();
+        var receiptWarehouseId = Guid.NewGuid();
+        var location = fixture.AddWarehouseLocation(receiptWarehouseId);
+        fixture.PurchaseOrder.DeliveryWarehouseId = null;
+        fixture.PurchaseOrderItem.WarehouseId = null;
+        var receipt = fixture.AddReceipt(location.Id);
+        await fixture.SaveAsync();
+
+        await fixture.Service.RevalidatePurchaseOrderReceiptAsync(
+            receipt.Id,
+            ProcurementPurchaseOrderSodRules.ApproveReceiptInspection,
+            "tdc0501-receipt-location-warehouse");
+
+        fixture.Access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.receive" &&
+                request.WarehouseId == receiptWarehouseId),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task ApprovalDrivenInventoryPostingRetainsApprovalAuthorizationContext()
     {
         await using var fixture = new Fixture();
@@ -209,7 +286,7 @@ public sealed class ProcurementReceiptSourceControlServiceTests
 
         fixture.Access.Verify(item => item.EnforceCapabilityAsync(
             It.Is<ProcurementAccessCapabilityRequest>(request =>
-                request.PermissionCode == "procurement.purchase-order.approve"),
+                request.PermissionCode == "procurement.inventory.receive"),
             It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -359,7 +436,24 @@ public sealed class ProcurementReceiptSourceControlServiceTests
         public List<ProcurementControlEventWriteRequest> ControlEvents { get; } = [];
         public List<NotificationTopicEvent> Notifications { get; } = [];
 
-        public PurchaseOrderReceipt AddReceipt()
+        public WarehouseLocation AddWarehouseLocation(Guid warehouseId)
+        {
+            var location = new WarehouseLocation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                WarehouseId = warehouseId,
+                LocationCode = $"RCV-{Guid.NewGuid():N}",
+                Name = "Receiving location",
+                IsActive = true,
+                IsReceivingLocation = true
+            };
+            _context.WarehouseLocations.Add(location);
+            _context.SaveChanges();
+            return location;
+        }
+
+        public PurchaseOrderReceipt AddReceipt(Guid? locationId = null)
         {
             var receipt = new PurchaseOrderReceipt
             {
@@ -378,11 +472,14 @@ public sealed class ProcurementReceiptSourceControlServiceTests
                 PurchaseOrderItemId = PurchaseOrderItem.Id,
                 ReceivedQuantity = 1m,
                 AcceptedQuantity = 1m,
+                LocationId = locationId,
                 UnitOfMeasure = "EA"
             });
             _context.SaveChanges();
             return receipt;
         }
+
+        public Task<int> SaveAsync() => _context.SaveChangesAsync();
 
         public async ValueTask DisposeAsync()
         {

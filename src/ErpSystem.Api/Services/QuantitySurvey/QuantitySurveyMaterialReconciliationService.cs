@@ -509,7 +509,7 @@ public sealed class QuantitySurveyMaterialReconciliationService(
         ?? throw new QuantitySurveyMaterialReconciliationNotFoundException("The governed material reconciliation was not found.");
     private async Task RequireProjectAsync(Guid projectId)
     {
-        if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null)
+        if (!await projectService.HasProjectAccessAsync(projectId))
             throw new UnauthorizedAccessException("You are not permitted to access the selected project.");
     }
     private async Task<ExternalActor> RequireExternalProjectAsync(Guid projectId, bool requireApprove, Guid? worksheetId, CancellationToken token)

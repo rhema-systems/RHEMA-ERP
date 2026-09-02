@@ -24,6 +24,8 @@ import { QuantitySurveyVariationDialog } from '@/components/quantity-survey/Quan
 import { QuantitySurveyContractClaimsWorkspace } from '@/components/quantity-survey/QuantitySurveyContractClaimsWorkspace';
 import { QuantitySurveyDayworkWorkspace } from '@/components/quantity-survey/QuantitySurveyDayworkWorkspace';
 import { QuantitySurveySubcontractWorkspace } from '@/components/quantity-survey/QuantitySurveySubcontractWorkspace';
+import { useAuth } from '@/hooks/use-auth';
+import { getQuantitySurveyWorkspaceAccess } from '@/lib/quantity-survey-workspace-access';
 import type { ContractDto } from '@/services/contractService';
 import type {
   CreateProjectExtensionOfTimeDto,
@@ -128,7 +130,24 @@ const formatWeight = (value?: number) =>
 const normalizeId = (value?: string | null) =>
   (value || '').trim().toLowerCase();
 
+export const usesCivilWorksEotWorkflow = (
+  contracts: ContractDto[],
+  contractId?: string | null
+) => {
+  const normalizedContractId = normalizeId(contractId);
+  if (!normalizedContractId) return false;
+
+  return contracts.some(
+    contract =>
+      normalizeId(contract.id) === normalizedContractId &&
+      contract.contractType?.trim().toLowerCase() === 'works'
+  );
+};
+
 export function ProjectCommercialAdminTab(props: Props) {
+  const { hasPermission } = useAuth();
+  const { canManageValuations, canManageVariations } =
+    getQuantitySurveyWorkspaceAccess(hasPermission);
   const {
     project,
     phases,
@@ -179,6 +198,14 @@ export function ProjectCommercialAdminTab(props: Props) {
         (contract) => contract.contractType?.toLowerCase() === 'works'
       ),
     [activeContracts]
+  );
+  const selectedExtensionUsesCivilWorkflow = useMemo(
+    () =>
+      usesCivilWorksEotWorkflow(
+        activeContracts,
+        extensionOfTimeDraft.contractId
+      ),
+    [activeContracts, extensionOfTimeDraft.contractId]
   );
   const milestoneOptions = useMemo(
     () =>
@@ -838,9 +865,15 @@ export function ProjectCommercialAdminTab(props: Props) {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Variations and change orders</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Variations and change orders</CardTitle>
+        </CardHeader>
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-3xl text-sm text-muted-foreground">Prepare site-instruction and change-request valuations against controlled Approved BoQ lines, retain clean central-DMS evidence, and route the result through the configured QS workflow.</p>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Prepare site-instruction and change-request valuations against
+            controlled Approved BoQ lines, retain clean central-DMS evidence,
+            and route the result through the configured QS workflow.
+          </p>
           <QuantitySurveyVariationDialog projectId={project.id} />
         </CardContent>
       </Card>
@@ -855,366 +888,380 @@ export function ProjectCommercialAdminTab(props: Props) {
             <CardTitle>Interim Valuations</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Title</Label>
-                <Input
-                  value={interimValuationDraft.title ?? ''}
-                  onChange={(event) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Valuation No.</Label>
-                <Input
-                  value={interimValuationDraft.valuationNumber ?? ''}
-                  onChange={(event) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      valuationNumber: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Status</Label>
-                <Input
-                  value="Draft — controlled by the valuation workflow"
-                  disabled
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={interimValuationDraft.valuationDate ?? ''}
-                  onChange={(event) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      valuationDate: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Milestone</Label>
-                <Select
-                  value={interimValuationDraft.projectMilestoneId || 'none'}
-                  onValueChange={(value) => {
-                    const projectMilestoneId =
-                      value === 'none' ? undefined : value;
-                    const milestone = milestoneOptions.find(
-                      (item) =>
-                        normalizeId(item.id) === normalizeId(projectMilestoneId)
-                    );
-                    const allowedPackageIds = new Set(
-                      milestone
-                        ? packages
-                            .filter((item) =>
-                              milestone.phases.some(
-                                (phase) =>
-                                  normalizeId(phase.projectPhaseId) ===
-                                  normalizeId(item.projectPhaseId)
-                              )
-                            )
-                            .map((item) => normalizeId(item.id))
-                        : []
-                    );
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      projectMilestoneId,
-                      projectPhaseId: milestone?.phases[0]?.projectPhaseId,
-                      projectPackageId: undefined,
-                      completedProjectPackageIds: (
-                        current.completedProjectPackageIds || []
-                      ).filter((id) => allowedPackageIds.has(normalizeId(id))),
-                    }));
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="No milestone" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No milestone</SelectItem>
-                    {milestoneOptions.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Contract</Label>
-                <Select
-                  value={interimValuationDraft.contractId || 'none'}
-                  onValueChange={(value) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      contractId: value === 'none' ? undefined : value,
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="No contract" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No contract</SelectItem>
-                    {activeContracts.map((contract) => (
-                      <SelectItem key={contract.id} value={contract.id}>
-                        {contractLabel(contract)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Gross Work</Label>
-                <Input
-                  value={formatMoney(
-                    interimValuationGrossWorkValue,
-                    interimValuationDraft.currency
-                  )}
-                  readOnly
-                  className="bg-muted"
-                />
-                <div className="text-xs text-muted-foreground">
-                  Derived from the budget total of the completed work components
-                  in this valuation.
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label>Due Payment (Net Valuation)</Label>
-                <Input
-                  value={formatMoney(
-                    interimValuationNetDue,
-                    interimValuationDraft.currency
-                  )}
-                  readOnly
-                  className="bg-muted"
-                />
-                <div className="text-xs text-muted-foreground">
-                  Gross work less retention and previously certified amounts.
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label>Retention</Label>
-                <Input
-                  type="number"
-                  value={interimValuationDraft.retentionAmount ?? ''}
-                  onChange={(event) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      retentionAmount: event.target.value
-                        ? Number(event.target.value)
-                        : undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Currency</Label>
-                <Select
-                  value={interimValuationDraft.currency || currencyOptions[0]}
-                  onValueChange={(value) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      currency: value,
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select currency" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {currencyOptions.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {getCurrencyOptionLabel(item)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label>Notes</Label>
-                <Textarea
-                  rows={2}
-                  value={interimValuationDraft.notes ?? ''}
-                  onChange={(event) =>
-                    setInterimValuationDraft((current) => ({
-                      ...current,
-                      notes: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            {selectedInterimValuationMilestone ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-semibold text-slate-900">
-                      Milestone Completion Checklist
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      Mark the completed work components for{' '}
-                      {selectedInterimValuationMilestone.title}. The saved
-                      selections feed the weighted project progress.
-                    </div>
+            {canManageValuations ? (
+              <>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Title</Label>
+                    <Input
+                      value={interimValuationDraft.title ?? ''}
+                      onChange={(event) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          title: event.target.value,
+                        }))
+                      }
+                    />
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">
-                      {completedWorkComponentIds.size} completed
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className="border-blue-200 bg-blue-50 text-blue-700"
+                  <div className="grid gap-2">
+                    <Label>Valuation No.</Label>
+                    <Input
+                      value={interimValuationDraft.valuationNumber ?? ''}
+                      onChange={(event) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          valuationNumber: event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Status</Label>
+                    <Input
+                      value="Draft — controlled by the valuation workflow"
+                      disabled
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Date</Label>
+                    <Input
+                      type="date"
+                      value={interimValuationDraft.valuationDate ?? ''}
+                      onChange={(event) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          valuationDate: event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Milestone</Label>
+                    <Select
+                      value={interimValuationDraft.projectMilestoneId || 'none'}
+                      onValueChange={(value) => {
+                        const projectMilestoneId =
+                          value === 'none' ? undefined : value;
+                        const milestone = milestoneOptions.find(
+                          (item) =>
+                            normalizeId(item.id) ===
+                            normalizeId(projectMilestoneId)
+                        );
+                        const allowedPackageIds = new Set(
+                          milestone
+                            ? packages
+                                .filter((item) =>
+                                  milestone.phases.some(
+                                    (phase) =>
+                                      normalizeId(phase.projectPhaseId) ===
+                                      normalizeId(item.projectPhaseId)
+                                  )
+                                )
+                                .map((item) => normalizeId(item.id))
+                            : []
+                        );
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          projectMilestoneId,
+                          projectPhaseId: milestone?.phases[0]?.projectPhaseId,
+                          projectPackageId: undefined,
+                          completedProjectPackageIds: (
+                            current.completedProjectPackageIds || []
+                          ).filter((id) =>
+                            allowedPackageIds.has(normalizeId(id))
+                          ),
+                        }));
+                      }}
                     >
-                      Project Progress{' '}
-                      {formatWeight(interimValuationProgressPreview)}
-                    </Badge>
+                      <SelectTrigger>
+                        <SelectValue placeholder="No milestone" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No milestone</SelectItem>
+                        {milestoneOptions.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Contract</Label>
+                    <Select
+                      value={interimValuationDraft.contractId || 'none'}
+                      onValueChange={(value) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          contractId: value === 'none' ? undefined : value,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="No contract" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No contract</SelectItem>
+                        {activeContracts.map((contract) => (
+                          <SelectItem key={contract.id} value={contract.id}>
+                            {contractLabel(contract)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Gross Work</Label>
+                    <Input
+                      value={formatMoney(
+                        interimValuationGrossWorkValue,
+                        interimValuationDraft.currency
+                      )}
+                      readOnly
+                      className="bg-muted"
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      Derived from the budget total of the completed work
+                      components in this valuation.
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Due Payment (Net Valuation)</Label>
+                    <Input
+                      value={formatMoney(
+                        interimValuationNetDue,
+                        interimValuationDraft.currency
+                      )}
+                      readOnly
+                      className="bg-muted"
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      Gross work less retention and previously certified
+                      amounts.
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Retention</Label>
+                    <Input
+                      type="number"
+                      value={interimValuationDraft.retentionAmount ?? ''}
+                      onChange={(event) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          retentionAmount: event.target.value
+                            ? Number(event.target.value)
+                            : undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Currency</Label>
+                    <Select
+                      value={
+                        interimValuationDraft.currency || currencyOptions[0]
+                      }
+                      onValueChange={(value) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          currency: value,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currencyOptions.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {getCurrencyOptionLabel(item)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label>Notes</Label>
+                    <Textarea
+                      rows={2}
+                      value={interimValuationDraft.notes ?? ''}
+                      onChange={(event) =>
+                        setInterimValuationDraft((current) => ({
+                          ...current,
+                          notes: event.target.value || undefined,
+                        }))
+                      }
+                    />
                   </div>
                 </div>
-                <div className="mt-4 space-y-3">
-                  {interimValuationPackageGroups.length === 0 ? (
-                    <div className="rounded-lg border border-dashed bg-white p-4 text-sm text-muted-foreground">
-                      This milestone does not have any phase deliverables yet.
-                    </div>
-                  ) : (
-                    interimValuationPackageGroups.map((group) => (
-                      <div
-                        key={group.phaseSelection.projectPhaseId}
-                        className="rounded-lg border bg-white p-4"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium text-slate-900">
-                              {group.phaseSelection.phaseName}
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className="border-blue-200 bg-blue-50 text-blue-700"
-                            >
-                              Phase Weight{' '}
-                              {formatWeight(
-                                group.phaseSelection.completionWeightPercent
-                              )}
-                            </Badge>
-                            <Badge variant="outline">
-                              Completion {formatWeight(group.completionPercent)}
-                            </Badge>
-                          </div>
-                          <div className="space-y-1 text-right text-xs text-slate-500">
-                            <div>
-                              Completed Weight{' '}
-                              {formatWeight(group.completedWeight)} of{' '}
-                              {formatWeight(group.totalWeight)}
-                            </div>
-                            <div>
-                              Phase Total{' '}
-                              {formatMoney(
-                                group.phaseBudgetTotal,
-                                interimValuationDraft.currency
-                              )}
-                            </div>
-                            <div>
-                              Completed Amount{' '}
-                              {formatMoney(
-                                group.completedBudgetTotal,
-                                interimValuationDraft.currency
-                              )}
-                            </div>
-                          </div>
+                {selectedInterimValuationMilestone ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="text-sm font-semibold text-slate-900">
+                          Milestone Completion Checklist
                         </div>
-                        <div className="mt-3 grid gap-2">
-                          {group.phasePackages.length === 0 ? (
-                            <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                              No work components are currently linked to this
-                              phase.
-                            </div>
-                          ) : (
-                            group.phasePackages.map((projectPackage) => (
-                              <label
-                                key={projectPackage.id}
-                                className="flex items-start gap-3 rounded-md border px-3 py-3 text-sm"
-                              >
-                                <Checkbox
-                                  checked={completedWorkComponentIds.has(
-                                    normalizeId(projectPackage.id)
-                                  )}
-                                  onCheckedChange={(checked) =>
-                                    toggleCompletedWorkComponent(
-                                      projectPackage.id,
-                                      Boolean(checked)
-                                    )
-                                  }
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="font-medium text-slate-900">
-                                    {projectPackage.code
-                                      ? `${projectPackage.code} - ${projectPackage.name}`
-                                      : projectPackage.name}
-                                  </div>
-                                  <div className="text-xs text-slate-500">
-                                    Work component weight{' '}
-                                    {formatWeight(
-                                      projectPackage.completionWeightPercent
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-slate-500">
-                                    Budget total{' '}
-                                    {formatMoney(
-                                      projectPackage.budgetAmount ?? 0,
-                                      interimValuationDraft.currency
-                                    )}
-                                  </div>
-                                </div>
-                              </label>
-                            ))
-                          )}
+                        <div className="text-xs text-slate-500">
+                          Mark the completed work components for{' '}
+                          {selectedInterimValuationMilestone.title}. The saved
+                          selections feed the weighted project progress.
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : milestoneOptions.length > 0 ? (
-              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                Select a milestone to load its saved phases and work components
-                for completion tracking.
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                Create milestone deliverables in the Plan tab before using
-                milestone-based interim valuation progress.
-              </div>
-            )}
-            <div className="flex justify-end gap-2">
-              {editingInterimValuationId ? (
-                <Button
-                  variant="outline"
-                  onClick={onCancelInterimValuationEdit}
-                >
-                  <X className="mr-2 h-4 w-4" />
-                  Cancel
-                </Button>
-              ) : null}
-              <Button
-                disabled={!interimValuationDraft.title?.trim()}
-                onClick={onSaveInterimValuation}
-              >
-                {editingInterimValuationId ? (
-                  <Save className="mr-2 h-4 w-4" />
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline">
+                          {completedWorkComponentIds.size} completed
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="border-blue-200 bg-blue-50 text-blue-700"
+                        >
+                          Project Progress{' '}
+                          {formatWeight(interimValuationProgressPreview)}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {interimValuationPackageGroups.length === 0 ? (
+                        <div className="rounded-lg border border-dashed bg-white p-4 text-sm text-muted-foreground">
+                          This milestone does not have any phase deliverables
+                          yet.
+                        </div>
+                      ) : (
+                        interimValuationPackageGroups.map((group) => (
+                          <div
+                            key={group.phaseSelection.projectPhaseId}
+                            className="rounded-lg border bg-white p-4"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium text-slate-900">
+                                  {group.phaseSelection.phaseName}
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className="border-blue-200 bg-blue-50 text-blue-700"
+                                >
+                                  Phase Weight{' '}
+                                  {formatWeight(
+                                    group.phaseSelection.completionWeightPercent
+                                  )}
+                                </Badge>
+                                <Badge variant="outline">
+                                  Completion{' '}
+                                  {formatWeight(group.completionPercent)}
+                                </Badge>
+                              </div>
+                              <div className="space-y-1 text-right text-xs text-slate-500">
+                                <div>
+                                  Completed Weight{' '}
+                                  {formatWeight(group.completedWeight)} of{' '}
+                                  {formatWeight(group.totalWeight)}
+                                </div>
+                                <div>
+                                  Phase Total{' '}
+                                  {formatMoney(
+                                    group.phaseBudgetTotal,
+                                    interimValuationDraft.currency
+                                  )}
+                                </div>
+                                <div>
+                                  Completed Amount{' '}
+                                  {formatMoney(
+                                    group.completedBudgetTotal,
+                                    interimValuationDraft.currency
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-2">
+                              {group.phasePackages.length === 0 ? (
+                                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                                  No work components are currently linked to
+                                  this phase.
+                                </div>
+                              ) : (
+                                group.phasePackages.map((projectPackage) => (
+                                  <label
+                                    key={projectPackage.id}
+                                    className="flex items-start gap-3 rounded-md border px-3 py-3 text-sm"
+                                  >
+                                    <Checkbox
+                                      checked={completedWorkComponentIds.has(
+                                        normalizeId(projectPackage.id)
+                                      )}
+                                      onCheckedChange={(checked) =>
+                                        toggleCompletedWorkComponent(
+                                          projectPackage.id,
+                                          Boolean(checked)
+                                        )
+                                      }
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-medium text-slate-900">
+                                        {projectPackage.code
+                                          ? `${projectPackage.code} - ${projectPackage.name}`
+                                          : projectPackage.name}
+                                      </div>
+                                      <div className="text-xs text-slate-500">
+                                        Work component weight{' '}
+                                        {formatWeight(
+                                          projectPackage.completionWeightPercent
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-slate-500">
+                                        Budget total{' '}
+                                        {formatMoney(
+                                          projectPackage.budgetAmount ?? 0,
+                                          interimValuationDraft.currency
+                                        )}
+                                      </div>
+                                    </div>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : milestoneOptions.length > 0 ? (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    Select a milestone to load its saved phases and work
+                    components for completion tracking.
+                  </div>
                 ) : (
-                  <Plus className="mr-2 h-4 w-4" />
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    Create milestone deliverables in the Plan tab before using
+                    milestone-based interim valuation progress.
+                  </div>
                 )}
-                {editingInterimValuationId ? 'Save Valuation' : 'Add Valuation'}
-              </Button>
-            </div>
+                <div className="flex justify-end gap-2">
+                  {editingInterimValuationId ? (
+                    <Button
+                      variant="outline"
+                      onClick={onCancelInterimValuationEdit}
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Cancel
+                    </Button>
+                  ) : null}
+                  <Button
+                    disabled={!interimValuationDraft.title?.trim()}
+                    onClick={onSaveInterimValuation}
+                  >
+                    {editingInterimValuationId ? (
+                      <Save className="mr-2 h-4 w-4" />
+                    ) : (
+                      <Plus className="mr-2 h-4 w-4" />
+                    )}
+                    {editingInterimValuationId
+                      ? 'Save Valuation'
+                      : 'Add Valuation'}
+                  </Button>
+                </div>
+              </>
+            ) : null}
             <div className="space-y-3">
               {project.interimValuations.length === 0 ? (
                 <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
@@ -1258,23 +1305,27 @@ export function ProjectCommercialAdminTab(props: Props) {
                           interimValuationStatus={item.status}
                           currency={item.currency}
                         />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={item.status !== 'Draft'}
-                          onClick={() => onEditInterimValuation(item)}
-                        >
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={item.status !== 'Draft'}
-                          onClick={() => onDeleteInterimValuation(item.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canManageValuations ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={item.status !== 'Draft'}
+                              onClick={() => onEditInterimValuation(item)}
+                            >
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={item.status !== 'Draft'}
+                              onClick={() => onDeleteInterimValuation(item.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1288,7 +1339,9 @@ export function ProjectCommercialAdminTab(props: Props) {
             <CardTitle>Payment Certificates</CardTitle>
             <div className="flex flex-wrap gap-2">
               <QuantitySurveyAdvanceRecoveryDialog projectId={project.id} />
-              <QuantitySurveyMaterialReconciliationDialog projectId={project.id} />
+              <QuantitySurveyMaterialReconciliationDialog
+                projectId={project.id}
+              />
               <QuantitySurveyPaymentCertificateDialog projectId={project.id} />
             </div>
           </CardHeader>
@@ -1647,168 +1700,205 @@ export function ProjectCommercialAdminTab(props: Props) {
             <CardTitle>Extension of Time</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {worksContracts.length > 0 ? (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                Works extensions of time are governed in <span className="font-medium">Site controls → Civil variation and extension of time</span>.
-                That workspace selects the active Works contract, an applied QS variation where there is cost impact, current central-DMS evidence, and the configured workflow. Historical EOT records remain visible below.
-              </div>
-            ) : (
-              <>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="grid gap-2 md:col-span-2">
-                <Label>Title</Label>
-                <Input
-                  value={extensionOfTimeDraft.title ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                />
-              </div>
+            {canManageVariations ? (
               <div className="grid gap-2">
-                <Label>Reference</Label>
-                <Input
-                  value={extensionOfTimeDraft.referenceNumber ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      referenceNumber: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Status</Label>
+                <Label>Contract</Label>
                 <Select
-                  value={
-                    extensionOfTimeDraft.status ||
-                    extensionOfTimeStatusOptions[0]
-                  }
-                  onValueChange={(value) =>
-                    setExtensionOfTimeDraft((current) => ({
+                  value={extensionOfTimeDraft.contractId || '__unlinked__'}
+                  onValueChange={value =>
+                    setExtensionOfTimeDraft(current => ({
                       ...current,
-                      status: value,
+                      contractId: value === '__unlinked__' ? undefined : value,
                     }))
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Select contract" />
                   </SelectTrigger>
                   <SelectContent>
-                    {extensionOfTimeStatusOptions.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {formatCatalogLabel(item)}
+                    <SelectItem value="__unlinked__">No linked contract</SelectItem>
+                    {activeContracts.map(contract => (
+                      <SelectItem key={contract.id} value={contract.id}>
+                        {contractLabel(contract)} ·{' '}
+                        {contract.contractType || 'Unspecified type'}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-2">
-                <Label>Requested</Label>
-                <Input
-                  type="date"
-                  value={extensionOfTimeDraft.requestedDate ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      requestedDate: event.target.value || undefined,
-                    }))
-                  }
-                />
+            ) : null}
+            {selectedExtensionUsesCivilWorkflow ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                Works extensions of time are governed in{' '}
+                <span className="font-medium">
+                  Site controls → Civil variation and extension of time
+                </span>
+                . That workspace selects the active Works contract, an applied
+                QS variation where there is cost impact, current central-DMS
+                evidence, and the configured workflow. Historical EOT records
+                remain visible below.
               </div>
-              <div className="grid gap-2">
-                <Label>Decision</Label>
-                <Input
-                  type="date"
-                  value={extensionOfTimeDraft.decisionDate ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      decisionDate: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Days Requested</Label>
-                <Input
-                  type="number"
-                  value={extensionOfTimeDraft.daysRequested ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      daysRequested: event.target.value
-                        ? Number(event.target.value)
-                        : undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Days Approved</Label>
-                <Input
-                  type="number"
-                  value={extensionOfTimeDraft.daysApproved ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      daysApproved: event.target.value
-                        ? Number(event.target.value)
-                        : undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Revised Completion</Label>
-                <Input
-                  type="date"
-                  value={extensionOfTimeDraft.revisedCompletionDate ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      revisedCompletionDate: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2 md:col-span-3">
-                <Label>Reason</Label>
-                <Textarea
-                  rows={2}
-                  value={extensionOfTimeDraft.reason ?? ''}
-                  onChange={(event) =>
-                    setExtensionOfTimeDraft((current) => ({
-                      ...current,
-                      reason: event.target.value || undefined,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              {editingExtensionOfTimeId ? (
-                <Button variant="outline" onClick={onCancelExtensionOfTimeEdit}>
-                  <X className="mr-2 h-4 w-4" />
-                  Cancel
-                </Button>
-              ) : null}
-              <Button
-                disabled={!extensionOfTimeDraft.title?.trim()}
-                onClick={onSaveExtensionOfTime}
-              >
-                {editingExtensionOfTimeId ? (
-                  <Save className="mr-2 h-4 w-4" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                {editingExtensionOfTimeId ? 'Save EOT' : 'Add EOT'}
-              </Button>
-            </div>
+            ) : canManageVariations ? (
+              <>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label>Title</Label>
+                    <Input
+                      value={extensionOfTimeDraft.title ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          title: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Reference</Label>
+                    <Input
+                      value={extensionOfTimeDraft.referenceNumber ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          referenceNumber: event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Status</Label>
+                    <Select
+                      value={
+                        extensionOfTimeDraft.status ||
+                        extensionOfTimeStatusOptions[0]
+                      }
+                      onValueChange={(value) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          status: value,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {extensionOfTimeStatusOptions.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {formatCatalogLabel(item)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Requested</Label>
+                    <Input
+                      type="date"
+                      value={extensionOfTimeDraft.requestedDate ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          requestedDate: event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Decision</Label>
+                    <Input
+                      type="date"
+                      value={extensionOfTimeDraft.decisionDate ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          decisionDate: event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Days Requested</Label>
+                    <Input
+                      type="number"
+                      value={extensionOfTimeDraft.daysRequested ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          daysRequested: event.target.value
+                            ? Number(event.target.value)
+                            : undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Days Approved</Label>
+                    <Input
+                      type="number"
+                      value={extensionOfTimeDraft.daysApproved ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          daysApproved: event.target.value
+                            ? Number(event.target.value)
+                            : undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Revised Completion</Label>
+                    <Input
+                      type="date"
+                      value={extensionOfTimeDraft.revisedCompletionDate ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          revisedCompletionDate:
+                            event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2 md:col-span-3">
+                    <Label>Reason</Label>
+                    <Textarea
+                      rows={2}
+                      value={extensionOfTimeDraft.reason ?? ''}
+                      onChange={(event) =>
+                        setExtensionOfTimeDraft((current) => ({
+                          ...current,
+                          reason: event.target.value || undefined,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  {editingExtensionOfTimeId ? (
+                    <Button
+                      variant="outline"
+                      onClick={onCancelExtensionOfTimeEdit}
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Cancel
+                    </Button>
+                  ) : null}
+                  <Button
+                    disabled={!extensionOfTimeDraft.title?.trim()}
+                    onClick={onSaveExtensionOfTime}
+                  >
+                    {editingExtensionOfTimeId ? (
+                      <Save className="mr-2 h-4 w-4" />
+                    ) : (
+                      <Plus className="mr-2 h-4 w-4" />
+                    )}
+                    {editingExtensionOfTimeId ? 'Save EOT' : 'Add EOT'}
+                  </Button>
+                </div>
               </>
-            )}
+            ) : null}
             <div className="space-y-3">
               {project.extensionOfTimeRequests.length === 0 ? (
                 <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
@@ -1840,23 +1930,29 @@ export function ProjectCommercialAdminTab(props: Props) {
                           </div>
                         ) : null}
                       </div>
-                      {worksContracts.length === 0 ? <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onEditExtensionOfTime(item)}
-                        >
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onDeleteExtensionOfTime(item.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div> : null}
+                      {canManageVariations &&
+                      !usesCivilWorksEotWorkflow(
+                        activeContracts,
+                        item.contractId
+                      ) ? (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onEditExtensionOfTime(item)}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onDeleteExtensionOfTime(item.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))

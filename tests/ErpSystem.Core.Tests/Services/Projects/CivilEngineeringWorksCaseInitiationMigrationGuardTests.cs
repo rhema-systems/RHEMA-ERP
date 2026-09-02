@@ -12,7 +12,6 @@ public sealed class CivilEngineeringWorksCaseInitiationMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ALTER TABLE dbo.ProjectCivilDesignCases ADD")
@@ -31,7 +30,7 @@ public sealed class CivilEngineeringWorksCaseInitiationMigrationGuardTests
             .And.Contain("source, property/site, category, classification and assessment lineage is immutable")
             .And.NotContain("CREATE TABLE ProjectCivilEngineeringCases")
             .And.NotContain("INSERT INTO dbo.ProjectCivilDesignCases");
-        metadata.Should().Contain($"Migration(\"{MigrationId}\")");
+        migration.Should().Contain($"[Migration(\"{MigrationId}\")]");
         preflight.Should().Contain($"GUARD_COVERAGE|{MigrationId}");
     }
 

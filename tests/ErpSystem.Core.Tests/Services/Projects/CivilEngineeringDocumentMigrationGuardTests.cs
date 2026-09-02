@@ -76,8 +76,6 @@ public sealed class CivilEngineeringDocumentMigrationGuardTests
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(
             root, "src", "ErpSystem.Data", "Migrations", DmsGovernanceMigrationId + ".cs"));
-        var metadata = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         migration.Should().Contain("TDC-CIV-ENGINEERING-FILE")
             .And.Contain("TDC-CIVIL-ENGINEERING-RESTRICTED")
@@ -88,7 +86,7 @@ public sealed class CivilEngineeringDocumentMigrationGuardTests
             .And.Contain("AllowDestruction")
             .And.Contain("NOT EXISTS")
             .And.NotContain("File.WriteAllBytes");
-        metadata.Should().Contain($"Migration(\"{DmsGovernanceMigrationId}\")");
+        migration.Should().Contain($"[Migration(\"{DmsGovernanceMigrationId}\")]");
     }
 
     private static string FindRepositoryRoot(

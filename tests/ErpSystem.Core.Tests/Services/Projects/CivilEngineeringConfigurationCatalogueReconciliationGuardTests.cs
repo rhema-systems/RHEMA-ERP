@@ -11,7 +11,6 @@ public sealed class CivilEngineeringConfigurationCatalogueReconciliationGuardTes
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue.cs"));
         var seeder = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Seeders", "CivilEngineeringConfigurationProfileSeeder.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("CIV-CFG-014")
@@ -24,7 +23,7 @@ public sealed class CivilEngineeringConfigurationCatalogueReconciliationGuardTes
             .And.Contain("IgnoreQueryFilters")
             .And.Contain("SupersedesProfileId = latest?.Id")
             .And.Contain("independent reapproval required");
-        metadata.Should().Contain("20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue");
+        migration.Should().Contain("[Migration(\"20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue\")]");
         preflight.Should().Contain("GUARD_COVERAGE|20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue");
     }
 

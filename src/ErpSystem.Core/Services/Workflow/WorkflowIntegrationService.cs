@@ -21,8 +21,29 @@ public class WorkflowIntegrationService : IWorkflowIntegrationService
         _logger = logger;
     }
 
+    public Task<bool> HasActiveApprovalWorkflowAsync(string entityType)
+        => _workflowService.HasActiveApprovalWorkflowAsync(entityType);
+
     public async Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId)
     {
+        if (!await _workflowService.HasActiveApprovalWorkflowAsync(entityType))
+        {
+            _logger.LogInformation(
+                "Approval workflow is disabled for {EntityType}; {EntityId} will use the direct lifecycle",
+                entityType,
+                entityId);
+
+            return new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.Completed,
+                    Message = "No active approval workflow is configured; approval is not required."
+                },
+                WorkflowOutcome.Approved,
+                approvalRequired: false);
+        }
+
         var executionResult = await _workflowService.StartApprovalWorkflowAsync(entityType, entityId);
         return CreateResult(entityType, entityId, executionResult, "submit");
     }

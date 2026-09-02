@@ -17,12 +17,21 @@ import { useRouter } from 'next/navigation';
 import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
 import { ReportSegmentFilters } from '@/components/finance/reports/ReportSegmentFilters';
 import { AppliedReportSegmentFilters } from '@/components/finance/reports/AppliedReportSegmentFilters';
+import { ReportDimensionFilters } from '@/components/finance/reports/ReportDimensionFilters';
+import { AppliedReportDimensionFilters } from '@/components/finance/reports/AppliedReportDimensionFilters';
 import {
     buildFinanceSegmentFilters,
     toFinanceSegmentFilterQueryParameters,
     type ReportSegmentSelections,
 } from '@/lib/finance/report-segment-filters';
 import type { FinanceSegmentFilterDto, SegmentStructure } from '@/types/finance';
+import {
+    appendFinanceDimensionFilters,
+    buildFinanceDimensionFilters,
+    toFinanceDimensionFilterQueryParameters,
+    type ReportDimensionSelections,
+} from '@/lib/finance/report-dimension-filters';
+import type { FinanceDimensionDefinition, FinanceDimensionFilterDto } from '@/types/finance';
 
 export default function TrialBalancePage() {
     const router = useRouter();
@@ -39,6 +48,10 @@ export default function TrialBalancePage() {
     const [segmentSelections, setSegmentSelections] = useState<ReportSegmentSelections>({});
     const [appliedSegmentFilters, setAppliedSegmentFilters] = useState<FinanceSegmentFilterDto[]>([]);
     const [segmentLoadError, setSegmentLoadError] = useState<string | null>(null);
+    const [transactionDimensions, setTransactionDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [dimensionSelections, setDimensionSelections] = useState<ReportDimensionSelections>({});
+    const [appliedDimensionFilters, setAppliedDimensionFilters] = useState<FinanceDimensionFilterDto[]>([]);
+    const [dimensionLoadError, setDimensionLoadError] = useState<string | null>(null);
     const [report, setReport] = useState<TrialBalanceReportDto | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +62,7 @@ export default function TrialBalancePage() {
     const loadInitialReport = async () => {
         try {
             setLoading(true);
-            const [settingsData, books, dimensions] = await Promise.all([
+            const [settingsData, books, dimensions, transactionDimensionOptions] = await Promise.all([
                 financeDataService.getFinanceSettings(),
                 financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
                 financeDataService.getReportingDimensions().catch((err) => {
@@ -57,15 +70,21 @@ export default function TrialBalancePage() {
                     setSegmentLoadError('GL segment filters could not be loaded.');
                     return [] as SegmentStructure[];
                 }),
+                financeDataService.getFinanceDimensions(true).catch(() => {
+                    setDimensionLoadError('Transaction-dimension filters could not be loaded.');
+                    return [];
+                }),
             ]);
             setSettings(settingsData);
             if (books.length > 0) setAccountingBooks(books);
             setReportingDimensions(dimensions);
+            setTransactionDimensions(transactionDimensionOptions);
             const data = await financeDataService.getTrialBalance({
                 asAtDate,
                 bookClassification,
                 includeZeroBalances: !hideZeroBalances,
                 segmentFilters: [],
+                dimensionFilters: [],
             });
             setReport(data);
         } catch (err) {
@@ -81,14 +100,17 @@ export default function TrialBalancePage() {
             setRunning(true);
             setError(null);
             const segmentFilters = buildFinanceSegmentFilters(reportingDimensions, segmentSelections);
+            const dimensionFilters = buildFinanceDimensionFilters(transactionDimensions, dimensionSelections);
             const data = await financeDataService.getTrialBalance({
                 asAtDate,
                 bookClassification,
                 includeZeroBalances: !hideZeroBalances,
                 segmentFilters,
+                dimensionFilters,
             });
             setReport(data);
             setAppliedSegmentFilters(segmentFilters);
+            setAppliedDimensionFilters(dimensionFilters);
         } catch (err) {
             console.error('Error loading trial balance report:', err);
             setError('Could not generate the trial balance report.');
@@ -121,11 +143,16 @@ export default function TrialBalancePage() {
             bookClassification,
             includeZeroBalances: !hideZeroBalances,
             ...toFinanceSegmentFilterQueryParameters(appliedSegmentFilters),
+            ...toFinanceDimensionFilterQueryParameters(appliedDimensionFilters),
         };
     };
 
     const updateSegmentSelection = (segmentStructureId: string, value: string) => {
         setSegmentSelections((current) => ({ ...current, [segmentStructureId]: value }));
+    };
+
+    const updateDimensionSelection = (definitionId: string, valueCode: string) => {
+        setDimensionSelections((current) => ({ ...current, [definitionId]: valueCode }));
     };
 
     const openDetailedLedger = (line: TrialBalanceLineDto) => {
@@ -141,6 +168,7 @@ export default function TrialBalancePage() {
             includeOpeningBalances: 'true',
         });
         params.append('accountIds', line.accountId);
+        appendFinanceDimensionFilters(params, appliedDimensionFilters);
 
         router.push(`/finance/reports/detailed-ledger?${params.toString()}`);
     };
@@ -263,6 +291,12 @@ export default function TrialBalancePage() {
                             onSelectionChange={updateSegmentSelection}
                             disabled={running}
                         />
+                        <ReportDimensionFilters
+                            definitions={transactionDimensions}
+                            selections={dimensionSelections}
+                            onSelectionChange={updateDimensionSelection}
+                            disabled={running}
+                        />
                         <div className="flex items-center gap-2 pb-2">
                             <Switch id="hide-zero" checked={hideZeroBalances} onCheckedChange={setHideZeroBalances} />
                             <Label htmlFor="hide-zero">Hide Zero Balances</Label>
@@ -273,12 +307,23 @@ export default function TrialBalancePage() {
                         </Button>
                     </div>
                     {segmentLoadError && <div className="mt-4 text-sm text-amber-700">{segmentLoadError}</div>}
+                    {dimensionLoadError && <div className="mt-4 text-sm text-amber-700">{dimensionLoadError}</div>}
                     {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
                     <AppliedReportSegmentFilters
                         dimensions={reportingDimensions}
                         appliedFilters={appliedSegmentFilters}
                         pendingFilters={buildFinanceSegmentFilters(reportingDimensions, segmentSelections)}
                     />
+                    <AppliedReportDimensionFilters
+                        definitions={transactionDimensions}
+                        appliedFilters={appliedDimensionFilters}
+                        pendingFilters={buildFinanceDimensionFilters(transactionDimensions, dimensionSelections)}
+                    />
+                    {appliedDimensionFilters.length > 0 && (
+                        <p className="mt-3 text-xs text-amber-700">
+                            Transaction-dimension totals include only ledger lines carrying the selected immutable coding. Operational adapters remain outside this view until individually certified. Analytical slices may be unbalanced unless the selected dimension is governed as Balancing.
+                        </p>
+                    )}
                 </CardContent>
             </Card>
 

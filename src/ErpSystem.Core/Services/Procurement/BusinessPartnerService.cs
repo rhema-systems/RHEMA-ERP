@@ -696,6 +696,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             IsBlacklisted = partner.IsBlacklisted,
             Currency = partner.Currency,
             CreatedAt = partner.CreatedAt,
+            Categories = MapCategoryNames(partner),
             // Customer-specific fields for list view
             CustomerType = partner.CustomerType,
             CreditLimit = partner.CreditLimit,
@@ -772,6 +773,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             InsuranceCoverageAmount = partner.InsuranceCoverage,
             Notes = partner.Notes,
             CreatedAt = partner.CreatedAt,
+            Categories = MapCategoryNames(partner),
             // Customer-Specific Fields
             CustomerType = partner.CustomerType,
             CustomerAccountNumber = partner.CustomerAccountNumber,
@@ -881,6 +883,17 @@ public class BusinessPartnerService : IBusinessPartnerService
         }
 
         return dto;
+    }
+
+    private static List<string> MapCategoryNames(BusinessPartner partner)
+    {
+        return partner.Categories
+            .Where(link => link.Category != null && !string.IsNullOrWhiteSpace(link.Category.CategoryName))
+            .OrderByDescending(link => link.IsPrimary)
+            .ThenBy(link => link.Category.CategoryName)
+            .Select(link => link.Category.CategoryName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<ErpSystem.Core.Entities.Finance.PaymentTerm?> ResolvePaymentTermAsync(

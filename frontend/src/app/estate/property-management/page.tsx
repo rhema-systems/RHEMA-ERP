@@ -6,8 +6,11 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   BarChart3,
+  Briefcase,
   Building2,
+  ClipboardCheck,
   CreditCard,
+  Database,
   Images,
   FileSignature,
   FileText,
@@ -15,7 +18,9 @@ import {
   KeyRound,
   Landmark,
   Loader2,
+  MessageSquare,
   Users,
+  Wrench,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -39,13 +44,18 @@ const procedureIcons: Record<
   React.ComponentType<{ className?: string }>
 > = {
   Building2,
+  Briefcase,
+  ClipboardCheck,
   CreditCard,
+  Database,
   FileSignature,
   FileText,
   Home,
   KeyRound,
   Landmark,
+  MessageSquare,
   Users,
+  Wrench,
 };
 
 const accentClasses: Record<string, string> = {
@@ -69,11 +79,11 @@ export default function EstatePropertyManagementPage() {
 
     const loadProcedures = async () => {
       try {
-        const data = await estatePropertyManagementService.getProcedures();
+        const propertyData = await estatePropertyManagementService.getProcedures();
         if (mounted) {
-          setProcedures(data);
+          setProcedures(propertyData);
           setLoadError(
-            data.length === 0
+            propertyData.length === 0
               ? 'No property management workspaces were returned by the API.'
               : null
           );
@@ -99,9 +109,68 @@ export default function EstatePropertyManagementPage() {
     };
   }, []);
 
-  const openWorkspace = (entityType: string) => {
-    router.push(
-      `/estate/property-management/${encodeURIComponent(entityType)}`
+  const openWorkspace = (entityType: string) =>
+    router.push(`/estate/property-management/${encodeURIComponent(entityType)}`);
+
+  const renderProcedureCard = (
+    procedure: FacilitiesProcedure
+  ) => {
+    const Icon = procedureIcons[procedure.icon] || Building2;
+    const accent = accentClasses[procedure.accent] || accentClasses.teal;
+    const isPropertyUnitRegister =
+      procedure.entityType === 'EstatePropertyManagementPropertyUnit';
+    const isLeaseManagement =
+      procedure.entityType === 'EstatePropertyManagementLease';
+    const isWorkflowManagedRequest =
+      procedure.entityType === 'EstatePropertyManagementListingApplication';
+
+    return (
+      <Card
+        key={procedure.entityType}
+        className="border-border bg-card text-card-foreground"
+      >
+        <CardHeader className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+              <Icon className={`h-5 w-5 ${accent}`} />
+            </div>
+            <Badge variant="secondary">
+              {isPropertyUnitRegister
+                  ? 'Estate records'
+                  : isLeaseManagement
+                    ? 'Lease register'
+                    : isWorkflowManagedRequest
+                      ? 'Workflow managed'
+                      : getProcedureStageLabel(
+                          procedure.workspaceType,
+                          procedure.stageCount
+                        )}
+            </Badge>
+          </div>
+          <div>
+            <CardTitle className="text-base leading-6">
+              {procedure.title}
+            </CardTitle>
+            <CardDescription className="mt-1">
+              {procedure.source}
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{procedure.entityType}</Badge>
+            <Badge variant="outline">{procedure.workspaceType ?? 'Case Workflow'}</Badge>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full justify-between"
+            onClick={() => openWorkspace(procedure.entityType)}
+          >
+            {getProcedureWorkspaceActionLabel(procedure.workspaceType)}
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </CardContent>
+      </Card>
     );
   };
 
@@ -110,16 +179,15 @@ export default function EstatePropertyManagementPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
           <Badge variant="outline" className="w-fit">
-            Estate property management
+            Estate operations
           </Badge>
           <div>
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-              Property Management
+              Property Management Operations
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Post-handoff property and commercial operations for received
-              units, active leases, occupants, availability, billing, and
-              Finance AR handoffs.
+              Property and unit registers, listings, customer requests,
+              leases, occupants, availability, handover, billing, and records.
             </p>
           </div>
         </div>
@@ -127,7 +195,7 @@ export default function EstatePropertyManagementPage() {
           <Button asChild>
             <Link href="/estate/property-management/dashboard">
               <BarChart3 className="mr-2 h-4 w-4" />
-              Dashboard
+              Property Dashboard
             </Link>
           </Button>
           <Button asChild variant="outline">
@@ -137,9 +205,9 @@ export default function EstatePropertyManagementPage() {
             </Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href="/estate/facilities">
+            <Link href="/estate/facilities/dashboard">
               <Building2 className="mr-2 h-4 w-4" />
-              Facilities Management
+              Facilities & Corporate Services
             </Link>
           </Button>
         </div>
@@ -148,11 +216,20 @@ export default function EstatePropertyManagementPage() {
       <Card className="border-border bg-card text-card-foreground">
         <CardContent className="p-4 text-sm text-muted-foreground">
           Estate casework owns applications, approvals, allocations, and lease
-          preparation. Property Management starts after an approved property or
-          unit is handed over for leasing, occupancy, billing, and ongoing
-          operations.
+          preparation. This hub starts after an approved property or unit is
+          handed over, then keeps lease, occupancy, billing, records,
+          property records and customer transactions connected. Facilities and
+          corporate service work is managed in its separate workspace.
         </CardContent>
       </Card>
+
+      <div>
+        <h2 className="text-lg font-semibold">Property, Lease & Customer Operations</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Use these for the property register, listings, requests, lease setup,
+          occupants, billing, ground rent, handover, availability, and records.
+        </p>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {!isLoading && loadError ? (
@@ -172,69 +249,7 @@ export default function EstatePropertyManagementPage() {
         ) : null}
 
         {!isLoading &&
-          procedures.map((procedure) => {
-            const Icon = procedureIcons[procedure.icon] || Building2;
-            const accent =
-              accentClasses[procedure.accent] || accentClasses.teal;
-            const isPropertyUnitRegister =
-              procedure.entityType === 'EstatePropertyManagementPropertyUnit';
-            const isLeaseManagement =
-              procedure.entityType === 'EstatePropertyManagementLease';
-            const isWorkflowManagedRequest =
-              procedure.entityType ===
-              'EstatePropertyManagementListingApplication';
-
-            return (
-              <Card
-                key={procedure.entityType}
-                className="border-border bg-card text-card-foreground"
-              >
-                <CardHeader className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
-                      <Icon className={`h-5 w-5 ${accent}`} />
-                    </div>
-                    <Badge variant="secondary">
-                      {isPropertyUnitRegister
-                        ? 'Estate records'
-                        : isLeaseManagement
-                          ? 'Lease register'
-                          : isWorkflowManagedRequest
-                            ? 'Workflow managed'
-                            : getProcedureStageLabel(
-                                procedure.workspaceType,
-                                procedure.stageCount
-                              )}
-                    </Badge>
-                  </div>
-                  <div>
-                    <CardTitle className="text-base leading-6">
-                      {procedure.title}
-                    </CardTitle>
-                    <CardDescription className="mt-1">
-                      {procedure.source}
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{procedure.entityType}</Badge>
-                    <Badge variant="outline">
-                      {procedure.workspaceType ?? 'Case Workflow'}
-                    </Badge>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-between"
-                    onClick={() => openWorkspace(procedure.entityType)}
-                  >
-                    {getProcedureWorkspaceActionLabel(procedure.workspaceType)}
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
+          procedures.map((procedure) => renderProcedureCard(procedure))}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -10,6 +11,8 @@ namespace ErpSystem.Data.Migrations;
 /// It stores only the review, DMS evidence and audit lineage; QS and Finance remain owners
 /// of certificate lifecycle, AP invoices, payment allocation, posting and reversal.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260820233000_AddCivilEngineeringIpcEndorsements")]
 public partial class AddCivilEngineeringIpcEndorsements : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

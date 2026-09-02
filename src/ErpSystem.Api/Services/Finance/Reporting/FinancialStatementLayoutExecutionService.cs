@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
@@ -18,17 +19,20 @@ public sealed class FinancialStatementLayoutExecutionService
     private readonly ICurrentUserService _currentUser;
     private readonly ITenantSettingsService _tenantSettings;
     private readonly IFinancialStatementLayoutService _layoutService;
+    private readonly FinanceDimensionReportingFilterService? _dimensionReportingFilters;
 
     public FinancialStatementLayoutExecutionService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
         ITenantSettingsService tenantSettings,
-        IFinancialStatementLayoutService layoutService)
+        IFinancialStatementLayoutService layoutService,
+        FinanceDimensionReportingFilterService? dimensionReportingFilters = null)
     {
         _context = context;
         _currentUser = currentUser;
         _tenantSettings = tenantSettings;
         _layoutService = layoutService;
+        _dimensionReportingFilters = dimensionReportingFilters;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -58,6 +62,7 @@ public sealed class FinancialStatementLayoutExecutionService
             request.IncludeHiddenRows,
             request.AccountIds,
             request.SegmentFilters,
+            request.DimensionFilters,
             isPreview: true,
             validation,
             cancellationToken);
@@ -157,6 +162,7 @@ public sealed class FinancialStatementLayoutExecutionService
             request.IncludeHiddenRows,
             request.AccountIds,
             request.SegmentFilters,
+            request.DimensionFilters,
             isPreview: false,
             validation,
             cancellationToken);
@@ -169,6 +175,7 @@ public sealed class FinancialStatementLayoutExecutionService
         bool includeHiddenRows,
         IEnumerable<Guid>? accountIds,
         IEnumerable<FinanceSegmentFilterDto>? segmentFilters,
+        IEnumerable<FinanceDimensionFilterDto>? dimensionFilters,
         bool isPreview,
         FinancialStatementLayoutValidationResultDto validation,
         CancellationToken cancellationToken)
@@ -191,6 +198,9 @@ public sealed class FinancialStatementLayoutExecutionService
         var resolvedSegmentFilters = await ResolveSegmentFiltersAsync(
             tenantId,
             segmentFilters,
+            cancellationToken);
+        var resolvedDimensionFilters = await ResolveDimensionFiltersAsync(
+            dimensionFilters,
             cancellationToken);
 
         IQueryable<Account> accountQuery = _context.Accounts
@@ -248,6 +258,7 @@ public sealed class FinancialStatementLayoutExecutionService
             layout.AccountingBook.Code,
             layout.StatementType,
             period,
+            resolvedDimensionFilters,
             cancellationToken);
 
         var orderedRows = FinancialStatementRowOrdering.Order(
@@ -649,6 +660,7 @@ public sealed class FinancialStatementLayoutExecutionService
         string accountingBookCode,
         FinancialStatementType statementType,
         ExecutionPeriod period,
+        IReadOnlyCollection<ResolvedFinanceDimensionFilter> dimensionFilters,
         CancellationToken cancellationToken)
     {
         if (accounts.Count == 0)
@@ -678,6 +690,11 @@ public sealed class FinancialStatementLayoutExecutionService
             query = query.Where(transaction => transaction.TransactionDate >= start);
         }
 
+        if (dimensionFilters.Count > 0)
+        {
+            query = _dimensionReportingFilters!.Apply(query, dimensionFilters);
+        }
+
         var rawBalances = await query
             .GroupBy(transaction => transaction.AccountId)
             .Select(group => new
@@ -696,6 +713,25 @@ public sealed class FinancialStatementLayoutExecutionService
             account => ToNormalBalance(
                 account.AccountType,
                 rawBalances.GetValueOrDefault(account.Id)));
+    }
+
+    private async Task<IReadOnlyCollection<ResolvedFinanceDimensionFilter>> ResolveDimensionFiltersAsync(
+        IEnumerable<FinanceDimensionFilterDto>? filters,
+        CancellationToken cancellationToken)
+    {
+        var requested = filters?.ToList() ?? [];
+        if (requested.Count == 0)
+        {
+            return [];
+        }
+
+        if (_dimensionReportingFilters == null)
+        {
+            throw new InvalidOperationException(
+                "Transaction-dimension filtering is not available for financial statement layouts.");
+        }
+
+        return await _dimensionReportingFilters.ResolveAsync(requested, cancellationToken);
     }
 
     private async Task<FinancialStatementLayoutVersion?> LoadVersionAsync(

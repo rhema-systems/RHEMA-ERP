@@ -24,17 +24,29 @@ import { businessPartnerService, BusinessPartnerDto } from '@/services/businessP
 import { format } from 'date-fns';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
+import {
+  getPurchaseOrderStatusPresentation,
+  isPurchaseOrderStatus,
+  PURCHASE_ORDER_STATUS_OPTIONS,
+  PurchaseOrderStatusKey,
+} from '@/lib/purchase-order-status';
 
-const POStatuses = [
-  { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800', icon: FileText },
-  { value: 'Pending Approval', label: 'Pending Approval', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
-  { value: 'Approved', label: 'Approved', color: 'bg-green-100 text-green-800', icon: CheckCircle },
-  { value: 'Sent', label: 'Sent', color: 'bg-blue-100 text-blue-800', icon: Send },
-  { value: 'Acknowledged', label: 'Acknowledged', color: 'bg-indigo-100 text-indigo-800', icon: CheckCircle },
-  { value: 'Partially Received', label: 'Partially Received', color: 'bg-purple-100 text-purple-800', icon: Package },
-  { value: 'Received', label: 'Received', color: 'bg-teal-100 text-teal-800', icon: TruckIcon },
-  { value: 'Cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-800', icon: XCircle }
-];
+const POStatusIcons: Partial<
+  Record<PurchaseOrderStatusKey, React.ComponentType<{ className?: string }>>
+> = {
+  Draft: FileText,
+  Submitted: Clock,
+  'Pending Approval': Clock,
+  Approved: CheckCircle,
+  Rejected: XCircle,
+  Sent: Send,
+  Acknowledged: CheckCircle,
+  'Partially Received': Package,
+  Received: TruckIcon,
+  Cancelled: XCircle,
+  Closed: CheckCircle,
+};
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
@@ -121,27 +133,29 @@ export default function PurchaseOrdersPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    const statusConfig = POStatuses.find(s => s.value === status);
-    const Icon = statusConfig?.icon || FileText;
+    const statusConfig = getPurchaseOrderStatusPresentation(status);
+    const Icon = POStatusIcons[statusConfig.key] || FileText;
     return (
-      <Badge className={statusConfig?.color || 'bg-gray-100'}>
+      <Badge variant="outline" className={statusConfig.badgeClass}>
         <Icon className="h-3 w-3 mr-1" />
-        {statusConfig?.label || status}
+        {statusConfig.label}
       </Badge>
     );
   };
 
   // Calculate stats (these would ideally come from a separate API endpoint)
-  const pendingCount = orders.filter(po => po.status === 'Pending Approval').length;
-  const activeCount = orders.filter(po => 
-    po.status === 'Approved' || po.status === 'Sent' || po.status === 'Acknowledged' || po.status === 'Partially Received'
+  const pendingCount = orders.filter(po =>
+    isPurchaseOrderStatus(po.status, 'Pending Approval', 'Submitted')
   ).length;
-  const receivedCount = orders.filter(po => po.status === 'Received').length;
+  const activeCount = orders.filter(po =>
+    isPurchaseOrderStatus(po.status, 'Approved', 'Sent', 'Acknowledged', 'Partially Received')
+  ).length;
+  const receivedCount = orders.filter(po => isPurchaseOrderStatus(po.status, 'Received')).length;
   const overdueCount = orders.filter(po => {
     if (!po.requiredDate) return false;
     const required = new Date(po.requiredDate);
     const today = new Date();
-    return required < today && (po.status === 'Approved' || po.status === 'Sent' || po.status === 'Acknowledged');
+    return required < today && isPurchaseOrderStatus(po.status, 'Approved', 'Sent', 'Acknowledged');
   }).length;
 
   const totalPages = Math.ceil(totalCount / pageSize);
@@ -275,8 +289,8 @@ export default function PurchaseOrdersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
-                  {POStatuses.map(s => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  {PURCHASE_ORDER_STATUS_OPTIONS.map(s => (
+                    <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -381,13 +395,13 @@ export default function PurchaseOrdersPage() {
                 </div>
               ) : (
                 orders.map((po) => {
-                  const isOverdue = po.requiredDate && new Date(po.requiredDate) < new Date() && 
-                    (po.status === 'Approved' || po.status === 'Sent' || po.status === 'Acknowledged');
+                  const isOverdue = po.requiredDate && new Date(po.requiredDate) < new Date() &&
+                    isPurchaseOrderStatus(po.status, 'Approved', 'Sent', 'Acknowledged');
 
                   const summary = workflowSummariesById[po.id];
                   const stepName = summary?.currentStepName || po.currentWorkflowStepName;
                   const pending = formatPendingApprovers(summary?.pendingApprovers || []);
-                  const showWorkflowBadges = po.status === 'Pending Approval' || po.status === 'Submitted';
+                  const showWorkflowBadges = isPurchaseOrderStatus(po.status, 'Pending Approval', 'Submitted');
                   
                   return (
                     <div
@@ -435,7 +449,7 @@ export default function PurchaseOrdersPage() {
                               {po.requiredDate && ` • Required: ${format(new Date(po.requiredDate), 'MMM dd, yyyy')}`}
                             </p>
                             <p className="text-sm font-medium text-primary">
-                              Total: ${po.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Total: {formatProcurementMoney(po.totalAmount, po.currency)}
                             </p>
                           </div>
                         </div>
@@ -456,8 +470,8 @@ export default function PurchaseOrdersPage() {
                             status={po.status}
                             currentStepName={stepName}
                             workflowSummary={summary}
-                            canSubmit={po.status === 'Draft'}
-                            canApproveReject={po.status === 'Pending Approval'}
+                            canSubmit={isPurchaseOrderStatus(po.status, 'Draft')}
+                            canApproveReject={isPurchaseOrderStatus(po.status, 'Pending Approval', 'Submitted')}
                             onSubmit={async () => {
                               await purchasingService.submitPurchaseOrder(po.id);
                             }}
@@ -478,7 +492,7 @@ export default function PurchaseOrdersPage() {
                             onOpenWorkflows={() => router.push('/administration/workflow')}
                           />
                           
-                          {(po.status === 'Approved' || po.status === 'Sent' || po.status === 'Acknowledged' || po.status === 'Partially Received') && (
+                          {isPurchaseOrderStatus(po.status, 'Approved', 'Sent', 'Acknowledged', 'Partially Received') && (
                             <Link href={`/procurement/purchase-orders/${po.id}/receive`}>
                               <Button size="sm">
                                 <Package className="h-4 w-4 mr-1" />

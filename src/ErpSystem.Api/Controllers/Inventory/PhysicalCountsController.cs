@@ -1,10 +1,15 @@
 using System.Security.Claims;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.DocumentManagement;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -18,15 +23,27 @@ public class PhysicalCountsController : ControllerBase
 {
     private readonly IPhysicalCountService _countService;
     private readonly ICurrentUserService _currentUser;
+    private readonly IProcurementAccessControlService _accessControl;
+    private readonly IControlledFileUploadService _controlledFiles;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<PhysicalCountsController> _logger;
 
     public PhysicalCountsController(
         IPhysicalCountService countService,
         ICurrentUserService currentUser,
+        IProcurementAccessControlService accessControl,
+        IControlledFileUploadService controlledFiles,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        ApplicationDbContext db,
         ILogger<PhysicalCountsController> logger)
     {
         _countService = countService;
         _currentUser = currentUser;
+        _accessControl = accessControl;
+        _controlledFiles = controlledFiles;
+        _centralDocuments = centralDocuments;
+        _db = db;
         _logger = logger;
     }
 
@@ -382,6 +399,179 @@ public class PhysicalCountsController : ControllerBase
     }
 
     /// <summary>
+    /// Lists the clean, current stock-taking evidence linked to a physical count.
+    /// </summary>
+    [HttpGet("{id:guid}/evidence")]
+    public async Task<ActionResult<IReadOnlyList<PhysicalCountEvidenceDto>>> GetEvidence(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var count = await _countService.GetByIdAsync(id);
+            if (count is null)
+                return NotFound(new { code = "PHYSICAL_COUNT_NOT_FOUND", message = "The physical count was not found in this tenant." });
+
+            var tenantId = RequiredTenantId();
+            var evidence = await (from version in _db.CentralDocumentVersions.AsNoTracking()
+                join record in _db.CentralDocumentRecords.AsNoTracking()
+                    on version.DocumentRecordId equals record.Id
+                join upload in _db.FileUploadRecords.AsNoTracking()
+                    on version.FileUploadRecordId equals upload.Id
+                where version.TenantId == tenantId && record.TenantId == tenantId && upload.TenantId == tenantId &&
+                      !version.IsDeleted && !record.IsDeleted && !upload.IsDeleted &&
+                      record.SourceRecordId == id && record.SourceModule == "Inventory" &&
+                      record.SourceEntityType == "PhysicalCount" &&
+                      record.LifecycleStatus == CentralDocumentEvidenceRules.ActiveLifecycleStatus &&
+                      record.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
+                      record.CurrentVersion == version.VersionNumber &&
+                      version.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && version.PublishedAt.HasValue &&
+                      upload.VirusScanStatus == ErpSystem.Core.Enums.FileVirusScanStatus.Clean
+                orderby version.CreatedAt descending
+                select new PhysicalCountEvidenceDto
+                {
+                    CentralDocumentRecordId = record.Id,
+                    CentralDocumentVersionId = version.Id,
+                    FileUploadRecordId = upload.Id,
+                    DocumentReference = record.DocumentReference,
+                    VersionNumber = version.VersionNumber,
+                    EvidenceReference = $"{count.CountNumber} stock-taking evidence / {record.DocumentReference}",
+                    Title = record.Title,
+                    FileName = upload.OriginalFileName,
+                    ContentType = upload.ContentType,
+                    FileSize = upload.FileSize,
+                    ScanStatus = upload.VirusScanStatus.ToString(),
+                    UploadedAtUtc = upload.CreatedAt
+                }).ToListAsync(cancellationToken);
+
+            return Ok(evidence);
+        }
+        catch (Exception ex)
+        {
+            return ControlledError(ex, "read stock-taking evidence", id);
+        }
+    }
+
+    /// <summary>
+    /// Uploads and publishes stock-taking evidence through the shared controlled-upload
+    /// and central-DMS owners. Users never enter upload, record, or version identifiers.
+    /// </summary>
+    [HttpPost("{id:guid}/evidence")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<ActionResult<PhysicalCountEvidenceDto>> UploadEvidence(
+        Guid id,
+        [FromForm] IFormFile file,
+        [FromForm] string? title,
+        CancellationToken cancellationToken)
+    {
+        ControlledFileUploadResult? upload = null;
+        var actorId = GetCurrentUserId();
+        try
+        {
+            if (actorId == Guid.Empty)
+                return Unauthorized(new { code = "PHYSICAL_COUNT_ACTOR_REQUIRED", message = "An authenticated user is required." });
+            if (file is null || file.Length == 0)
+                return BadRequest(new { code = "PHYSICAL_COUNT_EVIDENCE_FILE_REQUIRED", message = "Select a stock-taking evidence file." });
+
+            var count = await _countService.GetByIdAsync(id);
+            if (count is null)
+                return NotFound(new { code = "PHYSICAL_COUNT_NOT_FOUND", message = "The physical count was not found in this tenant." });
+            if (count.Status is not ("InProgress" or "RecountRequired"))
+                return Conflict(new
+                {
+                    code = "PHYSICAL_COUNT_EVIDENCE_STAGE_INVALID",
+                    message = "Stock-taking evidence can be uploaded while the count is in progress or awaiting recount."
+                });
+
+            var access = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = "procurement.inventory.count",
+                WarehouseId = count.WarehouseId,
+                LocationId = count.LocationId,
+                RequireLocationScope = true,
+                SourceType = "PhysicalCount",
+                SourceReference = count.CountNumber
+            }, HttpContext.TraceIdentifier, cancellationToken);
+            if (!access.Allowed)
+                return Forbid();
+
+            var tenantId = RequiredTenantId();
+            var safeFileName = Path.GetFileName(file.FileName);
+            var documentTitle = string.IsNullOrWhiteSpace(title) ? safeFileName : title.Trim();
+            if (documentTitle.Length > 250)
+                return BadRequest(new { code = "PHYSICAL_COUNT_EVIDENCE_TITLE_TOO_LONG", message = "Evidence title cannot exceed 250 characters." });
+
+            upload = await _controlledFiles.UploadAsync(new ControlledFileUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = actorId,
+                ActorName = _currentUser.UserName,
+                Category = ControlledFileUploadCategories.InventoryStockTakingEvidence,
+                FileName = safeFileName,
+                ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                FileSize = file.Length,
+                OpenReadStream = file.OpenReadStream
+            }, cancellationToken);
+
+            var link = await _centralDocuments.RegisterAsync(new CentralDocumentRepositoryRegistration
+            {
+                TenantId = tenantId,
+                ActorUserId = actorId,
+                ActorName = _currentUser.UserName,
+                FileUploadRecordId = upload.Record.Id,
+                SourceModule = "Inventory",
+                SourceLabel = "Physical stock-taking evidence",
+                SourceEntityType = "PhysicalCount",
+                SourceRecordId = count.Id,
+                SourceRecordReference = count.CountNumber,
+                Title = documentTitle,
+                DocumentType = "StockTakingEvidence",
+                AccessProfile = "Module restricted",
+                VersionStatus = CentralDocumentEvidenceRules.PublishedVersionStatus,
+                ChangeSummary = "Uploaded from the physical-count evidence panel.",
+                Notes = "Controlled stock count sheet, signed verification, or reconciliation evidence."
+            }, cancellationToken);
+
+            return Ok(new PhysicalCountEvidenceDto
+            {
+                CentralDocumentRecordId = link.DocumentRecordId,
+                CentralDocumentVersionId = link.DocumentVersionId,
+                FileUploadRecordId = link.FileUploadRecordId,
+                DocumentReference = link.DocumentReference,
+                VersionNumber = link.VersionNumber,
+                EvidenceReference = $"{count.CountNumber} stock-taking evidence / {link.DocumentReference}",
+                Title = documentTitle,
+                FileName = upload.Record.OriginalFileName,
+                ContentType = upload.Record.ContentType,
+                FileSize = upload.Record.FileSize,
+                ScanStatus = upload.Record.VirusScanStatus.ToString(),
+                UploadedAtUtc = upload.Record.CreatedAt
+            });
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            if (upload is not null && _currentUser.TenantId is { } tenantId && tenantId != Guid.Empty && actorId != Guid.Empty)
+            {
+                try
+                {
+                    await _controlledFiles.DeleteAsync(tenantId, upload.Record.Id, actorId, cancellationToken);
+                }
+                catch (Exception cleanupException)
+                {
+                    _logger.LogError(cleanupException,
+                        "Failed to roll back physical-count evidence upload {UploadId}", upload.Record.Id);
+                }
+            }
+            return ControlledError(ex, "upload stock-taking evidence", id);
+        }
+    }
+
+    /// <summary>
     /// Completes a physical count
     /// </summary>
     [HttpPost("{id}/complete")]
@@ -697,6 +887,13 @@ public class PhysicalCountsController : ControllerBase
         _logger.LogError(exception, "Failed to {Action} for physical-count target {Id}", action, id);
         return StatusCode(StatusCodes.Status500InternalServerError,
             new { code = "PHYSICAL_COUNT_FAILED", message = $"Failed to {action}." });
+    }
+
+    private Guid RequiredTenantId()
+    {
+        if (_currentUser.TenantId is not { } tenantId || tenantId == Guid.Empty)
+            throw new ProcurementAccessAuthorizationException("Tenant context is required.");
+        return tenantId;
     }
 }
 

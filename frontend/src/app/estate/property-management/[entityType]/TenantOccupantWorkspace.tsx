@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   estateLandManagementService,
@@ -55,6 +57,7 @@ export function TenantOccupantWorkspace() {
   const activeCount = occupantAssets.filter((asset) =>
     [EstateManagedAssetStatus.Leased, EstateManagedAssetStatus.Occupied].includes(asset.status)
   ).length;
+  const occupantPages = usePaginatedItems(occupantAssets, 10);
 
   return (
     <div className="space-y-6">
@@ -100,7 +103,7 @@ export function TenantOccupantWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {occupantAssets.map((asset) => (
+                  {occupantPages.items.map((asset) => (
                     <TableRow key={asset.id}>
                       <TableCell><div className="font-medium">{occupantName(asset)}</div><div className="text-xs text-muted-foreground">{asset.customerBusinessPartnerId || 'Manual occupant reference'}</div></TableCell>
                       <TableCell><div>{asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(asset)}</div></TableCell>
@@ -119,6 +122,7 @@ export function TenantOccupantWorkspace() {
               </Table>
             </div>
           ) : null}
+          {occupantAssets.length > occupantPages.pageSize ? <Pagination currentPage={occupantPages.currentPage} totalPages={occupantPages.totalPages} totalItems={occupantPages.totalItems} pageSize={occupantPages.pageSize} onPageChange={occupantPages.setCurrentPage} /> : null}
           {!isLoading && !loadError && occupantAssets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No tenant or occupant records have been linked yet.</div> : null}
         </CardContent>
       </Card>

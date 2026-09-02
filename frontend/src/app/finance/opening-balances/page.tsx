@@ -15,6 +15,7 @@ import {
     Plus,
     RefreshCw,
     Send,
+    ShieldCheck,
     Trash2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -33,10 +34,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { GovernedOpeningPreflight } from '@/components/finance/opening-balances/GovernedOpeningPreflight';
+import { GovernedOpeningSources } from '@/components/finance/opening-balances/GovernedOpeningSources';
 import { DEFAULT_ACCOUNTING_BOOKS, getAccountingBookName, isAccountEligibleForBook } from '@/lib/finance/accounting-books';
+import { canLoadOpeningBalanceQueries, canPostOpeningBalanceBatch, hasCompleteGovernedOpeningHeader, isOpeningBalanceBatchImmutable, openingBalanceQueryKeys } from '@/lib/finance/opening-balance-governance';
+import type { CreateOpeningStockAdjustmentDto, GovernedInventoryOpeningResult } from '@/lib/finance/opening-balance-governance';
 import { cn, formatCurrency } from '@/lib/utils';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { Account, AccountingBook, FiscalPeriod, OpeningBalanceBatch, OpeningBalanceDiagnostic, OpeningBalanceValidationResult } from '@/types/finance';
+import type { Account, AccountingBook, CreateBankAccountOpeningBalanceDto, CreateResidualGlEquityOpeningBalanceDto, FiscalPeriod, OpeningBalanceBatch, OpeningBalanceDiagnostic, OpeningBalanceValidationResult } from '@/types/finance';
+import { useAuth } from '@/hooks/use-auth';
+import { useTenant } from '@/contexts/TenantContext';
 
 type OpeningLine = {
     id: string;
@@ -47,7 +54,7 @@ type OpeningLine = {
     notes: string;
 };
 
-type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | 'specialized' | null;
+type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | 'specialized' | 'governed-bank' | 'governed-inventory' | 'governed-residual' | null;
 type SpecializedOpeningKind = 'supplierAdvance' | 'customerAdvance' | 'apWithholding' | 'arWithholding';
 
 const BASE_CURRENCY = 'GHS';
@@ -115,6 +122,7 @@ function statusVariant(status?: string): 'default' | 'secondary' | 'destructive'
         case 'approved':
             return 'default';
         case 'failed':
+        case 'postingfailed':
         case 'rejected':
             return 'destructive';
         case 'pendingapproval':
@@ -127,10 +135,20 @@ function statusVariant(status?: string): 'default' | 'secondary' | 'destructive'
 
 export default function OpeningBalancesPage() {
     const { toast } = useToast();
+    const { hasPermission, isLoading: authLoading } = useAuth();
+    const { currentTenantCode, isLoadingTenants } = useTenant();
+    const canPrepareOpeningBalances = hasPermission('Finance.Migration.OpeningBalances.Prepare');
+    const canSubmitOpeningBalances = canPrepareOpeningBalances && hasPermission('Finance.Workflow.Submit');
+    const canPostOpeningBalances = hasPermission('Finance.Migration.Adjustments.Run');
+    const canViewOpeningBalances = hasPermission('Finance.Read') || canPrepareOpeningBalances || canPostOpeningBalances;
+    const canRunDiagnostics = hasPermission('Finance.Migration.Diagnostics.Run');
+    const canPrepareInventoryOpening = hasPermission('procurement.inventory.adjust.request');
+    const queryScopeEnabled = canLoadOpeningBalanceQueries({ authLoading, tenantLoading: isLoadingTenants, tenantCode: currentTenantCode, canView: canViewOpeningBalances });
     const router = useRouter();
     const searchParams = useSearchParams();
     const requestedBatchId = searchParams.get('batchId');
     const suppressRequestedLoadRef = useRef(false);
+    const previousTenantCodeRef = useRef(currentTenantCode);
     const [busyAction, setBusyAction] = useState<BusyAction>(null);
     const [activeTab, setActiveTab] = useState('gl');
     const [openAccountLineId, setOpenAccountLineId] = useState<string | null>(null);
@@ -157,46 +175,74 @@ export default function OpeningBalancesPage() {
         bookClassification: 'IFRS',
     });
     const [lines, setLines] = useState<OpeningLine[]>([newLine(), newLine()]);
+    const governedOptionsRequest = {
+        openingDate: header.openingDate,
+        fiscalPeriodId: header.fiscalPeriodId,
+        bookClassification: header.bookClassification,
+    };
+    const governedHeaderComplete = hasCompleteGovernedOpeningHeader(governedOptionsRequest);
 
     const accountsQuery = useQuery({
-        queryKey: ['opening-balance-accounts'],
+        queryKey: openingBalanceQueryKeys.accounts(currentTenantCode),
         queryFn: () => financeDataService.getAccounts({ status: 'Active', pageSize: 1000 }),
+        enabled: queryScopeEnabled,
     });
 
     const periodsQuery = useQuery({
-        queryKey: ['opening-balance-periods'],
+        queryKey: openingBalanceQueryKeys.periods(currentTenantCode),
         queryFn: () => financeDataService.getFiscalPeriods(),
+        enabled: queryScopeEnabled,
     });
 
     const booksQuery = useQuery({
-        queryKey: ['opening-balance-accounting-books'],
+        queryKey: openingBalanceQueryKeys.books(currentTenantCode),
         queryFn: () => financeDataService.getAccountingBooks(),
+        enabled: queryScopeEnabled,
     });
 
     const settingsQuery = useQuery({
-        queryKey: ['opening-balance-finance-settings'],
+        queryKey: openingBalanceQueryKeys.settings(currentTenantCode),
         queryFn: () => financeDataService.getFinanceSettings(),
+        enabled: queryScopeEnabled,
     });
 
     const diagnosticsQuery = useQuery({
-        queryKey: ['opening-balance-diagnostics'],
+        queryKey: openingBalanceQueryKeys.diagnostics(currentTenantCode),
         queryFn: () => financeDataService.getOpeningBalanceDiagnostics(),
+        enabled: queryScopeEnabled && canRunDiagnostics,
     });
 
     const batchesQuery = useQuery({
-        queryKey: ['opening-balance-batches'],
+        queryKey: openingBalanceQueryKeys.batches(currentTenantCode),
         queryFn: () => financeDataService.getOpeningBalanceBatches(),
+        enabled: queryScopeEnabled,
     });
 
     const subledgerReadinessQuery = useQuery({
-        queryKey: ['opening-balance-subledger-readiness'],
+        queryKey: openingBalanceQueryKeys.subledgerReadiness(currentTenantCode),
         queryFn: () => financeDataService.getSubledgerOpeningBalanceReadiness(),
+        enabled: queryScopeEnabled,
     });
 
     const specializedOptionsQuery = useQuery({
-        queryKey: ['opening-balance-specialized-options'],
+        queryKey: openingBalanceQueryKeys.specializedOptions(currentTenantCode),
         queryFn: () => financeDataService.getSpecializedOpeningBalanceOptions(),
+        enabled: queryScopeEnabled && canPrepareOpeningBalances,
     });
+
+    const governedOptionsQuery = useQuery({
+        queryKey: openingBalanceQueryKeys.governedOptions(currentTenantCode, governedOptionsRequest),
+        queryFn: () => financeDataService.getGovernedOpeningBalanceOptions(governedOptionsRequest),
+        enabled: queryScopeEnabled && canPrepareOpeningBalances && governedHeaderComplete,
+    });
+
+    const openingStockOptionsQuery = useQuery({
+        queryKey: openingBalanceQueryKeys.openingStockOptions(currentTenantCode),
+        queryFn: () => financeDataService.getOpeningStockOptions(),
+        enabled: queryScopeEnabled && canPrepareInventoryOpening,
+    });
+
+    const refetchDiagnostics = () => canRunDiagnostics ? diagnosticsQuery.refetch() : Promise.resolve(null);
 
     const accountingBooks = useMemo<AccountingBook[]>(() => {
         const books = (booksQuery.data && booksQuery.data.length > 0 ? booksQuery.data : DEFAULT_ACCOUNTING_BOOKS)
@@ -255,6 +301,27 @@ export default function OpeningBalancesPage() {
             setHeader(current => ({ ...current, bookClassification: accountingBooks[0]?.code ?? 'IFRS' }));
         }
     }, [accountingBooks, header.bookClassification]);
+
+    useEffect(() => {
+        const previousTenantCode = previousTenantCodeRef.current;
+        previousTenantCodeRef.current = currentTenantCode;
+        if (!previousTenantCode || previousTenantCode === currentTenantCode) {
+            return;
+        }
+
+        // Query keys isolate server state. Clear form state as well so a selection from one tenant
+        // can never be submitted after the active tenant changes.
+        suppressRequestedLoadRef.current = true;
+        setCurrentBatch(null);
+        setValidation(null);
+        setComment('');
+        setIsDirty(false);
+        setSelectedFixedAssetBookValueIds([]);
+        setHeader(current => ({ ...current, batchNumber: '', sourceReference: '', description: '', fiscalPeriodId: '' }));
+        setLines([newLine(), newLine()]);
+        setActiveTab('gl');
+        router.replace('/finance/opening-balances', { scroll: false });
+    }, [currentTenantCode, router]);
 
     const totalDebit = useMemo(() => lines.reduce((sum, line) => sum + toAmount(line.debitAmount), 0), [lines]);
     const totalCredit = useMemo(() => lines.reduce((sum, line) => sum + toAmount(line.creditAmount), 0), [lines]);
@@ -370,7 +437,7 @@ export default function OpeningBalancesPage() {
             const created = await financeDataService.createOpeningBalanceBatch(buildPayload());
             applyBatchToForm(created);
             router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            await Promise.all([refetchDiagnostics(), batchesQuery.refetch()]);
             toast({ title: 'Opening batch created', description: created.batchNumber });
         } catch (error: any) {
             toast({ title: 'Create failed', description: error?.message || 'Unable to create opening balance batch.', variant: 'destructive' });
@@ -406,7 +473,7 @@ export default function OpeningBalancesPage() {
             setSelectedFixedAssetBookValueIds([]);
             setActiveTab('gl');
             router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
-            await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            await Promise.all([batchesQuery.refetch(), refetchDiagnostics(), subledgerReadinessQuery.refetch()]);
             toast({ title: 'Fixed-asset opening batch prepared', description: 'Validate and submit the generated batch for approval.' });
         } catch (error: any) {
             toast({ title: 'Preparation failed', description: error?.message || 'Unable to prepare the fixed-asset opening batch.', variant: 'destructive' });
@@ -478,10 +545,57 @@ export default function OpeningBalancesPage() {
             applyBatchToForm(created);
             setActiveTab('gl');
             router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
-            await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            await Promise.all([batchesQuery.refetch(), refetchDiagnostics(), subledgerReadinessQuery.refetch()]);
             toast({ title: 'Specialised opening batch prepared', description: 'Validate and submit the generated evidence for approval.' });
         } catch (error: any) {
             toast({ title: 'Preparation failed', description: error?.message || 'Unable to prepare specialised cutover evidence.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleCreateGovernedBank = async (dto: CreateBankAccountOpeningBalanceDto) => {
+        try {
+            setBusyAction('governed-bank');
+            const created = await financeDataService.createBankAccountOpeningBalance(dto);
+            applyBatchToForm(created);
+            setActiveTab('gl');
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([batchesQuery.refetch(), governedOptionsQuery.refetch(), refetchDiagnostics()]);
+            toast({ title: 'Bank opening batch prepared', description: `${created.batchNumber} is immutable and ready for validation.` });
+        } catch (error: any) {
+            toast({ title: 'Bank opening failed', description: error?.message || 'Unable to prepare the governed bank opening.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleCreateGovernedResidual = async (dto: CreateResidualGlEquityOpeningBalanceDto) => {
+        try {
+            setBusyAction('governed-residual');
+            const created = await financeDataService.createResidualGlEquityOpeningBalance(dto);
+            applyBatchToForm(created);
+            setActiveTab('gl');
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([batchesQuery.refetch(), governedOptionsQuery.refetch(), refetchDiagnostics()]);
+            toast({ title: 'Residual opening batch prepared', description: `${created.batchNumber} is immutable and ready for validation.` });
+        } catch (error: any) {
+            toast({ title: 'Residual opening failed', description: error?.message || 'Unable to prepare the governed residual opening.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleCreateOpeningStock = async (dto: CreateOpeningStockAdjustmentDto): Promise<GovernedInventoryOpeningResult> => {
+        try {
+            setBusyAction('governed-inventory');
+            const created = await financeDataService.createOpeningStockAdjustment(dto);
+            await openingStockOptionsQuery.refetch();
+            toast({ title: 'Opening-stock evidence prepared', description: `${created.adjustmentNumber} is immutable. Continue its Inventory approval lifecycle.` });
+            return created;
+        } catch (error: any) {
+            toast({ title: 'Opening-stock preparation failed', description: error?.message || 'Unable to prepare governed Inventory opening evidence.', variant: 'destructive' });
+            throw error;
         } finally {
             setBusyAction(null);
         }
@@ -499,7 +613,7 @@ export default function OpeningBalancesPage() {
             setBusyAction('update');
             const updated = await financeDataService.updateOpeningBalanceBatch(currentBatch.id, buildPayload());
             applyBatchToForm(updated);
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            await Promise.all([refetchDiagnostics(), batchesQuery.refetch()]);
             toast({ title: 'Opening batch saved', description: updated.batchNumber });
         } catch (error: any) {
             toast({ title: 'Save failed', description: error?.message || 'Unable to update opening balance batch.', variant: 'destructive' });
@@ -517,7 +631,7 @@ export default function OpeningBalancesPage() {
             setValidation(result);
             setCurrentBatch(refreshed);
             setIsDirty(false);
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            await Promise.all([refetchDiagnostics(), batchesQuery.refetch()]);
             toast({
                 title: result.isValid ? 'Validation passed' : 'Validation failed',
                 description: result.isValid ? currentBatch.batchNumber : result.errors[0],
@@ -536,7 +650,7 @@ export default function OpeningBalancesPage() {
             setBusyAction('submit');
             const submitted = await financeDataService.submitOpeningBalanceBatch(currentBatch.id, comment || undefined);
             applyBatchToForm(submitted);
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            await Promise.all([refetchDiagnostics(), batchesQuery.refetch()]);
             toast({ title: 'Opening batch submitted', description: submitted.status });
         } catch (error: any) {
             toast({ title: 'Submit failed', description: error?.message || 'Unable to submit opening balance batch.', variant: 'destructive' });
@@ -551,7 +665,7 @@ export default function OpeningBalancesPage() {
             setBusyAction('post');
             const posted = await financeDataService.postOpeningBalanceBatch(currentBatch.id, comment || undefined);
             applyBatchToForm(posted);
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            await Promise.all([refetchDiagnostics(), batchesQuery.refetch(), subledgerReadinessQuery.refetch()]);
             toast({ title: 'Opening batch posted', description: posted.batchNumber });
         } catch (error: any) {
             toast({ title: 'Post failed', description: error?.message || 'Unable to post opening balance batch.', variant: 'destructive' });
@@ -577,6 +691,9 @@ export default function OpeningBalancesPage() {
     }, [applyBatchToForm, router, toast]);
 
     useEffect(() => {
+        if (!queryScopeEnabled) {
+            return;
+        }
         if (!requestedBatchId) {
             suppressRequestedLoadRef.current = false;
             return;
@@ -589,7 +706,7 @@ export default function OpeningBalancesPage() {
         if (requestedBatchId && currentBatch?.id !== requestedBatchId) {
             void loadBatch(requestedBatchId, false);
         }
-    }, [currentBatch?.id, loadBatch, requestedBatchId]);
+    }, [currentBatch?.id, loadBatch, queryScopeEnabled, requestedBatchId]);
 
     const handleNewBatch = () => {
         const today = todayInputValue();
@@ -613,7 +730,10 @@ export default function OpeningBalancesPage() {
     };
 
     const handleRefresh = async () => {
-        const refreshes: Promise<unknown>[] = [batchesQuery.refetch(), diagnosticsQuery.refetch()];
+        const refreshes: Promise<unknown>[] = [batchesQuery.refetch()];
+        if (canRunDiagnostics) refreshes.push(diagnosticsQuery.refetch());
+        if (canPrepareOpeningBalances && governedHeaderComplete) refreshes.push(governedOptionsQuery.refetch());
+        if (canPrepareInventoryOpening) refreshes.push(openingStockOptionsQuery.refetch());
         if (currentBatch) {
             refreshes.push(loadBatch(currentBatch.id, false));
         }
@@ -621,10 +741,33 @@ export default function OpeningBalancesPage() {
     };
 
     const canSubmit = Boolean(currentBatch) && ['Draft', 'Validated', 'Failed'].includes(currentBatch?.status || '');
-    const canPost = Boolean(currentBatch) && ['Approved', 'Failed'].includes(currentBatch?.status || '');
+    const canPost = Boolean(currentBatch) && canPostOpeningBalanceBatch(currentBatch?.status);
     const canEditCurrent = Boolean(currentBatch) && ['Draft', 'Validated', 'Failed'].includes(currentBatch?.status || '');
-    const formReadOnly = Boolean(currentBatch) && !canEditCurrent;
+    const immutableCurrentBatch = isOpeningBalanceBatchImmutable(currentBatch);
+    const formReadOnly = !canPrepareOpeningBalances || immutableCurrentBatch || (Boolean(currentBatch) && !canEditCurrent);
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
+
+    if (authLoading || isLoadingTenants) {
+        return <div className="flex min-h-[320px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    }
+
+    if (!canViewOpeningBalances) {
+        return (
+            <div className="space-y-6 p-8 max-w-[1100px] mx-auto">
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Opening-balance preparation is not permitted</AlertTitle>
+                    <AlertDescription>
+                        Your role is not permitted to view Finance opening-balance records. Ask an administrator for the appropriate tenant-scoped Finance access.
+                    </AlertDescription>
+                </Alert>
+                <div className="flex gap-2">
+                    <Button variant="outline" asChild><Link href="/finance/reports/trial-balance">Open Trial Balance</Link></Button>
+                    <Button variant="outline" asChild><Link href="/finance/approvals">Open Approval Workbench</Link></Button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 p-8 max-w-[1600px] mx-auto">
@@ -638,10 +781,12 @@ export default function OpeningBalancesPage() {
                         {(batchesQuery.isFetching || diagnosticsQuery.isFetching) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                         Refresh
                     </Button>
-                    <Button variant="outline" onClick={handleNewBatch} disabled={busyAction !== null}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        New Batch
-                    </Button>
+                    {canPrepareOpeningBalances && (
+                        <Button variant="outline" onClick={handleNewBatch} disabled={busyAction !== null}>
+                            <Plus className="mr-2 h-4 w-4" />
+                            New Batch
+                        </Button>
+                    )}
                     <Button variant="outline" asChild>
                         <Link href="/finance/approvals">
                             <ClipboardCheck className="mr-2 h-4 w-4" />
@@ -672,14 +817,24 @@ export default function OpeningBalancesPage() {
             )}
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-                <TabsList>
+                <TabsList className="h-auto flex-wrap justify-start">
                     <TabsTrigger value="gl">GL Batch</TabsTrigger>
+                    <TabsTrigger value="governed">Governed Sources</TabsTrigger>
                     <TabsTrigger value="subledger">Subledger</TabsTrigger>
                     <TabsTrigger value="specialized">Advances &amp; WHT</TabsTrigger>
                     <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="gl" className="space-y-6">
+                    {immutableCurrentBatch && currentBatch && (
+                        <Alert>
+                            <ShieldCheck className="h-4 w-4" />
+                            <AlertTitle>Server-generated opening evidence</AlertTitle>
+                            <AlertDescription>
+                                {currentBatch.sourceKind} accounts, directions and source links are immutable. Validate and submit this batch without editing its header or lines.
+                            </AlertDescription>
+                        </Alert>
+                    )}
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between">
                             <CardTitle>Saved GL Batches</CardTitle>
@@ -1090,22 +1245,22 @@ export default function OpeningBalancesPage() {
                                     <div className="grid grid-cols-1 gap-2">
                                         <Button
                                             onClick={currentBatch ? handleUpdateBatch : handleCreateBatch}
-                                            disabled={busyAction !== null || clientErrors.length > 0 || (Boolean(currentBatch) && (!canEditCurrent || !isDirty))}
+                                            disabled={!canPrepareOpeningBalances || immutableCurrentBatch || busyAction !== null || clientErrors.length > 0 || (Boolean(currentBatch) && (!canEditCurrent || !isDirty))}
                                         >
                                             {busyAction === 'create' || busyAction === 'update'
                                                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                                 : <Database className="mr-2 h-4 w-4" />}
                                             {currentBatch ? (isDirty ? 'Save Changes' : 'Saved') : 'Create Batch'}
                                         </Button>
-                                        <Button variant="outline" onClick={handleValidateBatch} disabled={!currentBatch || isDirty || busyAction !== null || !canEditCurrent}>
+                                        <Button variant="outline" onClick={handleValidateBatch} disabled={!canPrepareOpeningBalances || !currentBatch || isDirty || busyAction !== null || !canEditCurrent}>
                                             {busyAction === 'validate' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
                                             Validate
                                         </Button>
-                                        <Button variant="outline" onClick={handleSubmitBatch} disabled={!canSubmit || isDirty || busyAction !== null}>
+                                        <Button variant="outline" onClick={handleSubmitBatch} disabled={!canSubmitOpeningBalances || !canSubmit || isDirty || busyAction !== null}>
                                             {busyAction === 'submit' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                             Submit
                                         </Button>
-                                        <Button onClick={handlePostBatch} disabled={!canPost || busyAction !== null}>
+                                        <Button onClick={handlePostBatch} disabled={!canPostOpeningBalances || !canPost || busyAction !== null}>
                                             {busyAction === 'post' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
                                             Post
                                         </Button>
@@ -1155,6 +1310,72 @@ export default function OpeningBalancesPage() {
                             )}
                         </div>
                     </div>
+                </TabsContent>
+
+                <TabsContent value="governed" className="space-y-6">
+                    <GovernedOpeningPreflight
+                        subledgerReadiness={subledgerReadinessQuery.data}
+                        subledgerReadinessLoading={subledgerReadinessQuery.isLoading}
+                        subledgerReadinessError={subledgerReadinessQuery.isError}
+                        financeOptions={governedOptionsQuery.data}
+                        financeOptionsLoading={governedOptionsQuery.isLoading}
+                        financeOptionsError={governedOptionsQuery.isError}
+                        financeHeaderComplete={governedHeaderComplete}
+                        inventoryOptions={openingStockOptionsQuery.data}
+                        inventoryOptionsLoading={openingStockOptionsQuery.isLoading}
+                        inventoryOptionsError={openingStockOptionsQuery.isError}
+                        inventoryAvailable={canPrepareInventoryOpening}
+                    />
+                    {governedOptionsQuery.isError && canPrepareOpeningBalances && (
+                        <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Finance governed options could not be loaded</AlertTitle>
+                            <AlertDescription>{governedOptionsQuery.error instanceof Error ? governedOptionsQuery.error.message : 'Refresh after the tenant Finance configuration is available.'}</AlertDescription>
+                        </Alert>
+                    )}
+                    {openingStockOptionsQuery.isError && canPrepareInventoryOpening && (
+                        <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Inventory opening readiness could not be loaded</AlertTitle>
+                            <AlertDescription>{openingStockOptionsQuery.error instanceof Error ? openingStockOptionsQuery.error.message : 'Refresh after Inventory readiness is available.'}</AlertDescription>
+                        </Alert>
+                    )}
+                    <GovernedOpeningSources
+                        key={`${currentTenantCode ?? 'missing'}:${header.openingDate}:${header.fiscalPeriodId}:${header.bookClassification}`}
+                        openingDate={header.openingDate}
+                        openingDateMin={selectedPeriodStart || undefined}
+                        openingDateMax={selectedPeriodEnd || undefined}
+                        fiscalPeriodId={header.fiscalPeriodId}
+                        fiscalPeriodCode={selectedPeriod?.periodCode}
+                        bookClassification={header.bookClassification}
+                        periodOptions={periodOptions}
+                        bookOptions={accountingBooks}
+                        headerLocked={Boolean(currentBatch)}
+                        financeOptions={governedOptionsQuery.data}
+                        openingStockOptions={openingStockOptionsQuery.data}
+                        financeOptionsLoading={governedOptionsQuery.isLoading}
+                        openingStockOptionsLoading={openingStockOptionsQuery.isLoading}
+                        canPrepareFinance={canPrepareOpeningBalances}
+                        canPrepareInventory={canPrepareInventoryOpening}
+                        busyAction={busyAction === 'governed-bank' ? 'bank' : busyAction === 'governed-inventory' ? 'inventory' : busyAction === 'governed-residual' ? 'residual' : null}
+                        onPrepareBank={handleCreateGovernedBank}
+                        onPrepareResidual={handleCreateGovernedResidual}
+                        onPrepareInventory={handleCreateOpeningStock}
+                        onOpeningDateChange={(value) => {
+                            setHeader(current => ({ ...current, openingDate: value }));
+                        }}
+                        onFiscalPeriodChange={(value) => {
+                            const period = periodOptions.find(item => item.id === value);
+                            setHeader(current => ({
+                                ...current,
+                                fiscalPeriodId: value,
+                                openingDate: period ? openingDateForPeriod(period, current.openingDate) : current.openingDate,
+                            }));
+                        }}
+                        onBookClassificationChange={(value) => {
+                            setHeader(current => ({ ...current, bookClassification: value }));
+                        }}
+                    />
                 </TabsContent>
 
                 <TabsContent value="subledger" className="space-y-6">
@@ -1276,7 +1497,7 @@ export default function OpeningBalancesPage() {
                                                                 type="checkbox"
                                                                 aria-label={`Select ${candidate.assetCode}`}
                                                                 checked={selectedFixedAssetBookValueIds.includes(candidate.fixedAssetBookValueId)}
-                                                                disabled={!selectable || busyAction !== null}
+                                                                disabled={!canPrepareOpeningBalances || !selectable || busyAction !== null}
                                                                 onChange={(event) => setSelectedFixedAssetBookValueIds(current => event.target.checked
                                                                     ? [...new Set([...current, candidate.fixedAssetBookValueId])]
                                                                     : current.filter(id => id !== candidate.fixedAssetBookValueId))}
@@ -1308,11 +1529,11 @@ export default function OpeningBalancesPage() {
                                         onClick={() => setSelectedFixedAssetBookValueIds((subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
                                             .filter(candidate => candidate.bookClassification === header.bookClassification && !candidate.openingPostedToGl)
                                             .map(candidate => candidate.fixedAssetBookValueId))}
-                                        disabled={busyAction !== null}
+                                        disabled={!canPrepareOpeningBalances || busyAction !== null}
                                     >
                                         Select Ready
                                     </Button>
-                                    <Button onClick={handleCreateFixedAssetBatch} disabled={busyAction !== null || selectedFixedAssetBookValueIds.length === 0}>
+                                    <Button onClick={handleCreateFixedAssetBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || selectedFixedAssetBookValueIds.length === 0}>
                                         {busyAction === 'fixed-assets' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
                                         Prepare GL Batch
                                     </Button>
@@ -1404,7 +1625,7 @@ export default function OpeningBalancesPage() {
                                     <div className="space-y-2"><Label>Certificate date</Label><Input type="date" value={specialized.certificateDate} onChange={event => setSpecialized(current => ({ ...current, certificateDate: event.target.value }))} /></div>
                                 </>}
                             </div>
-                            <Button onClick={handleCreateSpecializedBatch} disabled={busyAction !== null || specializedOptionsQuery.isLoading}>
+                            <Button onClick={handleCreateSpecializedBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || specializedOptionsQuery.isLoading}>
                                 {busyAction === 'specialized' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
                                 Prepare controlled batch
                             </Button>
@@ -1413,16 +1634,27 @@ export default function OpeningBalancesPage() {
                 </TabsContent>
 
                 <TabsContent value="diagnostics" className="space-y-6">
+                    {!canRunDiagnostics && (
+                        <Alert>
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Migration diagnostics permission required</AlertTitle>
+                            <AlertDescription>Your role can view opening balances but cannot run the tenant migration diagnostic scan.</AlertDescription>
+                        </Alert>
+                    )}
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between">
                             <CardTitle>Migration Diagnostics</CardTitle>
-                            <Button variant="outline" size="sm" onClick={() => diagnosticsQuery.refetch()} disabled={diagnosticsQuery.isFetching}>
+                            <Button variant="outline" size="sm" onClick={() => diagnosticsQuery.refetch()} disabled={!canRunDiagnostics || diagnosticsQuery.isFetching}>
                                 {diagnosticsQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                                 Refresh
                             </Button>
                         </CardHeader>
                         <CardContent>
-                            {diagnosticsQuery.isLoading ? (
+                            {!canRunDiagnostics ? (
+                                <div className="rounded-md border border-dashed p-8 text-center text-muted-foreground">
+                                    Diagnostics were not requested because this role lacks Finance.Migration.Diagnostics.Run.
+                                </div>
+                            ) : diagnosticsQuery.isLoading ? (
                                 <div className="space-y-3">
                                     <Skeleton className="h-12 w-full" />
                                     <Skeleton className="h-12 w-full" />

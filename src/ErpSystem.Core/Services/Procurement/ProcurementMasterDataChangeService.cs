@@ -1740,8 +1740,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         foreach (var role in makerRoles.Concat(checkerRoles))
         {
             var definition = ProcurementAccessControlRegistry.FindRole(role)
-                ?? throw new ProcurementMasterDataChangeValidationException(
-                    "ROLE_UNKNOWN", $"'{role}' is not a registered TDC procurement role.");
+                ?? throw new ProcurementMasterDataChangeValidationException("ROLE_UNKNOWN", $"'{role}' is not a registered TDC procurement role.");
             if (definition.IsReadOnly)
                 throw new ProcurementMasterDataChangeValidationException("READ_ONLY_ROLE", $"'{role}' is read-only and cannot be configured as maker or checker.");
         }
@@ -1790,7 +1789,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         EnsureAuthenticatedTenant();
         if (!CanManageAccess())
             throw new ProcurementMasterDataChangeAuthorizationException(
-                "The TDC ICT Administrator role is required to configure maker-checker policies.");
+                "SuperAdmin or the TDC ICT Administrator role is required to configure maker-checker policies.");
     }
 
     private void EnsureAccessManager()
@@ -1798,12 +1797,14 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         EnsureAuthenticatedTenant();
         if (!CanManageAccess())
             throw new ProcurementMasterDataChangeAuthorizationException(
-                "The TDC ICT Administrator role is required to activate or retire a maker-checker policy.");
+                "SuperAdmin or the TDC ICT Administrator role is required to activate or retire a maker-checker policy.");
     }
 
-    private bool CanManageAccess() => _currentUser.Roles.Any(role =>
-        ProcurementAccessControlRegistry.RoleGrantsPermission(
-            role, "procurement.access.manage"));
+    private bool CanManageAccess() =>
+        _currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) ||
+        _currentUser.Roles.Any(role =>
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage"));
 
     private void EnsureAuthenticatedTenant()
     {

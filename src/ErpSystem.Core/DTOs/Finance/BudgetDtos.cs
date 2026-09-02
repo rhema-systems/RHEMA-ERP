@@ -31,7 +31,30 @@ public class BudgetScenarioDto
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int ReturnCount { get; set; }
+    public IReadOnlyList<BudgetControlDimensionDto> ControlDimensions { get; set; } = Array.Empty<BudgetControlDimensionDto>();
     public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class BudgetControlDimensionDto
+{
+    public Guid FinanceDimensionDefinitionId { get; set; }
+    public string DimensionCode { get; set; } = string.Empty;
+    public string DimensionName { get; set; } = string.Empty;
+    public int DisplayOrder { get; set; }
+}
+
+public class BudgetDimensionAssignmentInputDto
+{
+    [Required] public Guid FinanceDimensionDefinitionId { get; set; }
+    [Required] public Guid FinanceDimensionValueId { get; set; }
+}
+
+public sealed class BudgetDimensionAssignmentDto : BudgetDimensionAssignmentInputDto
+{
+    public string DimensionCode { get; set; } = string.Empty;
+    public string DimensionName { get; set; } = string.Empty;
+    public string ValueCode { get; set; } = string.Empty;
+    public string ValueName { get; set; } = string.Empty;
 }
 
 public class CreateBudgetScenarioDto
@@ -49,6 +72,8 @@ public class CreateBudgetScenarioDto
     [Required]
     [MaxLength(3)]
     public string BaseCurrencyCode { get; set; } = "GHS";
+
+    public List<Guid> ControlDimensionDefinitionIds { get; set; } = new();
 }
 
 public class UpdateBudgetScenarioDto
@@ -63,6 +88,8 @@ public class UpdateBudgetScenarioDto
     public string? Description { get; set; }
     
     public bool IsActive { get; set; }
+
+    public List<Guid>? ControlDimensionDefinitionIds { get; set; }
 
     [Required]
     public string RowVersion { get; set; } = string.Empty;
@@ -182,6 +209,9 @@ public class BudgetEntryDto
     public string AccountCode { get; set; } = string.Empty;
     public string AccountName { get; set; } = string.Empty;
     public Guid FiscalPeriodId { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string? DimensionCombinationHash { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentDto> DimensionAssignments { get; set; } = Array.Empty<BudgetDimensionAssignmentDto>();
     public string PeriodName { get; set; } = string.Empty;
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; }
@@ -205,6 +235,8 @@ public class BudgetEntrySaveDto
     
     [Required]
     public Guid FiscalPeriodId { get; set; }
+
+    public List<BudgetDimensionAssignmentInputDto> DimensionAssignments { get; set; } = new();
     
     [Required]
     public string CurrencyCode { get; set; } = "GHS";
@@ -282,6 +314,26 @@ public class BudgetReportLineDto
     public string Favorability { get; set; } = "OnBudget";
     public IReadOnlyList<BudgetReportContributionDto> Contributions { get; set; } =
         Array.Empty<BudgetReportContributionDto>();
+    public IReadOnlyList<BudgetDimensionCellPositionDto> DimensionCells { get; set; } =
+        Array.Empty<BudgetDimensionCellPositionDto>();
+}
+
+/// <summary>
+/// Current position for one exact account, fiscal-period and budget-dimension cell.
+/// Account-period totals remain available on <see cref="BudgetReportLineDto"/>, while this
+/// breakdown prevents unrelated dimension combinations from being presented as one budget.
+/// </summary>
+public sealed class BudgetDimensionCellPositionDto
+{
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string DimensionDisplayValue { get; set; } = "Legacy / no dimensions";
+    public string? DimensionCombinationHash { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentDto> DimensionAssignments { get; set; } =
+        Array.Empty<BudgetDimensionAssignmentDto>();
+    public decimal BudgetAmount { get; set; }
+    public decimal ActualAmount { get; set; }
+    public decimal ReservedAmount { get; set; }
+    public decimal AvailableAmount { get; set; }
 }
 
 public class BudgetUnitSummaryDto

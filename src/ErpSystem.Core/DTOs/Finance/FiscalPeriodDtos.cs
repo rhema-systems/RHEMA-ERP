@@ -42,6 +42,12 @@ namespace ErpSystem.Core.DTOs.Finance
         
         /// <summary>TRUE if period allows transaction posting</summary>
         public bool IsOpen { get; set; }
+
+        /// <summary>
+        /// TRUE when Finance may post transactions dated after the current UTC business date,
+        /// provided the date remains inside this period.
+        /// </summary>
+        public bool AllowFutureDating { get; set; }
         
         /// <summary>TRUE if period is permanently locked</summary>
         public bool IsLocked { get; set; }

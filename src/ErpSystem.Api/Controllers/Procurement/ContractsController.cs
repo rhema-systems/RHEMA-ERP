@@ -166,6 +166,30 @@ public class ContractsController : ControllerBase
                 eligibility = ex.Result
             });
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                title = ex.Code,
+                status = 422,
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = ex.Code,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, new
+            {
+                title = "Tender source recovery forbidden",
+                status = 403,
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = "TENDER_SOURCE_RECOVERY_FORBIDDEN",
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -510,6 +534,16 @@ public class ContractsController : ControllerBase
         {
             var amendment = await _contractService.ProcessAmendmentAsync(amendmentId, dto);
             return Ok(amendment);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Contract amendment approval forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            });
         }
         catch (InvalidOperationException ex)
         {

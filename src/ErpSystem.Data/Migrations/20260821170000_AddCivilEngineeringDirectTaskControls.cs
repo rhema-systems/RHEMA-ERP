@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0501 governance overlay for existing Projects work items; task feedback remains a later Civil phase.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821170000_AddCivilEngineeringDirectTaskControls")]
 public partial class AddCivilEngineeringDirectTaskControls : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

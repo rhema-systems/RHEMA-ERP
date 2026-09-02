@@ -4,10 +4,13 @@ using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -30,6 +33,7 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly ICurrentUserService _currentUserService;
         private readonly IFinanceAuditService _financeAuditService;
         private readonly ApplicationDbContext _dbContext;
+        private readonly IFinanceBudgetControlService _budgetControl;
 
         public JournalEntryController(
             IJournalEntryService journalEntryService,
@@ -37,7 +41,8 @@ namespace ErpSystem.Api.Controllers.Finance
             IWorkflowService workflowService,
             ICurrentUserService currentUserService,
             IFinanceAuditService financeAuditService,
-            ApplicationDbContext dbContext)
+            ApplicationDbContext dbContext,
+            IFinanceBudgetControlService budgetControl)
         {
             _journalEntryService = journalEntryService;
             _generalLedgerService = generalLedgerService;
@@ -45,6 +50,7 @@ namespace ErpSystem.Api.Controllers.Finance
             _currentUserService = currentUserService;
             _financeAuditService = financeAuditService;
             _dbContext = dbContext;
+            _budgetControl = budgetControl;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -102,6 +108,23 @@ namespace ErpSystem.Api.Controllers.Finance
                 .ToListAsync();
 
             return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
+        }
+
+        private async Task<bool> CanViewJournalEntryAsync(Guid journalEntryId)
+        {
+            if (await HasAnyPermissionAsync(FinancePermissions.ViewFinance))
+                return true;
+
+            if (!await HasAnyPermissionAsync(ProcurementAccessControlRegistry.TenderPaymentVerifyPermission))
+                return false;
+
+            var tenantId = TenantId;
+            return await _dbContext.TenderPayments
+                .AsNoTracking()
+                .AnyAsync(payment =>
+                    payment.TenantId == tenantId &&
+                    !payment.IsDeleted &&
+                    payment.JournalEntryId == journalEntryId);
         }
 
         private async Task<ConflictObjectResult?> GetBatchOwnershipConflictAsync(Guid journalEntryId)
@@ -231,18 +254,25 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Retrieves journal entries with optional filtering by status, date range, and fiscal period.
+        /// Retrieves journal entries with optional filtering by status, date range, fiscal period, and source module.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<JournalEntryDto>>> GetJournalEntries(
             [FromQuery] string? status = null,
             [FromQuery] DateTime? startDate = null,
             [FromQuery] DateTime? endDate = null,
-            [FromQuery] Guid? periodId = null)
+            [FromQuery] Guid? periodId = null,
+            [FromQuery] Guid? fiscalPeriodId = null,
+            [FromQuery] string? sourceModule = null)
         {
             try
             {
-                var entries = await _journalEntryService.GetJournalEntriesAsync();
+                var entries = await _journalEntryService.GetJournalEntriesAsync(
+                    status,
+                    startDate,
+                    endDate,
+                    fiscalPeriodId ?? periodId,
+                    sourceModule);
                 return Ok(entries);
             }
             catch (Exception ex)
@@ -294,6 +324,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await CanViewJournalEntryAsync(id))
+                    return Forbid();
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -477,6 +510,42 @@ namespace ErpSystem.Api.Controllers.Finance
         // APPROVAL WORKFLOW ENDPOINTS
         // ====================================================================
 
+        [HttpGet("{id}/budget-control")]
+        public async Task<ActionResult<FinanceBudgetControlEvaluationDto>> GetBudgetControl(Guid id)
+        {
+            try
+            {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Create", "Finance.JournalEntries.Write", "Finance.JournalEntries.SubmitForApproval", "Finance.JournalEntries.Approve"))
+                    return Forbid();
+                return Ok(await _budgetControl.EvaluateManualJournalAsync(id));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [HttpPost("{id}/budget-override")]
+        public async Task<ActionResult<FinanceBudgetOverrideRequestDto>> RequestBudgetOverride(
+            Guid id,
+            [FromBody] FinanceBudgetOverrideCommandDto request)
+        {
+            try
+            {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.SubmitForApproval"))
+                    return Forbid();
+                return Ok(await _budgetControl.RequestManualJournalOverrideAsync(id, request.Reason));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
         /// <summary>
         /// Submits a draft journal entry for approval. Transitions from "Draft" to "Pending Approval".
         /// </summary>
@@ -501,19 +570,47 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 await _journalEntryService.ValidateJournalEntryReadyForSubmissionAsync(id);
 
-                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("JournalEntry", id);
+                // Reserve before starting the approval workflow so concurrent journals cannot
+                // spend the same adopted budget while they wait in the approval queue.
+                await _budgetControl.ReserveManualJournalAsync(id);
+
+                WorkflowExecutionResult workflowResult;
+                try
+                {
+                    workflowResult = await _workflowService.StartApprovalWorkflowAsync("JournalEntry", id);
+                }
+                catch
+                {
+                    await _budgetControl.ReleaseManualJournalAsync(id, "Journal approval workflow failed to start.");
+                    throw;
+                }
                 if (!workflowResult.Success)
+                {
+                    await _budgetControl.ReleaseManualJournalAsync(id, workflowResult.Message ?? "Journal workflow did not start.");
                     return BadRequest(workflowResult.Message ?? "Unable to start approval workflow.");
+                }
 
                 var currentWorkflowStep = await _workflowService.GetCurrentWorkflowStepAsync("JournalEntry", id);
                 if (currentWorkflowStep == null ||
                     string.Equals(currentWorkflowStep.StepName, "Draft", StringComparison.OrdinalIgnoreCase))
                 {
+                    await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal workflow did not advance to an approval step.");
+                    await _budgetControl.ReleaseManualJournalAsync(id, "Journal workflow did not advance to an approval step.");
                     return BadRequest("Approval workflow did not advance to the approval step. Journal entry was not submitted.");
                 }
 
-                // Update the entry status
-                await _journalEntryService.UpdateApprovalStatusAsync(id, "Pending Approval", "Pending");
+                // Update the entry status. If this final step fails, cancel the just-started
+                // workflow and release its budget commitment instead of leaving split state.
+                try
+                {
+                    await _journalEntryService.UpdateApprovalStatusAsync(id, "Pending Approval", "Pending");
+                }
+                catch
+                {
+                    await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal submission failed after workflow start.");
+                    await _budgetControl.ReleaseManualJournalAsync(id, "Journal submission failed after workflow start.");
+                    throw;
+                }
 
                 var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 return Ok(updated);
@@ -532,14 +629,19 @@ namespace ErpSystem.Api.Controllers.Finance
         /// Withdraws a pending approval request and returns the journal entry to Draft.
         /// </summary>
         [HttpPost("{id}/withdraw-approval")]
-        public async Task<ActionResult<JournalEntryDto>> WithdrawApproval(Guid id, [FromBody] ApprovalActionDto? request = null)
+        public async Task<ActionResult<JournalEntryDto>> WithdrawApproval(
+            Guid id,
+            [FromBody] WithdrawApprovalDto? request,
+            CancellationToken cancellationToken = default)
         {
             try
             {
                 if (!await HasAnyPermissionAsync(
-                        "Finance.JournalEntries.SubmitForApproval",
-                        "Finance.JournalEntries.Write",
-                        "Finance.JournalEntries.Delete"))
+                        FinancePermissions.SubmitJournalEntries,
+                        FinancePermissions.WorkflowCancel))
+                    return Forbid();
+
+                if (!Guid.TryParse(_currentUserService.UserId, out var currentUserId))
                     return Forbid();
 
                 var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
@@ -555,15 +657,62 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 var reason = request?.Reason?.Trim();
                 if (string.IsNullOrWhiteSpace(reason))
-                    reason = request?.Comments?.Trim();
-                if (string.IsNullOrWhiteSpace(reason))
-                    reason = "Approval request withdrawn.";
+                    return BadRequest("A withdrawal reason is required.");
 
-                var workflowResult = await _workflowService.CancelWorkflowAsync("JournalEntry", id, reason);
-                if (!workflowResult.Success)
-                    return BadRequest(workflowResult.Message ?? "Unable to cancel the active approval workflow.");
+                var canCancelAnyWorkflow = await HasAnyPermissionAsync(FinancePermissions.WorkflowCancel);
 
-                await _journalEntryService.UpdateApprovalStatusAsync(id, "Draft", "Withdrawn", rejectionReason: reason);
+                async Task<WorkflowExecutionResult> CancelWorkflowAndReturnToDraftAsync()
+                {
+                    var workflowResult = canCancelAnyWorkflow
+                        ? await _workflowService.CancelWorkflowAsync("JournalEntry", id, reason)
+                        : await _workflowService.RecallWorkflowAsync("JournalEntry", id, currentUserId, reason);
+
+                    if (!workflowResult.Success)
+                        return workflowResult;
+
+                    await _journalEntryService.WithdrawApprovalAsync(
+                        id,
+                        currentUserId,
+                        reason,
+                        cancellationToken);
+                    return workflowResult;
+                }
+
+                WorkflowExecutionResult result;
+                if (!_dbContext.Database.IsRelational() || _dbContext.Database.CurrentTransaction != null)
+                {
+                    result = await CancelWorkflowAndReturnToDraftAsync();
+                }
+                else
+                {
+                    var strategy = _dbContext.Database.CreateExecutionStrategy();
+                    result = await strategy.ExecuteAsync(async () =>
+                    {
+                        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                        try
+                        {
+                            var workflowResult = await CancelWorkflowAndReturnToDraftAsync();
+                            if (!workflowResult.Success)
+                            {
+                                await transaction.RollbackAsync(cancellationToken);
+                                _dbContext.ChangeTracker.Clear();
+                                return workflowResult;
+                            }
+
+                            await transaction.CommitAsync(cancellationToken);
+                            return workflowResult;
+                        }
+                        catch
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+                            _dbContext.ChangeTracker.Clear();
+                            throw;
+                        }
+                    });
+                }
+
+                if (!result.Success)
+                    return BadRequest(result.Message ?? "Unable to withdraw the active approval workflow.");
 
                 var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 return Ok(updated);
@@ -609,6 +758,11 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 if (!await CanCurrentUserApproveJournalWorkflowAsync(id, userId))
                     return StatusCode(403, "This journal entry is assigned to another workflow approver.");
+
+                // The direct endpoint is retained for compatibility. Revalidate before advancing
+                // the workflow so a changed budget position cannot complete the workflow first
+                // and only then fail the journal status update.
+                await _budgetControl.ValidateManualJournalForPostingAsync(id);
 
                 var workflowResult = await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Approve", request?.Comments);
                 if (!workflowResult.Success)
@@ -747,6 +901,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await CanViewJournalEntryAsync(id))
+                    return Forbid();
+
                 var attachments = await _journalEntryService.GetAttachmentsAsync(id);
                 return Ok(attachments);
             }

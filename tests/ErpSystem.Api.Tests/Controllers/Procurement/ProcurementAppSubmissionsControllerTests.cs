@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -43,7 +44,9 @@ public sealed class ProcurementAppSubmissionsControllerTests
     public async Task AuthorizedReaderCanUseTenantSafeRegisterQueries()
     {
         var id = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
         var service = new Mock<IProcurementAppSubmissionService>();
+        var fileStorage = new Mock<IFileStorageService>();
         service.Setup(item => item.GetSummaryAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcurementAppSubmissionSummaryDto { TotalAttemptCount = 1 });
         service.Setup(item => item.GetPublishedPlanOptionsAsync(It.IsAny<CancellationToken>()))
@@ -52,7 +55,17 @@ public sealed class ProcurementAppSubmissionsControllerTests
             .ReturnsAsync(new ProcurementAppSubmissionPageDto { TotalCount = 1 });
         service.Setup(item => item.GetAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcurementAppSubmissionDto { Id = id, SubmissionNumber = "APP-2026-00001" });
-        using var factory = CreateFactory(PolicyAuthorizationMode.Success, service);
+        service.Setup(item => item.GetExportFileAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAppExportFileDto
+            {
+                FileUploadRecordId = fileId,
+                FileName = "APP-2026-PLAN-001-R1.csv",
+                ContentType = "text/csv",
+                FilePath = "private/app/APP-2026-PLAN-001-R1.csv"
+            });
+        fileStorage.Setup(item => item.DownloadFileAsync("private/app/APP-2026-PLAN-001-R1.csv", fileId))
+            .ReturnsAsync(() => new MemoryStream(Encoding.UTF8.GetBytes("Plan Number,Plan Title")));
+        using var factory = CreateFactory(PolicyAuthorizationMode.Success, service, fileStorage);
         using var client = factory.CreateClient();
 
         var responses = new[]
@@ -60,7 +73,8 @@ public sealed class ProcurementAppSubmissionsControllerTests
             await client.GetAsync("/api/procurement/app-submissions/summary"),
             await client.GetAsync("/api/procurement/app-submissions/published-plans"),
             await client.GetAsync("/api/procurement/app-submissions?page=1&pageSize=25"),
-            await client.GetAsync($"/api/procurement/app-submissions/{id}")
+            await client.GetAsync($"/api/procurement/app-submissions/{id}"),
+            await client.GetAsync($"/api/procurement/app-submissions/{id}/export-file")
         };
 
         responses.Should().OnlyContain(response => response.StatusCode == HttpStatusCode.OK);
@@ -80,15 +94,13 @@ public sealed class ProcurementAppSubmissionsControllerTests
         service.Setup(item => item.ResubmitAsync(id, It.IsAny<ResubmitProcurementAppRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(dto);
         using var factory = CreateFactory(PolicyAuthorizationMode.Success, service);
         using var client = factory.CreateClient();
-        const string checksum = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
         var responses = new[]
         {
-            await client.PostAsync("/api/procurement/app-submissions/exports", Json($"{{\"procurementPlanId\":\"{planId}\",\"exportFileName\":\"app.xlsx\",\"exportFormat\":\"XLSX\",\"exportTemplateVersion\":\"v1\",\"exportChecksumSha256\":\"{checksum}\"}}")),
+            await client.PostAsync("/api/procurement/app-submissions/exports", Json($"{{\"procurementPlanId\":\"{planId}\",\"exportFormat\":\"CSV\"}}")),
             await client.PostAsync($"/api/procurement/app-submissions/{id}/submit", Json("{\"externalSubmissionReference\":\"GH-001\",\"submittedAtUtc\":\"2026-07-21T00:00:00Z\",\"rowVersion\":\"AQ==\"}")),
             await client.PostAsync($"/api/procurement/app-submissions/{id}/acknowledge", Json("{\"acknowledgementReference\":\"ACK-001\",\"acknowledgedAtUtc\":\"2026-07-21T00:00:00Z\",\"rowVersion\":\"AQ==\"}")),
             await client.PostAsync($"/api/procurement/app-submissions/{id}/reject", Json("{\"rejectionReference\":\"REJ-001\",\"rejectionReason\":\"Invalid template\",\"rejectedAtUtc\":\"2026-07-21T00:00:00Z\",\"rowVersion\":\"AQ==\"}")),
-            await client.PostAsync($"/api/procurement/app-submissions/{id}/resubmit", Json($"{{\"exportFileName\":\"app-r2.xlsx\",\"exportFormat\":\"XLSX\",\"exportTemplateVersion\":\"v2\",\"exportChecksumSha256\":\"{checksum}\",\"rowVersion\":\"AQ==\"}}"))
+            await client.PostAsync($"/api/procurement/app-submissions/{id}/resubmit", Json("{\"exportFormat\":\"CSV\",\"rowVersion\":\"AQ==\"}"))
         };
 
         responses[0].StatusCode.Should().Be(HttpStatusCode.Created);
@@ -125,16 +137,18 @@ public sealed class ProcurementAppSubmissionsControllerTests
     private static StringContent Json(string value) => new(value, Encoding.UTF8, "application/json");
 
     private static ProcurementAppSubmissionsController Controller(Mock<IProcurementAppSubmissionService> service, string traceIdentifier) =>
-        new(service.Object)
+        new(service.Object, Mock.Of<IFileStorageService>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { TraceIdentifier = traceIdentifier } }
         };
 
     private static WebApplicationFactory<Program> CreateFactory(
         PolicyAuthorizationMode mode,
-        Mock<IProcurementAppSubmissionService>? service = null)
+        Mock<IProcurementAppSubmissionService>? service = null,
+        Mock<IFileStorageService>? fileStorage = null)
     {
         service ??= new Mock<IProcurementAppSubmissionService>();
+        fileStorage ??= new Mock<IFileStorageService>();
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
@@ -143,8 +157,10 @@ public sealed class ProcurementAppSubmissionsControllerTests
                 services.RemoveAll<IHostedService>();
                 services.RemoveAll<IPolicyEvaluator>();
                 services.RemoveAll<IProcurementAppSubmissionService>();
+                services.RemoveAll<IFileStorageService>();
                 services.AddSingleton<IPolicyEvaluator>(new PolicyTestEvaluator(mode));
                 services.AddSingleton(service.Object);
+                services.AddSingleton(fileStorage.Object);
             });
         });
     }

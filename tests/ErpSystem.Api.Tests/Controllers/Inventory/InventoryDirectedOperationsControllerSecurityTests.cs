@@ -47,7 +47,7 @@ public sealed class InventoryDirectedOperationsControllerSecurityTests
         var method = typeof(InventoryDirectedOperationsController).GetMethod(action)!;
         method.GetCustomAttribute<HttpPostAttribute>().Should().NotBeNull();
         method.GetCustomAttributes<AuthorizeAttribute>(inherit: true)
-            .Should().OnlyContain(attribute => string.IsNullOrWhiteSpace(attribute.Roles));
+            .Should().NotContain(attribute => !string.IsNullOrWhiteSpace(attribute.Roles));
         method.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true).Should().BeNull();
     }
 

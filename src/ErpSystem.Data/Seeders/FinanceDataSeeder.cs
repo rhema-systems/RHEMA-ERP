@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
@@ -68,6 +69,12 @@ public class FinanceDataSeeder
             await SeedAccountsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 6.1 Seed a deliberately small set of realistic DEPT-ACCT-PROJ combinations.
+            // The full Cartesian product would make account selectors unusable and would imply
+            // that every department/project/account combination had been approved by TDC.
+            await SeedFinanceDemoAccountCombinationsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             // 6.25 Seed unit-accounting demo drivers used by statistical ledger screens
             await SeedUnitAccountingDemoDataAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
@@ -80,9 +87,9 @@ public class FinanceDataSeeder
             await SeedFixedAssetCategoriesAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
-            // 7.5 Seed Fixed Assets
-            await SeedFixedAssetsAsync(tenantId, baseDate);
-            await _context.SaveChangesAsync();
+            // Fixed-asset masters and their monetary values are deliberately not baseline seed data.
+            // They must enter through an explicit import/capitalization/opening workflow so every
+            // accounting-book value has source, journal, and posting-event lineage.
 
             // 8. Seed Tax Configuration
             await SeedTaxConfigurationAsync(tenantId, baseDate);
@@ -94,7 +101,16 @@ public class FinanceDataSeeder
 
             // 9.5 Seed operational liquidity masters only for this known standard/demo COA.
             // Custom tenant COAs are deliberately handled by the Banking setup wizard.
+            await SeedFinanceDemoBankingMastersAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             await SeedBankingSettlementDefaultsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
+            // 9.75 Seed counterparties needed to execute Finance-owned AP and AR scenarios.
+            // No invoices, receipts or payments are seeded: testers must create those records
+            // through the controlled workflows so the resulting evidence is meaningful.
+            await SeedFinanceDemoCounterpartiesAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
             // 10. Seed Module Definitions
@@ -354,8 +370,10 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "USD",
-                Rate = 0.08m,
-                InverseRate = 12.5m, // 1 / 0.08
+                // ExchangeRate.Rate is functional/base currency per one target-currency unit:
+                // 1 USD = 12.50 GHS. AP, AR and governed openings freeze this carrying rate.
+                Rate = 12.5m,
+                InverseRate = 0.08m, // 1 / 12.5
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -378,8 +396,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "EUR",
-                Rate = 0.076m,
-                InverseRate = 13.1579m, // 1 / 0.076
+                Rate = 13.1579m,
+                InverseRate = 0.076m, // rounded 1 / 13.1579
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -402,8 +420,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "GBP",
-                Rate = 0.063m,
-                InverseRate = 15.873m, // 1 / 0.063
+                Rate = 15.873m,
+                InverseRate = 0.063m, // rounded 1 / 15.873
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -935,6 +953,170 @@ public class FinanceDataSeeder
         _logger.LogInformation($"Seeded {newAccounts.Count} new accounts with segmentation");
     }
 
+    /// <summary>
+    /// Installs a reviewable subset of the TDC segmented chart for demonstrations and UAT.
+    /// </summary>
+    /// <remarks>
+    /// These are additional posting accounts, not aliases for the natural-account rows. Each
+    /// account carries its own DEPT-ACCT-PROJ evidence, so journal and report filters can prove
+    /// that departmental and project analysis works end to end. The seed is missing-only by
+    /// account number; a developer's or accountant's later edits are never overwritten.
+    /// </remarks>
+    private async Task SeedFinanceDemoAccountCombinationsAsync(Guid tenantId, DateTime baseDate)
+    {
+        var structures = await _context.AccountSegmentStructures
+            .Where(segment => segment.TenantId == tenantId && segment.IsActive && !segment.IsDeleted)
+            .ToListAsync();
+        var departmentSegment = structures.SingleOrDefault(segment => segment.SegmentCode == "DEPT");
+        var naturalAccountSegment = structures.SingleOrDefault(segment => segment.IsNaturalAccount);
+        var projectSegment = structures.SingleOrDefault(segment => segment.SegmentCode == "PROJ");
+        if (departmentSegment == null || naturalAccountSegment == null || projectSegment == null)
+        {
+            _logger.LogWarning(
+                "Skipping Finance demo account combinations because the DEPT-ACCT-PROJ structure is incomplete for tenant {TenantId}.",
+                tenantId);
+            return;
+        }
+
+        var lookupValues = await _context.SegmentLookupValues
+            .Where(value =>
+                value.TenantId == tenantId &&
+                !value.IsDeleted &&
+                value.IsActive &&
+                (value.SegmentStructureId == departmentSegment.Id ||
+                 value.SegmentStructureId == projectSegment.Id))
+            .ToListAsync();
+        var departments = lookupValues
+            .Where(value => value.SegmentStructureId == departmentSegment.Id)
+            .ToDictionary(value => value.SegmentValue, StringComparer.OrdinalIgnoreCase);
+        var projects = lookupValues
+            .Where(value => value.SegmentStructureId == projectSegment.Id)
+            .ToDictionary(value => value.SegmentValue, StringComparer.OrdinalIgnoreCase);
+
+        // SourceCode supplies the accounting classification. NaturalCode is the visible natural
+        // segment and differs only for the three dedicated cash/bank accounts introduced here.
+        var definitions = new[]
+        {
+            new { Department = "100", SourceCode = "1000", NaturalCode = "1001", Project = "0000", Name = "Main Operating Bank - GHS", Currency = "GHS", MultiCurrency = false, Budget = false },
+            new { Department = "100", SourceCode = "1000", NaturalCode = "1002", Project = "0000", Name = "Foreign Currency Bank - USD", Currency = "USD", MultiCurrency = true, Budget = false },
+            new { Department = "100", SourceCode = "1000", NaturalCode = "1003", Project = "0000", Name = "Finance Petty Cash - GHS", Currency = "GHS", MultiCurrency = false, Budget = false },
+            new { Department = "100", SourceCode = "6000", NaturalCode = "6000", Project = "0000", Name = "Salaries - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "100", SourceCode = "6100", NaturalCode = "6100", Project = "0000", Name = "Office Rent - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "100", SourceCode = "6200", NaturalCode = "6200", Project = "0000", Name = "Utilities - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "100", SourceCode = "6500", NaturalCode = "6500", Project = "0000", Name = "Professional Fees - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "100", SourceCode = "6600", NaturalCode = "6600", Project = "0000", Name = "Bank Charges - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "200", SourceCode = "4100", NaturalCode = "4100", Project = "0000", Name = "Estate Service Revenue", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "200", SourceCode = "6200", NaturalCode = "6200", Project = "P103", Name = "Utilities - Kaiser Flats Redevelopment", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "300", SourceCode = "1500", NaturalCode = "1500", Project = "P101", Name = "Capital Work in Progress - Community 26", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "300", SourceCode = "6200", NaturalCode = "6200", Project = "P101", Name = "Utilities - Community 26 Project", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "300", SourceCode = "6500", NaturalCode = "6500", Project = "P101", Name = "Professional Fees - Community 26 Project", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "500", SourceCode = "6400", NaturalCode = "6400", Project = "0000", Name = "Publicity - Corporate Planning & Communication", Currency = "GHS", MultiCurrency = false, Budget = true },
+            new { Department = "600", SourceCode = "6500", NaturalCode = "6500", Project = "0000", Name = "External Audit & Assurance Fees", Currency = "GHS", MultiCurrency = false, Budget = true }
+        };
+
+        var sourceCodes = definitions.Select(definition => definition.SourceCode).Distinct().ToList();
+        var sourceAccounts = await _context.Accounts
+            .Where(account =>
+                account.TenantId == tenantId &&
+                !account.IsDeleted &&
+                sourceCodes.Contains(account.AccountCode))
+            .ToDictionaryAsync(account => account.AccountCode);
+        var existingNumberList = await _context.Accounts
+            .Where(account => account.TenantId == tenantId && !account.IsDeleted)
+            .Select(account => account.AccountNumber)
+            .ToListAsync();
+        var existingNumbers = existingNumberList.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var created = 0;
+        foreach (var definition in definitions)
+        {
+            var accountNumber = $"{definition.Department}-{definition.NaturalCode}-{definition.Project}";
+            if (existingNumbers.Contains(accountNumber))
+            {
+                continue;
+            }
+
+            if (!sourceAccounts.TryGetValue(definition.SourceCode, out var source) ||
+                !departments.TryGetValue(definition.Department, out var department) ||
+                !projects.TryGetValue(definition.Project, out var project))
+            {
+                _logger.LogWarning(
+                    "Skipping demo account {AccountNumber}; its natural account, department or project master is missing.",
+                    accountNumber);
+                continue;
+            }
+
+            var account = new Account
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountCode = accountNumber,
+                AccountNumber = accountNumber,
+                AccountName = definition.Name,
+                AccountType = source.AccountType,
+                AccountCategory = source.AccountCategory,
+                AccountSubCategory = source.AccountSubCategory,
+                Description = $"TDC Finance demonstration posting account derived from natural account {definition.SourceCode}.",
+                ParentAccountId = source.Id,
+                IsSegmented = true,
+                CurrencyCode = definition.Currency,
+                IsMultiCurrency = definition.MultiCurrency,
+                IsIFRSClassified = source.IsIFRSClassified,
+                IsBaseClassified = source.IsBaseClassified,
+                IsLocalClassified = source.IsLocalClassified,
+                IFRSLineItem = source.IFRSLineItem,
+                BaseLineItem = source.BaseLineItem,
+                LocalLineItem = source.LocalLineItem,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                RequireDepartmentCode = true,
+                RequireProjectCode = definition.Project != "0000",
+                BudgetTrackingEnabled = definition.Budget,
+                Status = AccountStatus.Active,
+                TaxReportingCategory = source.TaxReportingCategory,
+                CashFlowClassification = source.CashFlowClassification,
+                IsSystemAccount = false,
+                CreatedAt = baseDate,
+                CreatedBy = "System (Finance Demo)",
+                SegmentValues =
+                [
+                    CreateSegmentValue(departmentSegment, department.SegmentValue, department.Description, department.Id),
+                    CreateSegmentValue(naturalAccountSegment, definition.NaturalCode, definition.Name, null),
+                    CreateSegmentValue(projectSegment, project.SegmentValue, project.Description, project.Id)
+                ]
+            };
+
+            _context.Accounts.Add(account);
+            existingNumbers.Add(accountNumber);
+            created++;
+        }
+
+        _logger.LogInformation(
+            "Ensured TDC Finance demo account combinations for tenant {TenantId}; created {CreatedCount} account(s).",
+            tenantId,
+            created);
+
+        AccountSegmentValue CreateSegmentValue(
+            AccountSegmentStructure structure,
+            string value,
+            string? description,
+            Guid? lookupId)
+            => new()
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SegmentStructureId = structure.Id,
+                SegmentPosition = structure.SegmentPosition,
+                SegmentValue = value,
+                SegmentLookupValueId = lookupId,
+                SegmentValueDescription = description,
+                EffectiveDate = baseDate,
+                IsLocked = false,
+                CreatedAt = baseDate,
+                CreatedBy = "System (Finance Demo)"
+            };
+    }
+
     private async Task SeedUnitAccountingDemoDataAsync(Guid tenantId, DateTime baseDate)
     {
         var unitTypeDefinitions = new (Guid Id, string Code, string Name, string Description, int DecimalPlaces)[]
@@ -1265,6 +1447,11 @@ public class FinanceDataSeeder
 
     private List<Account> GetStandardChartOfAccounts(Guid tenantId, DateTime baseDate)
     {
+        // Reference-data seeding must never invent a ledger balance. Earlier development fixtures
+        // placed presentation values directly on Account.Balance without journals, which made the
+        // trial balance, detailed ledger and account card disagree on a fresh database. All GL
+        // accounts now start at zero; opening positions must enter through the controlled opening-
+        // balance workspace so debit/credit evidence and subledger reconciliation are retained.
         return new List<Account>
         {
             // ===== ASSETS =====
@@ -1287,7 +1474,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 250000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1310,7 +1497,7 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 185000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1358,7 +1545,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 320000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1381,7 +1568,7 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 1500000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1405,7 +1592,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 800000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1429,7 +1616,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 450000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1453,7 +1640,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 250000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1477,7 +1664,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 300000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1634,7 +1821,7 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 125000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1657,7 +1844,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 45000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1730,7 +1917,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 500000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1754,7 +1941,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 1000000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1776,7 +1963,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 435000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1800,7 +1987,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 850000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1822,7 +2009,32 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 320000m,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-4110-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "4110",
+                AccountNumber = "4110",
+                AccountName = "Rental Income",
+                AccountType = AccountType.Revenue,
+                AccountCategory = "Operating Revenue",
+                AccountSubCategory = "Property Rental",
+                Description = "Rental income from Estate and Property Management lease billing.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = true,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = true,
+                Status = AccountStatus.Active,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1869,7 +2081,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 25000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1918,7 +2130,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 12500m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1966,7 +2178,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 8200m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2014,7 +2226,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 420000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2036,7 +2248,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 280000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2058,7 +2270,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 60000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2080,7 +2292,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 18000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2102,7 +2314,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 75000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2124,7 +2336,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 45000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2146,7 +2358,7 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 32000m,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2245,147 +2457,224 @@ public class FinanceDataSeeder
 
     #endregion
 
-    #region Fixed Assets Seeding
+    #region Banking Settlement Seeding
 
-    private async Task SeedFixedAssetsAsync(Guid tenantId, DateTime baseDate)
+    /// <summary>
+    /// Seeds the cash-management masters used by the manual Finance demonstration script.
+    /// </summary>
+    /// <remarks>
+    /// Balances intentionally start at zero. The opening-balance and transaction scenarios must
+    /// establish monetary balances through controlled postings; placing a value directly on the
+    /// bank master would make the bank card disagree with the GL and weaken the demonstration.
+    /// Existing masters are preserved so rerunning Development seeding cannot overwrite local
+    /// bank setup or operational balances.
+    /// </remarks>
+    private async Task SeedFinanceDemoBankingMastersAsync(Guid tenantId, DateTime baseDate)
     {
-        if (await _context.FixedAssets.AnyAsync(a => a.TenantId == tenantId))
+        var accountNumbers = new[] { "100-1001-0000", "100-1002-0000", "100-1003-0000" };
+        var glAccounts = await _context.Accounts
+            .Where(account =>
+                account.TenantId == tenantId &&
+                !account.IsDeleted &&
+                accountNumbers.Contains(account.AccountNumber))
+            .ToDictionaryAsync(account => account.AccountNumber);
+
+        var bankDefinitions = new[]
         {
-            _logger.LogInformation("Fixed assets already exist. Skipping.");
-            return;
-        }
+            new { Id = Guid.Parse("00000008-1001-0000-0000-000000000001"), Number = "TDC-DEMO-GHS-001", Name = "TDC Main Operating Account", Bank = "Ghana Commercial Bank", Branch = "Tema Main", Currency = "GHS", GL = "100-1001-0000" },
+            new { Id = Guid.Parse("00000008-1002-0000-0000-000000000001"), Number = "TDC-DEMO-USD-001", Name = "TDC Foreign Currency Account", Bank = "Ghana Commercial Bank", Branch = "Tema Main", Currency = "USD", GL = "100-1002-0000" },
+            new { Id = Guid.Parse("00000008-1003-0000-0000-000000000001"), Number = "TDC-DEMO-PETTY-001", Name = "TDC Finance Petty Cash Account", Bank = "Internal Cash Office", Branch = "TDC Head Office", Currency = "GHS", GL = "100-1003-0000" }
+        };
 
-        // Get categories to link
-        var categories = await _context.FixedAssetCategories
-            .Where(c => c.TenantId == tenantId)
-            .ToDictionaryAsync(c => c.Code, c => c.Id);
-
-        if (!categories.Any())
+        foreach (var definition in bankDefinitions)
         {
-            _logger.LogWarning("No fixed asset categories found. Skipping fixed asset seeding.");
-            return;
-        }
-
-        var assets = new List<FixedAsset>();
-        var systemUser = "System";
-
-        // 1. Building Asset
-        if (categories.TryGetValue("FA-BLDG", out var buildingCategoryId))
-        {
-            assets.Add(new FixedAsset
+            if (await _context.BankAccounts.IgnoreQueryFilters().AnyAsync(bank =>
+                    bank.TenantId == tenantId && bank.AccountNumber == definition.Number))
             {
+                continue;
+            }
+
+            if (!glAccounts.TryGetValue(definition.GL, out var glAccount))
+            {
+                _logger.LogWarning(
+                    "Skipping demo bank account {AccountNumber}; GL account {GLAccountNumber} is missing.",
+                    definition.Number,
+                    definition.GL);
+                continue;
+            }
+
+            _context.BankAccounts.Add(new BankAccount
+            {
+                Id = definition.Id,
                 TenantId = tenantId,
-                FixedAssetCategoryId = buildingCategoryId,
-                AssetCode = "FA-2024-BLDG-001",
-                Name = "Headquarters Building",
-                Description = "Main office building in Accra",
-                PurchaseDate = baseDate.AddYears(-2),
-                PlacedInServiceDate = baseDate.AddYears(-2).AddDays(30),
-                PurchasePrice = 1200000m,
-                InstallationCost = 50000m,
-                TaxAmount = 0m,
-                AcquisitionCost = 1250000m,
-                NetBookValue = 1125000m, // Roughly 2 years depreciation
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 240, // 20 years
-                ResidualValue = 50000m,
-                Status = FixedAssetStatus.Active,
+                AccountNumber = definition.Number,
+                AccountName = definition.Name,
+                BankName = definition.Bank,
+                BankBranch = definition.Branch,
+                Currency = definition.Currency,
+                AccountType = BankAccountType.Checking,
+                GLAccountId = glAccount.Id,
+                CurrentBalance = 0m,
+                AvailableBalance = 0m,
+                OpeningBalance = 0m,
+                IsActive = true,
+                OpeningDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Notes = "Development-only TDC Finance demonstration master. Establish balances through controlled postings.",
                 CreatedAt = baseDate,
-                CreatedBy = systemUser
+                CreatedBy = "System (Finance Demo)"
             });
         }
 
-        // 2. Equipment Asset
-        if (categories.TryGetValue("FA-EQP", out var equipmentCategoryId))
+        var paymentMethodDefinitions = new[]
         {
-            assets.Add(new FixedAsset
-            {
-                TenantId = tenantId,
-                FixedAssetCategoryId = equipmentCategoryId,
-                AssetCode = "FA-2024-EQP-001",
-                Name = "Industrial Generator",
-                Description = "Backup power generator 500kVA",
-                PurchaseDate = baseDate.AddMonths(-6),
-                PlacedInServiceDate = baseDate.AddMonths(-6).AddDays(5),
-                PurchasePrice = 150000m,
-                InstallationCost = 10000m,
-                TaxAmount = 0m,
-                AcquisitionCost = 160000m,
-                NetBookValue = 144000m,
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 60, // 5 years
-                ResidualValue = 10000m,
-                SerialNumber = "GEN-500K-9988",
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
+            new { Id = Guid.Parse("00000009-0001-0000-0000-000000000001"), Code = "CASH", Name = "Cash", Type = PaymentMethodType.Cash, RequiresBank = false, RequiresReference = false, DefaultGL = "000-1020-0000" },
+            new { Id = Guid.Parse("00000009-0002-0000-0000-000000000001"), Code = "CHQ", Name = "Cheque", Type = PaymentMethodType.Cheque, RequiresBank = false, RequiresReference = true, DefaultGL = "000-1021-0000" },
+            new { Id = Guid.Parse("00000009-0003-0000-0000-000000000001"), Code = "EFT", Name = "Electronic Funds Transfer", Type = PaymentMethodType.EFT, RequiresBank = true, RequiresReference = true, DefaultGL = "100-1001-0000" },
+            new { Id = Guid.Parse("00000009-0004-0000-0000-000000000001"), Code = "MOMO", Name = "Mobile Money", Type = PaymentMethodType.MobileMoney, RequiresBank = false, RequiresReference = true, DefaultGL = "000-1022-0000" },
+            new { Id = Guid.Parse("00000009-0005-0000-0000-000000000001"), Code = "CARD", Name = "Card", Type = PaymentMethodType.Card, RequiresBank = false, RequiresReference = true, DefaultGL = "000-1023-0000" },
+            new { Id = Guid.Parse("00000009-0006-0000-0000-000000000001"), Code = "BANK", Name = "Bank Transfer", Type = PaymentMethodType.BankTransfer, RequiresBank = true, RequiresReference = true, DefaultGL = "100-1001-0000" }
+        };
+        var allGlAccounts = await _context.Accounts
+            .Where(account => account.TenantId == tenantId && !account.IsDeleted)
+            .ToDictionaryAsync(account => account.AccountNumber);
 
-            assets.Add(new FixedAsset
-            {
-                TenantId = tenantId,
-                FixedAssetCategoryId = equipmentCategoryId,
-                AssetCode = "FA-2024-EQP-002",
-                Name = "Server Rack System",
-                Description = "Main datacenter server rack",
-                PurchaseDate = baseDate.AddMonths(-1),
-                PlacedInServiceDate = baseDate.AddMonths(-1).AddDays(2),
-                PurchasePrice = 45000m,
-                InstallationCost = 5000m,
-                TaxAmount = 0m,
-                AcquisitionCost = 50000m,
-                NetBookValue = 49166.67m,
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 60,
-                ResidualValue = 0m,
-                SerialNumber = "SRV-RCK-1122",
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
-        }
-
-        // 3. Vehicle Asset
-        if (categories.TryGetValue("FA-VEH", out var vehicleCategoryId))
+        foreach (var definition in paymentMethodDefinitions)
         {
-            assets.Add(new FixedAsset
+            if (await _context.PaymentMethods.IgnoreQueryFilters().AnyAsync(method =>
+                    method.TenantId == tenantId && method.Code == definition.Code))
             {
-                TenantId = tenantId,
-                FixedAssetCategoryId = vehicleCategoryId,
-                AssetCode = "FA-2024-VEH-001",
-                Name = "Delivery Truck - Toyota Hilux",
-                Description = "Main operations delivery vehicle",
-                PurchaseDate = baseDate.AddYears(-1),
-                PlacedInServiceDate = baseDate.AddYears(-1).AddDays(14),
-                PurchasePrice = 250000m,
-                InstallationCost = 0m,
-                TaxAmount = 0m,
-                AcquisitionCost = 250000m,
-                NetBookValue = 187500m,
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 48, // 4 years
-                ResidualValue = 25000m,
-                SerialNumber = "VIN-TOY-HLX-4455",
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
-        }
+                continue;
+            }
 
-        if (assets.Any())
-        {
-            await _context.FixedAssets.AddRangeAsync(assets);
-            _logger.LogInformation($"Seeded {assets.Count} fixed assets");
+            _context.PaymentMethods.Add(new ErpSystem.Core.Entities.Finance.PaymentMethod
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                Code = definition.Code,
+                Name = definition.Name,
+                Type = definition.Type,
+                Description = "Development-only TDC Finance demonstration payment method.",
+                IsActive = true,
+                RequiresBankAccount = definition.RequiresBank,
+                RequiresReference = definition.RequiresReference,
+                DefaultGLAccountId = allGlAccounts.TryGetValue(definition.DefaultGL, out var account)
+                    ? account.Id
+                    : null,
+                CreatedAt = baseDate,
+                CreatedBy = "System (Finance Demo)"
+            });
         }
     }
 
-    #endregion
+    /// <summary>
+    /// Seeds realistic but fictional counterparties for Finance-owned AP and AR UAT.
+    /// </summary>
+    private async Task SeedFinanceDemoCounterpartiesAsync(Guid tenantId, DateTime baseDate)
+    {
+        var net30 = await _context.PaymentTerms
+            .FirstOrDefaultAsync(term => tenantId == term.TenantId && term.Code == "NET30" && !term.IsDeleted);
+        var accounts = await _context.Accounts
+            .Where(account => account.TenantId == tenantId && !account.IsDeleted)
+            .ToDictionaryAsync(account => account.AccountNumber);
 
-    #region Banking Settlement Seeding
+        var supplierDefinitions = new[]
+        {
+            new { Code = "TDC-DEMO-SUP-001", Name = "Tema Engineering Services Ltd", Currency = "GHS", TaxId = "C0000000010", Withholding = true, Expense = "300-6500-P101", Notes = "Professional and engineering services; use WHT Services in the demonstration." },
+            new { Code = "TDC-DEMO-SUP-002", Name = "Volta Office Solutions Ltd", Currency = "GHS", TaxId = "C0000000029", Withholding = true, Expense = "100-6200-0000", Notes = "Local goods and office services; use WHT Goods where the threshold is met." },
+            new { Code = "TDC-DEMO-SUP-003", Name = "Global Infrastructure Systems Inc", Currency = "USD", TaxId = "FOREIGN-DEMO-003", Withholding = false, Expense = "300-6500-P101", Notes = "Foreign-currency supplier for cross-currency settlement and FX evidence." }
+        };
+
+        foreach (var definition in supplierDefinitions)
+        {
+            if (await _context.Suppliers.IgnoreQueryFilters().AnyAsync(supplier =>
+                    supplier.TenantId == tenantId && supplier.SupplierCode == definition.Code))
+            {
+                continue;
+            }
+
+            _context.Suppliers.Add(new Supplier
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SupplierCode = definition.Code,
+                Name = definition.Name,
+                Description = "Fictional TDC Finance UAT supplier.",
+                SupplierType = "Vendor",
+                Address = "Tema Development Area",
+                City = "Tema",
+                Country = definition.Currency == "GHS" ? "Ghana" : "United States",
+                Phone = "+233 30 000 0000",
+                Email = $"{definition.Code.ToLowerInvariant()}@example.test",
+                PrimaryContactName = "Finance Contact",
+                PrimaryContactTitle = "Accounts Officer",
+                PrimaryContactEmail = $"accounts.{definition.Code.ToLowerInvariant()}@example.test",
+                TaxId = definition.TaxId,
+                IsWithholdingTaxApplicable = definition.Withholding,
+                TaxTreatment = TaxTreatment.Standard,
+                PaymentTerms = "Net 30",
+                PaymentTermId = net30?.Id,
+                IsActive = true,
+                IsPreferred = definition.Code == "TDC-DEMO-SUP-001",
+                Status = "Active",
+                Rating = 4,
+                DefaultApAccountId = accounts.TryGetValue("000-2000-0000", out var apAccount) ? apAccount.Id : null,
+                DefaultExpenseAccountId = accounts.TryGetValue(definition.Expense, out var expenseAccount) ? expenseAccount.Id : null,
+                Notes = definition.Notes,
+                CreatedAt = baseDate,
+                CreatedBy = "System (Finance Demo)"
+            });
+        }
+
+        var customerDefinitions = new[]
+        {
+            new { Code = "TDC-DEMO-CUS-001", Name = "Tema Industrial Estate Residents Association", Currency = "GHS", CreditLimit = 500000m, VatWithholdingAgent = false, TaxId = "C1000000011" },
+            new { Code = "TDC-DEMO-CUS-002", Name = "Meridian Property Holdings Ltd", Currency = "GHS", CreditLimit = 750000m, VatWithholdingAgent = true, TaxId = "C1000000020" },
+            new { Code = "TDC-DEMO-CUS-003", Name = "Atlantic Development Partners Ltd", Currency = "USD", CreditLimit = 1000000m, VatWithholdingAgent = false, TaxId = "FOREIGN-DEMO-C03" }
+        };
+
+        foreach (var definition in customerDefinitions)
+        {
+            if (await _context.BusinessPartners.IgnoreQueryFilters().AnyAsync(partner =>
+                    partner.TenantId == tenantId && partner.PartnerCode == definition.Code))
+            {
+                continue;
+            }
+
+            _context.BusinessPartners.Add(new BusinessPartner
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                PartnerCode = definition.Code,
+                CustomerAccountNumber = definition.Code,
+                PartnerName = definition.Name,
+                LegalName = definition.Name,
+                PartnerType = "Customer",
+                CustomerType = "Corporate",
+                RegistrationStatus = "Approved",
+                ApprovalStatus = "Approved",
+                IsActive = true,
+                IsVatWithholdingAgent = definition.VatWithholdingAgent,
+                TaxTreatment = TaxTreatment.Standard,
+                TaxIdentificationNumber = definition.TaxId,
+                PrimaryContactName = "Finance Contact",
+                PrimaryContactTitle = "Accounts Officer",
+                PrimaryEmail = $"accounts.{definition.Code.ToLowerInvariant()}@example.test",
+                PrimaryPhone = "+233 30 000 0000",
+                PhysicalAddress = "Tema Development Area",
+                PhysicalCity = "Tema",
+                PhysicalCountry = definition.Currency == "GHS" ? "Ghana" : "United Kingdom",
+                Currency = definition.Currency,
+                CreditLimit = definition.CreditLimit,
+                OutstandingBalance = 0m,
+                PaymentTermId = net30?.Id,
+                PaymentTerms = "Net 30",
+                DefaultArAccountId = accounts.TryGetValue("000-1100-0000", out var arAccount) ? arAccount.Id : null,
+                Notes = "Fictional TDC Finance UAT customer. No opening exposure is seeded.",
+                CreatedAt = baseDate,
+                CreatedBy = "System (Finance Demo)"
+            });
+        }
+    }
 
     private async Task SeedBankingSettlementDefaultsAsync(Guid tenantId, DateTime baseDate)
     {
@@ -2492,7 +2781,11 @@ public class FinanceDataSeeder
             _context.LiquidityAccounts.Add(new LiquidityAccount
             {
                 TenantId = tenantId,
-                Code = $"BANK-{bank.Id.ToString("N")[..8]}".ToUpperInvariant(),
+                // The historical eight-character prefix is not unique for deterministic seed
+                // GUIDs (several begin with 00000008). Sixteen hexadecimal characters keep the
+                // code comfortably inside LiquidityAccount's 30-character limit while retaining
+                // enough of the stable bank identifier to avoid collisions on repeatable builds.
+                Code = BuildBankLiquidityAccountCode(bank.Id),
                 Name = bank.AccountName,
                 AccountType = LiquidityAccountType.Bank,
                 Currency = bank.Currency,
@@ -2521,6 +2814,9 @@ public class FinanceDataSeeder
             settings.ReturnedChequeBankChargeAccountId = returnedChequeBankChargeAccountId;
         }
     }
+
+    private static string BuildBankLiquidityAccountCode(Guid bankAccountId) =>
+        $"BANK-{bankAccountId.ToString("N")[..16]}".ToUpperInvariant();
 
     #endregion
 

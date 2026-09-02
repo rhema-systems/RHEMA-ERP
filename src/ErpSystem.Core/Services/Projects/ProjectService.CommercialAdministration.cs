@@ -550,7 +550,7 @@ public partial class ProjectService
                ?? throw new InvalidOperationException("Selected contract was not found.");
     }
 
-    private static void EnsureLegacyExtensionOfTimeIsNotWorks(Contract? contract)
+    internal static void EnsureLegacyExtensionOfTimeIsNotWorks(Contract? contract)
     {
         if (string.Equals(contract?.ContractType, "Works", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Works extension-of-time requests must be created and reviewed from Site controls through the governed Civil workflow.");

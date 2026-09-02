@@ -37,6 +37,9 @@ public sealed class QuantitySurveyEstimateVersion : TenantEntity, IQuantitySurve
     public DateTime EstimateDate { get; set; }
     public Guid CurrencyId { get; set; }
     [Required, StringLength(3)] public string CurrencyCodeSnapshot { get; set; } = string.Empty;
+    [StringLength(500)] public string? FundingSourceSnapshot { get; set; }
+    [StringLength(2000)] public string? PropertyReferenceSnapshot { get; set; }
+    public int SourceSnapshotSchemaVersion { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal DirectCost { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal MarkupTotal { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal TotalAmount { get; set; }

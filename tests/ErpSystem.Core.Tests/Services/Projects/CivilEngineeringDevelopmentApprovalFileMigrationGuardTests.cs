@@ -10,7 +10,6 @@ public sealed class CivilEngineeringDevelopmentApprovalFileMigrationGuardTests
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("ProjectCivilDevelopmentApprovalFiles")
             .And.Contain("ProjectCivilDevelopmentApprovalEvidence")
@@ -26,7 +25,7 @@ public sealed class CivilEngineeringDevelopmentApprovalFileMigrationGuardTests
             .And.Contain("version.FileSize")
             .And.Contain("ProjectCivilDevelopmentApprovalFiles approvalFile")
             .And.NotContain("ProjectCivilDevelopmentApprovalFiles file ON");
-        metadata.Should().Contain("20260821110000_AddCivilEngineeringDevelopmentApprovalFiles");
+        sql.Should().Contain("[Migration(\"20260821110000_AddCivilEngineeringDevelopmentApprovalFiles\")]");
     }
 
     private static string FindRoot()

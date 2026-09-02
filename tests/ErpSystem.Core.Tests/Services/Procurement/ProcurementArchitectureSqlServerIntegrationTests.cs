@@ -2,10 +2,13 @@ using System.Reflection;
 using System.Data;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Reports;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -36,6 +39,106 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
 {
     [SqlServerFact]
     [Trait("Category", "SqlServerIntegration")]
+    public async Task TenderLineageGuardAllowsOnlyValidatedOneTimeSourcingCaseRecovery()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync(
+            TenderLineageRecoverySchemaSql);
+        await database.ApplySqlOperationsAsync(
+            new AllowGovernedTenderLineageRecovery());
+
+        var tenantId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var sourcingCaseId = Guid.NewGuid();
+        var replacementCaseId = Guid.NewGuid();
+        var mismatchedCaseId = Guid.NewGuid();
+        var tenderId = Guid.NewGuid();
+        var mismatchedTenderId = Guid.NewGuid();
+        const string fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        await database.ExecuteAsync(
+            """
+            INSERT dbo.PurchaseRequisitions (Id,TenantId,IsDeleted,Status,TotalAmount,Currency)
+            VALUES (@id,@tenant,0,'Approved',30000,'GHS');
+            """,
+            new SqlParameter("@id", requisitionId),
+            new SqlParameter("@tenant", tenantId));
+        await database.ExecuteAsync(
+            """
+            INSERT dbo.ProcurementRequisitionSourcingReleases
+                (Id,TenantId,IsDeleted,PurchaseRequisitionId,ControlFingerprint)
+            VALUES (@id,@tenant,0,@requisition,@fingerprint);
+            """,
+            new SqlParameter("@id", releaseId),
+            new SqlParameter("@tenant", tenantId),
+            new SqlParameter("@requisition", requisitionId),
+            new SqlParameter("@fingerprint", fingerprint));
+
+        foreach (var sourcingCase in new[]
+                 {
+                     (sourcingCaseId, 1, fingerprint),
+                     (replacementCaseId, 1, fingerprint),
+                     (mismatchedCaseId, 0, fingerprint)
+                 })
+        {
+            await database.ExecuteAsync(
+                """
+                INSERT dbo.ProcurementSourcingCases
+                    (Id,TenantId,IsDeleted,Status,PurchaseRequisitionId,SourcingReleaseId,
+                     SelectedMethod,EstimatedValue,CurrencyCode,SourceControlFingerprint)
+                VALUES (@id,@tenant,0,1,@requisition,@release,@method,30000,'GHS',@fingerprint);
+                """,
+                new SqlParameter("@id", sourcingCase.Item1),
+                new SqlParameter("@tenant", tenantId),
+                new SqlParameter("@requisition", requisitionId),
+                new SqlParameter("@release", releaseId),
+                new SqlParameter("@method", sourcingCase.Item2),
+                new SqlParameter("@fingerprint", sourcingCase.Item3));
+        }
+
+        foreach (var id in new[] { tenderId, mismatchedTenderId })
+        {
+            await database.ExecuteAsync(
+                """
+                INSERT dbo.Tenders
+                    (Id,TenantId,SourcePurchaseRequisitionId,SourcingReleaseId,SourcingCaseId,
+                     EstimatedValue,Currency,TenderType)
+                VALUES (@id,@tenant,@requisition,@release,NULL,30000,'GHS','ITB');
+                """,
+                new SqlParameter("@id", id),
+                new SqlParameter("@tenant", tenantId),
+                new SqlParameter("@requisition", requisitionId),
+                new SqlParameter("@release", releaseId));
+        }
+
+        await database.ExecuteAsync(
+            "UPDATE dbo.Tenders SET SourcingCaseId=@case WHERE Id=@id;",
+            new SqlParameter("@case", sourcingCaseId),
+            new SqlParameter("@id", tenderId));
+
+        var replacement = await Assert.ThrowsAsync<SqlException>(() =>
+            database.ExecuteAsync(
+                "UPDATE dbo.Tenders SET SourcingCaseId=@case WHERE Id=@id;",
+                new SqlParameter("@case", replacementCaseId),
+                new SqlParameter("@id", tenderId)));
+        replacement.Number.Should().Be(51070);
+
+        var removal = await Assert.ThrowsAsync<SqlException>(() =>
+            database.ExecuteAsync(
+                "UPDATE dbo.Tenders SET SourcingCaseId=NULL WHERE Id=@id;",
+                new SqlParameter("@id", tenderId)));
+        removal.Number.Should().Be(51070);
+
+        var invalidRecovery = await Assert.ThrowsAsync<SqlException>(() =>
+            database.ExecuteAsync(
+                "UPDATE dbo.Tenders SET SourcingCaseId=@case WHERE Id=@id;",
+                new SqlParameter("@case", mismatchedCaseId),
+                new SqlParameter("@id", mismatchedTenderId)));
+        invalidRecovery.Number.Should().Be(51070);
+    }
+
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
     public async Task ReservationPromotesAndUtilizesExactlyOnceWithoutCrossTenantOrContractDoubleCount()
     {
         await using var database = await DisposableSqlDatabase.CreateAsync(string.Empty);
@@ -57,11 +160,14 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         var contractId = Guid.NewGuid();
         var projectId = Guid.NewGuid();
         var certificateId = Guid.NewGuid();
+        var postReleaseCertificateId = Guid.NewGuid();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer(database.ConnectionString)
             .Options;
         await using var context = new ApplicationDbContext(options, tenantId);
         await context.Database.EnsureCreatedAsync();
+        await database.ApplySqlOperationsAsync(
+            new EnforceAtomicPurchaseOrderBudgetCommitment());
 
         var now = DateTime.UtcNow;
         var tenant = NewTenant(tenantId, "PROC-SQL-PRIMARY");
@@ -84,6 +190,20 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
 
         var budget = NewBudget(budgetId, tenantId, departmentId, actorId, "PB-SQL-001", 1000m);
         var requisition = NewRequisition(requisitionId, tenantId, actorId, budgetId, "PB-SQL-001", "PR-SQL-001", 1000m);
+        requisition.Status = "Approved";
+        var sourcingRelease = new ProcurementRequisitionSourcingRelease
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PurchaseRequisitionId = requisitionId, AttemptNumber = 1,
+            ReleaseReference = "PR-SQL-001/REL/A1",
+            ReleasedAtUtc = now, ReleasedById = actorId,
+            ReleasedByName = "Procurement SQL Actor",
+            ReleaseReason = "SQL lifecycle verification",
+            CorrelationId = "sql-release",
+            ControlFingerprint = new string('a', 64),
+            SnapshotJson = "{}", IntegrityHash = new string('b', 64),
+            CreatedAt = now, CreatedById = actorId
+        };
         var foreignBudget = NewBudget(foreignBudgetId, foreignTenantId, foreignDepartmentId,
             foreignActorId, "PB-SQL-FOREIGN", 100m);
         var foreignRequisition = NewRequisition(foreignRequisitionId, foreignTenantId, foreignActorId,
@@ -137,7 +257,7 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
             OriginalBidAmount = 300m, AwardedAmount = 300m, Currency = "GHS",
             AwardedById = actorId, Status = "ContractSigned", CreatedAt = now
         };
-        context.AddRange(budget, requisition, foreignBudget, foreignRequisition,
+        context.AddRange(budget, requisition, sourcingRelease, foreignBudget, foreignRequisition,
             foreignCommitment, foreignFormalEntry, partner, tender, tenderBid, tenderAward);
         await context.SaveChangesAsync();
 
@@ -145,6 +265,21 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         using var unitOfWork = new UnitOfWork(context);
         var reservationStore = new ProcurementBudgetReservationStore(context);
         var access = new Mock<IProcurementAccessControlService>();
+        access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string _, CancellationToken _) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "CAPABILITY_ALLOWED",
+                    Message = "The TDC procurement officer capability is available.",
+                    ActorUserId = actorId,
+                    TenantId = tenantId,
+                    PermissionCode = request.PermissionCode,
+                    EvaluatedAtUtc = DateTime.UtcNow
+                });
         var controlEvents = new Mock<IProcurementControlEventService>();
         controlEvents.Setup(item => item.RecordAsync(
                 It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
@@ -156,24 +291,21 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
 
         await unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
 
-        // FR-PR-005: PR submission protects exposure as a reservation, not a
-        // formal Finance commitment. Replaying submission must not reserve twice.
-        var reservation = await reservationService.ReserveAsync(requisition, "sql-pr-reserve");
-        reservation.CanReserve.Should().BeTrue();
-        await unitOfWork.SaveChangesAsync();
-        var reservationReplay = await reservationService.ReserveAsync(requisition, "sql-pr-reserve-retry");
-        reservationReplay.CommitmentId.Should().Be(reservation.CommitmentId);
-        await unitOfWork.SaveChangesAsync();
+        // Submission/approval readiness is read-only. The reservation begins
+        // only inside the final downstream approval transaction.
+        var readiness = await reservationService.GetDownstreamReadinessAsync(
+            requisition.Id, 300m, "GHS");
+        readiness.CanReserve.Should().BeTrue();
 
         context.ChangeTracker.Clear();
         var afterReservation = await context.ProcurementBudgets.IgnoreQueryFilters()
             .SingleAsync(item => item.Id == budgetId);
-        afterReservation.ReservedAmount.Should().Be(1000m);
+        afterReservation.ReservedAmount.Should().Be(0m);
         afterReservation.CommittedAmount.Should().Be(0m);
         afterReservation.UtilizedAmount.Should().Be(0m);
-        afterReservation.RemainingAmount.Should().Be(0m);
+        afterReservation.RemainingAmount.Should().Be(1000m);
         (await context.ProcurementBudgetCommitments.IgnoreQueryFilters()
-            .CountAsync(item => item.PurchaseRequisitionId == requisitionId)).Should().Be(1);
+            .CountAsync(item => item.PurchaseRequisitionId == requisitionId)).Should().Be(0);
         (await context.ProcurementBudgetCommitmentLedgerEntries.IgnoreQueryFilters()
             .CountAsync(item => item.PurchaseRequisitionId == requisitionId)).Should().Be(0);
 
@@ -209,20 +341,43 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
             Currency = "GHS", GrossCertifiedAmount = 50m, NetCertifiedAmount = 50m,
             IssueDate = now, PreparedAt = now, CreatedAt = now, CreatedById = actorId
         };
+        var postReleaseCertificate = new ProjectPaymentCertificate
+        {
+            Id = postReleaseCertificateId, TenantId = tenantId, ProjectId = projectId,
+            ContractId = contractId, ClientRequestId = Guid.NewGuid(),
+            CertificateNumber = "CERT-SQL-POST-RELEASE",
+            Title = "SQL post-release certificate probe",
+            Status = ProjectPaymentCertificateStatuses.Approved,
+            ApprovalStatus = ProjectPaymentCertificateStatuses.Approved,
+            Currency = "GHS", GrossCertifiedAmount = 1m, NetCertifiedAmount = 1m,
+            IssueDate = now, PreparedAt = now, CreatedAt = now, CreatedById = actorId
+        };
         foreach (var purchaseOrder in new[] { poOne, poTwo, overCommittedPo, contractPo, contractPoOver })
+        {
             purchaseOrder.BusinessPartnerId = partnerId;
+            MakeGovernedDraft(purchaseOrder, sourcingRelease.Id);
+        }
         var receiptOne = Guid.NewGuid();
         var receiptTwo = Guid.NewGuid();
         var contractPoReceipt = Guid.NewGuid();
+        var contractPoFinalReceipt = Guid.NewGuid();
         var contractPoExcessReceipt = Guid.NewGuid();
-        context.AddRange(contract, project, certificate, poOne, poTwo, overCommittedPo, contractPo, contractPoOver,
+        context.AddRange(contract, project, certificate, postReleaseCertificate,
+            poOne, poTwo, overCommittedPo, contractPo, contractPoOver,
             NewReceipt(receiptOne, tenantId, poOne.Id, "REC-SQL-001", actorId),
             NewReceipt(receiptTwo, tenantId, poTwo.Id, "REC-SQL-002", actorId),
             NewReceipt(contractPoReceipt, tenantId, contractPo.Id, "REC-SQL-CONTRACT", actorId),
+            NewReceipt(contractPoFinalReceipt, tenantId, contractPo.Id, "REC-SQL-CONTRACT-FINAL", actorId),
             NewReceipt(contractPoExcessReceipt, tenantId, contractPo.Id, "REC-SQL-CONTRACT-OVER", actorId));
         await unitOfWork.SaveChangesAsync();
 
+        var poOneReservation = await reservationService.ReserveForDownstreamAsync(
+            requisition, 300m, "GHS", "procurement.purchase-order.approve", "sql-po-1-reserve");
+        poOneReservation.CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
         var formalOne = await lifecycle.CommitPurchaseOrderAsync(poOne, "sql-po-1");
+        await unitOfWork.SaveChangesAsync();
+        poOne.Status = "Approved";
         await unitOfWork.SaveChangesAsync();
         var formalOneReplay = await lifecycle.CommitPurchaseOrderAsync(poOne, "sql-po-1-retry");
         formalOneReplay.Id.Should().Be(formalOne.Id);
@@ -234,22 +389,45 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
             conflictingPoReplay, "sql-po-1-conflict");
         (await conflictingPo.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
             .Which.Code.Should().Be("BUDGET_COMMITMENT_IDEMPOTENCY_CONFLICT");
+        var poTwoReservation = await reservationService.ReserveForDownstreamAsync(
+            requisition, 700m, "GHS", "procurement.purchase-order.approve", "sql-po-2-reserve");
+        poTwoReservation.CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
         await lifecycle.CommitPurchaseOrderAsync(poTwo, "sql-po-2");
         await unitOfWork.SaveChangesAsync();
+        poTwo.Status = "Approved";
+        await unitOfWork.SaveChangesAsync();
 
+        var contractReservation = await reservationService.ReserveForDownstreamAsync(
+            requisition, 1000m, "GHS", "procurement.purchase-order.approve", "sql-contract-reserve");
+        contractReservation.CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
         var contractFormal = await lifecycle.CommitContractAsync(contract, "sql-contract");
         await unitOfWork.SaveChangesAsync();
         var contractFormalReplay = await lifecycle.CommitContractAsync(contract, "sql-contract-retry");
         contractFormalReplay.Id.Should().Be(contractFormal.Id);
         await unitOfWork.SaveChangesAsync();
 
+        var overCommitReadiness = await reservationService.ReserveForDownstreamAsync(
+            requisition, 1001m, "GHS", "procurement.purchase-order.approve", "sql-over-reserve");
+        overCommitReadiness.CanReserve.Should().BeFalse();
         var overCommit = async () => await lifecycle.CommitPurchaseOrderAsync(overCommittedPo, "sql-over");
         (await overCommit.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
             .Which.Code.Should().Be("BUDGET_RESERVATION_EXCEEDED");
 
         // A child PO under an already committed contract is an allocation only;
-        // it must not commit the same GHS exposure a second time.
+        // it must not commit the same GHS exposure a second time. The parent
+        // formal commitment remains authoritative after the original budget
+        // period closes, so the allocation trigger must not revalidate current
+        // budget eligibility.
+        var expiredBudget = await context.ProcurementBudgets.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == budgetId);
+        expiredBudget.Status = "Closed";
+        expiredBudget.ExpiryDate = DateTime.UtcNow.AddDays(-1);
+        await unitOfWork.SaveChangesAsync();
         var allocation = await lifecycle.CommitPurchaseOrderAsync(contractPo, "sql-contract-po");
+        await unitOfWork.SaveChangesAsync();
+        contractPo.Status = "Approved";
         await unitOfWork.SaveChangesAsync();
         var allocationReplay = await lifecycle.CommitPurchaseOrderAsync(contractPo, "sql-contract-po-retry");
         allocationReplay.Id.Should().Be(allocation.Id);
@@ -257,6 +435,11 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         var overAllocation = async () => await lifecycle.CommitPurchaseOrderAsync(contractPoOver, "sql-contract-po-over");
         (await overAllocation.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
             .Which.Code.Should().Be("PO_CONTRACT_COMMITMENT_EXCEEDED");
+        var zeroUtilizationClose = async () => await lifecycle.ReleaseUnusedContractAsync(
+            contractId, "sql-contract-po-zero-close");
+        (await zeroUtilizationClose.Should()
+                .ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
+            .Which.Code.Should().Be("CONTRACT_CHILD_PO_ALLOCATION_OUTSTANDING");
 
         // A source belonging to another tenant must not resolve through the
         // current tenant's lifecycle service.
@@ -295,7 +478,16 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
             poTwo.Id, receiptTwo, "REC-SQL-002", 400m, "sql-receipt-2");
         await unitOfWork.SaveChangesAsync();
         await lifecycle.UtilizePurchaseOrderAsync(
-            contractPo.Id, contractPoReceipt, "REC-SQL-CONTRACT", 250m, "sql-contract-receipt");
+            contractPo.Id, contractPoReceipt, "REC-SQL-CONTRACT", 100m, "sql-contract-receipt");
+        await unitOfWork.SaveChangesAsync();
+        var partialUtilizationClose = async () => await lifecycle.ReleaseUnusedContractAsync(
+            contractId, "sql-contract-po-partial-close");
+        (await partialUtilizationClose.Should()
+                .ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
+            .Which.Code.Should().Be("CONTRACT_CHILD_PO_ALLOCATION_OUTSTANDING");
+        await lifecycle.UtilizePurchaseOrderAsync(
+            contractPo.Id, contractPoFinalReceipt, "REC-SQL-CONTRACT-FINAL", 150m,
+            "sql-contract-receipt-final");
         await unitOfWork.SaveChangesAsync();
         var overChildAllocation = async () => await lifecycle.UtilizePurchaseOrderAsync(
             contractPo.Id, contractPoExcessReceipt, "REC-SQL-CONTRACT-OVER", 1m,
@@ -303,10 +495,10 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         (await overChildAllocation.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
             .Which.Code.Should().Be("PO_CONTRACT_ALLOCATION_EXCEEDED");
         var certificateUtilization = await lifecycle.UtilizeContractCertificateAsync(
-            contractId, certificateId, "CERT-SQL-001", 50m, "sql-certificate");
+            contractId, certificateId, "CERT-SQL-001", 25m, "sql-certificate");
         await unitOfWork.SaveChangesAsync();
         var certificateReplay = await lifecycle.UtilizeContractCertificateAsync(
-            contractId, certificateId, "CERT-SQL-001", 50m, "sql-certificate-retry");
+            contractId, certificateId, "CERT-SQL-001", 25m, "sql-certificate-retry");
         certificateReplay.Id.Should().Be(certificateUtilization.Id);
         await unitOfWork.SaveChangesAsync();
         var conflictingCertificate = async () => await lifecycle.UtilizeContractCertificateAsync(
@@ -314,10 +506,419 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         (await conflictingCertificate.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
             .Which.Code.Should().Be("BUDGET_UTILIZATION_IDEMPOTENCY_CONFLICT");
 
+        // Works completion releases only the unused GHS 25 contract balance.
+        // Prove that a later terminal-mutation failure rolls back both Finance
+        // and its immutable release evidence before applying the successful
+        // completion and replaying it exactly once.
+        var transaction = context.Database.CurrentTransaction!;
+        await transaction.CreateSavepointAsync("BeforeWorksCloseout");
+        var rolledBackRelease = await lifecycle.ReleaseUnusedContractAsync(
+            contractId, "sql-works-closeout-rollback");
+        rolledBackRelease.Should().NotBeNull();
+        rolledBackRelease!.Amount.Should().Be(25m);
+        await unitOfWork.SaveChangesAsync();
+        var rolledBackContract = await context.Contracts.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == contractId);
+        rolledBackContract.Status = "Completed";
+        await unitOfWork.SaveChangesAsync();
+        await transaction.RollbackToSavepointAsync("BeforeWorksCloseout");
+        context.ChangeTracker.Clear();
+        (await context.ProcurementBudgetCommitmentLedgerEntries.IgnoreQueryFilters()
+            .CountAsync(item =>
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                item.SourceType == "Contract" &&
+                item.SourceId == contractId)).Should().Be(0);
+        (await context.Contracts.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == contractId)).Status.Should().Be("Active");
+        (await context.ProcurementBudgets.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == budgetId)).CommittedAmount.Should().Be(25m);
+
+        var contractRelease = await lifecycle.ReleaseUnusedContractAsync(
+            contractId, "sql-works-closeout");
+        contractRelease.Should().NotBeNull();
+        contractRelease!.Amount.Should().Be(25m);
+        await unitOfWork.SaveChangesAsync();
+        var completedContract = await context.Contracts.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == contractId);
+        completedContract.Status = "Completed";
+        await unitOfWork.SaveChangesAsync();
+        var contractReleaseReplay = await lifecycle.ReleaseUnusedContractAsync(
+            contractId, "sql-works-closeout-replay");
+        contractReleaseReplay!.Id.Should().Be(contractRelease.Id);
+        await unitOfWork.SaveChangesAsync();
+        var postReleaseAllocationPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, requisitionId,
+            "PO-SQL-CONTRACT-POST-RELEASE", 26m);
+        postReleaseAllocationPo.ContractId = contractId;
+        postReleaseAllocationPo.BusinessPartnerId = partnerId;
+        MakeGovernedDraft(postReleaseAllocationPo, sourcingRelease.Id);
+        context.Add(postReleaseAllocationPo);
+        await unitOfWork.SaveChangesAsync();
+        var allocateReleasedParentCapacity = async () =>
+            await lifecycle.CommitPurchaseOrderAsync(
+                postReleaseAllocationPo, "sql-contract-post-release-allocation");
+        (await allocateReleasedParentCapacity.Should()
+                .ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
+            .Which.Code.Should().Be("PO_CONTRACT_COMMITMENT_EXCEEDED");
+        var utilizeReleasedContractCapacity = async () =>
+            await lifecycle.UtilizeContractCertificateAsync(
+                contractId,
+                postReleaseCertificateId,
+                postReleaseCertificate.CertificateNumber,
+                1m,
+                "sql-post-release-certificate");
+        (await utilizeReleasedContractCapacity.Should()
+                .ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
+            .Which.Code.Should().Be("FORMAL_BUDGET_COMMITMENT_EXCEEDED");
+
         var foreignUtilization = async () => await lifecycle.UtilizePurchaseOrderAsync(
             foreignFormalPoId, Guid.NewGuid(), "REC-SQL-FOREIGN", 100m, "sql-foreign-receipt");
         (await foreignUtilization.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>())
             .Which.Code.Should().Be("FORMAL_BUDGET_COMMITMENT_REQUIRED");
+
+        // A fully unused closeout returns Finance capacity but terminalizes
+        // this PR envelope. Replacement procurement must start from a newly
+        // approved or formally amended requisition; advisory and final paths
+        // must agree and the SQL trigger must not permit a free reopen.
+        var releasedBudget = NewBudget(
+            Guid.NewGuid(), tenantId, departmentId, actorId, "PB-SQL-RELEASED", 100m);
+        var releasedRequisition = NewRequisition(
+            Guid.NewGuid(), tenantId, actorId, releasedBudget.Id,
+            releasedBudget.BudgetCode, "PR-SQL-RELEASED", 100m);
+        releasedRequisition.Status = "Approved";
+        var releasedTender = new Tender
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            TenderNumber = "TND-SQL-RELEASED", Title = "Unused replacement guard",
+            SourcePurchaseRequisitionId = releasedRequisition.Id,
+            CreatedAt = now, CreatedById = actorId
+        };
+        var releasedTenderBid = new TenderBid
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TenderId = releasedTender.Id,
+            BusinessPartnerId = partnerId, BidNumber = "BID-SQL-RELEASED",
+            Status = "Accepted", TotalBidAmount = 100m, Currency = "GHS",
+            CreatedAt = now
+        };
+        var releasedTenderAward = new TenderAward
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TenderId = releasedTender.Id,
+            TenderBidId = releasedTenderBid.Id, BusinessPartnerId = partnerId,
+            OriginalBidAmount = 100m, AwardedAmount = 100m, Currency = "GHS",
+            AwardedById = actorId, Status = "ContractSigned", CreatedAt = now
+        };
+        var fullyUnusedContract = new Contract
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TenderId = releasedTender.Id,
+            TenderAwardId = releasedTenderAward.Id, BusinessPartnerId = partnerId,
+            ContractNumber = "CON-SQL-FULLY-UNUSED",
+            ContractTitle = "Fully unused replacement guard",
+            ContractValue = 100m, Currency = "GHS", Status = "Active",
+            CreatedAt = now, CreatedById = actorId
+        };
+        context.AddRange(
+            releasedBudget, releasedRequisition, releasedTender, releasedTenderBid,
+            releasedTenderAward, fullyUnusedContract);
+        await unitOfWork.SaveChangesAsync();
+        (await reservationService.ReserveForDownstreamAsync(
+            releasedRequisition, 100m, "GHS",
+            "procurement.contract.approve", "sql-released-reserve"))
+            .CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
+        await lifecycle.CommitContractAsync(
+            fullyUnusedContract, "sql-released-contract-commit");
+        await unitOfWork.SaveChangesAsync();
+        (await lifecycle.ReleaseUnusedContractAsync(
+            fullyUnusedContract.Id, "sql-released-contract-close"))!
+            .Amount.Should().Be(100m);
+        await unitOfWork.SaveChangesAsync();
+        var releasedAdvisory = await reservationService.GetDownstreamReadinessAsync(
+            releasedRequisition.Id, 50m, "GHS");
+        var releasedFinal = await reservationService.ReserveForDownstreamAsync(
+            releasedRequisition, 50m, "GHS",
+            "procurement.contract.approve", "sql-released-replacement");
+        releasedAdvisory.CanReserve.Should().BeFalse();
+        releasedAdvisory.DecisionCode.Should().Be("PR_BUDGET_COMMITMENT_RELEASED");
+        releasedFinal.CanReserve.Should().BeFalse();
+        releasedFinal.DecisionCode.Should().Be("PR_BUDGET_COMMITMENT_RELEASED");
+        (await context.ProcurementBudgetCommitments.IgnoreQueryFilters()
+            .SingleAsync(item =>
+                item.PurchaseRequisitionId == releasedRequisition.Id))
+            .Status.Should().Be(ProcurementBudgetCommitmentStatus.Released);
+
+        // A generic no-exposure PR release must zero its aggregate under the
+        // exact release session context; the lifecycle trigger rejects an
+        // unauthenticated Reserved -> Released amount mutation.
+        var prReleaseBudget = NewBudget(
+            Guid.NewGuid(), tenantId, departmentId, actorId, "PB-SQL-PR-RELEASE", 80m);
+        var prReleaseRequisition = NewRequisition(
+            Guid.NewGuid(), tenantId, actorId, prReleaseBudget.Id,
+            prReleaseBudget.BudgetCode, "PR-SQL-GENERIC-RELEASE", 80m);
+        prReleaseRequisition.Status = "Approved";
+        context.AddRange(prReleaseBudget, prReleaseRequisition);
+        await unitOfWork.SaveChangesAsync();
+        (await reservationService.ReserveForDownstreamAsync(
+            prReleaseRequisition, 80m, "GHS",
+            "procurement.purchase-order.approve", "sql-pr-release-reserve"))
+            .CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
+        (await reservationService.ReleaseAsync(
+            prReleaseRequisition,
+            "Approved requisition withdrawn before downstream exposure.",
+            "procurement.requisition.approve",
+            "sql-pr-release"))
+            .Released.Should().BeTrue();
+        var prReleasedCommitment = await context.ProcurementBudgetCommitments
+            .SingleAsync(item => item.PurchaseRequisitionId == prReleaseRequisition.Id);
+        prReleasedCommitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Released);
+        prReleasedCommitment.ReservedAmount.Should().Be(0m);
+        prReleasedCommitment.FormallyCommittedAmount.Should().Be(0m);
+        prReleasedCommitment.BudgetReservedAfter.Should().Be(0m);
+        prReleaseBudget.ReservedAmount.Should().Be(0m);
+
+        // Retain one ordinary reservation through commit so each direct SQL
+        // lifecycle-guard probe can run in its own autocommit statement. A
+        // trigger THROW may abort its ambient transaction, so running these
+        // probes inside the lifecycle setup transaction would invalidate all
+        // later assertions instead of independently certifying each guard.
+        var mutationProbeBudget = NewBudget(
+            Guid.NewGuid(), tenantId, departmentId, actorId, "PB-SQL-MUTATION-PROBE", 80m);
+        var mutationProbeRequisition = NewRequisition(
+            Guid.NewGuid(), tenantId, actorId, mutationProbeBudget.Id,
+            mutationProbeBudget.BudgetCode, "PR-SQL-MUTATION-PROBE", 80m);
+        mutationProbeRequisition.Status = "Approved";
+        var mutationProbeRelease = new ProcurementRequisitionSourcingRelease
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PurchaseRequisitionId = mutationProbeRequisition.Id, AttemptNumber = 1,
+            ReleaseReference = "PR-SQL-MUTATION-PROBE/REL/A1",
+            ReleasedAtUtc = now, ReleasedById = actorId,
+            ReleasedByName = "Procurement SQL Actor",
+            ReleaseReason = "SQL lifecycle mutation guard verification",
+            CorrelationId = "sql-mutation-probe-release",
+            ControlFingerprint = new string('c', 64),
+            SnapshotJson = "{}", IntegrityHash = new string('d', 64),
+            CreatedAt = now, CreatedById = actorId
+        };
+        context.AddRange(mutationProbeBudget, mutationProbeRequisition);
+        await unitOfWork.SaveChangesAsync();
+        (await reservationService.ReserveForDownstreamAsync(
+            mutationProbeRequisition, 80m, "GHS",
+            "procurement.purchase-order.approve", "sql-mutation-probe-reserve"))
+            .CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
+        var mutationProbeCommitment = await context.ProcurementBudgetCommitments
+            .SingleAsync(item =>
+                item.PurchaseRequisitionId == mutationProbeRequisition.Id);
+        var mutationProbeCommitmentId = mutationProbeCommitment.Id;
+        mutationProbeRelease.BudgetCommitmentId = mutationProbeCommitment.Id;
+        mutationProbeRelease.BudgetCommitmentReference =
+            mutationProbeCommitment.ReservationReference;
+        context.Add(mutationProbeRelease);
+        await unitOfWork.SaveChangesAsync();
+
+        var frameworkProfile = new ProcurementConfigurationProfile
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            ProfileCode = "PROC-SQL-FRAMEWORK", Name = "SQL framework probe profile",
+            Version = 1, EffectiveFrom = now.AddDays(-1), CreatedAt = now
+        };
+        var frameworkPolicy = new ProcurementPolicySet
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            Code = "PROC-SQL-FRAMEWORK", Name = "SQL framework probe policy",
+            Version = 1, SourceConfigurationProfileId = frameworkProfile.Id,
+            DefaultCurrencyCode = "GHS", EffectiveFrom = now.AddDays(-1),
+            CreatedAt = now
+        };
+        var frameworkMethodRule = new ProcurementPolicyMethodRule
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, PolicySetId = frameworkPolicy.Id,
+            RuleCode = "METHOD-RFQ-SQL", Name = "SQL framework RFQ method",
+            Category = ProcurementCategoryClass.Goods,
+            Method = ProcurementMethodType.RequestForQuotation,
+            IsAllowed = true, RequiresCompetition = true, MinimumQuotationCount = 1,
+            SourceDecisionKey = "DEC-001", IsEnabled = true,
+            EffectiveFrom = now.AddDays(-1), CreatedAt = now
+        };
+        var frameworkThresholdRule = new ProcurementPolicyThresholdRule
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, PolicySetId = frameworkPolicy.Id,
+            RuleCode = "THRESHOLD-RFQ-SQL", Name = "SQL framework threshold",
+            Category = ProcurementCategoryClass.Goods,
+            Method = ProcurementMethodType.RequestForQuotation,
+            CurrencyCode = "GHS", LowerBound = 0m, UpperBound = 80m,
+            StatutoryReference = "SQL framework trigger certification",
+            SourceDecisionKey = "DEC-001", IsEnabled = true,
+            EffectiveFrom = now.AddDays(-1), CreatedAt = now
+        };
+        var frameworkSourcingCase = new ProcurementSourcingCase
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PurchaseRequisitionId = mutationProbeRequisition.Id,
+            SourcingReleaseId = mutationProbeRelease.Id,
+            CaseSequence = 1, CaseNumber = "CASE-SQL-FRAMEWORK",
+            Category = ProcurementCategoryClass.Goods,
+            RecommendedMethod = ProcurementMethodType.RequestForQuotation,
+            SelectedMethod = ProcurementMethodType.RequestForQuotation,
+            MethodSelectionBasis = ProcurementSourcingMethodSelectionBasis.AutomaticRecommendation,
+            EstimatedValue = 80m, CurrencyCode = "GHS",
+            PolicySetId = frameworkPolicy.Id, PolicyCode = frameworkPolicy.Code,
+            PolicyVersion = frameworkPolicy.Version,
+            MethodRuleId = frameworkMethodRule.Id,
+            MethodRuleCode = frameworkMethodRule.RuleCode,
+            ThresholdRuleId = frameworkThresholdRule.Id,
+            ThresholdRuleCode = frameworkThresholdRule.RuleCode,
+            Justification = "SQL Server framework commitment trigger certification.",
+            Status = ProcurementSourcingCaseStatus.Ready,
+            CreatedByName = "Procurement SQL Actor",
+            SourceControlFingerprint = new string('e', 64),
+            CaseFingerprint = new string('f', 64), SnapshotJson = "{}",
+            IntegrityHash = new string('1', 64), CreatedAt = now, CreatedById = actorId
+        };
+        var frameworkReadiness = new ProcurementAwardReadinessDecision
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            SourceType = ProcurementAwardReadinessSourceType.RequestForQuotation,
+            SourceId = frameworkSourcingCase.Id,
+            SourceReference = frameworkSourcingCase.CaseNumber,
+            Method = ProcurementMethodType.RequestForQuotation,
+            DecisionSequence = 1, Status = ProcurementAwardReadinessDecisionStatus.Ready,
+            RecommendationSubjectType = "BusinessPartner",
+            RecommendedBusinessPartnerIdsJson = $"[\"{partnerId}\"]",
+            SourceIntegrityHash = new string('2', 64),
+            IntegrityHash = new string('3', 64),
+            IdempotencyKey = "sql-framework-readiness",
+            CorrelationId = "sql-framework-readiness",
+            EvaluatedAtUtc = now, EvaluatedByUserId = actorId,
+            EvaluatedByName = "Procurement SQL Actor",
+            CreatedAt = now, CreatedById = actorId
+        };
+        context.AddRange(
+            frameworkProfile, frameworkPolicy, frameworkMethodRule,
+            frameworkThresholdRule, frameworkSourcingCase, frameworkReadiness);
+        await unitOfWork.SaveChangesAsync();
+
+        var wrongAmountPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id,
+            "PO-SQL-WRONG-AMOUNT", 2m);
+        var wrongCurrencyPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id,
+            "PO-SQL-WRONG-CURRENCY", 2m);
+        var frameworkFinalPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id,
+            "PO-SQL-FRAMEWORK-FINAL", 2m);
+        foreach (var governedProbe in new[]
+                 {
+                     wrongAmountPo, wrongCurrencyPo, frameworkFinalPo
+                 })
+        {
+            governedProbe.BusinessPartnerId = partnerId;
+            MakeGovernedDraft(governedProbe, mutationProbeRelease.Id);
+        }
+        frameworkFinalPo.ProcurementSourceType =
+            ProcurementPurchaseOrderSourceType.FrameworkCallOff;
+        frameworkFinalPo.SourcingCaseId = frameworkSourcingCase.Id;
+        frameworkFinalPo.AwardReadinessDecisionId = frameworkReadiness.Id;
+        context.AddRange(wrongAmountPo, wrongCurrencyPo, frameworkFinalPo);
+        await unitOfWork.SaveChangesAsync();
+        await lifecycle.CommitPurchaseOrderAsync(
+            wrongAmountPo, "sql-wrong-amount-formal");
+        await unitOfWork.SaveChangesAsync();
+        await lifecycle.CommitPurchaseOrderAsync(
+            wrongCurrencyPo, "sql-wrong-currency-formal");
+        await unitOfWork.SaveChangesAsync();
+        await lifecycle.CommitPurchaseOrderAsync(
+            frameworkFinalPo, "sql-framework-formal");
+        await unitOfWork.SaveChangesAsync();
+        frameworkFinalPo.Status = "Approved";
+        await unitOfWork.SaveChangesAsync();
+
+        // Full utilization alone keeps the shared envelope active. The
+        // explicit governed close is the terminal event and remains replay-safe
+        // without inventing a zero-value Release ledger row.
+        var fullCloseBudget = NewBudget(
+            Guid.NewGuid(), tenantId, departmentId, actorId, "PB-SQL-FULL-CLOSE", 100m);
+        var fullCloseRequisition = NewRequisition(
+            Guid.NewGuid(), tenantId, actorId, fullCloseBudget.Id,
+            fullCloseBudget.BudgetCode, "PR-SQL-FULL-CLOSE", 100m);
+        fullCloseRequisition.Status = "Approved";
+        var fullCloseTender = new Tender
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            TenderNumber = "TND-SQL-FULL-CLOSE", Title = "Fully utilized close proof",
+            SourcePurchaseRequisitionId = fullCloseRequisition.Id,
+            CreatedAt = now, CreatedById = actorId
+        };
+        var fullCloseTenderBid = new TenderBid
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TenderId = fullCloseTender.Id,
+            BusinessPartnerId = partnerId, BidNumber = "BID-SQL-FULL-CLOSE",
+            Status = "Accepted", TotalBidAmount = 100m, Currency = "GHS",
+            CreatedAt = now
+        };
+        var fullCloseTenderAward = new TenderAward
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TenderId = fullCloseTender.Id,
+            TenderBidId = fullCloseTenderBid.Id, BusinessPartnerId = partnerId,
+            OriginalBidAmount = 100m, AwardedAmount = 100m, Currency = "GHS",
+            AwardedById = actorId, Status = "ContractSigned", CreatedAt = now
+        };
+        var fullCloseContract = new Contract
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TenderId = fullCloseTender.Id,
+            TenderAwardId = fullCloseTenderAward.Id, BusinessPartnerId = partnerId,
+            ContractNumber = "CON-SQL-FULL-CLOSE",
+            ContractTitle = "Fully utilized close proof",
+            ContractValue = 100m, Currency = "GHS", Status = "Active",
+            CreatedAt = now, CreatedById = actorId
+        };
+        var fullCloseProject = new Project
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            ProjectCode = "PRJ-SQL-FULL-CLOSE", Title = "Fully utilized close proof",
+            Status = ProjectStatuses.InProgress, ContractId = fullCloseContract.Id,
+            TenderId = fullCloseTender.Id, DepartmentId = departmentId,
+            BaseCurrencyCode = "GHS", CreatedAt = now, CreatedById = actorId
+        };
+        var fullCloseCertificate = new ProjectPaymentCertificate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = fullCloseProject.Id,
+            ContractId = fullCloseContract.Id, ClientRequestId = Guid.NewGuid(),
+            CertificateNumber = "CERT-SQL-FULL-CLOSE", Title = "Full utilization",
+            Currency = "GHS", GrossCertifiedAmount = 100m,
+            CreatedAt = now, CreatedById = actorId
+        };
+        context.AddRange(
+            fullCloseBudget, fullCloseRequisition, fullCloseTender,
+            fullCloseTenderBid, fullCloseTenderAward, fullCloseContract,
+            fullCloseProject, fullCloseCertificate);
+        await unitOfWork.SaveChangesAsync();
+        (await reservationService.ReserveForDownstreamAsync(
+            fullCloseRequisition, 100m, "GHS",
+            "procurement.contract.approve", "sql-full-close-reserve"))
+            .CanReserve.Should().BeTrue();
+        await unitOfWork.SaveChangesAsync();
+        await lifecycle.CommitContractAsync(fullCloseContract, "sql-full-close-commit");
+        await unitOfWork.SaveChangesAsync();
+        await lifecycle.UtilizeContractCertificateAsync(
+            fullCloseContract.Id, fullCloseCertificate.Id,
+            fullCloseCertificate.CertificateNumber, 100m,
+            "sql-full-close-utilize");
+        await unitOfWork.SaveChangesAsync();
+        var fullCloseCommitment = await context.ProcurementBudgetCommitments
+            .SingleAsync(item => item.PurchaseRequisitionId == fullCloseRequisition.Id);
+        fullCloseCommitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Reserved);
+        (await lifecycle.ReleaseUnusedContractAsync(
+            fullCloseContract.Id, "sql-full-close")).Should().BeNull();
+        fullCloseCommitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Consumed);
+        fullCloseCommitment.ConsumedAtUtc.Should().NotBeNull();
+        (await lifecycle.ReleaseUnusedContractAsync(
+            fullCloseContract.Id, "sql-full-close-replay")).Should().BeNull();
+        (await context.ProcurementBudgetCommitmentLedgerEntries.CountAsync(item =>
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                item.SourceId == fullCloseContract.Id))
+            .Should().Be(0);
 
         await unitOfWork.CommitAsync();
         context.ChangeTracker.Clear();
@@ -326,13 +927,15 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
             .SingleAsync(item => item.Id == budgetId);
         finalBudget.ReservedAmount.Should().Be(0m);
         finalBudget.CommittedAmount.Should().Be(0m);
-        finalBudget.UtilizedAmount.Should().Be(1000m);
-        finalBudget.RemainingAmount.Should().Be(0m);
+        finalBudget.UtilizedAmount.Should().Be(975m);
+        finalBudget.RemainingAmount.Should().Be(25m);
         var finalCommitment = await context.ProcurementBudgetCommitments.IgnoreQueryFilters()
             .SingleAsync(item => item.PurchaseRequisitionId == requisitionId);
-        finalCommitment.FormallyCommittedAmount.Should().Be(1000m);
-        finalCommitment.UtilizedAmount.Should().Be(1000m);
+        finalCommitment.ReservedAmount.Should().Be(975m);
+        finalCommitment.FormallyCommittedAmount.Should().Be(975m);
+        finalCommitment.UtilizedAmount.Should().Be(975m);
         finalCommitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Consumed);
+        finalCommitment.ConsumedAtUtc.Should().NotBeNull();
         var ledger = await context.ProcurementBudgetCommitmentLedgerEntries.IgnoreQueryFilters()
             .Where(item => item.PurchaseRequisitionId == requisitionId).ToListAsync();
         ledger.Count(item => item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment)
@@ -340,11 +943,768 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         ledger.Count(item => item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation)
             .Should().Be(1);
         ledger.Count(item => item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Utilization)
-            .Should().Be(4);
+            .Should().Be(5);
+        ledger.Count(item => item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release)
+            .Should().Be(1);
         ledger.Where(item => item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment)
             .Sum(item => item.Amount).Should().Be(1000m);
         ledger.Where(item => item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Utilization)
-            .Sum(item => item.Amount).Should().Be(1000m);
+            .Sum(item => item.Amount).Should().Be(975m);
+
+        async Task AssertLifecycleGuardAsync(string sql, params SqlParameter[] parameters)
+        {
+            var mutation = async () => await database.ExecuteAsync(sql, parameters);
+            (await mutation.Should().ThrowAsync<SqlException>())
+                .Which.Number.Should().Be(51022);
+        }
+
+        await AssertLifecycleGuardAsync(
+            "UPDATE dbo.ProcurementBudgetCommitments SET Status=2 WHERE Id=@id;",
+            new SqlParameter("@id", mutationProbeCommitmentId));
+        await AssertLifecycleGuardAsync(
+            "UPDATE dbo.ProcurementBudgetCommitments SET Status=3 WHERE Id=@id;",
+            new SqlParameter("@id", mutationProbeCommitmentId));
+        await AssertLifecycleGuardAsync(
+            "UPDATE dbo.ProcurementBudgetCommitments SET FormallyCommittedAmount=FormallyCommittedAmount+1 WHERE Id=@id;",
+            new SqlParameter("@id", mutationProbeCommitmentId));
+        await AssertLifecycleGuardAsync(
+            "UPDATE dbo.ProcurementBudgetCommitments SET UtilizedAmount=UtilizedAmount+1 WHERE Id=@id;",
+            new SqlParameter("@id", mutationProbeCommitmentId));
+
+        const string reservationPiggybackSql = """
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_TENANT_ID', @value=@tenant;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_REQUISITION_ID', @value=@requisition;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_COMMITMENT_ID', @value=@commitment;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_AMOUNT_BEFORE', @value=80;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_AMOUNT_AFTER', @value=81;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_SEQUENCE_BEFORE', @value=1;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_SEQUENCE_AFTER', @value=2;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_DOWNSTREAM_RESERVATION_CORRELATION_ID', @value=N'sql-reservation-aggregate-piggyback';
+            UPDATE dbo.ProcurementBudgetCommitments
+            SET ReservedAmount=81, FormallyCommittedAmount=1, UtilizedAmount=1,
+                ReservationSequence=2, CorrelationId=N'sql-reservation-aggregate-piggyback'
+            WHERE Id=@commitment;
+            """;
+        await AssertLifecycleGuardAsync(
+            reservationPiggybackSql,
+            new SqlParameter("@tenant", tenantId),
+            new SqlParameter("@requisition", mutationProbeRequisition.Id),
+            new SqlParameter("@commitment", mutationProbeCommitmentId));
+
+        const string releasePiggybackSql = """
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_REQUISITION_RELEASE_TENANT_ID', @value=@tenant;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_REQUISITION_RELEASE_REQUISITION_ID', @value=@requisition;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_REQUISITION_RELEASE_COMMITMENT_ID', @value=@commitment;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_REQUISITION_RELEASE_AMOUNT_BEFORE', @value=80;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_REQUISITION_RELEASE_SEQUENCE', @value=1;
+            EXEC sys.sp_set_session_context @key=N'PROCUREMENT_REQUISITION_RELEASE_CORRELATION_ID', @value=N'sql-release-aggregate-piggyback';
+            UPDATE dbo.ProcurementBudgetCommitments
+            SET ReservedAmount=0, FormallyCommittedAmount=1, UtilizedAmount=1,
+                Status=2, CorrelationId=N'sql-release-aggregate-piggyback'
+            WHERE Id=@commitment;
+            """;
+        await AssertLifecycleGuardAsync(
+            releasePiggybackSql,
+            new SqlParameter("@tenant", tenantId),
+            new SqlParameter("@requisition", mutationProbeRequisition.Id),
+            new SqlParameter("@commitment", mutationProbeCommitmentId));
+
+        // Certify the production SQL hard stop itself. Each probe begins in
+        // Draft so only the transition into final exposure invokes 52041.
+        var missingLedgerPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id, "PO-SQL-NO-LEDGER", 2m);
+        var nullSourcePo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id, "PO-SQL-NULL-SOURCE", 2m);
+        var foreignCommitmentPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id, "PO-SQL-FOREIGN-COMMIT", 2m);
+        var frameworkMissingLedgerPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id,
+            "PO-SQL-FRAMEWORK-NO-LEDGER", 2m);
+        var overParentPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, requisitionId, "PO-SQL-CONTRACT-OVER-TRIGGER", 51m);
+        overParentPo.ContractId = contractId;
+        foreach (var probe in new[]
+                 {
+                      missingLedgerPo, nullSourcePo, foreignCommitmentPo,
+                      frameworkMissingLedgerPo
+                  })
+        {
+            probe.BusinessPartnerId = partnerId;
+            MakeGovernedDraft(probe, mutationProbeRelease.Id);
+        }
+        overParentPo.BusinessPartnerId = partnerId;
+        MakeGovernedDraft(overParentPo, sourcingRelease.Id);
+        foreach (var frameworkProbe in new[]
+                 {
+                     frameworkMissingLedgerPo
+                 })
+        {
+            frameworkProbe.ProcurementSourceType =
+                ProcurementPurchaseOrderSourceType.FrameworkCallOff;
+            frameworkProbe.SourcingCaseId = frameworkSourcingCase.Id;
+            frameworkProbe.AwardReadinessDecisionId = frameworkReadiness.Id;
+        }
+        nullSourcePo.ProcurementSourceType = null;
+
+        ProcurementBudgetCommitmentLedgerEntry Exposure(
+            PurchaseOrder po,
+            ProcurementBudgetCommitment owner,
+            Guid ownerBudgetId,
+            Guid ownerRequisitionId,
+            decimal amount,
+            string currency,
+            ProcurementBudgetCommitmentLedgerEntryType entryType,
+            Guid? parentId = null) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = owner.TenantId,
+            ProcurementBudgetCommitmentId = owner.Id,
+            ProcurementBudgetId = ownerBudgetId,
+            PurchaseRequisitionId = ownerRequisitionId,
+            EntryType = entryType,
+            SourceType = "PurchaseOrder", SourceId = po.Id,
+            SourceReference = po.OrderNumber,
+            Amount = amount, Currency = currency,
+            FormalCommitmentEntryId = parentId,
+            OccurredAtUtc = DateTime.UtcNow,
+            ActorUserId = owner.TenantId == tenantId ? actorId : foreignActorId,
+            ActorName = "SQL trigger probe",
+            CorrelationId = $"sql-trigger-{po.Id:N}",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        context.AddRange(
+            missingLedgerPo, nullSourcePo, foreignCommitmentPo,
+            frameworkMissingLedgerPo,
+            overParentPo,
+            Exposure(foreignCommitmentPo, foreignCommitment, foreignBudgetId, foreignRequisitionId,
+                2m, "GHS", ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment),
+            Exposure(overParentPo, finalCommitment, budgetId, requisitionId,
+                51m, "GHS", ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation,
+                contractFormal.Id));
+        await context.SaveChangesAsync();
+
+        // The valid 250 allocation above succeeded while its budget was closed
+        // and expired. This additional 51 allocation must still fail because
+        // effective children exceed the parent's net 275 after its immutable
+        // 25 release, even if a stale external update leaves the contract Active.
+        await database.ExecuteAsync(
+            "UPDATE dbo.Contracts SET Status=N'Active' WHERE Id=@id;",
+            new SqlParameter("@id", contractId));
+        var overParentTransition = async () => await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Approved' WHERE Id=@id;",
+            new SqlParameter("@id", overParentPo.Id));
+        (await overParentTransition.Should().ThrowAsync<SqlException>())
+            .Which.Number.Should().Be(52041);
+        await database.ExecuteAsync(
+            "UPDATE dbo.Contracts SET Status=N'Completed' WHERE Id=@id;",
+            new SqlParameter("@id", contractId));
+
+        // Each draft was formally projected through the real lifecycle. These
+        // post-projection mutations isolate the per-PO amount/currency checks
+        // without corrupting the aggregate projection itself.
+        await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET TotalAmount=3 WHERE Id=@id;",
+            new SqlParameter("@id", wrongAmountPo.Id));
+        await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Currency=N'USD' WHERE Id=@id;",
+            new SqlParameter("@id", wrongCurrencyPo.Id));
+
+        foreach (var invalidPo in new[]
+                 {
+                      missingLedgerPo, nullSourcePo, wrongAmountPo, wrongCurrencyPo,
+                      foreignCommitmentPo, frameworkMissingLedgerPo
+                  })
+        {
+            var transition = async () => await database.ExecuteAsync(
+                "UPDATE dbo.PurchaseOrders SET Status=N'Approved' WHERE Id=@id;",
+                new SqlParameter("@id", invalidPo.Id));
+            (await transition.Should().ThrowAsync<SqlException>())
+                .Which.Number.Should().Be(52041);
+        }
+
+        // The dedicated source-4 route used the real lifecycle projection and
+        // protects that final exposure from a generic cancellation.
+        var finalExitWithoutReversal = async () => await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Cancelled' WHERE Id=@id;",
+            new SqlParameter("@id", frameworkFinalPo.Id));
+        (await finalExitWithoutReversal.Should().ThrowAsync<SqlException>())
+            .Which.Number.Should().Be(52041);
+
+        // Non-exposure workflow exits remain ordinary status transitions.
+        await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Cancelled' WHERE Id=@id;",
+            new SqlParameter("@id", missingLedgerPo.Id));
+        await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Pending Approval' WHERE Id=@id;",
+            new SqlParameter("@id", wrongAmountPo.Id));
+        await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Rejected' WHERE Id=@id;",
+            new SqlParameter("@id", wrongAmountPo.Id));
+
+        // A different PR under the same Finance budget cannot borrow the
+        // already-projected committed balance of the first PR. The second
+        // aggregate and immutable Formal row are internally exact, but the
+        // omitted budget increment must still block final exposure.
+        var unprojectedSiblingRequisition = NewRequisition(
+            Guid.NewGuid(), tenantId, actorId, mutationProbeBudget.Id,
+            mutationProbeBudget.BudgetCode,
+            "PR-SQL-UNPROJECTED-SIBLING", 2m);
+        unprojectedSiblingRequisition.Status = "Approved";
+        var unprojectedSiblingCommitment = NewCommitment(
+            Guid.NewGuid(), tenantId, mutationProbeBudget,
+            unprojectedSiblingRequisition, actorId, 2m, DateTime.UtcNow);
+        unprojectedSiblingCommitment.FormallyCommittedAmount = 2m;
+        var unprojectedSiblingRelease = new ProcurementRequisitionSourcingRelease
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PurchaseRequisitionId = unprojectedSiblingRequisition.Id,
+            AttemptNumber = 1,
+            ReleaseReference = "PR-SQL-UNPROJECTED-SIBLING/REL/A1",
+            ReleasedAtUtc = DateTime.UtcNow, ReleasedById = actorId,
+            ReleasedByName = "Procurement SQL Actor",
+            ReleaseReason = "SQL budget-wide projection trigger verification",
+            CorrelationId = "sql-unprojected-sibling-release",
+            ControlFingerprint = new string('6', 64),
+            SnapshotJson = "{}", IntegrityHash = new string('7', 64),
+            BudgetCommitmentId = unprojectedSiblingCommitment.Id,
+            BudgetCommitmentReference = unprojectedSiblingCommitment.ReservationReference,
+            CreatedAt = DateTime.UtcNow, CreatedById = actorId
+        };
+        var unprojectedSiblingPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, unprojectedSiblingRequisition.Id,
+            "PO-SQL-UNPROJECTED-SIBLING", 2m);
+        unprojectedSiblingPo.BusinessPartnerId = partnerId;
+        MakeGovernedDraft(unprojectedSiblingPo, unprojectedSiblingRelease.Id);
+        context.AddRange(
+            unprojectedSiblingRequisition, unprojectedSiblingCommitment,
+            unprojectedSiblingRelease, unprojectedSiblingPo,
+            Exposure(unprojectedSiblingPo, unprojectedSiblingCommitment,
+                mutationProbeBudget.Id, unprojectedSiblingRequisition.Id,
+                2m, "GHS",
+                ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment));
+        await context.SaveChangesAsync();
+        var unprojectedSiblingTransition = async () => await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Approved' WHERE Id=@id;",
+            new SqlParameter("@id", unprojectedSiblingPo.Id));
+        (await unprojectedSiblingTransition.Should().ThrowAsync<SqlException>())
+            .Which.Number.Should().Be(52041);
+
+        // A per-PO formal row that was never projected into the aggregate and
+        // Finance budget cannot authorize final exposure.
+        var rogueProjectionPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, mutationProbeRequisition.Id,
+            "PO-SQL-ROGUE-PROJECTION", 2m);
+        rogueProjectionPo.BusinessPartnerId = partnerId;
+        MakeGovernedDraft(rogueProjectionPo, mutationProbeRelease.Id);
+        context.AddRange(
+            rogueProjectionPo,
+            Exposure(rogueProjectionPo, mutationProbeCommitment,
+                mutationProbeBudget.Id, mutationProbeRequisition.Id,
+                2m, "GHS", ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment));
+        await context.SaveChangesAsync();
+        var rogueProjectionTransition = async () => await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Approved' WHERE Id=@id;",
+            new SqlParameter("@id", rogueProjectionPo.Id));
+        (await rogueProjectionTransition.Should().ThrowAsync<SqlException>())
+            .Which.Number.Should().Be(52041);
+
+        // Amendment re-entry must also require a live aggregate projection.
+        // A soft-deleted commitment remains a valid FK target for immutable
+        // release lineage, but it cannot authorize a final PO exposure.
+        var deletedProjectionBudget = NewBudget(
+            Guid.NewGuid(), tenantId, departmentId, actorId,
+            "PB-SQL-DELETED-PROJECTION", 10m);
+        var deletedProjectionRequisition = NewRequisition(
+            Guid.NewGuid(), tenantId, actorId, deletedProjectionBudget.Id,
+            deletedProjectionBudget.BudgetCode,
+            "PR-SQL-DELETED-PROJECTION", 10m);
+        deletedProjectionRequisition.Status = "Approved";
+        var deletedProjectionCommitment = NewCommitment(
+            Guid.NewGuid(), tenantId, deletedProjectionBudget,
+            deletedProjectionRequisition, actorId, 10m, DateTime.UtcNow);
+        deletedProjectionCommitment.IsDeleted = true;
+        deletedProjectionCommitment.DeletedAt = DateTime.UtcNow;
+        var deletedProjectionRelease = new ProcurementRequisitionSourcingRelease
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PurchaseRequisitionId = deletedProjectionRequisition.Id,
+            AttemptNumber = 1,
+            ReleaseReference = "PR-SQL-DELETED-PROJECTION/REL/A1",
+            ReleasedAtUtc = DateTime.UtcNow, ReleasedById = actorId,
+            ReleasedByName = "Procurement SQL Actor",
+            ReleaseReason = "SQL deleted projection trigger verification",
+            CorrelationId = "sql-deleted-projection-release",
+            ControlFingerprint = new string('4', 64),
+            SnapshotJson = "{}", IntegrityHash = new string('5', 64),
+            BudgetCommitmentId = deletedProjectionCommitment.Id,
+            BudgetCommitmentReference = deletedProjectionCommitment.ReservationReference,
+            CreatedAt = DateTime.UtcNow, CreatedById = actorId
+        };
+        var amendmentReentryPo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, deletedProjectionRequisition.Id,
+            "PO-SQL-AMENDMENT-DELETED-PROJECTION", 10m);
+        amendmentReentryPo.BusinessPartnerId = partnerId;
+        MakeGovernedDraft(amendmentReentryPo, deletedProjectionRelease.Id);
+        amendmentReentryPo.Status = "Amendment Pending Approval";
+        context.AddRange(
+            deletedProjectionBudget, deletedProjectionRequisition,
+            deletedProjectionCommitment, deletedProjectionRelease,
+            amendmentReentryPo,
+            Exposure(amendmentReentryPo, deletedProjectionCommitment,
+                deletedProjectionBudget.Id, deletedProjectionRequisition.Id,
+                10m, "GHS",
+                ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment));
+        await context.SaveChangesAsync();
+        var amendmentReentryWithoutProjection = async () => await database.ExecuteAsync(
+            "UPDATE dbo.PurchaseOrders SET Status=N'Approved' WHERE Id=@id;",
+            new SqlParameter("@id", amendmentReentryPo.Id));
+        (await amendmentReentryWithoutProjection.Should().ThrowAsync<SqlException>())
+            .Which.Number.Should().Be(52041);
+    }
+
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task AppliedPoAmendmentUsesExactContextAndNetReleasedExposureWhilePreservingSiblingReservation()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync(string.Empty);
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var departmentId = Guid.NewGuid();
+        var budgetId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        var commitmentId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var sourcingCaseId = Guid.NewGuid();
+        var readinessId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var inventoryItemId = Guid.NewGuid();
+        var workflowEntityTypeId = Guid.NewGuid();
+        var workflowDefinitionId = Guid.NewGuid();
+        var workflowInstanceId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer(database.ConnectionString)
+            .Options;
+        await using var context = new ApplicationDbContext(options, tenantId);
+        await context.Database.EnsureCreatedAsync();
+        await database.ApplySqlOperationsAsync(
+            new EnforceAtomicPurchaseOrderBudgetCommitment());
+
+        var budget = NewBudget(
+            budgetId, tenantId, departmentId, actorId, "PB-SQL-AMEND", 200m);
+        budget.CommittedAmount = 100m;
+        budget.ReservedAmount = 0m;
+        budget.RemainingAmount = 100m;
+        var requisition = NewRequisition(
+            requisitionId, tenantId, actorId, budgetId,
+            budget.BudgetCode, "PR-SQL-AMEND", 150m);
+        requisition.Status = "Approved";
+        var commitment = new ProcurementBudgetCommitment
+        {
+            Id = commitmentId,
+            TenantId = tenantId,
+            ProcurementBudgetId = budgetId,
+            PurchaseRequisitionId = requisitionId,
+            ReservationReference = "BCR-PR-SQL-AMEND",
+            ReservationSequence = 1,
+            Status = ProcurementBudgetCommitmentStatus.Reserved,
+            ReservedAmount = 100m,
+            FormallyCommittedAmount = 100m,
+            Currency = "GHS",
+            BudgetAllocatedSnapshot = 200m,
+            BudgetCommittedAfter = 100m,
+            BudgetReservedAfter = 0m,
+            BudgetAvailableAfter = 100m,
+            ReservedAtUtc = now,
+            ReservedById = actorId,
+            ReservedByName = "SQL amendment actor",
+            CorrelationId = "sql-amend-reservation",
+            CreatedAt = now,
+            CreatedById = actorId
+        };
+        var sourcingRelease = new ProcurementRequisitionSourcingRelease
+        {
+            Id = releaseId,
+            TenantId = tenantId,
+            PurchaseRequisitionId = requisitionId,
+            AttemptNumber = 1,
+            ReleaseReference = "PR-SQL-AMEND/REL/A1",
+            ReleasedAtUtc = now,
+            ReleasedById = actorId,
+            ReleasedByName = "SQL amendment actor",
+            ReleaseReason = "SQL amendment lifecycle proof",
+            BudgetCommitmentId = commitmentId,
+            BudgetCommitmentReference = commitment.ReservationReference,
+            CorrelationId = "sql-amend-release",
+            ControlFingerprint = new string('a', 64),
+            SnapshotJson = "{}",
+            IntegrityHash = new string('b', 64),
+            CreatedAt = now,
+            CreatedById = actorId
+        };
+        var supplier = new BusinessPartner
+        {
+            Id = supplierId,
+            TenantId = tenantId,
+            PartnerCode = "SUP-SQL-AMEND",
+            PartnerName = "SQL Amendment Supplier",
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
+            ApprovedById = actorId,
+            ApprovedDate = now,
+            Currency = "GHS",
+            IsActive = true,
+            CreatedAt = now
+        };
+        var inventoryCategory = new InventoryCategory
+        {
+            Id = categoryId,
+            TenantId = tenantId,
+            Code = "SQL-AMEND",
+            Name = "SQL Amendment Items",
+            CreatedAt = now
+        };
+        var inventoryItem = new InventoryItem
+        {
+            Id = inventoryItemId,
+            TenantId = tenantId,
+            ItemCode = "SQL-AMEND-ITEM",
+            Name = "SQL amendment item",
+            CategoryId = categoryId,
+            UnitOfMeasure = "EA",
+            Status = ItemStatus.Active,
+            CreatedAt = now
+        };
+        var poOne = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, requisitionId, "PO-SQL-AMEND-1", 100m);
+        var poTwo = NewPurchaseOrder(
+            Guid.NewGuid(), tenantId, requisitionId, "PO-SQL-AMEND-2", 30m);
+        foreach (var po in new[] { poOne, poTwo })
+        {
+            MakeGovernedDraft(po, releaseId);
+            po.BusinessPartnerId = supplierId;
+            po.ProcurementSourceId = sourceId;
+            po.ProcurementSourceReference = "RFQ-SQL-AMEND";
+            // Direct RFQ award lineage is represented by source/release; the
+            // schema requires both case and readiness to be null for type 0.
+            po.SourcingCaseId = null;
+            po.AwardReadinessDecisionId = null;
+            po.RequiredDate = now.Date.AddDays(5);
+            po.PromisedDate = now.Date.AddDays(7);
+        }
+        poOne.RevisionNumber = 1;
+        poTwo.ProcurementSourceId = Guid.NewGuid();
+        poTwo.ProcurementSourceReference = "RFQ-SQL-AMEND-2";
+        var poOneItem = new PurchaseOrderItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PurchaseOrderId = poOne.Id,
+            InventoryItemId = inventoryItemId,
+            ItemDescription = "SQL amendment item",
+            OrderedQuantity = 10m,
+            RemainingQuantity = 10m,
+            UnitOfMeasure = "EA",
+            UnitPrice = 10m,
+            LineTotal = 100m,
+            CreatedAt = now
+        };
+        var directFormal = new ProcurementBudgetCommitmentLedgerEntry
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            ProcurementBudgetCommitmentId = commitmentId,
+            ProcurementBudgetId = budgetId,
+            PurchaseRequisitionId = requisitionId,
+            EntryType = ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+            SourceType = "PurchaseOrder", SourceId = poOne.Id,
+            SourceReference = poOne.OrderNumber, Amount = 100m,
+            Currency = "GHS", OccurredAtUtc = now, ActorUserId = actorId,
+            ActorName = "SQL amendment actor", CorrelationId = "sql-amend-po1",
+            CreatedAt = now, CreatedById = actorId
+        };
+        var releasedContractId = Guid.NewGuid();
+        var contractFormal = new ProcurementBudgetCommitmentLedgerEntry
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            ProcurementBudgetCommitmentId = commitmentId,
+            ProcurementBudgetId = budgetId,
+            PurchaseRequisitionId = requisitionId,
+            EntryType = ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+            SourceType = "Contract", SourceId = releasedContractId,
+            SourceReference = "CON-SQL-RELEASED", Amount = 40m,
+            Currency = "GHS", OccurredAtUtc = now, ActorUserId = actorId,
+            ActorName = "SQL amendment actor", CorrelationId = "sql-contract-formal",
+            CreatedAt = now, CreatedById = actorId
+        };
+        var contractRelease = new ProcurementBudgetCommitmentLedgerEntry
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            ProcurementBudgetCommitmentId = commitmentId,
+            ProcurementBudgetId = budgetId,
+            PurchaseRequisitionId = requisitionId,
+            EntryType = ProcurementBudgetCommitmentLedgerEntryType.Release,
+            SourceType = "Contract", SourceId = releasedContractId,
+            SourceReference = "CON-SQL-RELEASED", Amount = 40m,
+            Currency = "GHS", FormalCommitmentEntryId = contractFormal.Id,
+            OccurredAtUtc = now, ActorUserId = actorId,
+            ActorName = "SQL amendment actor", CorrelationId = "sql-contract-release",
+            CreatedAt = now, CreatedById = actorId
+        };
+        var workflowEntityType = new WorkflowEntityType
+        {
+            Id = workflowEntityTypeId, TenantId = tenantId,
+            Code = "PO_SQL_AMEND", Name = "SQL PO Amendment", CreatedAt = now
+        };
+        var workflowDefinition = new WorkflowDefinition
+        {
+            Id = workflowDefinitionId, TenantId = tenantId,
+            DefinitionKey = Guid.NewGuid(), Name = "SQL PO Amendment Approval",
+            EntityTypeId = workflowEntityTypeId, Version = 1,
+            LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+            IsActive = true, CreatedAt = now
+        };
+        var workflowInstance = new WorkflowInstance
+        {
+            Id = workflowInstanceId, TenantId = tenantId,
+            WorkflowDefinitionId = workflowDefinitionId,
+            EntityId = poOne.Id, EntityTypeId = workflowEntityTypeId,
+            Status = WorkflowInstanceStatus.InProgress,
+            InitiatedById = actorId, CreatedAt = now
+        };
+        context.AddRange(
+            NewTenant(tenantId, "PROC-SQL-AMEND"),
+            NewUser(actorId, tenantId, "proc.sql.amend"),
+            new Department
+            {
+                Id = departmentId, TenantId = tenantId, Name = "SQL Amendment",
+                Code = "SQL-AMEND", AccountCode = "SQL-AMEND", CreatedAt = now
+            },
+            budget, requisition, sourcingRelease, supplier,
+            inventoryCategory, inventoryItem, poOne, poTwo, poOneItem,
+            commitment, directFormal, contractFormal, contractRelease,
+            workflowEntityType, workflowDefinition, workflowInstance);
+        await context.SaveChangesAsync();
+        poOne.Status = "Approved";
+        await context.SaveChangesAsync();
+
+        using var unitOfWork = new UnitOfWork(context);
+        var currentUser = NewCurrentUser(actorId, tenantId);
+        var source = new ProcurementPurchaseOrderSourceResolution
+        {
+            SourceType = ProcurementPurchaseOrderSourceType.RfqAward,
+            SourceId = sourceId,
+            SourceReference = "RFQ-SQL-AMEND",
+            PurchaseRequisitionId = requisitionId,
+            PurchaseRequisitionNumber = requisition.RequisitionNumber,
+            SourcingReleaseId = releaseId,
+            SourcingCaseId = Guid.Empty,
+            AwardReadinessDecisionId = Guid.Empty,
+            BusinessPartnerId = supplierId,
+            CurrencyCode = "GHS",
+            SourceSnapshotJson = poOne.SourceSnapshotJson,
+            SourceIntegrityHash = poOne.SourceIntegrityHash,
+            ValidatedAtUtc = now
+        };
+        var access = new Mock<IProcurementAccessControlService>();
+        var controlEvents = new Mock<IProcurementControlEventService>();
+        controlEvents.Setup(item => item.RecordAsync(
+                It.IsAny<ProcurementControlEventWriteRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementControlEventDto());
+        var sources = new Mock<IProcurementPurchaseOrderSourceService>();
+        sources.Setup(item => item.RevalidateAsync(
+                It.IsAny<PurchaseOrder>(), "Amend", It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(source);
+        sources.Setup(item => item.ValidateOrderAsync(
+                It.IsAny<ProcurementPurchaseOrderSourceResolution>(),
+                It.IsAny<IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine>>(),
+                It.IsAny<decimal>(), It.IsAny<string?>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var sod = new Mock<IProcurementPurchaseOrderSodService>();
+        sod.Setup(item => item.EnforceApprovalAsync(
+                It.IsAny<PurchaseOrder>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderSodReadinessDto
+            {
+                CanApprove = true, Code = "PO_SOD_ALLOWED"
+            });
+        var compliance = new Mock<IProcurementPurchaseOrderComplianceService>();
+        compliance.Setup(item => item.EnforceAsync(
+                It.IsAny<PurchaseOrder>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderComplianceDto
+            {
+                IsCompliant = true, Code = "PO_COMPLIANT"
+            });
+        var framework = new Mock<IProcurementFrameworkCallOffService>();
+        framework.Setup(item => item.IsFrameworkCallOffPurchaseOrderAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var workflow = new Mock<IWorkflowIntegrationService>();
+        workflow.Setup(item => item.SubmitAsync("PurchaseOrder", poOne.Id))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.InProgress,
+                    WorkflowInstanceId = workflowInstanceId
+                },
+                WorkflowOutcome.Pending));
+        workflow.Setup(item => item.CanUserApproveAsync(
+                "PurchaseOrder", poOne.Id, actorId))
+            .ReturnsAsync(true);
+        workflow.Setup(item => item.ProcessApprovalAsync(
+                "PurchaseOrder", poOne.Id, actorId, "approve", It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.Completed,
+                    WorkflowInstanceId = workflowInstanceId
+                },
+                WorkflowOutcome.Approved));
+        var notifications = new Mock<INotificationTopicPublisher>();
+        notifications.Setup(item => item.PublishAsync(
+                It.IsAny<NotificationTopicEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var reservationStore = new ProcurementBudgetReservationStore(context);
+        var amendmentStore = new ProcurementPurchaseOrderAmendmentStore(context);
+        var amendmentService = new ProcurementPurchaseOrderAmendmentService(
+            unitOfWork, currentUser.Object, access.Object, sources.Object,
+            sod.Object, compliance.Object, framework.Object, workflow.Object,
+            reservationStore, amendmentStore, controlEvents.Object,
+            notifications.Object,
+            NullLogger<ProcurementPurchaseOrderAmendmentService>.Instance);
+
+        var created = await amendmentService.CreateAsync(
+            poOne.Id,
+            new CreateProcurementPurchaseOrderAmendmentRequest
+            {
+                Reason = "Prove exact SQL amendment budget lifecycle authorization.",
+                ChangeScope = "Quantity",
+                RequiredDate = poOne.RequiredDate,
+                PromisedDate = poOne.PromisedDate,
+                EvidenceReference = "DMS-SQL-AMEND-CREATE",
+                IdempotencyKey = "sql-amend-create",
+                Items =
+                [
+                    new ProcurementPurchaseOrderAmendmentItemRequest
+                    {
+                        PurchaseOrderItemId = poOneItem.Id,
+                        InventoryItemId = inventoryItemId,
+                        ItemDescription = poOneItem.ItemDescription,
+                        OrderedQuantity = 12m,
+                        UnitOfMeasure = "EA",
+                        UnitPrice = 10m
+                    }
+                ]
+            },
+            "sql-amend-create");
+        var submitted = await amendmentService.SubmitAsync(
+            created.Id,
+            new ProcurementPurchaseOrderAmendmentLifecycleRequest
+            {
+                Comment = "Submit exact SQL amendment proof.",
+                RowVersion = created.RowVersion,
+                EvidenceReference = "DMS-SQL-AMEND-SUBMIT"
+            },
+            "sql-amend-submit");
+        var applied = await amendmentService.DecideAsync(
+            submitted.Id,
+            new DecideProcurementPurchaseOrderAmendmentRequest
+            {
+                Approved = true,
+                Comment = "Approve exact SQL amendment proof.",
+                RowVersion = submitted.RowVersion,
+                EvidenceReference = "DMS-SQL-AMEND-APPROVE"
+            },
+            "sql-amend-approve");
+
+        applied.CommitmentAdjustments.Should().ContainSingle()
+            .Which.DeltaAmount.Should().Be(20m);
+        context.ChangeTracker.Clear();
+        var amendedCommitment = await context.ProcurementBudgetCommitments
+            .IgnoreQueryFilters().SingleAsync(item => item.Id == commitmentId);
+        amendedCommitment.ReservationSequence.Should().Be(2);
+        amendedCommitment.ReservedAmount.Should().Be(120m);
+        amendedCommitment.FormallyCommittedAmount.Should().Be(120m);
+        (amendedCommitment.ReservedAmount - amendedCommitment.FormallyCommittedAmount)
+            .Should().Be(0m);
+        var amendedBudget = await context.ProcurementBudgets.IgnoreQueryFilters()
+            .SingleAsync(item => item.Id == budgetId);
+        amendedBudget.CommittedAmount.Should().Be(120m);
+        amendedBudget.ReservedAmount.Should().Be(0m);
+
+        var budgetControl = new ProcurementRequisitionBudgetControlService(
+            unitOfWork, currentUser.Object, access.Object, controlEvents.Object,
+            reservationStore);
+        var sourceService = new ProcurementPurchaseOrderSourceService(
+            unitOfWork, currentUser.Object, access.Object, controlEvents.Object,
+            budgetControl, reservationStore, notifications.Object,
+            NullLogger<ProcurementPurchaseOrderSourceService>.Instance);
+        var ensureBudgetCommitment = typeof(ProcurementPurchaseOrderSourceService)
+            .GetMethod("EnsureBudgetCommitmentAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+        var ensureTask = (Task)ensureBudgetCommitment.Invoke(
+            sourceService,
+            [source, poTwo.TotalAmount, poTwo.Currency, poTwo.Id,
+                "sql-amend-po2-reserve", CancellationToken.None])!;
+        await ensureTask;
+        var expandedCommitment = await context.ProcurementBudgetCommitments
+            .IgnoreQueryFilters().SingleAsync(item => item.Id == commitmentId);
+        expandedCommitment.ReservedAmount.Should().Be(150m);
+        expandedCommitment.FormallyCommittedAmount.Should().Be(120m);
+        expandedCommitment.ReservationSequence.Should().Be(3);
+
+        var lifecycle = new ProcurementBudgetCommitmentLifecycleService(
+            unitOfWork, currentUser.Object, reservationStore);
+        var poTwoFormal = await lifecycle.CommitPurchaseOrderAsync(
+            poTwo, "sql-amend-po2-commit");
+        await unitOfWork.SaveChangesAsync();
+        poTwo.Status = "Approved";
+        await unitOfWork.SaveChangesAsync();
+        var poTwoReplay = await lifecycle.CommitPurchaseOrderAsync(
+            poTwo, "sql-amend-po2-replay");
+        poTwoReplay.Id.Should().Be(poTwoFormal.Id);
+        await unitOfWork.SaveChangesAsync();
+        await unitOfWork.CommitAsync();
+
+        context.ChangeTracker.Clear();
+        var finalCommitment = await context.ProcurementBudgetCommitments
+            .IgnoreQueryFilters().SingleAsync(item => item.Id == commitmentId);
+        finalCommitment.ReservedAmount.Should().Be(150m);
+        finalCommitment.FormallyCommittedAmount.Should().Be(150m);
+        (await context.ProcurementBudgetCommitmentLedgerEntries.IgnoreQueryFilters()
+            .CountAsync(item =>
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == "PurchaseOrder")).Should().Be(2);
+
+        await unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+        await reservationStore.SetDownstreamReservationContextAsync(
+            new ProcurementDownstreamReservationMutationContext(
+                tenantId, requisitionId, Guid.NewGuid(),
+                150m, 151m, 3, 4, "sql-wrong-downstream-context"),
+            CancellationToken.None);
+        var wrongContextMutation = async () =>
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                 UPDATE dbo.ProcurementBudgetCommitments
+                 SET ReservedAmount = ReservedAmount + 1,
+                     ReservationSequence = ReservationSequence + 1,
+                     CorrelationId = {"sql-wrong-downstream-context"}
+                 WHERE Id = {commitmentId};
+                 """);
+        (await wrongContextMutation.Should().ThrowAsync<SqlException>())
+            .Which.Number.Should().Be(51022);
+        if (unitOfWork.HasActiveTransaction)
+            await unitOfWork.RollbackAsync();
     }
 
     [SqlServerFact]
@@ -493,6 +1853,70 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
             new SqlParameter("@invoice", invoiceId));
         (await staleMatch.Should().ThrowAsync<SqlException>())
             .Which.Number.Should().Be(51603);
+    }
+
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task TenantFilterUsesCurrentContextAcrossSharedProviderModelAndPreservesSoftDelete()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync(string.Empty);
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer(database.ConnectionString)
+            .Options;
+        var tenantAId = Guid.NewGuid();
+        var tenantBId = Guid.NewGuid();
+        var partnerAId = Guid.NewGuid();
+        var partnerBId = Guid.NewGuid();
+        var deletedPartnerBId = Guid.NewGuid();
+
+        await using (var setup = new ApplicationDbContext(options))
+        {
+            await setup.Database.EnsureCreatedAsync();
+            setup.AddRange(
+                NewTenant(tenantAId, "FILTER-SQL-A"),
+                NewTenant(tenantBId, "FILTER-SQL-B"),
+                new BusinessPartner
+                {
+                    Id = partnerAId, TenantId = tenantAId,
+                    PartnerCode = "FILTER-A", PartnerName = "Tenant A Supplier",
+                    PartnerType = "Supplier", RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved", Currency = "GHS", IsActive = true
+                },
+                new BusinessPartner
+                {
+                    Id = partnerBId, TenantId = tenantBId,
+                    PartnerCode = "FILTER-B", PartnerName = "Tenant B Supplier",
+                    PartnerType = "Supplier", RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved", Currency = "GHS", IsActive = true
+                },
+                new BusinessPartner
+                {
+                    Id = deletedPartnerBId, TenantId = tenantBId,
+                    PartnerCode = "FILTER-B-DELETED", PartnerName = "Deleted Tenant B Supplier",
+                    PartnerType = "Supplier", RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved", Currency = "GHS", IsActive = true,
+                    IsDeleted = true, DeletedAt = DateTime.UtcNow
+                });
+            await setup.SaveChangesAsync();
+        }
+
+        await using (var tenantA = new ApplicationDbContext(options, tenantAId))
+        {
+            (await tenantA.BusinessPartners.Select(item => item.Id).ToListAsync())
+                .Should().Equal(partnerAId);
+        }
+
+        await using (var tenantB = new ApplicationDbContext(options, tenantBId))
+        {
+            (await tenantB.BusinessPartners.Select(item => item.Id).ToListAsync())
+                .Should().Equal(partnerBId);
+        }
+
+        await using (var system = new ApplicationDbContext(options))
+        {
+            (await system.BusinessPartners.Select(item => item.Id).ToListAsync())
+                .Should().BeEquivalentTo(new[] { partnerAId, partnerBId });
+        }
     }
 
     [SqlServerFact]
@@ -702,6 +2126,20 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         CreatedAt = DateTime.UtcNow
     };
 
+    private static void MakeGovernedDraft(
+        PurchaseOrder purchaseOrder,
+        Guid sourcingReleaseId)
+    {
+        purchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.RfqAward;
+        purchaseOrder.ProcurementSourceId = purchaseOrder.Id;
+        purchaseOrder.ProcurementSourceReference = purchaseOrder.OrderNumber;
+        purchaseOrder.SourcingReleaseId = sourcingReleaseId;
+        purchaseOrder.SourcingCaseId = null;
+        purchaseOrder.AwardReadinessDecisionId = null;
+        purchaseOrder.ProcurementCategory = ProcurementCategoryClass.Goods;
+        purchaseOrder.Status = "Draft";
+    }
+
     private static PurchaseOrderReceipt NewReceipt(
         Guid id,
         Guid tenantId,
@@ -727,10 +2165,13 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         currentUser.SetupGet(item => item.Username).Returns("proc.sql.actor");
         currentUser.SetupGet(item => item.FullName).Returns("Procurement SQL Actor");
         currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
-        currentUser.SetupGet(item => item.Roles).Returns(new[] { "TenantAdmin" });
+        currentUser.SetupGet(item => item.Roles).Returns(new[] { "TDC_PROCUREMENT_OFFICER" });
         currentUser.SetupGet(item => item.Claims).Returns(new Dictionary<string, string>());
         currentUser.Setup(item => item.HasRole(It.IsAny<string>()))
-            .Returns((string role) => string.Equals(role, "TenantAdmin", StringComparison.OrdinalIgnoreCase));
+            .Returns((string role) => string.Equals(
+                role,
+                "TDC_PROCUREMENT_OFFICER",
+                StringComparison.OrdinalIgnoreCase));
         return currentUser;
     }
 
@@ -898,5 +2339,25 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         (Id uniqueidentifier PRIMARY KEY DEFAULT NEWID(),VendorInvoiceId uniqueidentifier NOT NULL,
          PurchaseOrderItemId uniqueidentifier NOT NULL,Quantity decimal(18,4) NOT NULL,
          UnitPrice decimal(18,4) NOT NULL);
+        """;
+
+    private const string TenderLineageRecoverySchemaSql =
+        """
+        CREATE TABLE dbo.PurchaseRequisitions
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,IsDeleted bit NOT NULL,
+         Status nvarchar(50) NOT NULL,TotalAmount decimal(18,2) NULL,Currency nvarchar(10) NULL);
+        CREATE TABLE dbo.ProcurementRequisitionSourcingReleases
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,IsDeleted bit NOT NULL,
+         PurchaseRequisitionId uniqueidentifier NOT NULL,ControlFingerprint nvarchar(64) NOT NULL);
+        CREATE TABLE dbo.ProcurementSourcingCases
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,IsDeleted bit NOT NULL,
+         Status int NOT NULL,PurchaseRequisitionId uniqueidentifier NOT NULL,SourcingReleaseId uniqueidentifier NOT NULL,
+         SelectedMethod int NOT NULL,EstimatedValue decimal(18,2) NULL,CurrencyCode nvarchar(10) NULL,
+         SourceControlFingerprint nvarchar(64) NOT NULL);
+        CREATE TABLE dbo.Tenders
+        (Id uniqueidentifier PRIMARY KEY,TenantId uniqueidentifier NOT NULL,
+         SourcePurchaseRequisitionId uniqueidentifier NULL,SourcingReleaseId uniqueidentifier NULL,
+         SourcingCaseId uniqueidentifier NULL,EstimatedValue decimal(18,2) NULL,
+         Currency nvarchar(10) NULL,TenderType nvarchar(50) NOT NULL);
         """;
 }

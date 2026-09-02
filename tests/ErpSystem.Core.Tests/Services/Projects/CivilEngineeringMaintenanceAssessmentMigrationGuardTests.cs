@@ -10,7 +10,6 @@ public sealed class CivilEngineeringMaintenanceAssessmentMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821050000_AddCivilEngineeringMaintenanceAssessments.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         migration.Should().Contain("CK_CivilEngineeringMaintenanceAssessments_Assignment")
             .And.Contain("TR_CivilEngineeringMaintenanceAssessments_Lineage")
@@ -19,7 +18,7 @@ public sealed class CivilEngineeringMaintenanceAssessmentMigrationGuardTests
             .And.Contain("CivilEngineeringMaintenanceIntakes")
             .And.Contain("TR_CivilEngineeringMaintenanceAssessmentRevisions_AppendOnly")
             .And.Contain("ClientRequestId");
-        metadata.Should().Contain("20260821050000_AddCivilEngineeringMaintenanceAssessments");
+        migration.Should().Contain("[Migration(\"20260821050000_AddCivilEngineeringMaintenanceAssessments\")]");
     }
 
     private static string FindRepositoryRoot([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")

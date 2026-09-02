@@ -76,6 +76,27 @@ public sealed class ProcurementComplianceDecisionServiceTests
     }
 
     [Fact]
+    public async Task MissingOptionalAuthorityMetadataDoesNotBlockAutomaticMethodSelection()
+    {
+        await using var fixture = new DecisionFixture();
+        var policy = await fixture.AddCompletePolicyAsync();
+        fixture.Context.ProcurementPolicyAuthorityRules.RemoveRange(
+            fixture.Context.ProcurementPolicyAuthorityRules.Where(item =>
+                item.PolicySetId == policy.Id));
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            Request(policy.Id, evidence: new[] { "SPEC-KEY" }),
+            "trace-optional-authority");
+
+        result.CanProceed.Should().BeTrue();
+        result.SelectedMethod.Should().Be(ProcurementMethodType.RequestForQuotation);
+        result.RequiredAuthorities.Should().BeEmpty();
+        result.HardStops.Should().NotContain(item => item.Code == "AUTHORITY_NOT_CONFIGURED");
+        result.Warnings.Should().ContainSingle(item => item.Code == "AUTHORITY_NOT_CONFIGURED");
+    }
+
+    [Fact]
     public async Task SodConflictIsReturnedAsDeclarativeHardStopWithoutRuntimeEnforcement()
     {
         await using var fixture = new DecisionFixture();

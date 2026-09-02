@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, DollarSign, PieChart, Wallet, CreditCard, Building2, TrendingUp, Download, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Wallet, Building2, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -14,9 +14,14 @@ import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
 
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function CashPositionPage() {
     const router = useRouter();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
 
     const { data: position, isLoading, error } = useQuery({
         queryKey: ['cash-position'],
@@ -52,10 +57,15 @@ export default function CashPositionPage() {
                         </p>
                     </div>
                 </div>
-                <Button variant="outline">
-                    <Download className="mr-2 h-4 w-4" />
-                    Export Report
-                </Button>
+                {canExport && (
+                    <ReportPdfActions
+                        reportName="cash position report"
+                        onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                            DOCUMENT_TYPES.financeCashPositionReport)}
+                        onPrint={() => documentOutputService.printReportDocument(
+                            DOCUMENT_TYPES.financeCashPositionReport)}
+                    />
+                )}
             </div>
 
             {/* Top Level Summary Cards */}
@@ -121,7 +131,7 @@ export default function CashPositionPage() {
                                 <TableRow>
                                     <TableHead>Currency</TableHead>
                                     <TableHead className="text-right">Account Count</TableHead>
-                                    <TableHead className="text-right">Balance</TableHead>
+                                    <TableHead className="text-right">Balance ({position.currency} Base Eq)</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -180,8 +190,8 @@ export default function CashPositionPage() {
                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                         <AlertCircle className="h-5 w-5" />
                         <p>
-                            Note: All balances are converted to the base currency ({position.currency}) for aggregation purposes using the latest exchange rates.
-                            Balances in the "Breakdown by Currency" table are shown in their native currency.
+                            Note: All monetary balances are posted functional-currency ({position.currency}) GL amounts.
+                            Currency rows identify the native currency of the underlying bank accounts; the values remain {position.currency} base equivalents and are not native-currency totals.
                         </p>
                     </div>
                 </CardContent>

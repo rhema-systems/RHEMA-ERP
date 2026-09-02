@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>Civil completion evidence/directions only; Maintenance and Finance remain authoritative.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821063000_AddCivilEngineeringMaintenanceCompletionControls")]
 public partial class AddCivilEngineeringMaintenanceCompletionControls : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

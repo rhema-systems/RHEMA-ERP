@@ -69,7 +69,10 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { projectService } from '@/services/projectService';
 import { ReportResult, reportsService } from '@/services/reports';
-import { ReportModuleNavigator } from './ReportModuleNavigator';
+import {
+  ReportModuleNavigator,
+  type ReportModuleNavigationItem,
+} from './ReportModuleNavigator';
 
 type CatalogueMode =
   'procurement' | 'inventory' | 'compliance' | 'quantity-survey' | 'civil-engineering';
@@ -347,6 +350,30 @@ export const quantitySurveyCatalogue: CatalogueItem[] = [
     icon: ClipboardCheck,
   },
   {
+    code: 'retention-register',
+    title: 'Retention Register',
+    description:
+      'Reconcile retention held, released and outstanding by certificate and Works contract.',
+    group: 'Valuations and certificates',
+    icon: Scale,
+  },
+  {
+    code: 'cost-to-complete',
+    title: 'Cost-to-Complete Report',
+    description:
+      'Compare budget, actual cost, commitments, forecast and the projected final position.',
+    group: 'Cost plans and BoQs',
+    icon: BarChart3,
+  },
+  {
+    code: 'contract-balance',
+    title: 'Contract Balance Report',
+    description:
+      'Reconcile the original and revised contract against variations, certificates and retention.',
+    group: 'Changes and closeout',
+    icon: FileSpreadsheet,
+  },
+  {
     code: 'variation-log',
     title: 'Variation Log',
     description:
@@ -361,6 +388,14 @@ export const quantitySurveyCatalogue: CatalogueItem[] = [
       'Reconcile final accounts to contract, BoQ, variations, claims, retention and payments.',
     group: 'Changes and closeout',
     icon: FileCheck2,
+  },
+  {
+    code: 'audit-trail',
+    title: 'Quantity Survey Audit Trail',
+    description:
+      'Review project-scoped creation, change, workflow, approval, posting and reversal history.',
+    group: 'Controls and audit',
+    icon: History,
   },
 ];
 
@@ -645,6 +680,26 @@ export function StatutoryReportCataloguePage({
       ),
     [catalogue, reportsQuery.data]
   );
+  const navigatorItems: Array<
+    ReportModuleNavigationItem & Pick<CatalogueItem, 'description'>
+  > = [
+    ...(isQuantitySurvey
+      ? [
+          {
+            code: 'dashboard',
+            title: 'QS Cost Dashboard',
+            description: 'Authority-scoped cost control dashboard.',
+            group: 'Cost control',
+            icon: BarChart3,
+            available: true,
+          },
+        ]
+      : []),
+    ...catalogue.map((item) => ({
+      ...item,
+      available: reports.some((report) => report.tags?.includes(item.code)),
+    })),
+  ];
   const suppliersQuery = useQuery({
     queryKey: ['business-partners', 'report-filter'],
     queryFn: () => businessPartnerService.getAllPartnersForDropdown(),
@@ -780,8 +835,7 @@ export function StatutoryReportCataloguePage({
     if (isProjectScopedReports && !projectId) {
       toast({
         title: 'Select a project',
-        description:
-          `${moduleName} reports are restricted to an assigned project.`,
+        description: `${moduleName} reports are restricted to an assigned project.`,
         variant: 'destructive',
       });
       return;
@@ -1005,26 +1059,7 @@ export function StatutoryReportCataloguePage({
           moduleName={moduleName}
           modulePath={modulePath}
           activeReportCode={selectedCode}
-          items={[
-            ...(isQuantitySurvey
-              ? [
-                  {
-                    code: 'dashboard',
-                    title: 'QS Cost Dashboard',
-                    description: 'Authority-scoped cost control dashboard.',
-                    group: 'Cost control',
-                    icon: BarChart3,
-                    available: true,
-                  },
-                ]
-              : []),
-            ...catalogue.map((item) => ({
-              ...item,
-              available: reports.some((report) =>
-                report.tags?.includes(item.code)
-              ),
-            })),
-          ]}
+          items={navigatorItems}
         />
         <div className="min-w-0">
           <h1 className="truncate text-xl font-semibold tracking-tight">

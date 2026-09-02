@@ -436,28 +436,6 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             return services;
         }
 
-        /// <summary>
-        /// Registers only the idempotent module seeders used by the finite <c>seed-db</c> command.
-        /// Keeping this separate from the full runtime service graph allows database bootstrap to run
-        /// without requiring web-only dependencies such as SignalR, Redis, or file storage.
-        /// </summary>
-        public static IServiceCollection AddErpSystemDatabaseSeeders(this IServiceCollection services)
-        {
-            services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyConfigurationProfileSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyAccessControlSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringConfigurationProfileSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringAccessControlSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.ProcurementSupplierOnboardingTestSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyStatutoryReportSeeder>();
-            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringStatutoryReportSeeder>();
-            return services;
-        }
-
         public static IServiceCollection AddErpSystemServices(this IServiceCollection services)
         {
             // Core services
@@ -524,6 +502,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentManagementService, ErpSystem.Core.Services.DocumentManagement.CentralDocumentManagementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRepositoryFileService>();
             services.AddScoped<ErpSystem.Api.Services.DocumentManagement.ICentralDocumentRenditionService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRenditionService>();
+            services.AddScoped<ErpSystem.Api.Services.DocumentManagement.ICentralDocumentPdfSigningService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentPdfSigningService>();
+            services.AddOptions<ErpSystem.Api.Services.DocumentManagement.DocumentSigningOptions>()
+                .BindConfiguration(ErpSystem.Api.Services.DocumentManagement.DocumentSigningOptions.SectionName);
             services.AddScoped<ErpSystem.Core.Interfaces.Legal.ILegalProcedureCatalogService, ErpSystem.Core.Services.Legal.LegalProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IFacilitiesProcedureCatalogService, ErpSystem.Core.Services.Estate.FacilitiesProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IPropertyManagementProcedureCatalogService, ErpSystem.Core.Services.Estate.PropertyManagementProcedureCatalogService>();
@@ -659,6 +640,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashBankPaymentSlipDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CustomerReceiptDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApSupplierStatementDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApAgingReportDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApCashRequirementsDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApMatchExceptionReportDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApProcurementReconciliationDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ArAgingReportDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ArCustomerStatementDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashPositionReportDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.InputTaxRegisterDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.OutputTaxRegisterDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.VatReconciliationDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.WhtPayableReportDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.WhtCertificateRegisterDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.WhtCertificateDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.WhtRemittanceRegisterDocumentBuilder>();
+              services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ConsolidatedBudgetDocumentBuilder>();
+              services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BudgetScenarioComparisonDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.TrialBalanceDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.IncomeStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BalanceSheetDocumentBuilder>();
@@ -812,12 +809,31 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // departmental returns, consolidated reporting, and governed revisions.
             // Register it here so callers do not create parallel budgeting services.
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBudgetService, ErpSystem.Api.Services.Finance.Budget.BudgetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceBudgetControlService, ErpSystem.Api.Services.Finance.Budget.FinanceBudgetControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceBudgetCommitmentService, ErpSystem.Api.Services.Finance.Budget.FinanceBudgetCommitmentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutExecutionService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutExecutionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutImportService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutImportService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IGeneralLedgerService, ErpSystem.Api.Services.Finance.GL.GeneralLedgerService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceDimensionAdministrationService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceDimensionReportingFilterService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionCertificationService, ErpSystem.Api.Services.Finance.GL.FinanceDimensionCertificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceDimensionAssignmentStore, ErpSystem.Api.Services.Finance.GL.FinanceSourceDimensionAssignmentStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceDimensionService, ErpSystem.Api.Services.Finance.GL.FinanceSourceDimensionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceApVendorInvoice));
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceApSupplierDebitNote));
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceArCustomerInvoice));
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchSpreadsheetService, ErpSystem.Api.Services.Finance.GL.JournalBatchSpreadsheetService>();
             // Recurring journals extend the existing GL posting pipeline. The
@@ -848,6 +864,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICustomerService, ErpSystem.Api.Services.Finance.AR.CustomerService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetReportsService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetReportsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ITaxReportingService, ErpSystem.Api.Services.Finance.Taxation.TaxReportingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashPositionReportService, ErpSystem.Api.Services.Finance.Cash.CashPositionReportService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IWithholdingTaxCertificateService, ErpSystem.Api.Services.Finance.Taxation.WithholdingTaxCertificateService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankAccountService, ErpSystem.Api.Services.Finance.Cash.BankAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankingSettlementService, ErpSystem.Api.Services.Finance.Cash.BankingSettlementService>();
@@ -866,6 +883,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceMatchExceptionService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceMatchExceptionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService, ErpSystem.Api.Services.Finance.AP.SupplierDebitNoteService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApSupplierIdentityService, ErpSystem.Api.Services.Finance.AP.ApSupplierIdentityService>();
+            // FIN-INT-012/013 is a Finance-owned, fail-closed consumer only. Procurement/Inventory
+            // supplies approved immutable envelopes, never Finance account ids, and remains the
+            // owner of return approval, dispatch, quantities, locations and carrying-cost evidence.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISupplierReturnFinanceAdapter,
+                ErpSystem.Api.Services.Finance.AP.SupplierReturnFinanceAdapter>();
             services.AddScoped<ErpSystem.Api.Services.Finance.AP.FinancePurchaseOrderReceiptPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
             // FIN-INT-007 consumes Procurement's accepted-supply contract but keeps all asset
@@ -1189,7 +1213,18 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementExceptionalSourcingControlService, ErpSystem.Core.Services.Procurement.ProcurementExceptionalSourcingControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPrequalificationService, ErpSystem.Core.Services.Procurement.ProcurementPrequalificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
-            services.AddErpSystemDatabaseSeeders();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyConfigurationProfileSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyAccessControlSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringConfigurationProfileSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringAccessControlSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementSupplierOnboardingTestSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
@@ -1414,7 +1449,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 .AddPolicy(FinancePermissions.ConfigureFixedAssetCategoriesPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.AdministerFinance,
-                        FinancePermissions.ManageFixedAssets)));
+                        FinancePermissions.ManageFixedAssets)))
+                .AddPolicy(FinancePermissions.WithdrawJournalApprovalPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.SubmitJournalEntries,
+                        FinancePermissions.WorkflowCancel)))
+                .AddPolicy(FinancePermissions.ViewTenderPaymentJournalPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.ViewFinance,
+                        ProcurementAccessControlRegistry.TenderPaymentVerifyPermission)));
 
             foreach (var permission in FinancePermissions.All)
             {

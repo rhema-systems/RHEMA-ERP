@@ -10,6 +10,8 @@ The maintained integration artifacts are:
 - [Finance Integration Adapter Checklist](Finance/finance-integration-adapter-checklist.md) — joint producer/Finance design and review checklist.
 - [Finance Integration Consumer-Test Template](Finance/finance-integration-consumer-test-template.md) — reusable request-capture assertions and CI expectations.
 - [FIN-INT-006 Fixed Asset Disposal Reference Contract](Finance/fixed-asset-disposal-ar-tax-cash-contract.md) — first complete orchestration example.
+- [FIN-INT-015 Procurement Budget Commitment Contract](Finance/procurement-finance-budget-commitment-contract.md) — Finance-owned availability/reservation boundary for Procurement consumers.
+- [Finance Coding Dimensions Architecture](Finance/finance-coding-dimensions-architecture.md) — structural-account versus transaction-dimension ownership, posting, reporting and budget rollout.
 
 ## Quick Integration Overview
 
@@ -43,6 +45,11 @@ Every posting-capable integration should build a `FinancePostingRequestDto` with
 - `FunctionalCurrencyCode`
 - deterministic `IdempotencyKey`
 - balanced `FinancePostingLineDto` lines
+
+`FinancePostingLineDto.Dimensions` is an additive Finance 1.1 input. During adapter certification it
+is optional. A producer supplies dimension codes plus a configured value code or canonical source-
+entity lineage; it must not select a stored Finance dimension-set ID. Finance resolves the immutable
+set. Required dimension rules become posting errors only after the producer adapter is certified.
 
 Source metadata is not optional. Audit trail, duplicate-posting protection, reversal planning, report drill-through, settlement diagnostics, and migration sign-off all depend on stable source metadata.
 
@@ -107,6 +114,33 @@ Frontend Finance work should use the existing service layer instead of ad hoc `f
 - AP APIs: `accountsPayableService`
 
 Finance screens live under `frontend/src/app/finance/...`. Keep lifecycle and navigation consistent with existing screens: draft, submit, approve, post, view journal, reverse/void where applicable. When a posting creates a journal, route users to the resulting journal entry when practical.
+
+### Budget Commitment Integration
+
+Finance is the source of truth for the adopted budget. Producer modules call
+`IFinanceBudgetCommitmentService`; they must not write `BudgetEntry`,
+`FinanceBudgetReservation` or `FinanceBudgetReservationOperation` directly and must not maintain
+an unrelated accounting ceiling as authority.
+
+Use the exact Finance `BudgetEntryId` selected from `GetEligibleBudgetCellsAsync`. Finance validates
+the effective adopted scenario, fiscal period, budget-tracked expense account,
+department/cost-centre combination, functional currency and approved exchange-rate evidence.
+Availability is `approved - posted actual - active reservations`.
+
+Producer lifecycle rules:
+
+- evaluate drafts without mutation;
+- reserve once when the controlled source reaches its agreed approved state;
+- amend using an absolute target amount and the returned reservation version;
+- release on rejection/cancellation/unused closure;
+- inherit the requisition commitment at PO issue rather than reserving twice;
+- reduce/consume only after the exact related Finance posting event commits;
+- never write actuals through the commitment service—posted GL is the actual.
+
+All mutations require deterministic idempotency and correlation keys. Retrying the same key and
+payload returns the original result; using the key for changed evidence fails closed. See
+[FIN-INT-015](Finance/procurement-finance-budget-commitment-contract.md) for the full lifecycle,
+currency, receipt/GRNI, supplier-invoice and reversal rules.
 
 ### Developer Checklist for New Integrations
 

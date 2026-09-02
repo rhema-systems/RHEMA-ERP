@@ -4,6 +4,7 @@ export type ProcedureWorkspaceType =
   | 'Operational Queue'
   | 'Operational Board'
   | 'Event Workflow'
+  | 'Legal Matter'
   | 'Dashboard / Report';
 
 interface ProcedureWorkspaceTerminology {
@@ -59,6 +60,14 @@ const terminologyByType: Record<
     createLabel: 'Create event',
     selectMessage: 'Select or create an event to start work.',
   },
+  'Legal Matter': {
+    title: 'Live Legal Matter Workspace',
+    collectionLabel: 'Legal Matters',
+    emptyMessage: 'No legal matters have been opened for this procedure yet.',
+    createHeading: 'Open Legal Matter',
+    createLabel: 'Create legal matter',
+    selectMessage: 'Select or create a legal matter to start work.',
+  },
   'Dashboard / Report': {
     title: 'Dashboard / Report',
     collectionLabel: 'Reports',
@@ -111,6 +120,8 @@ export const getProcedureWorkspaceActionLabel = (
       return 'Open board';
     case 'Event Workflow':
       return 'Open event workflow';
+    case 'Legal Matter':
+      return 'Open legal matter';
     case 'Dashboard / Report':
       return 'Open reporting';
     default:
@@ -132,6 +143,10 @@ export const getProcedureStageLabel = (
 
   if (workspaceType === 'Dashboard / Report') {
     return `${stageCount} reporting stages`;
+  }
+
+  if (workspaceType === 'Legal Matter') {
+    return `${stageCount} legal stages`;
   }
 
   return `${stageCount} stages`;

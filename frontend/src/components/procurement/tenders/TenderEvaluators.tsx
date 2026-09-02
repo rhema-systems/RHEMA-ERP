@@ -10,6 +10,9 @@ import { toast } from 'sonner';
 import { tenderService, TenderEvaluatorDto, AssignEvaluatorsDto } from '@/services/tenderService';
 import AssignEvaluatorsDialog from './AssignEvaluatorsDialog';
 import { format } from 'date-fns';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 interface TenderEvaluatorsProps {
   tenderId: string;
@@ -18,9 +21,13 @@ interface TenderEvaluatorsProps {
 }
 
 export default function TenderEvaluators({ tenderId, tenderStatus, onEvaluatorsChanged }: TenderEvaluatorsProps) {
+  const { hasPermission } = useAuth();
+  const canAdminister = hasPermission('procurement.tender.administer');
   const [evaluators, setEvaluators] = useState<TenderEvaluatorDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [removingEvaluatorId, setRemovingEvaluatorId] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   useEffect(() => {
     loadEvaluators();
@@ -47,26 +54,29 @@ export default function TenderEvaluators({ tenderId, tenderStatus, onEvaluatorsC
       await loadEvaluators();
       onEvaluatorsChanged?.();
     } catch (error) {
-      toast.error('Failed to assign evaluators');
+      toast.error(getProcurementProblemMessage(error, 'Failed to assign evaluators'));
       console.error(error);
     }
   };
 
   const handleRemoveEvaluator = async (evaluatorId: string) => {
-    if (!confirm('Are you sure you want to remove this evaluator?')) return;
-
     try {
+      setRemoveBusy(true);
       await tenderService.removeEvaluator(tenderId, evaluatorId);
       toast.success('Evaluator removed successfully');
       await loadEvaluators();
       onEvaluatorsChanged?.();
+      setRemovingEvaluatorId(null);
     } catch (error) {
-      toast.error('Failed to remove evaluator');
+      toast.error(getProcurementProblemMessage(error, 'Failed to remove evaluator'));
       console.error(error);
+      return false;
+    } finally {
+      setRemoveBusy(false);
     }
   };
 
-  const isEditable = ['Draft', 'Published'].includes(tenderStatus);
+  const isEditable = canAdminister && ['Draft', 'Published'].includes(tenderStatus);
 
   return (
     <div className="space-y-4">
@@ -125,7 +135,8 @@ export default function TenderEvaluators({ tenderId, tenderStatus, onEvaluatorsC
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRemoveEvaluator(evaluator.id)}
+                          onClick={() => setRemovingEvaluatorId(evaluator.id)}
+                          aria-label={`Remove ${evaluator.userName}`}
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
@@ -146,6 +157,17 @@ export default function TenderEvaluators({ tenderId, tenderStatus, onEvaluatorsC
           onAssign={handleAssignEvaluators}
         />
       )}
+
+      <ConfirmationDialog
+        open={Boolean(removingEvaluatorId)}
+        onOpenChange={(open) => { if (!open) setRemovingEvaluatorId(null); }}
+        title="Remove evaluator"
+        description="Remove this evaluator from the tender committee assignment? Existing submitted evaluation records are not changed."
+        confirmText="Remove evaluator"
+        variant="destructive"
+        isLoading={removeBusy}
+        onConfirm={() => removingEvaluatorId ? handleRemoveEvaluator(removingEvaluatorId) : false}
+      />
     </div>
   );
 }

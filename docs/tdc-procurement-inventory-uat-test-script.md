@@ -7,7 +7,7 @@
 
 ## Purpose and status
 
-This script covers the implemented, user-visible procurement and stores controls. It deliberately does **not** claim that an approved procurement plan is exported directly to GHANEPS: the current approved scope is a manual exchange at the RFQ/tender stage, with server-side checksum calculation.
+This script covers the implemented, user-visible procurement and stores controls. Annual Procurement Plan (APP) packages and RFQ/tender exchanges are manual GHANEPS handoffs: the application generates and retains the files and checksums, while the user performs the external submission. No direct GHANEPS API connection is claimed.
 
 Status: prepared for UAT. The final authenticated browser/API acceptance for the corrective slice is still pending runtime verification.
 
@@ -46,11 +46,13 @@ Status: prepared for UAT. The final authenticated browser/API acceptance for the
 
 ## C. Manual GHANEPS exchange
 
-1. Complete the approved plan/PR path through the existing sourcing flow to an eligible RFQ or tender.
-2. Open **Procurement → Purchasing → RFQs** (or **Tenders**) and open its **GHANEPS Exchange** action.
-3. Provide the retained manual exchange content/evidence as required by the dialog.
-4. Expected: the application calculates and records the SHA-256 checksum itself. The user does not type a checksum when creating the exchange. An externally supplied checksum, where shown, is for later reconciliation only.
-5. Record the exchange/audit reference. There is currently no “export procurement plan directly to GHANEPS” screen or direct GHANEPS API integration in scope.
+1. Publish the approved procurement plan, then open **Procurement → Planning → APP Submissions**.
+2. Select the published plan and choose CSV, JSON, or XML. Optionally upload a supporting document or enter a normal external reference. Expected: no file-record GUID or workflow-evidence GUID is requested from the user.
+3. Choose **Generate and register export**. Expected: the server creates the package, stores and virus-scans it, calculates the SHA-256 checksum, and records the package and checksum in the immutable APP timeline.
+4. Download the generated APP package, submit it through the external manual process, then record the external submission reference and acknowledgement or rejection. A rejected attempt must be resubmitted with a newly generated package and checksum.
+5. Complete the approved plan/PR path through the existing sourcing flow to an eligible RFQ or tender.
+6. Open **Procurement → Purchasing → RFQs** (or **Tenders**) and open its **GHANEPS Exchange** action. Complete the configured export/import, attempt, acknowledgement, retry, and reconciliation checks.
+7. Expected: both APP and RFQ/tender exchanges calculate their SHA-256 checksums on the server. An externally supplied checksum, where shown, is reconciliation input only. No direct GHANEPS API connection is used.
 
 ## D. Supplier return after goods receipt
 

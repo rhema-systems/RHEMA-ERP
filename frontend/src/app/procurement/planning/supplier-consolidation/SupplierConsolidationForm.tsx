@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
-import { currencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import { procurementCurrencyService, type CurrencyListDto } from '@/services/financeCommonService';
 import { inventoryManagementService, type InventoryCategoryDto } from '@/services/inventoryManagementService';
 import {
   supplierConsolidationService,
@@ -94,7 +94,7 @@ export function SupplierConsolidationForm({ initialValue, mode }: SupplierConsol
   useEffect(() => {
     Promise.all([
       businessPartnerService.getActivePartners('Supplier').catch(() => []),
-      currencyService.getActive().catch(() => []),
+      procurementCurrencyService.getActive().catch(() => []),
       inventoryManagementService.getActiveInventoryCategories().catch(() => []),
     ]).then(([supplierData, currencyData, categoryData]) => {
       setSuppliers(supplierData);

@@ -14,7 +14,6 @@ public sealed class CivilEngineeringPlanningGisValidationMigrationGuardTests
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
         var evidenceBinding = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", EvidenceBindingMigrationId + ".cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ProjectCivilPlanningGisValidations")
@@ -34,12 +33,12 @@ public sealed class CivilEngineeringPlanningGisValidationMigrationGuardTests
             .And.NotContain("CREATE TABLE dbo.EstateManagedAssets")
             .And.NotContain("CREATE TABLE dbo.ProjectCivilDevelopmentApprovalFiles")
             .And.NotContain("CREATE TABLE dbo.CentralDocumentRecords");
-        metadata.Should().Contain($"Migration(\"{MigrationId}\")");
+        migration.Should().Contain($"[Migration(\"{MigrationId}\")]");
         evidenceBinding.Should().Contain("ProjectCivilDevelopmentApprovalEvidence")
             .And.Contain("CentralDocumentRecordId = i.CentralDocumentRecordId")
             .And.Contain("CentralDocumentVersionId = i.CentralDocumentVersionId")
             .And.NotContain("CREATE TABLE");
-        metadata.Should().Contain($"Migration(\"{EvidenceBindingMigrationId}\")");
+        evidenceBinding.Should().Contain($"[Migration(\"{EvidenceBindingMigrationId}\")]");
         preflight.Should().Contain($"GUARD_COVERAGE|{MigrationId}");
         preflight.Should().Contain($"GUARD_COVERAGE|{EvidenceBindingMigrationId}");
     }

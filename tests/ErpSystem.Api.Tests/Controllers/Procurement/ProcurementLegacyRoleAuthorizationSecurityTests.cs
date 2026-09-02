@@ -14,13 +14,12 @@ public sealed class ProcurementLegacyRoleAuthorizationSecurityTests
         .Where(type =>
             !type.IsAbstract &&
             typeof(ControllerBase).IsAssignableFrom(type) &&
-            string.Equals(type.Namespace, typeof(AwardVerificationsController).Namespace, StringComparison.Ordinal))
-        .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            string.Equals(type.Namespace, "ErpSystem.Api.Controllers.Procurement", StringComparison.Ordinal))
         .ToArray();
 
     private static readonly HashSet<string> LegacyGenericRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "SuperAdmin", "TenantAdmin", "Manager", "Employee"
+        "SuperAdmin", "TenantAdmin", "Manager", "Employee", "Admin", "Administrator"
     };
 
     [Fact]
@@ -55,6 +54,23 @@ public sealed class ProcurementLegacyRoleAuthorizationSecurityTests
             $"Unregistered procurement policies are referenced: {string.Join(", ", unknown)}");
     }
 
+    [Fact]
+    public void ProcurementSettingsOptionReadsRequireRecordsPermissionAndAreNotAnonymous()
+    {
+        foreach (var action in new[]
+                 {
+                     nameof(ProcurementSettingsController.ShouldAutoCreateInventoryItems),
+                     nameof(ProcurementSettingsController.ShouldAutoCreateSupplierItems),
+                     nameof(ProcurementSettingsController.AllowNonInventoryItems)
+                 })
+        {
+            var method = typeof(ProcurementSettingsController).GetMethod(action)!;
+            Assert.Equal("procurement.records.read",
+                method.GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+            Assert.Null(method.GetCustomAttribute<AllowAnonymousAttribute>());
+        }
+    }
+
     [Theory]
     [MemberData(nameof(CriticalPolicyMappings))]
     public void CriticalEndpointsUseTheExpectedPermissionPolicy(Type controller, string action, string policy)
@@ -69,6 +85,7 @@ public sealed class ProcurementLegacyRoleAuthorizationSecurityTests
     public static TheoryData<Type, string, string> CriticalPolicyMappings => new()
     {
         { typeof(AwardVerificationsController), nameof(AwardVerificationsController.GetVerificationById), "procurement.records.read" },
+        { typeof(ProcurementAccessControlsController), nameof(ProcurementAccessControlsController.UpdateCommittee), "procurement.access.manage" },
         { typeof(AwardVerificationsController), nameof(AwardVerificationsController.CompleteVerification), "procurement.tender.evaluate" },
         { typeof(ContractsController), nameof(ContractsController.GetContract), "procurement.records.read" },
         { typeof(ContractsController), nameof(ContractsController.ActivateContract), "procurement.contract.approve" },
@@ -81,11 +98,10 @@ public sealed class ProcurementLegacyRoleAuthorizationSecurityTests
         { typeof(PrequalificationController), nameof(PrequalificationController.Evaluate), "procurement.tender.evaluate" },
         { typeof(PrequalificationController), nameof(PrequalificationController.Decide), "procurement.sourcing.approve" },
         { typeof(ProcurementAccessControlsController), nameof(ProcurementAccessControlsController.CreateAssignment), "procurement.access.manage" },
-        { typeof(ProcurementAccessControlsController), nameof(ProcurementAccessControlsController.AddCommitteeMember), "procurement.access.manage" },
         { typeof(ProcurementConfigurationProfilesController), nameof(ProcurementConfigurationProfilesController.GetHistory), "procurement.audit.read" },
-        { typeof(ProcurementConfigurationProfilesController), nameof(ProcurementConfigurationProfilesController.Update), "procurement.access.manage" },
         { typeof(ProcurementMasterDataChangesController), nameof(ProcurementMasterDataChangesController.CreatePolicy), "procurement.access.manage" },
         { typeof(ProcurementMasterDataChangesController), nameof(ProcurementMasterDataChangesController.ActivatePolicy), "procurement.access.manage" },
+        { typeof(ProcurementConfigurationProfilesController), nameof(ProcurementConfigurationProfilesController.Update), "procurement.access.manage" },
         { typeof(ProcurementPolicySetsController), nameof(ProcurementPolicySetsController.GetPolicySets), "procurement.records.read" },
         { typeof(ProcurementPolicySetsController), nameof(ProcurementPolicySetsController.Publish), "procurement.access.manage" },
         { typeof(ProcurementSettingsController), nameof(ProcurementSettingsController.UpdateSettings), "procurement.access.manage" },

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Civil-only status linkage for approved maintenance scopes. The referenced QS, budget,
 /// procurement and contract records remain owned and mutated by their existing modules.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs")]
 public partial class AddCivilEngineeringMaintenanceCostingHandoffs : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

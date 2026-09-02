@@ -20,6 +20,10 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ForeignAmount { get; set; }
         public decimal? ExchangeRate { get; set; }
         public int? LineNumber { get; set; }
+        public Guid? FinanceDimensionSetId { get; set; }
+        public string? FinanceDimensionDisplayValue { get; set; }
+        public List<FinanceDimensionAssignmentDto> Dimensions { get; set; } = new();
+        public FinanceDimensionSnapshotDto? DimensionSnapshot { get; set; }
     }
 
     public class CreateAccountTransactionDto
@@ -48,5 +52,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ExchangeRate { get; set; }
 
         public int LineNumber { get; set; } = 1;
+
+        /// <summary>
+        /// Structured transaction dimensions supplied by the journal maker. Finance resolves the
+        /// values into an immutable set; callers cannot select a stored set id.
+        /// </summary>
+        public IReadOnlyList<FinancePostingDimensionValueDto> Dimensions { get; set; }
+            = Array.Empty<FinancePostingDimensionValueDto>();
     }
 }

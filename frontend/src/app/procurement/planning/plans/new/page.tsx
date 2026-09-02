@@ -19,6 +19,7 @@ import {
   type ProcurementBudgetDto,
 } from '@/services/procurementPlanningService';
 import { FiscalYearSelect } from '../../components/FiscalYearSelect';
+import { applyProcurementPlanBudgetSelection } from '../../components/procurementPlanBudgetSelection';
 
 export default function NewProcurementPlanPage() {
   const router = useRouter();
@@ -73,6 +74,7 @@ export default function NewProcurementPlanPage() {
         const values = await procurementBudgetService.getAvailableBudgetsForLinking(
           formData.departmentId,
           formData.fiscalYear,
+          true,
         );
         if (active) setAvailableBudgets(values);
       } catch (error) {
@@ -117,7 +119,7 @@ export default function NewProcurementPlanPage() {
       router.push('/procurement/planning/plans');
     } catch (error) {
       console.error('Error creating procurement plan:', error);
-      toast.error('Failed to create procurement plan');
+      toast.error(error instanceof Error ? error.message : 'Failed to create procurement plan');
     } finally {
       setLoading(false);
     }
@@ -301,10 +303,10 @@ export default function NewProcurementPlanPage() {
                   <Label htmlFor="budgetId">Approved Budget</Label>
                   <Select
                     value={formData.budgetId || '__none__'}
-                    onValueChange={(value) => setFormData((previous) => ({
-                      ...previous,
-                      budgetId: value === '__none__' ? undefined : value,
-                    }))}
+                    onValueChange={(value) => {
+                      setFormData((previous) =>
+                        applyProcurementPlanBudgetSelection(previous, availableBudgets, value));
+                    }}
                     disabled={!formData.departmentId || loadingBudgets}
                   >
                     <SelectTrigger id="budgetId">
@@ -326,7 +328,8 @@ export default function NewProcurementPlanPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Final approval requires a selected approved budget for this department and fiscal year.
+                    Final approval requires an approved budget for this department and fiscal year. A budget may fund
+                    multiple plans while its controlled planning capacity remains sufficient.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -342,21 +345,15 @@ export default function NewProcurementPlanPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="currency">Currency</Label>
-                  <Select
-                    value={formData.currency}
-                    onValueChange={(value) => handleInputChange('currency', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select currency" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USD">USD - US Dollar</SelectItem>
-                      <SelectItem value="EUR">EUR - Euro</SelectItem>
-                      <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                      <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
-                      <SelectItem value="ETB">ETB - Ethiopian Birr</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    id="currency"
+                    value={formData.budgetId ? formData.currency : 'Select an approved budget'}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Currency is inherited from the selected approved budget.
+                  </p>
                 </div>
               </div>
 

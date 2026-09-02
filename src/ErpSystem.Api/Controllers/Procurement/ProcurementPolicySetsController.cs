@@ -34,6 +34,13 @@ public sealed class ProcurementPolicySetsController : ControllerBase
                 : Ok(policySet);
         });
 
+    [HttpGet("role-options")]
+    [Authorize(Policy = "procurement.records.read")]
+    public Task<IActionResult> GetRoleOptions(
+        [FromQuery] Guid? workflowDefinitionId = null,
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async () => Ok(await _service.GetRoleOptionsAsync(workflowDefinitionId, cancellationToken)));
+
     [HttpGet("{id:guid}")]
     [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetPolicySet(Guid id, CancellationToken cancellationToken) =>

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// development-approval file. Central DMS and the approval-file evidence
 /// register remain the authoritative document owners.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822001000_HardenCivilEngineeringPlanningGisEvidenceBinding")]
 public partial class HardenCivilEngineeringPlanningGisEvidenceBinding : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

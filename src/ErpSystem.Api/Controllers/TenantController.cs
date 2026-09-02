@@ -250,8 +250,8 @@ public class TenantController : ControllerBase
             }
             if (_civilEngineeringConfigurationProfileSeeder is not null)
             {
-                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedCivilInitializerActorId)
-                    ? parsedCivilInitializerActorId
+                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedInitializerActorId)
+                    ? parsedInitializerActorId
                     : (Guid?)null;
                 await _civilEngineeringConfigurationProfileSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
             }

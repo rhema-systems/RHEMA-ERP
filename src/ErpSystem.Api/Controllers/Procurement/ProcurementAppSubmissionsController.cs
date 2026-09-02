@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,8 +12,15 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public sealed class ProcurementAppSubmissionsController : ControllerBase
 {
     private readonly IProcurementAppSubmissionService _service;
+    private readonly IFileStorageService _fileStorage;
 
-    public ProcurementAppSubmissionsController(IProcurementAppSubmissionService service) => _service = service;
+    public ProcurementAppSubmissionsController(
+        IProcurementAppSubmissionService service,
+        IFileStorageService fileStorage)
+    {
+        _service = service;
+        _fileStorage = fileStorage;
+    }
 
     [HttpGet("summary")]
     public Task<IActionResult> GetSummary(CancellationToken cancellationToken) =>
@@ -29,6 +37,15 @@ public sealed class ProcurementAppSubmissionsController : ControllerBase
     [HttpGet("{id:guid}")]
     public Task<IActionResult> Get(Guid id, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetAsync(id, cancellationToken)));
+
+    [HttpGet("{id:guid}/export-file")]
+    public Task<IActionResult> DownloadExport(Guid id, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var export = await _service.GetExportFileAsync(id, cancellationToken);
+            var stream = await _fileStorage.DownloadFileAsync(export.FilePath, export.FileUploadRecordId);
+            return File(stream, export.ContentType, export.FileName);
+        });
 
     [HttpPost("exports")]
     public Task<IActionResult> RecordExport([FromBody] RecordProcurementAppExportRequest request, CancellationToken cancellationToken) =>

@@ -23,6 +23,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   Select,
   SelectContent,
@@ -134,6 +136,7 @@ export function PropertyUnitRegister() {
     null
   );
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const assetPages = usePaginatedItems(assets, 10);
 
   const loadAssets = React.useCallback(async () => {
     setIsLoading(true);
@@ -359,7 +362,7 @@ export function PropertyUnitRegister() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {assets.map((asset) => {
+                  {assetPages.items.map((asset) => {
                     const lesseeOrOwner = getCurrentLesseeOrOwner(asset);
                     const isPortalListing =
                       asset.externalListingType !== 'None';
@@ -485,6 +488,7 @@ export function PropertyUnitRegister() {
               </Table>
             </div>
           ) : null}
+          {assets.length > assetPages.pageSize ? <Pagination currentPage={assetPages.currentPage} totalPages={assetPages.totalPages} totalItems={assetPages.totalItems} pageSize={assetPages.pageSize} onPageChange={assetPages.setCurrentPage} /> : null}
         </CardContent>
       </Card>
     </div>

@@ -64,68 +64,127 @@ public sealed class CivilEngineeringDirectTaskService(
         if (errors.Count > 0) throw Validation(errors);
         var requestHash = Hash(new
         {
-            projectId, title = request.Title.Trim(), instructions = request.Instructions.Trim(), request.AssignedToUserId, request.AssignedRoleId,
-            request.Urgency, urgencyReason = Clean(request.UrgencyReason, 1000), dueDate = request.DueDate!.Value.ToUniversalTime(), request.CentralDocumentRecordId, request.CentralDocumentVersionId
+            projectId,
+            title = request.Title.Trim(),
+            instructions = request.Instructions.Trim(),
+            request.AssignedToUserId,
+            request.AssignedRoleId,
+            request.Urgency,
+            urgencyReason = Clean(request.UrgencyReason, 1000),
+            dueDate = request.DueDate!.Value.ToUniversalTime(),
+            request.CentralDocumentRecordId,
+            request.CentralDocumentVersionId
         });
 
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-        var retry = await Tasks(true).SingleOrDefaultAsync(value => value.ClientRequestId == request.ClientRequestId, token);
-        if (retry is not null)
+        CivilEngineeringDirectTaskDto? result = null;
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            if (!FixedEquals(retry.RequestHash, requestHash)) throw Conflict("This client request identifier was already used with different Civil task values.");
-            await transaction.CommitAsync(token);
-            return (await MapAsync([retry], token)).Single();
-        }
-
-        policy = await ResolvePolicyAsync(at, token);
-        errors = CivilEngineeringDirectTaskPolicy.ValidateCreate(request, policy.Value, at);
-        if (errors.Count > 0) throw Validation(errors);
-        await RequireProjectAsync(projectId, token);
-        await RequireAssignmentAuthorityAsync(projectId, token);
-        var assignee = await RequireAssigneeAsync(projectId, request.AssignedToUserId, request.AssignedRoleId, policy, token);
-        var evidence = request.CentralDocumentVersionId.HasValue
-            ? await RequireEvidenceAsync(request.CentralDocumentRecordId!.Value, request.CentralDocumentVersionId.Value, token)
-            : null;
-        var now = DateTime.UtcNow;
-        var sortOrder = await db.ProjectWorkItems.Where(value => value.TenantId == TenantId && value.ProjectId == projectId && value.ParentId == null && !value.IsDeleted).CountAsync(token);
-        var workItem = new ProjectWorkItem
-        {
-            Id = Guid.NewGuid(), TenantId = TenantId, ProjectId = projectId, NodeType = ProjectWorkItemNodeTypes.Task,
-            Title = request.Title.Trim(), Description = request.Instructions.Trim(), Status = "Assigned", Priority = CivilEngineeringDirectTaskPolicy.WorkItemPriority(request.Urgency),
-            AssignedToUserId = assignee.UserId, PlannedStartDate = now, PlannedEndDate = request.DueDate!.Value.ToUniversalTime(), SortOrder = sortOrder,
-            IsRollupEnabled = true, CreatedAt = now, CreatedBy = UserName, CreatedById = UserId
-        };
-        var task = new ProjectCivilDirectTaskControl
-        {
-            Id = Guid.NewGuid(), TenantId = TenantId, ProjectId = projectId, WorkItemId = workItem.Id, ClientRequestId = request.ClientRequestId, RequestHash = requestHash,
-            AssignedToUserId = assignee.UserId, AssignedRoleId = assignee.RoleId, AssignedRoleName = assignee.RoleName,
-            Urgency = request.Urgency, IsUrgentPath = CivilEngineeringDirectTaskPolicy.IsUrgent(request.Urgency), UrgencyReason = Clean(request.UrgencyReason, 1000),
-            UrgentResponseDueAt = CivilEngineeringDirectTaskPolicy.IsUrgent(request.Urgency) ? request.DueDate!.Value.ToUniversalTime() : null,
-            DueDate = request.DueDate!.Value.ToUniversalTime(), Instructions = request.Instructions.Trim(),
-            CentralDocumentRecordId = evidence?.DocumentRecordId, CentralDocumentVersionId = evidence?.Id,
-            ConfigurationProfileId = policy.ProfileId, ConfigurationDecisionId = policy.DecisionId, WorkflowDefinitionId = policy.WorkflowDefinitionId,
-            FeedbackMetadataTemplateId = policy.Template.Id, FeedbackMetadataTemplateCodeSnapshot = policy.Template.TemplateCode, PolicyHash = policy.PolicyHash,
-            Status = "Assigned", ApprovalStatus = "Draft", CorrelationId = Correlation(correlationId), CreatedAt = now, CreatedBy = UserName, CreatedById = UserId
-        };
-        db.ProjectWorkItems.Add(workItem);
-        db.ProjectCivilDirectTaskControls.Add(task);
-        if (task.IsUrgentPath)
-        {
-            db.Notifications.Add(new Notification
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+            var retry = await Tasks(true).SingleOrDefaultAsync(value => value.ClientRequestId == request.ClientRequestId, token);
+            if (retry is not null)
             {
-                Id = Guid.NewGuid(), TenantId = TenantId, RecipientId = assignee.UserId, NotificationType = "CivilDirectTaskUrgentAssignment",
-                Title = "Urgent Civil task assigned", Message = $"An urgent Civil task '{workItem.Title}' requires a response by {task.UrgentResponseDueAt:dd MMM yyyy HH:mm} UTC.",
-                Priority = request.Urgency == CivilEngineeringUrgency.Emergency ? "Critical" : "High", Status = "Pending", ScheduledFor = now,
-                EntityType = nameof(ProjectCivilDirectTaskControl), EntityId = task.Id, ActionUrl = $"/development/civil-engineering/direct-tasks?projectId={projectId}", DeliveryMethods = "InApp",
-                AdditionalData = JsonSerializer.Serialize(new { source = "CIV-0503", taskId = task.Id, projectId, task.UrgencyReason, task.UrgentResponseDueAt, correlationId = Correlation(correlationId) }, JsonOptions),
-                CreatedAt = now, CreatedBy = UserName, CreatedById = UserId
-            });
-        }
-        AddRevision(task, CivilEngineeringAuditEventMap.CreateCivilTask, null, Snapshot(task, workItem), null, correlationId);
-        AddAudit(task, CivilEngineeringAuditEventMap.CreateCivilTask, null, Snapshot(task, workItem), correlationId);
-        await SaveAsync(token);
-        await transaction.CommitAsync(token);
-        return (await MapAsync([task], token)).Single();
+                if (!FixedEquals(retry.RequestHash, requestHash)) throw Conflict("This client request identifier was already used with different Civil task values.");
+                await transaction.CommitAsync(token);
+                result = (await MapAsync([retry], token)).Single();
+                return;
+            }
+
+            policy = await ResolvePolicyAsync(at, token);
+            errors = CivilEngineeringDirectTaskPolicy.ValidateCreate(request, policy.Value, at);
+            if (errors.Count > 0) throw Validation(errors);
+            await RequireProjectAsync(projectId, token);
+            await RequireAssignmentAuthorityAsync(projectId, token);
+            var assignee = await RequireAssigneeAsync(projectId, request.AssignedToUserId, request.AssignedRoleId, policy, token);
+            var evidence = request.CentralDocumentVersionId.HasValue
+                ? await RequireEvidenceAsync(request.CentralDocumentRecordId!.Value, request.CentralDocumentVersionId.Value, token)
+                : null;
+            var now = DateTime.UtcNow;
+            var sortOrder = await db.ProjectWorkItems.Where(value => value.TenantId == TenantId && value.ProjectId == projectId && value.ParentId == null && !value.IsDeleted).CountAsync(token);
+            var workItem = new ProjectWorkItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ProjectId = projectId,
+                NodeType = ProjectWorkItemNodeTypes.Task,
+                Title = request.Title.Trim(),
+                Description = request.Instructions.Trim(),
+                Status = "Assigned",
+                Priority = CivilEngineeringDirectTaskPolicy.WorkItemPriority(request.Urgency),
+                AssignedToUserId = assignee.UserId,
+                PlannedStartDate = now,
+                PlannedEndDate = request.DueDate!.Value.ToUniversalTime(),
+                SortOrder = sortOrder,
+                IsRollupEnabled = true,
+                CreatedAt = now,
+                CreatedBy = UserName,
+                CreatedById = UserId
+            };
+            var task = new ProjectCivilDirectTaskControl
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ProjectId = projectId,
+                WorkItemId = workItem.Id,
+                ClientRequestId = request.ClientRequestId,
+                RequestHash = requestHash,
+                AssignedToUserId = assignee.UserId,
+                AssignedRoleId = assignee.RoleId,
+                AssignedRoleName = assignee.RoleName,
+                Urgency = request.Urgency,
+                IsUrgentPath = CivilEngineeringDirectTaskPolicy.IsUrgent(request.Urgency),
+                UrgencyReason = Clean(request.UrgencyReason, 1000),
+                UrgentResponseDueAt = CivilEngineeringDirectTaskPolicy.IsUrgent(request.Urgency) ? request.DueDate!.Value.ToUniversalTime() : null,
+                DueDate = request.DueDate!.Value.ToUniversalTime(),
+                Instructions = request.Instructions.Trim(),
+                CentralDocumentRecordId = evidence?.DocumentRecordId,
+                CentralDocumentVersionId = evidence?.Id,
+                ConfigurationProfileId = policy.ProfileId,
+                ConfigurationDecisionId = policy.DecisionId,
+                WorkflowDefinitionId = policy.WorkflowDefinitionId,
+                FeedbackMetadataTemplateId = policy.Template.Id,
+                FeedbackMetadataTemplateCodeSnapshot = policy.Template.TemplateCode,
+                PolicyHash = policy.PolicyHash,
+                Status = "Assigned",
+                ApprovalStatus = "Draft",
+                CorrelationId = Correlation(correlationId),
+                CreatedAt = now,
+                CreatedBy = UserName,
+                CreatedById = UserId
+            };
+            db.ProjectWorkItems.Add(workItem);
+            db.ProjectCivilDirectTaskControls.Add(task);
+            if (task.IsUrgentPath)
+            {
+                db.Notifications.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    RecipientId = assignee.UserId,
+                    NotificationType = "CivilDirectTaskUrgentAssignment",
+                    Title = "Urgent Civil task assigned",
+                    Message = $"An urgent Civil task '{workItem.Title}' requires a response by {task.UrgentResponseDueAt:dd MMM yyyy HH:mm} UTC.",
+                    Priority = request.Urgency == CivilEngineeringUrgency.Emergency ? "Critical" : "High",
+                    Status = "Pending",
+                    ScheduledFor = now,
+                    EntityType = nameof(ProjectCivilDirectTaskControl),
+                    EntityId = task.Id,
+                    ActionUrl = $"/development/civil-engineering/direct-tasks?projectId={projectId}",
+                    DeliveryMethods = "InApp",
+                    AdditionalData = JsonSerializer.Serialize(new { source = "CIV-0503", taskId = task.Id, projectId, task.UrgencyReason, task.UrgentResponseDueAt, correlationId = Correlation(correlationId) }, JsonOptions),
+                    CreatedAt = now,
+                    CreatedBy = UserName,
+                    CreatedById = UserId
+                });
+            }
+            AddRevision(task, CivilEngineeringAuditEventMap.CreateCivilTask, null, Snapshot(task, workItem), null, correlationId);
+            AddAudit(task, CivilEngineeringAuditEventMap.CreateCivilTask, null, Snapshot(task, workItem), correlationId);
+            await SaveAsync(token);
+            await transaction.CommitAsync(token);
+            result = (await MapAsync([task], token)).Single();
+        });
+        return result ?? throw new InvalidOperationException("The Civil direct-task transaction completed without a result.");
     }
 
     public async Task<IReadOnlyList<CivilEngineeringDirectTaskDto>> EscalateUrgentAsync(Guid projectId, EscalateCivilEngineeringUrgentTasksRequest request, string correlationId, CancellationToken token = default)
@@ -136,59 +195,79 @@ public sealed class CivilEngineeringDirectTaskService(
         var requestHash = Hash(new { projectId, request.ClientRequestId });
         var now = DateTime.UtcNow;
 
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-        var retries = await Tasks(true).Where(value => value.ProjectId == projectId && value.UrgentEscalationClientRequestId == request.ClientRequestId)
-            .OrderBy(value => value.DueDate).ToListAsync(token);
-        if (retries.Count > 0)
+        IReadOnlyList<CivilEngineeringDirectTaskDto>? result = null;
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            if (retries.Any(value => !FixedEquals(value.UrgentEscalationRequestHash ?? string.Empty, requestHash)))
-                throw Conflict("This client request identifier was already used with different urgent-task escalation values.");
-            await transaction.CommitAsync(token);
-            return await MapAsync(retries, token);
-        }
-
-        var tasks = await Tasks(true).Where(value => value.ProjectId == projectId && value.IsUrgentPath && value.UrgentResponseDueAt.HasValue
-                && value.UrgentResponseDueAt.Value < now && !value.UrgentEscalatedAt.HasValue && value.Status != "Accepted" && value.Status != "Cancelled")
-            .Include(value => value.WorkItem).OrderBy(value => value.UrgentResponseDueAt).ToListAsync(token);
-        if (tasks.Count == 0)
-        {
-            await transaction.CommitAsync(token);
-            return [];
-        }
-
-        foreach (var task in tasks)
-        {
-            var policy = await ResolveFrozenPolicyAsync(task, token);
-            var recipients = await UrgentEscalationRecipientsAsync(projectId, task.AssignedToUserId, policy, token);
-            if (recipients.Count == 0)
-                throw Validation("CIV-CFG-010 has no active independent project-member escalation recipient for this overdue urgent task.");
-
-            var before = Snapshot(task, task.WorkItem);
-            task.UrgentEscalatedAt = now;
-            task.UrgentEscalationClientRequestId = request.ClientRequestId;
-            task.UrgentEscalationRequestHash = requestHash;
-            task.CorrelationId = Correlation(correlationId);
-            task.UpdatedAt = now;
-            task.UpdatedBy = UserName;
-            task.LastModifiedById = UserId;
-            foreach (var recipientId in recipients)
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+            var retries = await Tasks(true).Where(value => value.ProjectId == projectId && value.UrgentEscalationClientRequestId == request.ClientRequestId)
+                .OrderBy(value => value.DueDate).ToListAsync(token);
+            if (retries.Count > 0)
             {
-                db.Notifications.Add(new Notification
-                {
-                    Id = Guid.NewGuid(), TenantId = TenantId, RecipientId = recipientId, NotificationType = "CivilDirectTaskUrgentEscalation",
-                    Title = "Overdue urgent Civil task", Message = $"The urgent Civil task '{task.WorkItem.Title}' passed its response deadline and requires intervention.",
-                    Priority = task.Urgency == CivilEngineeringUrgency.Emergency ? "Critical" : "High", Status = "Pending", ScheduledFor = now,
-                    EntityType = nameof(ProjectCivilDirectTaskControl), EntityId = task.Id, ActionUrl = $"/development/civil-engineering/direct-tasks?projectId={projectId}", DeliveryMethods = "InApp",
-                    AdditionalData = JsonSerializer.Serialize(new { source = "CIV-0503", taskId = task.Id, projectId, task.UrgencyReason, task.UrgentResponseDueAt, request.ClientRequestId, correlationId = Correlation(correlationId) }, JsonOptions),
-                    CreatedAt = now, CreatedBy = UserName, CreatedById = UserId
-                });
+                if (retries.Any(value => !FixedEquals(value.UrgentEscalationRequestHash ?? string.Empty, requestHash)))
+                    throw Conflict("This client request identifier was already used with different urgent-task escalation values.");
+                await transaction.CommitAsync(token);
+                result = await MapAsync(retries, token);
+                return;
             }
-            AddRevision(task, CivilEngineeringAuditEventMap.OverrideCivilTaskUrgency, before, Snapshot(task, task.WorkItem), "Overdue urgent-task escalation dispatched to configured independent project roles.", correlationId);
-            AddAudit(task, CivilEngineeringAuditEventMap.OverrideCivilTaskUrgency, before, Snapshot(task, task.WorkItem), correlationId);
-        }
-        await SaveAsync(token);
-        await transaction.CommitAsync(token);
-        return await MapAsync(tasks, token);
+
+            var tasks = await Tasks(true).Where(value => value.ProjectId == projectId && value.IsUrgentPath && value.UrgentResponseDueAt.HasValue
+                    && value.UrgentResponseDueAt.Value < now && !value.UrgentEscalatedAt.HasValue && value.Status != "Accepted" && value.Status != "Cancelled")
+                .Include(value => value.WorkItem).OrderBy(value => value.UrgentResponseDueAt).ToListAsync(token);
+            if (tasks.Count == 0)
+            {
+                await transaction.CommitAsync(token);
+                result = [];
+                return;
+            }
+
+            foreach (var task in tasks)
+            {
+                var policy = await ResolveFrozenPolicyAsync(task, token);
+                var recipients = await UrgentEscalationRecipientsAsync(projectId, task.AssignedToUserId, policy, token);
+                if (recipients.Count == 0)
+                    throw Validation("CIV-CFG-010 has no active independent project-member escalation recipient for this overdue urgent task.");
+
+                var before = Snapshot(task, task.WorkItem);
+                task.UrgentEscalatedAt = now;
+                task.UrgentEscalationClientRequestId = request.ClientRequestId;
+                task.UrgentEscalationRequestHash = requestHash;
+                task.CorrelationId = Correlation(correlationId);
+                task.UpdatedAt = now;
+                task.UpdatedBy = UserName;
+                task.LastModifiedById = UserId;
+                foreach (var recipientId in recipients)
+                {
+                    db.Notifications.Add(new Notification
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        RecipientId = recipientId,
+                        NotificationType = "CivilDirectTaskUrgentEscalation",
+                        Title = "Overdue urgent Civil task",
+                        Message = $"The urgent Civil task '{task.WorkItem.Title}' passed its response deadline and requires intervention.",
+                        Priority = task.Urgency == CivilEngineeringUrgency.Emergency ? "Critical" : "High",
+                        Status = "Pending",
+                        ScheduledFor = now,
+                        EntityType = nameof(ProjectCivilDirectTaskControl),
+                        EntityId = task.Id,
+                        ActionUrl = $"/development/civil-engineering/direct-tasks?projectId={projectId}",
+                        DeliveryMethods = "InApp",
+                        AdditionalData = JsonSerializer.Serialize(new { source = "CIV-0503", taskId = task.Id, projectId, task.UrgencyReason, task.UrgentResponseDueAt, request.ClientRequestId, correlationId = Correlation(correlationId) }, JsonOptions),
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = UserId
+                    });
+                }
+                AddRevision(task, CivilEngineeringAuditEventMap.OverrideCivilTaskUrgency, before, Snapshot(task, task.WorkItem), "Overdue urgent-task escalation dispatched to configured independent project roles.", correlationId);
+                AddAudit(task, CivilEngineeringAuditEventMap.OverrideCivilTaskUrgency, before, Snapshot(task, task.WorkItem), correlationId);
+            }
+            await SaveAsync(token);
+            await transaction.CommitAsync(token);
+            result = await MapAsync(tasks, token);
+        });
+        return result ?? throw new InvalidOperationException("The Civil urgent-task escalation transaction completed without a result.");
     }
 
     public async Task<CivilEngineeringDirectTaskFeedbackLookupsDto> GetFeedbackLookupsAsync(Guid projectId, Guid taskId, CancellationToken token = default)
@@ -224,64 +303,87 @@ public sealed class CivilEngineeringDirectTaskService(
         var errors = CivilEngineeringDirectTaskPolicy.ValidateFeedback(request);
         if (errors.Count > 0) throw Validation(errors);
         var requestHash = Hash(new { taskId, request.Action, message = Clean(request.Message, 2000), request.ProgressPercent, request.MeasurementValue, request.MeasurementUnitId, capturedOfflineAtUtc = request.CapturedOfflineAtUtc?.ToUniversalTime(), request.CentralDocumentRecordId, request.CentralDocumentVersionId, request.RowVersion });
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-        var task = await LoadTaskAsync(projectId, taskId, true, token);
-        await RequireProjectMemberAsync(task.ProjectId, token);
-        var retry = await db.ProjectCivilDirectTaskFeedbackEntries.SingleOrDefaultAsync(value => value.TenantId == TenantId && value.DirectTaskControlId == task.Id && value.ClientRequestId == request.ClientRequestId, token);
-        if (retry is not null)
+        CivilEngineeringDirectTaskDto? result = null;
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            if (!FixedEquals(retry.RequestHash, requestHash)) throw Conflict("This client request identifier was already used with different Civil task feedback values.");
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+            var task = await LoadTaskAsync(projectId, taskId, true, token);
+            await RequireProjectMemberAsync(task.ProjectId, token);
+            var retry = await db.ProjectCivilDirectTaskFeedbackEntries.SingleOrDefaultAsync(value => value.TenantId == TenantId && value.DirectTaskControlId == task.Id && value.ClientRequestId == request.ClientRequestId, token);
+            if (retry is not null)
+            {
+                if (!FixedEquals(retry.RequestHash, requestHash)) throw Conflict("This client request identifier was already used with different Civil task feedback values.");
+                await transaction.CommitAsync(token);
+                result = (await MapAsync([task], token)).Single();
+                return;
+            }
+
+            ApplyRowVersion(task, request.RowVersion);
+            var policy = await ResolveFrozenPolicyAsync(task, token);
+            var isAssignee = await IsAssignedActorAsync(task, token);
+            var isReviewer = await IsReviewerAsync(task, token);
+            var evidence = request.CentralDocumentVersionId.HasValue
+                ? await RequireEvidenceAsync(request.CentralDocumentRecordId!.Value, request.CentralDocumentVersionId.Value, policy.Template.TemplateCode, token)
+                : null;
+            var measurementUnit = request.MeasurementUnitId.HasValue ? await RequireMeasurementUnitAsync(request.MeasurementUnitId.Value, token) : null;
+            var now = DateTime.UtcNow;
+            var workItem = await db.ProjectWorkItems.SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == task.WorkItemId && value.ProjectId == task.ProjectId && !value.IsDeleted, token)
+                ?? throw Conflict("The authoritative Projects work item for this Civil task is unavailable.");
+            var before = Snapshot(task, workItem);
+            var feedback = new ProjectCivilDirectTaskFeedbackEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                DirectTaskControlId = task.Id,
+                ClientRequestId = request.ClientRequestId,
+                RequestHash = requestHash,
+                Sequence = await NextFeedbackSequenceAsync(task.Id, token),
+                Action = request.Action,
+                ProgressPercent = request.ProgressPercent,
+                Message = Clean(request.Message, 2000),
+                ActorUserId = UserId,
+                MeasurementValue = request.MeasurementValue,
+                MeasurementUnitId = measurementUnit?.Id,
+                CapturedOfflineAtUtc = request.CapturedOfflineAtUtc?.ToUniversalTime(),
+                CentralDocumentRecordId = evidence?.DocumentRecordId,
+                CentralDocumentVersionId = evidence?.Id,
+                // The append-only feedback record is deliberately written before a shared workflow can persist its own records.
+                // The subsequent revision/audit preserves the normalized workflow outcome without ever mutating this event.
+                WorkflowOutcome = null,
+                CorrelationId = Correlation(correlationId),
+                CreatedAt = now,
+                CreatedBy = UserName,
+                CreatedById = UserId
+            };
+
+            db.ProjectCivilDirectTaskFeedbackEntries.Add(feedback);
+            await SaveAsync(token, "feedback event");
+
+            task.LastFeedbackClientRequestId = request.ClientRequestId;
+            task.LastFeedbackRequestHash = requestHash;
+            WorkflowOutcome? outcome;
+            try { outcome = await PrepareFeedbackMutationAsync(task, workItem, request, policy, isAssignee, isReviewer, now, token); }
+            catch (DbUpdateConcurrencyException) { throw Conflict("The shared direct-task workflow changed concurrently. Refresh and retry."); }
+            catch (DbUpdateException exception) when (exception.InnerException is SqlException sql && sql.Number is >= 52280 and <= 52291) { throw Conflict(sql.Message); }
+            catch (DbUpdateException) { throw Conflict("The shared direct-task workflow could not persist this feedback action. Refresh and retry."); }
+            task.CorrelationId = Correlation(correlationId);
+            task.UpdatedAt = now;
+            task.UpdatedBy = UserName;
+            task.LastModifiedById = UserId;
+            workItem.UpdatedAt = now;
+            workItem.UpdatedBy = UserName;
+            workItem.LastModifiedById = UserId;
+            var auditAction = AuditAction(request.Action, outcome);
+            var after = new { task = Snapshot(task, workItem), feedback = FeedbackSnapshot(feedback) };
+            AddRevision(task, auditAction, before, after, Clean(request.Message, 2000), correlationId);
+            AddAudit(task, auditAction, before, after, correlationId);
+            await SaveAsync(token, "lifecycle mutation");
             await transaction.CommitAsync(token);
-            return (await MapAsync([task], token)).Single();
-        }
-
-        ApplyRowVersion(task, request.RowVersion);
-        var policy = await ResolveFrozenPolicyAsync(task, token);
-        var isAssignee = await IsAssignedActorAsync(task, token);
-        var isReviewer = await IsReviewerAsync(task, token);
-        var evidence = request.CentralDocumentVersionId.HasValue
-            ? await RequireEvidenceAsync(request.CentralDocumentRecordId!.Value, request.CentralDocumentVersionId.Value, policy.Template.TemplateCode, token)
-            : null;
-        var measurementUnit = request.MeasurementUnitId.HasValue ? await RequireMeasurementUnitAsync(request.MeasurementUnitId.Value, token) : null;
-        var now = DateTime.UtcNow;
-        var workItem = await db.ProjectWorkItems.SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == task.WorkItemId && value.ProjectId == task.ProjectId && !value.IsDeleted, token)
-            ?? throw Conflict("The authoritative Projects work item for this Civil task is unavailable.");
-        var before = Snapshot(task, workItem);
-        var feedback = new ProjectCivilDirectTaskFeedbackEntry
-        {
-            Id = Guid.NewGuid(), TenantId = TenantId, DirectTaskControlId = task.Id, ClientRequestId = request.ClientRequestId, RequestHash = requestHash,
-            Sequence = await NextFeedbackSequenceAsync(task.Id, token), Action = request.Action, ProgressPercent = request.ProgressPercent,
-            Message = Clean(request.Message, 2000), ActorUserId = UserId, MeasurementValue = request.MeasurementValue, MeasurementUnitId = measurementUnit?.Id,
-            CapturedOfflineAtUtc = request.CapturedOfflineAtUtc?.ToUniversalTime(), CentralDocumentRecordId = evidence?.DocumentRecordId, CentralDocumentVersionId = evidence?.Id,
-            // The append-only feedback record is deliberately written before a shared workflow can persist its own records.
-            // The subsequent revision/audit preserves the normalized workflow outcome without ever mutating this event.
-            WorkflowOutcome = null, CorrelationId = Correlation(correlationId), CreatedAt = now, CreatedBy = UserName, CreatedById = UserId
-        };
-
-        db.ProjectCivilDirectTaskFeedbackEntries.Add(feedback);
-        await SaveAsync(token);
-
-        task.LastFeedbackClientRequestId = request.ClientRequestId;
-        task.LastFeedbackRequestHash = requestHash;
-        WorkflowOutcome? outcome;
-        try { outcome = await PrepareFeedbackMutationAsync(task, workItem, request, policy, isAssignee, isReviewer, now, token); }
-        catch (DbUpdateConcurrencyException) { throw Conflict("The shared direct-task workflow changed concurrently. Refresh and retry."); }
-        catch (DbUpdateException exception) when (exception.InnerException is SqlException sql && sql.Number is >= 52280 and <= 52291) { throw Conflict(sql.Message); }
-        catch (DbUpdateException) { throw Conflict("The shared direct-task workflow could not persist this feedback action. Refresh and retry."); }
-        task.CorrelationId = Correlation(correlationId);
-        task.UpdatedAt = now;
-        task.UpdatedBy = UserName;
-        task.LastModifiedById = UserId;
-        workItem.UpdatedAt = now;
-        workItem.UpdatedBy = UserName;
-        workItem.LastModifiedById = UserId;
-        var auditAction = AuditAction(request.Action, outcome);
-        var after = new { task = Snapshot(task, workItem), feedback = FeedbackSnapshot(feedback) };
-        AddRevision(task, auditAction, before, after, Clean(request.Message, 2000), correlationId);
-        AddAudit(task, auditAction, before, after, correlationId);
-        await SaveAsync(token);
-        await transaction.CommitAsync(token);
-        return (await MapAsync([task], token)).Single();
+            result = (await MapAsync([task], token)).Single();
+        });
+        return result ?? throw new InvalidOperationException("The Civil task-feedback transaction completed without a result.");
     }
 
     private IQueryable<ProjectCivilDirectTaskControl> Tasks(bool tracked) =>
@@ -470,9 +572,10 @@ public sealed class CivilEngineeringDirectTaskService(
 
     private async Task RequireProjectAsync(Guid projectId, CancellationToken token)
     {
-        if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null)
+        if (projectId == Guid.Empty
+            || !await db.Projects.AsNoTracking().AnyAsync(value => value.TenantId == TenantId && value.Id == projectId && !value.IsDeleted, token))
             throw new UnauthorizedAccessException("You are not permitted to access the selected project.");
-        if (!await db.Projects.AsNoTracking().AnyAsync(value => value.TenantId == TenantId && value.Id == projectId && !value.IsDeleted, token))
+        if (await projectService.GetProjectByIdAsync(projectId) is null)
             throw new UnauthorizedAccessException("You are not permitted to access the selected project.");
     }
 
@@ -500,7 +603,10 @@ public sealed class CivilEngineeringDirectTaskService(
             .OrderBy(value => value.FirstName).ThenBy(value => value.LastName).ToListAsync(token);
         return rows.GroupBy(value => new { value.UserId, value.RoleId }).Select(value => value.First()).Select(value => new CivilEngineeringDirectTaskAssigneeDto
         {
-            UserId = value.UserId, RoleId = value.RoleId, RoleName = value.RoleName!, DisplayName = DisplayName(value.FirstName, value.LastName, value.UserName)
+            UserId = value.UserId,
+            RoleId = value.RoleId,
+            RoleName = value.RoleName!,
+            DisplayName = DisplayName(value.FirstName, value.LastName, value.UserName)
         }).ToList();
     }
 
@@ -644,13 +750,31 @@ public sealed class CivilEngineeringDirectTaskService(
         var documents = await db.CentralDocumentRecords.AsNoTracking().Where(value => value.TenantId == TenantId && documentIds.Contains(value.Id)).ToDictionaryAsync(value => value.Id, value => value.DocumentReference, token);
         return values.Where(value => workItems.ContainsKey(value.WorkItemId)).Select(value => new CivilEngineeringDirectTaskDto
         {
-            Id = value.Id, ProjectId = value.ProjectId, WorkItemId = value.WorkItemId, Title = workItems[value.WorkItemId].Title, Instructions = value.Instructions,
-            AssignedToUserId = value.AssignedToUserId, AssignedToName = users.GetValueOrDefault(value.AssignedToUserId, "Unavailable assignee"), AssignedRoleId = value.AssignedRoleId,
-            AssignedRoleName = value.AssignedRoleName, Urgency = value.Urgency, DueDate = value.DueDate, Status = value.Status, ApprovalStatus = value.ApprovalStatus,
-            IsUrgentPath = value.IsUrgentPath, UrgencyReason = value.UrgencyReason, UrgentResponseDueAt = value.UrgentResponseDueAt, UrgentEscalatedAt = value.UrgentEscalatedAt,
-            ProgressPercent = value.ProgressPercent, AcknowledgedAt = value.AcknowledgedAt, CompletedAt = value.CompletedAt, AcceptedAt = value.AcceptedAt,
-            DocumentReference = value.CentralDocumentRecordId.HasValue ? documents.GetValueOrDefault(value.CentralDocumentRecordId.Value) : null, WorkflowInstanceId = value.WorkflowInstanceId,
-            CreatedAt = value.CreatedAt, RowVersion = Convert.ToBase64String(value.RowVersion)
+            Id = value.Id,
+            ProjectId = value.ProjectId,
+            WorkItemId = value.WorkItemId,
+            Title = workItems[value.WorkItemId].Title,
+            Instructions = value.Instructions,
+            AssignedToUserId = value.AssignedToUserId,
+            AssignedToName = users.GetValueOrDefault(value.AssignedToUserId, "Unavailable assignee"),
+            AssignedRoleId = value.AssignedRoleId,
+            AssignedRoleName = value.AssignedRoleName,
+            Urgency = value.Urgency,
+            DueDate = value.DueDate,
+            Status = value.Status,
+            ApprovalStatus = value.ApprovalStatus,
+            IsUrgentPath = value.IsUrgentPath,
+            UrgencyReason = value.UrgencyReason,
+            UrgentResponseDueAt = value.UrgentResponseDueAt,
+            UrgentEscalatedAt = value.UrgentEscalatedAt,
+            ProgressPercent = value.ProgressPercent,
+            AcknowledgedAt = value.AcknowledgedAt,
+            CompletedAt = value.CompletedAt,
+            AcceptedAt = value.AcceptedAt,
+            DocumentReference = value.CentralDocumentRecordId.HasValue ? documents.GetValueOrDefault(value.CentralDocumentRecordId.Value) : null,
+            WorkflowInstanceId = value.WorkflowInstanceId,
+            CreatedAt = value.CreatedAt,
+            RowVersion = Convert.ToBase64String(value.RowVersion)
         }).ToList();
     }
 
@@ -668,12 +792,19 @@ public sealed class CivilEngineeringDirectTaskService(
             .ToDictionaryAsync(value => value.Id, value => string.IsNullOrWhiteSpace(value.Symbol) ? $"{value.Code} · {value.Name}" : $"{value.Symbol} ({value.Code})", token);
         return values.Select(value => new CivilEngineeringDirectTaskFeedbackDto
         {
-            Id = value.Id, Sequence = value.Sequence, Action = value.Action, ProgressPercent = value.ProgressPercent, Message = value.Message,
-            MeasurementValue = value.MeasurementValue, MeasurementUnitLabel = value.MeasurementUnitId.HasValue ? units.GetValueOrDefault(value.MeasurementUnitId.Value) : null,
+            Id = value.Id,
+            Sequence = value.Sequence,
+            Action = value.Action,
+            ProgressPercent = value.ProgressPercent,
+            Message = value.Message,
+            MeasurementValue = value.MeasurementValue,
+            MeasurementUnitLabel = value.MeasurementUnitId.HasValue ? units.GetValueOrDefault(value.MeasurementUnitId.Value) : null,
             CapturedOfflineAtUtc = value.CapturedOfflineAtUtc,
             ActorName = users.GetValueOrDefault(value.ActorUserId, "Unavailable user"),
             DocumentReference = value.CentralDocumentRecordId.HasValue ? documents.GetValueOrDefault(value.CentralDocumentRecordId.Value) : null,
-            WorkflowOutcome = value.WorkflowOutcome, CorrelationId = value.CorrelationId, CreatedAt = value.CreatedAt
+            WorkflowOutcome = value.WorkflowOutcome,
+            CorrelationId = value.CorrelationId,
+            CreatedAt = value.CreatedAt
         }).ToList();
     }
 
@@ -689,20 +820,31 @@ public sealed class CivilEngineeringDirectTaskService(
     private void AddRevision(ProjectCivilDirectTaskControl task, string action, object? before, object after, string? reason, string correlationId)
     {
         CivilEngineeringAuditEventMap.GetRequired(action);
-        task.Revisions.Add(new ProjectCivilDirectTaskRevision { Id = Guid.NewGuid(), TenantId = TenantId, DirectTaskControlId = task.Id, Action = action, ActorUserId = UserId, ActorName = UserName, ActorRoles = ActorRoles, CorrelationId = Correlation(correlationId), Reason = Clean(reason, 2000), BeforeJson = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), AfterJson = JsonSerializer.Serialize(after, JsonOptions), CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId });
+        db.ProjectCivilDirectTaskRevisions.Add(new ProjectCivilDirectTaskRevision { Id = Guid.NewGuid(), TenantId = TenantId, DirectTaskControlId = task.Id, Action = action, ActorUserId = UserId, ActorName = UserName, ActorRoles = ActorRoles, CorrelationId = Correlation(correlationId), Reason = Clean(reason, 2000), BeforeJson = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), AfterJson = JsonSerializer.Serialize(after, JsonOptions), CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId });
     }
 
     private void AddAudit(ProjectCivilDirectTaskControl task, string action, object? before, object after, string correlationId) => db.AuditLogs.Add(new AuditLog
     {
-        TenantId = TenantId, UserId = UserId, Username = UserName, Action = action, Resource = nameof(ProjectCivilDirectTaskControl), ResourceId = task.Id.ToString(),
-        OldValues = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), NewValues = JsonSerializer.Serialize(new { correlationId = Correlation(correlationId), value = after }, JsonOptions),
-        IpAddress = currentUser.IpAddress ?? string.Empty, UserAgent = currentUser.UserAgent, Timestamp = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId
+        TenantId = TenantId,
+        UserId = UserId,
+        Username = UserName,
+        Action = action,
+        Resource = nameof(ProjectCivilDirectTaskControl),
+        ResourceId = task.Id.ToString(),
+        OldValues = before is null ? null : JsonSerializer.Serialize(before, JsonOptions),
+        NewValues = JsonSerializer.Serialize(new { correlationId = Correlation(correlationId), value = after }, JsonOptions),
+        IpAddress = currentUser.IpAddress ?? string.Empty,
+        UserAgent = currentUser.UserAgent,
+        Timestamp = DateTime.UtcNow,
+        CreatedAt = DateTime.UtcNow,
+        CreatedBy = UserName,
+        CreatedById = UserId
     });
 
-    private async Task SaveAsync(CancellationToken token)
+    private async Task SaveAsync(CancellationToken token, string? operation = null)
     {
         try { await db.SaveChangesAsync(token); }
-        catch (DbUpdateConcurrencyException) { throw Conflict("The Civil direct task changed concurrently. Refresh and retry."); }
+        catch (DbUpdateConcurrencyException) { throw Conflict($"The Civil direct task {operation ?? "record"} changed concurrently. Refresh and retry."); }
         catch (DbUpdateException exception) when (exception.InnerException is SqlException sql && sql.Number is >= 52280 and <= 52291) { throw Conflict(sql.Message); }
         catch (DbUpdateException exception) when (exception.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true) { throw Conflict("A duplicate or conflicting Civil direct task was detected. Refresh and retry."); }
     }

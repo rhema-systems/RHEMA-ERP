@@ -14,6 +14,19 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public class BusinessPartnerServiceContactTests
 {
     [Fact]
+    public async Task GetByIdAsync_ShouldReturnAssignedBusinessCategories()
+    {
+        var fixture = new BusinessPartnerContactFixture();
+        fixture.AddCategory("SUP-GOODS", "Goods", isPrimary: true);
+        var service = fixture.CreateService();
+
+        var result = await service.GetByIdAsync(fixture.Partner.Id);
+
+        result.Should().NotBeNull();
+        result!.Categories.Should().Equal("Goods");
+    }
+
+    [Fact]
     public async Task AddContactAsync_ShouldCreatePrimaryContactAndSyncPartnerSummary()
     {
         var fixture = new BusinessPartnerContactFixture();
@@ -107,6 +120,9 @@ public class BusinessPartnerServiceContactTests
                 .Setup(x => x.GetByIdAsync(Partner.Id))
                 .ReturnsAsync(Partner);
             _partnerRepository
+                .Setup(x => x.GetWithAllRelatedDataAsync(Partner.Id))
+                .ReturnsAsync(Partner);
+            _partnerRepository
                 .Setup(x => x.UpdateAsync(It.IsAny<BusinessPartner>()))
                 .ReturnsAsync((BusinessPartner partner) => partner);
 
@@ -193,6 +209,29 @@ public class BusinessPartnerServiceContactTests
             }
 
             return contact;
+        }
+
+        public void AddCategory(string code, string name, bool isPrimary = false)
+        {
+            var category = new PartnerCategory
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                CategoryCode = code,
+                CategoryName = name,
+                CategoryType = "Supplier",
+                IsActive = true
+            };
+
+            Partner.Categories.Add(new BusinessPartnerCategory
+            {
+                Id = Guid.NewGuid(),
+                BusinessPartnerId = Partner.Id,
+                CategoryId = category.Id,
+                Category = category,
+                BusinessPartner = Partner,
+                IsPrimary = isPrimary
+            });
         }
     }
 }

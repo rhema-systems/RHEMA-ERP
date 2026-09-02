@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0504 structured Civil mobile field feedback on the existing append-only direct-task feedback owner.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821200000_AddCivilEngineeringMobileFieldFeedback")]
 public partial class AddCivilEngineeringMobileFieldFeedback : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

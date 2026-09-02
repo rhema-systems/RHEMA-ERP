@@ -51,18 +51,18 @@ public sealed class ProcurementMasterDataChangeServiceTests
         (await fixture.Context.ProcurementMasterDataControlPolicies.CountAsync()).Should().Be(0);
     }
 
-    [Theory]
-    [InlineData("TenantAdmin")]
-    [InlineData("SuperAdmin")]
-    public async Task LegacyGenericAdministratorCannotConfigureMasterDataPolicies(string legacyRole)
+    [Fact]
+    public async Task PolicyRejectsLegacyGenericRolesAsMakerOrChecker()
     {
         await using var fixture = new Fixture();
-        fixture.Switch(fixture.MakerUserId, legacyRole);
+        fixture.Switch(fixture.MakerUserId, ProcurementAccessControlRegistry.IctAdministratorRole);
+        var request = PolicyRequest();
+        request.MakerRoles = new() { "TenantAdmin" };
 
-        var action = () => fixture.Service.SavePolicyAsync(
-            null, PolicyRequest(), $"trace-legacy-{legacyRole}");
+        var action = () => fixture.Service.SavePolicyAsync(null, request, "trace-legacy-role");
 
-        await action.Should().ThrowAsync<ProcurementMasterDataChangeAuthorizationException>();
+        (await action.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>())
+            .Which.Code.Should().Be("ROLE_UNKNOWN");
         (await fixture.Context.ProcurementMasterDataControlPolicies.CountAsync()).Should().Be(0);
     }
 

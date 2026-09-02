@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -20,6 +21,26 @@ import {
 } from '@/services/inventoryManagementService';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import axios from 'axios';
+
+type ProblemDetailsPayload = {
+  detail?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const payload = error.response?.data as ProblemDetailsPayload | string | undefined;
+    if (typeof payload === 'string' && payload.trim()) return payload;
+    if (payload && typeof payload === 'object') {
+      const detail = payload.detail?.trim();
+      const code = payload.code ?? payload.extensions?.code;
+      if (detail) return code ? `${detail} (${code})` : detail;
+    }
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 export default function WarehouseItemsPage() {
   const { toast } = useToast();
@@ -36,6 +57,8 @@ export default function WarehouseItemsPage() {
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<WarehouseItemDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WarehouseItemDto | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [previewWarehouseId, setPreviewWarehouseId] = useState<string>('');
 
   const [selectedInventoryItems, setSelectedInventoryItems] = useState<string[]>([]);
@@ -43,11 +66,11 @@ export default function WarehouseItemsPage() {
   const [dialogWarehouseSearch, setDialogWarehouseSearch] = useState('');
   const [dialogItemSearch, setDialogItemSearch] = useState('');
   const [assignForm, setAssignForm] = useState<BulkAssignItemsDto>({
-    inventoryItemIds: [], warehouseIds: [], initialQuantity: 0, reorderLevel: 0, maxStock: 0
+    inventoryItemIds: [], warehouseIds: [], reorderLevel: 0, maxStock: 0
   });
 
   const [editForm, setEditForm] = useState<UpdateWarehouseItemDto>({
-    currentStock: 0, reorderLevel: 0, maxStock: 0, notes: ''
+    reorderLevel: 0, maxStock: 0, notes: ''
   });
 
   const fetchData = useCallback(async () => {
@@ -100,11 +123,11 @@ export default function WarehouseItemsPage() {
       setIsAssignDialogOpen(false);
       resetAssignForm();
       fetchData();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error assigning items:', err);
       toast({
         title: 'Assignment Failed',
-        description: 'Failed to assign items to warehouses',
+        description: getApiErrorMessage(err, 'Failed to assign items to warehouses'),
         variant: 'destructive'
       });
     }
@@ -113,7 +136,6 @@ export default function WarehouseItemsPage() {
   const handleEdit = (item: WarehouseItemDto) => {
     setSelectedItem(item);
     setEditForm({
-      currentStock: item.currentStock,
       reorderLevel: item.reorderLevel,
       maxStock: item.maxStock,
       notes: item.notes || ''
@@ -132,34 +154,38 @@ export default function WarehouseItemsPage() {
       });
       setIsEditDialogOpen(false);
       fetchData();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error updating item:', err);
       toast({
         title: 'Update Failed',
-        description: 'Failed to update warehouse item',
+        description: getApiErrorMessage(err, 'Failed to update warehouse item'),
         variant: 'destructive'
       });
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this item from the warehouse?')) return;
+  const confirmDelete = async (): Promise<boolean> => {
+    if (!deleteTarget) return false;
+    setIsDeleting(true);
     try {
-      await inventoryManagementService.deleteWarehouseItem(id);
+      await inventoryManagementService.deleteWarehouseItem(deleteTarget.id);
       toast({
         title: 'Success',
         description: 'Item removed from warehouse successfully',
         variant: 'success'
       });
-      fetchData();
+      await fetchData();
+      return true;
     } catch (err: unknown) {
       console.error('Error deleting:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to remove item';
       toast({
         title: 'Delete Failed',
-        description: errorMessage,
+        description: getApiErrorMessage(err, 'Failed to remove item'),
         variant: 'destructive'
       });
+      return false;
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -169,7 +195,7 @@ export default function WarehouseItemsPage() {
     setPreviewWarehouseId('');
     setDialogWarehouseSearch('');
     setDialogItemSearch('');
-    setAssignForm({ inventoryItemIds: [], warehouseIds: [], initialQuantity: 0, reorderLevel: 0, maxStock: 0 });
+    setAssignForm({ inventoryItemIds: [], warehouseIds: [], reorderLevel: 0, maxStock: 0 });
   };
 
   const toggleInventoryItem = (id: string) => {
@@ -245,7 +271,7 @@ export default function WarehouseItemsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Warehouse Items</h1>
-          <p className="text-muted-foreground">Assign inventory items to warehouses and manage stock quantities</p>
+          <p className="text-muted-foreground">Maintain warehouse assignments and stocking parameters</p>
         </div>
         <Button onClick={() => setIsAssignDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" /> Assign Items to Warehouses
@@ -329,7 +355,16 @@ export default function WarehouseItemsPage() {
                     <TableCell>{item.lastMovementDate ? format(new Date(item.lastMovementDate), 'MMM dd, yyyy') : '-'}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)} disabled={item.allocatedStock > 0}><Trash2 className="h-4 w-4" /></Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeleteTarget(item)}
+                        disabled={item.currentStock !== 0 || item.availableStock !== 0 || item.allocatedStock !== 0}
+                        title="Remove empty warehouse assignment"
+                        aria-label={`Remove ${item.itemName} from ${item.warehouseName}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
@@ -454,12 +489,8 @@ export default function WarehouseItemsPage() {
                   </div>
                 </div>
 
-                {/* Quantity Settings */}
-                <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t">
-                  <div>
-                    <Label>Initial Quantity</Label>
-                    <Input type="number" min="0" value={assignForm.initialQuantity} onChange={(e) => setAssignForm({...assignForm, initialQuantity: Number(e.target.value)})} />
-                  </div>
+                {/* Stocking Parameters */}
+                <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t">
                   <div>
                     <Label>Reorder Level</Label>
                     <Input type="number" min="0" value={assignForm.reorderLevel} onChange={(e) => setAssignForm({...assignForm, reorderLevel: Number(e.target.value)})} />
@@ -469,6 +500,9 @@ export default function WarehouseItemsPage() {
                     <Input type="number" min="0" value={assignForm.maxStock} onChange={(e) => setAssignForm({...assignForm, maxStock: Number(e.target.value)})} />
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  New assignments start with zero stock. Record quantities through opening stock, receipts, transfers, returns, or approved adjustments.
+                </p>
               </div>
             </div>
           </div>
@@ -481,7 +515,7 @@ export default function WarehouseItemsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Quantity Dialog */}
+      {/* Edit Stocking Parameters Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -491,13 +525,16 @@ export default function WarehouseItemsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div>
-              <Label>Current Stock</Label>
-              <Input type="number" min="0" value={editForm.currentStock} onChange={(e) => setEditForm({...editForm, currentStock: Number(e.target.value)})} />
-              {selectedItem && selectedItem.allocatedStock > 0 && (
-                <p className="text-xs text-amber-600 mt-1">Note: {selectedItem.allocatedStock} units are currently allocated</p>
-              )}
-            </div>
+            {selectedItem && (
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="grid grid-cols-3 gap-3">
+                  <div><span className="text-muted-foreground">Current</span><div className="font-medium">{selectedItem.currentStock}</div></div>
+                  <div><span className="text-muted-foreground">Available</span><div className="font-medium">{selectedItem.availableStock}</div></div>
+                  <div><span className="text-muted-foreground">Allocated</span><div className="font-medium">{selectedItem.allocatedStock}</div></div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">Stock balances are read-only here and change only through governed inventory transactions.</p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Reorder Level</Label>
@@ -519,6 +556,20 @@ export default function WarehouseItemsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !isDeleting) setDeleteTarget(null); }}
+        title="Remove Warehouse Assignment"
+        description={deleteTarget
+          ? `Remove ${deleteTarget.itemCode} - ${deleteTarget.itemName} from ${deleteTarget.warehouseName}? Only an empty assignment can be removed.`
+          : undefined}
+        confirmText="Remove Assignment"
+        cancelText="Cancel"
+        variant="destructive"
+        onConfirm={confirmDelete}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

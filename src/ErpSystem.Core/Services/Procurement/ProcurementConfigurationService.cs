@@ -215,7 +215,7 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
                 "The TDC access-management permission is required to return a configuration decision to proposed.", before, null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             throw new ProcurementConfigurationAuthorizationException(
-                "The TDC ICT Administrator role is required to return a configuration decision to proposed.");
+                "SuperAdmin or the TDC ICT Administrator role is required to return a configuration decision to proposed.");
         }
 
         var definition = ProcurementConfigurationDecisionRegistry.GetRequired(decision.DecisionKey);
@@ -233,7 +233,7 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
                 "The TDC access-management permission is required to approve a configuration decision.", before, null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             throw new ProcurementConfigurationAuthorizationException(
-                "The TDC ICT Administrator role is required to approve a configuration decision.");
+                "SuperAdmin or the TDC ICT Administrator role is required to approve a configuration decision.");
         }
 
         decision.SchemaVersion = request.SchemaVersion;
@@ -361,7 +361,7 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
                 "Direct publish rejected: TDC access-management permission is required.", ProfileSnapshot(profile), null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             throw new ProcurementConfigurationAuthorizationException(
-                "The TDC ICT Administrator role is required to publish procurement configuration profiles.");
+                "SuperAdmin or the TDC ICT Administrator role is required to publish procurement configuration profiles.");
         }
 
         ProcurementConfigurationLifecyclePolicy.EnsureCanPublish(profile);
@@ -998,7 +998,7 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             $"Direct {action.ToLowerInvariant()} rejected: TDC access-management permission is required.", ProfileSnapshot(profile), null);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         throw new ProcurementConfigurationAuthorizationException(
-            $"The TDC ICT Administrator role is required to {action.ToLowerInvariant()} procurement configuration profiles.");
+            $"SuperAdmin or the TDC ICT Administrator role is required to {action.ToLowerInvariant()} procurement configuration profiles.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -1012,12 +1012,14 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
         EnsureAuthenticatedTenant();
         if (!CanManageAccess())
             throw new ProcurementConfigurationAuthorizationException(
-                "The TDC ICT Administrator role is required to administer procurement configuration.");
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement configuration.");
     }
 
-    private bool CanManageAccess() => _currentUser.Roles.Any(role =>
-        ProcurementAccessControlRegistry.RoleGrantsPermission(
-            role, "procurement.access.manage"));
+    private bool CanManageAccess() =>
+        _currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) ||
+        _currentUser.Roles.Any(role =>
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage"));
 
     private static void ValidateDecisionState(
         SaveProcurementConfigurationDecisionRequest request,

@@ -4046,6 +4046,80 @@ public class ProjectServiceTests
     }
 
     [Fact]
+    public async Task HasProjectAccessAsync_ShouldAuthorizeThroughTheLightweightProjectBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-ACCESS-1",
+            Title = "QS access boundary"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.Add(project);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = userId,
+            Role = "QuantitySurveyor",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var result = await fixture.CreateService().HasProjectAccessAsync(project.Id);
+
+        result.Should().BeTrue();
+        fixture.ProjectRepository.Verify(repository => repository.GetByIdAsync(project.Id), Times.Once);
+        fixture.ProjectRepository.Verify(repository => repository.GetDetailByIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HasProjectAccessAsync_ShouldReturnFalseForDeniedOrCrossTenantProjects()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var deniedProject = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-DENIED",
+            Title = "Denied project"
+        };
+        var crossTenantProject = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            ProjectCode = "PRJ-QS-CROSS-TENANT",
+            Title = "Cross tenant project"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.AddRange([deniedProject, crossTenantProject]);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = crossTenantProject.TenantId,
+            ProjectId = crossTenantProject.Id,
+            UserId = userId,
+            Role = "QuantitySurveyor",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var service = fixture.CreateService();
+
+        (await service.HasProjectAccessAsync(deniedProject.Id)).Should().BeFalse();
+        (await service.HasProjectAccessAsync(crossTenantProject.Id)).Should().BeFalse();
+        (await service.HasProjectAccessAsync(Guid.Empty)).Should().BeFalse();
+        fixture.ProjectRepository.Verify(repository => repository.GetDetailByIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GetProjectByIdAsync_ShouldPopulateUserDisplayNamesForProjectWorkspace()
     {
         var tenantId = Guid.NewGuid();
@@ -4876,6 +4950,7 @@ public class ProjectServiceTests
         public List<ProjectPhase> ProjectPhases { get; } = new();
         public List<ProjectWorkItem> WorkItems { get; } = new();
         public List<ProjectMilestone> Milestones { get; } = new();
+        public List<ProjectMilestonePhase> MilestonePhases { get; } = new();
         public List<ProjectInitiationVersion> InitiationVersions { get; } = new();
         public List<ProjectResourceAllocation> ResourceAllocations { get; } = new();
         public List<ProjectRisk> Risks { get; } = new();
@@ -4902,6 +4977,7 @@ public class ProjectServiceTests
         public List<ProjectLessonLearned> LessonsLearned { get; } = new();
         public List<ProjectClosure> Closures { get; } = new();
         public List<ProjectUnit> ProjectUnits { get; } = new();
+        public List<ProjectUnitAmenity> ProjectUnitAmenities { get; } = new();
         public List<PurchaseRequisition> PurchaseRequisitions { get; } = new();
         public List<PurchaseOrder> PurchaseOrders { get; } = new();
         public List<PurchaseOrderItem> PurchaseOrderItems { get; } = new();
@@ -4974,6 +5050,7 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<ProjectPhase>> _projectPhaseRepository;
         private readonly Mock<IGenericRepository<ProjectWorkItem>> _workItemRepository;
         private readonly Mock<IGenericRepository<ProjectMilestone>> _milestoneRepository;
+        private readonly Mock<IGenericRepository<ProjectMilestonePhase>> _milestonePhaseRepository;
         private readonly Mock<IGenericRepository<ProjectInitiationVersion>> _initiationVersionRepository;
         private readonly Mock<IGenericRepository<ProjectResourceAllocation>> _resourceAllocationRepository;
         private readonly Mock<IGenericRepository<ProjectRisk>> _riskRepository;
@@ -5000,6 +5077,7 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<ProjectLessonLearned>> _lessonLearnedRepository;
         private readonly Mock<IGenericRepository<ProjectClosure>> _closureRepository;
         private readonly Mock<IGenericRepository<ProjectUnit>> _projectUnitRepository;
+        private readonly Mock<IGenericRepository<ProjectUnitAmenity>> _projectUnitAmenityRepository;
         private readonly Mock<IGenericRepository<PurchaseRequisition>> _purchaseRequisitionRepository;
         private readonly Mock<IGenericRepository<PurchaseOrder>> _purchaseOrderRepository;
         private readonly Mock<IGenericRepository<PurchaseOrderItem>> _purchaseOrderItemRepository;
@@ -5064,6 +5142,7 @@ public class ProjectServiceTests
             _projectPhaseRepository = CreateRepository(ProjectPhases);
             _workItemRepository = CreateRepository(WorkItems);
             _milestoneRepository = CreateRepository(Milestones);
+            _milestonePhaseRepository = CreateRepository(MilestonePhases);
             _initiationVersionRepository = CreateRepository(InitiationVersions);
             _resourceAllocationRepository = CreateRepository(ResourceAllocations);
             _riskRepository = CreateRepository(Risks);
@@ -5090,6 +5169,7 @@ public class ProjectServiceTests
             _lessonLearnedRepository = CreateRepository(LessonsLearned);
             _closureRepository = CreateRepository(Closures);
             _projectUnitRepository = CreateRepository(ProjectUnits);
+            _projectUnitAmenityRepository = CreateRepository(ProjectUnitAmenities);
             _purchaseRequisitionRepository = CreateRepository(PurchaseRequisitions);
             _purchaseOrderRepository = CreateRepository(PurchaseOrders);
             _purchaseOrderItemRepository = CreateRepository(PurchaseOrderItems);
@@ -5245,6 +5325,7 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<ProjectPhase>()).Returns(_projectPhaseRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectWorkItem>()).Returns(_workItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectMilestone>()).Returns(_milestoneRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectMilestonePhase>()).Returns(_milestonePhaseRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectInitiationVersion>()).Returns(_initiationVersionRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectResourceAllocation>()).Returns(_resourceAllocationRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectRisk>()).Returns(_riskRepository.Object);
@@ -5271,6 +5352,7 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<ProjectLessonLearned>()).Returns(_lessonLearnedRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectClosure>()).Returns(_closureRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectUnit>()).Returns(_projectUnitRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectUnitAmenity>()).Returns(_projectUnitAmenityRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseRequisition>()).Returns(_purchaseRequisitionRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrder>()).Returns(_purchaseOrderRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrderItem>()).Returns(_purchaseOrderItemRepository.Object);
@@ -5321,6 +5403,9 @@ public class ProjectServiceTests
             UnitOfWork
                 .Setup(x => x.ExecuteInStrategyAsync(It.IsAny<Func<Task<bool>>>(), It.IsAny<CancellationToken>()))
                 .Returns((Func<Task<bool>> operation, CancellationToken _) => operation());
+            UnitOfWork
+                .Setup(x => x.ExecuteInStrategyAsync(It.IsAny<Func<Task<ProjectDetailDto>>>(), It.IsAny<CancellationToken>()))
+                .Returns((Func<Task<ProjectDetailDto>> operation, CancellationToken _) => operation());
             AppEventBus
                 .Setup(x => x.PublishAsync(It.IsAny<EntityActivityEvent>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);

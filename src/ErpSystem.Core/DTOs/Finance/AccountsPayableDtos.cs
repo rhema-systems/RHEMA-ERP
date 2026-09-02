@@ -37,6 +37,7 @@ public class VendorInvoiceDto
 
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public decimal BaseCurrencyAmount { get; set; }
 
     public int PaymentTermsDays { get; set; }
@@ -88,6 +89,7 @@ public class VendorInvoiceDto
 
     public List<VendorInvoiceLineItemDto> LineItems { get; set; } = new();
     public List<VendorPaymentAllocationDto> PaymentAllocations { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -110,6 +112,7 @@ public class VendorInvoiceCreateDto
 
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public int PaymentTermsDays { get; set; } = 30;
     public Guid? PaymentTermId { get; set; }
@@ -148,6 +151,7 @@ public class VendorInvoiceCreateDto
 
     [Required]
     public List<VendorInvoiceLineItemCreateDto> LineItems { get; set; } = new();
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class VendorInvoiceUpdateDto
@@ -166,6 +170,7 @@ public class VendorInvoiceUpdateDto
 
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public int PaymentTermsDays { get; set; } = 30;
     public Guid? PaymentTermId { get; set; }
@@ -189,6 +194,7 @@ public class VendorInvoiceUpdateDto
     public bool IsOpeningBalance { get; set; }
 
     public List<VendorInvoiceLineItemCreateDto> LineItems { get; set; } = new();
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class VendorInvoiceQueryDto
@@ -217,6 +223,7 @@ public class VendorInvoiceLineItemDto
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
     public string? GLAccountName { get; set; }
+    public Guid? BudgetEntryId { get; set; }
     public Guid? FixedAssetId { get; set; }
     public Guid? CapitalizationJournalEntryId { get; set; }
     public Guid? CapitalizationPostingEventId { get; set; }
@@ -241,8 +248,10 @@ public class VendorInvoiceLineItemDto
 
 public class VendorInvoiceLineItemCreateDto
 {
+    public Guid? Id { get; set; }
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
+    public Guid? BudgetEntryId { get; set; }
     public Guid? FixedAssetId { get; set; }
     /// <summary>
     /// Legacy procurement PO line id only; do not send FinancePurchaseOrderItem ids in this field.
@@ -590,6 +599,7 @@ public class VendorPaymentDto
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
+    public List<SupplierDebitNoteApplicationDto> SupplierDebitNoteApplications { get; set; } = new();
 }
 
 /// <summary>
@@ -1044,6 +1054,13 @@ public class ApAgingInvoiceDto
     public decimal CreditedAmount { get; set; }
     public decimal WithheldAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public string DocumentCurrencyCode { get; set; } = "GHS";
+    public decimal DocumentTotalAmount { get; set; }
+    public decimal DocumentSettledAmount { get; set; }
+    public decimal DocumentCreditedAmount { get; set; }
+    public decimal DocumentWithheldAmount { get; set; }
+    public decimal DocumentBalanceAmount { get; set; }
     public Guid? SourcePostingEventId { get; set; }
     public Guid? SourceJournalEntryId { get; set; }
     public string? SettlementStatus { get; set; }
@@ -1115,6 +1132,7 @@ public class SupplierDetailedLedgerReportDto
     public decimal TotalDebits { get; set; }
     public decimal TotalCredits { get; set; }
     public decimal TotalClosingBalance { get; set; }
+    public List<DetailedLedgerCurrencyTotalDto> CurrencyTotals { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
     public List<SupplierDetailedLedgerAccountDto> Suppliers { get; set; } = new();
 }

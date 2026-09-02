@@ -1,4 +1,6 @@
 using FluentAssertions;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Services.Projects;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Projects;
@@ -10,7 +12,6 @@ public sealed class CivilEngineeringExtensionOfTimeMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003400_AddCivilEngineeringExtensionOfTimeControls.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ProjectExtensionOfTimeRequests(Id)")
@@ -25,9 +26,10 @@ public sealed class CivilEngineeringExtensionOfTimeMigrationGuardTests
             .And.Contain("TR_ProjectCivilExtensionOfTimeRevisions_AppendOnly")
             .And.Contain("TR_ProjectExtensionOfTimeRequests_CivilControl")
             .And.Contain("52153")
+            .And.Contain("[Migration(\"20260822003400_AddCivilEngineeringExtensionOfTimeControls\")]")
+            .And.Contain("[DbContext(typeof(ApplicationDbContext))]")
             .And.NotContain("FinanceJournal")
             .And.NotContain("GeneralLedger");
-        metadata.Should().Contain("20260822003400_AddCivilEngineeringExtensionOfTimeControls");
         preflight.Should().Contain("GUARD_COVERAGE|20260822003400_AddCivilEngineeringExtensionOfTimeControls");
     }
 
@@ -56,6 +58,37 @@ public sealed class CivilEngineeringExtensionOfTimeMigrationGuardTests
             .And.NotContain("Contract ID");
         commercialPanel.Should().Contain("Works extensions of time are governed")
             .And.Contain("Site controls → Civil variation and extension of time");
+    }
+
+    [Fact]
+    public void Legacy_works_eot_create_is_blocked_by_the_runtime_guard()
+    {
+        var action = () => ProjectService.EnsureLegacyExtensionOfTimeIsNotWorks(
+            new Contract { ContractType = "Works" });
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*governed Civil workflow*");
+    }
+
+    [Fact]
+    public void Works_variation_create_remains_available_while_only_legacy_eot_create_is_guarded()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Projects", "ProjectService.CommercialAdministration.cs"));
+        var variation = MethodBody(source, "AddProjectVariationOrderAsync", "UpdateProjectVariationOrderAsync");
+        var eot = MethodBody(source, "AddProjectExtensionOfTimeRequestAsync", "UpdateProjectExtensionOfTimeRequestAsync");
+
+        variation.Should().NotContain("EnsureLegacyExtensionOfTimeIsNotWorks");
+        eot.Should().Contain("EnsureLegacyExtensionOfTimeIsNotWorks(contract)");
+    }
+
+    private static string MethodBody(string source, string method, string nextMethod)
+    {
+        var start = source.IndexOf(method, StringComparison.Ordinal);
+        var end = source.IndexOf(nextMethod, start, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0);
+        end.Should().BeGreaterThan(start);
+        return source[start..end];
     }
 
     private static string FindRepositoryRoot([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")

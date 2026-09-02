@@ -1,4 +1,5 @@
 import type { ControlledDocumentIssueSummary } from '@/types/controlled-documents';
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
 
 export interface Customer {
     id: string;
@@ -60,6 +61,7 @@ export interface InvoiceLineItem {
     quantity: number;
     unitPrice: number;
     taxRate: number;
+    taxAmount?: number;
     taxCode?: string;
     unit?: string;
     discountPercentage: number;
@@ -72,23 +74,33 @@ export interface Invoice {
     invoiceNumber: string;
     customerId: string;
     customerName: string;
+    customerAddress?: string;
     invoiceDate: string;
-    dueDate: string;
+    dueDate: string | null;
+    subTotal?: number;
+    taxAmount?: number;
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
-    status: 'Draft' | 'Sent' | 'Posted' | 'Paid' | 'Void' | 'Overdue';
+    status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
     currencyCode: string;
     exchangeRate: number;
+    exchangeRateId?: string;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
+    reference?: string;
     isOpeningBalance: boolean;
+    earlyPaymentDiscountPercentage?: number;
+    earlyPaymentDiscountDueDate?: string;
+    earlyPaymentDiscountAmount?: number;
+    journalEntryId?: string;
     notes?: string;
     lineItems: InvoiceLineItem[];
     tenantId: string;
     createdAt: string;
     createdBy?: string;
+    financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface InvoiceCreateRequest {
@@ -97,6 +109,7 @@ export interface InvoiceCreateRequest {
     dueDate?: string;
     currencyCode: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;
@@ -104,9 +117,11 @@ export interface InvoiceCreateRequest {
     isOpeningBalance?: boolean;
     notes?: string;
     lineItems: InvoiceLineItemRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface InvoiceLineItemRequest {
+    id?: string;
     lineItemType: 'Product' | 'GLAccount';
     productId?: string;
     glAccountId?: string;
@@ -336,9 +351,38 @@ export interface AgingBucket {
 
 export interface AgingReport {
     asOfDate: string;
+    currencyCode: string;
+    usesSettlementReadModel: boolean;
     buckets: AgingBucket[];
-    totalOutstanding: number;
-    customerDetails?: any[]; // Simplified for summary view
+    summary: {
+        totalCurrent: number;
+        totalDays1To30: number;
+        totalDays31To60: number;
+        totalDays61To90: number;
+        totalDays90Plus: number;
+        grandTotal: number;
+        totalCustomers: number;
+        overdueCustomers: number;
+    };
+    customers: Array<{
+        customerId: string;
+        customerCode: string;
+        customerName: string;
+        current: number;
+        days1To30: number;
+        days31To60: number;
+        days61To90: number;
+        days90Plus: number;
+        totalOutstanding: number;
+    }>;
+}
+
+export interface DetailedLedgerCurrencyTotal {
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
 }
 
 export interface CustomerDetailedLedgerReport {
@@ -350,6 +394,7 @@ export interface CustomerDetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals: DetailedLedgerCurrencyTotal[];
     warnings: string[];
     customers: CustomerDetailedLedgerAccount[];
 }

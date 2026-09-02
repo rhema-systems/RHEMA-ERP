@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -7,6 +8,8 @@ namespace ErpSystem.Data.Migrations;
 /// <summary>
 /// Civil lineage only. Maintenance remains authoritative for JobCards and WorkOrders.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821060000_AddCivilEngineeringMaintenanceExecutionLinks")]
 public partial class AddCivilEngineeringMaintenanceExecutionLinks : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

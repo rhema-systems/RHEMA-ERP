@@ -132,20 +132,16 @@ public sealed class ProcurementControlEventServiceTests
         integrity.Issues.Should().ContainSingle(item => item.EventId == recorded.Id && item.ExpectedHash != item.ActualHash);
     }
 
-    [Theory]
-    [InlineData("TDC_STORES_OFFICER")]
-    [InlineData("TenantAdmin")]
-    [InlineData("SuperAdmin")]
-    [InlineData(ProcurementAccessControlRegistry.IctAdministratorRole)]
-    public async Task AuditReaderPermissionIsRequiredForQueryButNotForInternalWriterContract(string role)
+    [Fact]
+    public async Task AuthenticatedActorCanQueryAfterAuditPermissionIsEnforcedAtApiBoundary()
     {
         await using var fixture = new Fixture();
-        fixture.SetRoles(role);
+        fixture.SetRoles("TDC_STORES_OFFICER");
         await fixture.Service.RecordAsync(Request("event-writer"));
 
-        var query = () => fixture.Service.GetSummaryAsync();
+        var summary = await fixture.Service.GetSummaryAsync();
 
-        await query.Should().ThrowAsync<ProcurementControlEventAuthorizationException>();
+        summary.TotalCount.Should().Be(1);
     }
 
     [Fact]

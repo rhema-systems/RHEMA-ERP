@@ -33,15 +33,23 @@ import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import {
   ProcurementTenderControlStatus as Status,
   ProcurementTenderSubmissionDisposition as Disposition,
+  ProcurementMethodType as Method,
   type ProcurementTenderControl,
 } from '@/types/procurement-tender-control';
 import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
 
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleString() : '—';
-const methodLabel = (method: number) =>
-  ({ 1: 'NCT', 2: 'ICT', 7: 'QBS', 8: 'QCBS' })[method] ?? 'Controlled tender';
-const isQualitySelection = (method: number) => method === 7 || method === 8;
+const methodLabel = (method: Method) =>
+  ({
+    [Method.NationalCompetitiveTendering]: 'NCT',
+    [Method.InternationalCompetitiveTendering]: 'ICT',
+    [Method.QualityBasedSelection]: 'QBS',
+    [Method.QualityAndCostBasedSelection]: 'QCBS',
+  })[method] ?? 'Controlled tender';
+const isQualitySelection = (method: Method) =>
+  method === Method.QualityBasedSelection ||
+  method === Method.QualityAndCostBasedSelection;
 
 export default function ProcurementTenderControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
@@ -92,11 +100,15 @@ export default function ProcurementTenderControlsPage() {
       );
       setAuthorityReference(next.authorityApprovalReference ?? '');
       setPpaReference(next.ppaApprovalReference ?? '');
-      try {
-        setAwardGate(
-          await procurementAwardReadinessService.latest('Tender', tenderId)
-        );
-      } catch {
+      if (next.status === Status.Approved) {
+        try {
+          setAwardGate(
+            await procurementAwardReadinessService.latest('Tender', tenderId)
+          );
+        } catch {
+          setAwardGate(null);
+        }
+      } else {
         setAwardGate(null);
       }
     } catch (error) {
@@ -506,13 +518,13 @@ export default function ProcurementTenderControlsPage() {
           evidence={financialEvidence}
           setEvidence={setFinancialEvidence}
         >
-          {control.method === 7 && (
+          {control.method === Method.QualityBasedSelection && (
             <p className="text-xs text-muted-foreground">
               QBS opens the financial/negotiation review only for the uniquely
               highest-ranked qualified technical bid.
             </p>
           )}
-          {control.method === 8 && (
+          {control.method === Method.QualityAndCostBasedSelection && (
             <p className="text-xs text-muted-foreground">
               QCBS financial and combined scores are calculated by the server
               from evaluated amounts using {control.technicalWeight}/
@@ -587,7 +599,8 @@ export default function ProcurementTenderControlsPage() {
         </EvaluationCard>
       )}
 
-      {readiness.canSubmitApproval && (
+      {readiness.canSubmitApproval &&
+        hasPermission('procurement.tender.approve') && (
         <ActionCard title="Submit exact authority/PPA workflow">
           <p className="text-sm text-muted-foreground">
             Route {control.authorityRouteReference}; shared workflow and SOD are
@@ -607,7 +620,7 @@ export default function ProcurementTenderControlsPage() {
         </ActionCard>
       )}
 
-      {readiness.canDecide && (
+      {readiness.canDecide && hasPermission('procurement.tender.approve') && (
         <ActionCard title="Authority and PPA decision">
           <Field
             label="Authority approval reference"

@@ -25,6 +25,17 @@ export const hasAnyEvaluationCommitteeAction = (
 export const createEvaluationIdempotencyKey = (action: string) =>
   `tdc0208-${normalizeAction(action)}-${crypto.randomUUID()}`;
 
+export const isEvaluationCommitteeControlError = (error: unknown) => {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : error && typeof error === 'object'
+        ? JSON.stringify(error)
+        : '';
+  return /EVALUATION_SCORER_INELIGIBLE|evaluation committee control|committee (acceptance|appointment|attendance|quorum|conflict)/i.test(message);
+};
+
 export const validateCommitteeBinding = (
   request: BindProcurementEvaluationCommitteeRequest
 ) => {

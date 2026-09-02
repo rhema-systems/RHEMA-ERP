@@ -6,8 +6,10 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -32,22 +34,27 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly ApplicationDbContext _dbContext;
         private readonly IVendorInvoiceMatchExceptionService? _matchExceptionService;
         private readonly IProcurementAcceptedSupplyService? _acceptedSupplyService;
+        private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
 
         public VendorInvoiceController(
             IVendorInvoiceService invoiceService,
             ICurrentUserService currentUserService,
             ApplicationDbContext dbContext,
             IVendorInvoiceMatchExceptionService? matchExceptionService = null,
-            IProcurementAcceptedSupplyService? acceptedSupplyService = null)
+            IProcurementAcceptedSupplyService? acceptedSupplyService = null,
+            IFinanceBudgetCommitmentService? budgetCommitments = null)
         {
             _invoiceService = invoiceService;
             _currentUserService = currentUserService;
             _dbContext = dbContext;
             _matchExceptionService = matchExceptionService;
             _acceptedSupplyService = acceptedSupplyService;
+            _budgetCommitments = budgetCommitments;
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+        private static readonly FinancePostingProducerContext DimensionProducer =
+            new(FinanceDimensionRouteId.FinanceApVendorInvoice);
 
         private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
         {
@@ -72,7 +79,7 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}")]
         public async Task<ActionResult<VendorInvoiceDto>> GetById(Guid id)
         {
-            var invoice = await _invoiceService.GetByIdAsync(id);
+            var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
             return invoice == null ? NotFound() : Ok(invoice);
         }
 
@@ -114,6 +121,84 @@ namespace ErpSystem.Api.Controllers.Finance
             }
         }
 
+        /// <summary>
+        /// Returns active, tenant-scoped canonical Supplier identities for AP selection controls.
+        /// Procurement owns the Supplier master; Finance exposes this read-only projection because
+        /// VendorInvoice and AP report filters must use Supplier.Id, never BusinessPartner.Id.
+        /// </summary>
+        [HttpGet("suppliers")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        [ProducesResponseType(typeof(IReadOnlyList<ApInvoiceSupplierDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierDto>>> GetSuppliers(
+            CancellationToken cancellationToken)
+        {
+            Guid tenantId;
+            try
+            {
+                tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            }
+            catch (InvalidOperationException)
+            {
+                return Forbid();
+            }
+
+            // This is intentionally a read-only Finance boundary. Supplier activation and master
+            // data remain Procurement-owned and are never repaired or mutated from this endpoint.
+            var suppliers = await _dbContext.Suppliers
+                .AsNoTracking()
+                .Where(supplier =>
+                    supplier.TenantId == tenantId &&
+                    !supplier.IsDeleted &&
+                    supplier.IsActive &&
+                    supplier.Status == "Active")
+                .OrderBy(supplier => supplier.Name)
+                .ThenBy(supplier => supplier.SupplierCode)
+                .Select(supplier => new ApInvoiceSupplierDto
+                {
+                    Id = supplier.Id,
+                    Code = supplier.SupplierCode,
+                    Name = supplier.Name,
+                    PaymentTermId = supplier.PaymentTermId
+                })
+                .ToListAsync(cancellationToken);
+
+            return Ok(suppliers);
+        }
+
+        /// <summary>
+        /// Returns adopted Finance budget cells for one AP expense account and invoice date.
+        /// AP receives selectable evidence only; it never mutates budget setup through this route.
+        /// </summary>
+        [HttpGet("budget-cells")]
+        [ProducesResponseType(typeof(IReadOnlyList<FinanceBudgetCellDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<IReadOnlyList<FinanceBudgetCellDto>>> GetBudgetCells(
+            [FromQuery] DateTime budgetDate,
+            [FromQuery] Guid accountId,
+            CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync(
+                    "Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            if (_budgetCommitments == null)
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Finance budget control unavailable",
+                    detail: "Finance budget commitments are not registered.");
+            try
+            {
+                return Ok(await _budgetCommitments.GetEligibleBudgetCellsAsync(
+                    new FinanceBudgetCellQueryDto
+                    {
+                        BudgetDate = budgetDate,
+                        AccountId = accountId
+                    }, cancellationToken));
+            }
+            catch (FinanceBudgetCommitmentValidationException exception)
+            {
+                return UnprocessableEntity(new { code = exception.Code, message = exception.Message });
+            }
+        }
+
         /// <summary>Creates a new vendor invoice in Draft status with the supplied line items.</summary>
         [HttpPost]
         public async Task<ActionResult<VendorInvoiceDto>> Create([FromBody] VendorInvoiceCreateDto dto)
@@ -123,7 +208,7 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
-                var invoice = await _invoiceService.CreateAsync(dto);
+                var invoice = await _invoiceService.CreateAsync(dto, DimensionProducer);
                 return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, invoice);
             }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -136,7 +221,7 @@ namespace ErpSystem.Api.Controllers.Finance
             if (id != dto.Id) return BadRequest("ID mismatch");
             if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"))
                 return Forbid();
-            try { return Ok(await _invoiceService.UpdateAsync(dto)); }
+            try { return Ok(await _invoiceService.UpdateAsync(dto, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -158,7 +243,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AP.Invoices.SubmitForApproval", "Finance.AP.Invoices.Approve"))
                 return Forbid();
-            try { return Ok(await _invoiceService.SubmitForApprovalAsync(id)); }
+            try { return Ok(await _invoiceService.SubmitForApprovalAsync(id, DimensionProducer)); }
             catch (VendorInvoiceMatchControlException ex)
             {
                 return UnprocessableEntity(new { code = ex.Code, message = ex.Message });
@@ -172,7 +257,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Approve"))
                 return Forbid();
-            try { return Ok(await _invoiceService.ApproveAsync(id, comments)); }
+            try { return Ok(await _invoiceService.ApproveAsync(id, DimensionProducer, comments)); }
             catch (VendorInvoiceMatchControlException ex)
             {
                 return UnprocessableEntity(new { code = ex.Code, message = ex.Message });
@@ -186,7 +271,17 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync(FinancePermissions.PostApInvoices))
                 return Forbid();
-            try { return Ok(await _invoiceService.PostAsync(id)); }
+            try { return Ok(await _invoiceService.PostAsync(id, DimensionProducer)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Explicitly re-evaluates and reserves the current source-dimension budget cells.</summary>
+        [HttpPost("{id}/budget-refresh")]
+        public async Task<ActionResult<FinanceSourceDocumentDimensionDto>> RefreshBudget(Guid id)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            try { return Ok(await _invoiceService.RefreshBudgetAsync(id, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -516,6 +611,52 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try { return Ok(await _paymentService.GetPaymentAllocationsAsync(id)); }
             catch (UnauthorizedAccessException) { return Forbid(); }
+        }
+
+        /// <summary>
+        /// Reserves posted supplier debit notes against invoices in this Finance-owned AP
+        /// settlement. The debit note has already posted to AP control, so this endpoint creates
+        /// subledger evidence only and never posts a second journal.
+        /// </summary>
+        [HttpPost("{id}/supplier-debit-note-applications")]
+        [Authorize(Policy = FinancePermissions.ProcessApPayments)]
+        public async Task<ActionResult<SupplierDebitNoteApplicationResultDto>> ApplySupplierDebitNotes(
+            Guid id,
+            [FromBody] List<SupplierDebitNoteApplicationCreateDto> applications)
+        {
+            try { return Ok(await _paymentService.ApplySupplierDebitNotesAsync(id, applications)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Returns original and reversal supplier-credit applications for this payment.</summary>
+        [HttpGet("{id}/supplier-debit-note-applications")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<List<SupplierDebitNoteApplicationDto>>> GetSupplierDebitNoteApplications(Guid id)
+        {
+            try { return Ok(await _paymentService.GetSupplierDebitNoteApplicationsAsync(id)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        }
+
+        /// <summary>Releases an unposted supplier-credit reservation using a compensating row.</summary>
+        [HttpPost("supplier-debit-note-applications/{applicationId}/reverse")]
+        [Authorize(Policy = FinancePermissions.ProcessApPayments)]
+        public async Task<IActionResult> ReverseSupplierDebitNoteApplication(
+            Guid applicationId,
+            [FromBody] string reason)
+        {
+            try
+            {
+                await _paymentService.ReverseSupplierDebitNoteApplicationAsync(applicationId, reason);
+                return Ok();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
         }
 
         /// <summary>Posts an authorized vendor payment to the general ledger through the central finance posting engine.</summary>

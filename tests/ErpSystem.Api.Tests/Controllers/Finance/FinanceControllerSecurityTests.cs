@@ -63,7 +63,7 @@ public sealed class FinanceControllerSecurityTests
             policies.Should()
                 .NotBeEmpty($"{controller.Name}.{action} should require an action-level Finance policy");
             policies.Should()
-                .OnlyContain(policy => FinancePermissions.AllNames.Contains(policy), "Finance policies must be backed by seeded permissions");
+                .OnlyContain(policy => FinancePermissions.AllPolicyNames.Contains(policy), "Finance policies must be registered Finance permissions or composite policies");
         }
     }
 
@@ -97,7 +97,7 @@ public sealed class FinanceControllerSecurityTests
                 policies.Should()
                     .NotBeEmpty($"{controller.Name}.{action.Name} must be covered by the Finance permission convention");
                 policies.Should()
-                    .OnlyContain(policy => FinancePermissions.AllNames.Contains(policy), $"{controller.Name}.{action.Name} must use seeded Finance permissions");
+                    .OnlyContain(policy => FinancePermissions.AllPolicyNames.Contains(policy), $"{controller.Name}.{action.Name} must use registered Finance permissions or composite policies");
             }
         }
     }
@@ -123,8 +123,11 @@ public sealed class FinanceControllerSecurityTests
     }
 
     [Theory]
+    [InlineData(typeof(JournalEntryController), "GetJournalEntryById", FinancePermissions.ViewTenderPaymentJournalPolicy)]
+    [InlineData(typeof(JournalEntryController), "GetAttachments", FinancePermissions.ViewTenderPaymentJournalPolicy)]
     [InlineData(typeof(JournalEntryController), "CreateJournalEntry", FinancePermissions.CreateJournalEntries)]
     [InlineData(typeof(JournalEntryController), "RequestApproval", FinancePermissions.SubmitJournalEntries)]
+    [InlineData(typeof(JournalEntryController), "WithdrawApproval", FinancePermissions.WithdrawJournalApprovalPolicy)]
     [InlineData(typeof(JournalEntryController), "PostJournalEntry", FinancePermissions.PostJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ReverseJournalEntry", FinancePermissions.ReverseJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ApproveJournalEntry", FinancePermissions.ApproveJournalEntries)]
@@ -153,6 +156,7 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(FinanceApprovalsController), "Approve", FinancePermissions.WorkflowApprove)]
     [InlineData(typeof(FinanceApprovalsController), "Reject", FinancePermissions.WorkflowReject)]
     [InlineData(typeof(FiscalPeriodController), "OpenPeriod", FinancePermissions.OpenAccountingPeriods)]
+    [InlineData(typeof(FiscalPeriodController), "UpdatePostingDatePolicy", FinancePermissions.AdministerFinance)]
     [InlineData(typeof(FiscalPeriodController), "RequestPeriodReopen", FinancePermissions.ReopenAccountingPeriods)]
     [InlineData(typeof(FiscalPeriodController), "ReviewPeriodReopen", FinancePermissions.ApproveAccountingPeriodReopens)]
     [InlineData(typeof(BudgetController), "GetReturns", FinancePermissions.AssignBudgetReturns)]
@@ -172,11 +176,14 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(BudgetController), "ApplyRevision", FinancePermissions.ApplyBudgetRevisions)]
     [InlineData(typeof(OpeningBalancesController), "Create", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "CreateFixedAssetBatch", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "CreateBankAccountOpening", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "CreateResidualGlEquityOpening", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "CreateSupplierAdvance", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "CreateCustomerAdvance", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "CreateApWithholding", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "CreateArWithholding", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "GetSpecializedOptions", FinancePermissions.ViewFinance)]
+    [InlineData(typeof(OpeningBalancesController), "GetGovernedOptions", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "GetSubledgerReadiness", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "List", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "Update", FinancePermissions.PrepareOpeningBalances)]

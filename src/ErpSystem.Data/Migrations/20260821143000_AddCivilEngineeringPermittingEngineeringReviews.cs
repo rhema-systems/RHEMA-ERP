@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0403 SCE engineering recommendation register; HOD decision remains a later stage.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821143000_AddCivilEngineeringPermittingEngineeringReviews")]
 public partial class AddCivilEngineeringPermittingEngineeringReviews : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

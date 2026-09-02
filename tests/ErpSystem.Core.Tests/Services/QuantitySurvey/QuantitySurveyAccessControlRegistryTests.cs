@@ -96,8 +96,14 @@ public sealed class QuantitySurveyAccessControlRegistryTests
     [Fact]
     public async Task Report_catalogue_is_complete_project_scoped_and_seeded_idempotently()
     {
-        QuantitySurveyStatutoryReportCatalogue.Definitions.Should().HaveCount(6);
+        QuantitySurveyStatutoryReportCatalogue.Definitions.Should().HaveCount(10);
         QuantitySurveyStatutoryReportCatalogue.Definitions.Select(value => value.Code).Should().OnlyHaveUniqueItems();
+        QuantitySurveyStatutoryReportCatalogue.Definitions.Select(value => value.Code).Should().Contain([
+            QuantitySurveyStatutoryReportCatalogue.RetentionRegisterCode,
+            QuantitySurveyStatutoryReportCatalogue.CostToCompleteCode,
+            QuantitySurveyStatutoryReportCatalogue.ContractBalanceCode,
+            QuantitySurveyStatutoryReportCatalogue.AuditTrailCode
+        ]);
         QuantitySurveyStatutoryReportCatalogue.Definitions.Should().OnlyContain(value =>
             value.Query.StartsWith(QuantitySurveyStatutoryReportCatalogue.QueryPrefix, StringComparison.Ordinal) &&
             value.Columns.Count > 0 && value.Tags.Contains("quantity-survey"));
@@ -119,7 +125,7 @@ public sealed class QuantitySurveyAccessControlRegistryTests
         await seeder.SeedTenantAsync(tenantId);
 
         var reports = await context.Reports.IgnoreQueryFilters().Where(value => value.TenantId == tenantId).ToListAsync();
-        reports.Should().HaveCount(6);
+        reports.Should().HaveCount(10);
         reports.Should().OnlyContain(value => value.Type == QuantitySurveyStatutoryReportCatalogue.ReportType &&
             value.Status == "published" && value.ModuleId != null && !value.IsDeleted);
     }

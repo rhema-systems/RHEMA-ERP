@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   hasEvaluationCommitteeAction,
+  isEvaluationCommitteeControlError,
   validateCoiDeclaration,
   validateCommitteeBinding,
   validateMeetingReadiness,
@@ -33,6 +34,11 @@ const appointment = (
 });
 
 describe('evaluation committee controls', () => {
+  it('recognizes committee readiness failures that need an actionable handoff', () => {
+    expect(isEvaluationCommitteeControlError(new Error('No active evaluation committee control exists. (EVALUATION_SCORER_INELIGIBLE)'))).toBe(true);
+    expect(isEvaluationCommitteeControlError(new Error('Network request failed'))).toBe(false);
+  });
+
   it('trusts server actions while normalizing naming style', () => {
     expect(hasEvaluationCommitteeAction(['ConfirmQuorum'], 'confirm-quorum')).toBe(
       true

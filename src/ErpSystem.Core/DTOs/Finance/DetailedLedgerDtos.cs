@@ -3,6 +3,15 @@ using System.Collections.Generic;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
+    public class DetailedLedgerCurrencyTotalDto
+    {
+        public string CurrencyCode { get; set; } = "GHS";
+        public decimal OpeningBalance { get; set; }
+        public decimal TotalDebits { get; set; }
+        public decimal TotalCredits { get; set; }
+        public decimal ClosingBalance { get; set; }
+    }
+
     public class DetailedLedgerRequestDto
     {
         public DateTime StartDate { get; set; } = DateTime.UtcNow.Date;
@@ -12,6 +21,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IncludeReversed { get; set; } = true;
         public bool IncludeOpeningBalances { get; set; } = true;
         public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+        public List<FinanceDimensionFilterDto> DimensionFilters { get; set; } = new();
     }
 
     public class DetailedLedgerReportDto
@@ -63,5 +73,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ExchangeRate { get; set; }
         public bool IsReversed { get; set; }
         public string? SegmentString { get; set; }
+        public Guid? FinanceDimensionSetId { get; set; }
+        public string? FinanceDimensionDisplay { get; set; }
+        public List<FinanceDimensionAssignmentDto> Dimensions { get; set; } = new();
     }
 }

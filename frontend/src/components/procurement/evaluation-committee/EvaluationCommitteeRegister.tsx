@@ -471,6 +471,14 @@ function CompositionSection({
                         )}
                         {canEvaluate &&
                           isSelf &&
+                          control.status === 'Draft' &&
+                          member.status === 'Pending' && (
+                            <span className="text-xs text-muted-foreground">
+                              Awaiting committee activation
+                            </span>
+                          )}
+                        {canEvaluate &&
+                          isSelf &&
                           control.status === 'Active' &&
                           member.status === 'Accepted' &&
                           serverAllows(control.allowedActions, [
@@ -485,14 +493,6 @@ function CompositionSection({
                                 ? 'Renew declaration'
                                 : 'Declare COI'}
                             </Button>
-                          )}
-                        {canEvaluate &&
-                          isSelf &&
-                          control.status === 'Draft' &&
-                          member.status === 'Pending' && (
-                            <span className="text-xs text-muted-foreground">
-                              Awaiting committee activation
-                            </span>
                           )}
                       </div>
                     </td>

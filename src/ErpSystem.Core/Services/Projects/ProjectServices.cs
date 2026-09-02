@@ -648,17 +648,17 @@ public partial class ProjectService : IProjectService
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManageMembers);
         if (dto.UserId == Guid.Empty)
             throw new InvalidOperationException("Select an active user before adding a project member.");
+        var selectedUser = await _userService.GetUserByIdAsync(dto.UserId);
+        if (selectedUser is null || selectedUser.TenantId != _currentUserProvider.TenantId ||
+            !selectedUser.IsActive)
+            throw new InvalidOperationException(
+                "The selected user is not an active member of the current tenant.");
         var selectedRole = await GetActiveProjectCatalogEntryAsync(
             "member-roles",
             dto.Role,
             "project member role");
         if (string.Equals(selectedRole.Code, CivilEngineeringAccessControlRegistry.ProjectEngineerRole, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Use the governed Civil Engineering Project Engineer assignment control to appoint this project role.");
-        var selectedUser = await _userService.GetUserByIdAsync(dto.UserId);
-        if (selectedUser is null || selectedUser.TenantId != _currentUserProvider.TenantId ||
-            !selectedUser.IsActive)
-            throw new InvalidOperationException(
-                "The selected user is not an active member of the current tenant.");
         var repo = _unitOfWork.Repository<ProjectMember>();
         var existing = await repo.FirstOrDefaultAsync(x => x.ProjectId == projectId && x.UserId == dto.UserId && x.Role == selectedRole.Code && x.TenantId == _currentUserProvider.TenantId);
         if (existing != null)
@@ -707,7 +707,6 @@ public partial class ProjectService : IProjectService
         var normalizedCode = requestedCode?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedCode))
             throw new InvalidOperationException($"Select an active {selectionName} configured for the current tenant.");
-
         return await _unitOfWork.Repository<ProjectCatalogEntry>().FirstOrDefaultAsync(entry =>
                 entry.TenantId == _currentUserProvider.TenantId
                 && !entry.IsDeleted
@@ -721,7 +720,6 @@ public partial class ProjectService : IProjectService
     {
         if (userId == Guid.Empty)
             throw new InvalidOperationException($"Select an active {selectionName} from the current tenant.");
-
         var selectedUser = await _userService.GetUserByIdAsync(userId);
         if (selectedUser is null
             || selectedUser.TenantId != _currentUserProvider.TenantId
@@ -733,7 +731,6 @@ public partial class ProjectService : IProjectService
     {
         if (!workItemId.HasValue)
             return;
-
         var exists = await _unitOfWork.Repository<ProjectWorkItem>().ExistsAsync(item =>
             item.Id == workItemId.Value
             && item.ProjectId == projectId
@@ -983,6 +980,7 @@ public partial class ProjectService : IProjectService
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == allocationId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project resource allocation with ID {allocationId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
+
         var selectedRole = await GetActiveProjectCatalogEntryAsync(
             "resource-roles",
             dto.AllocationRole,
@@ -3194,37 +3192,21 @@ public partial class ProjectService : IProjectService
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageExecution);
         if (!dto.MaintenanceAssetId.HasValue && !dto.FixedAssetId.HasValue && !dto.CompanyAssetId.HasValue && !dto.JobCardId.HasValue)
-        {
             throw new InvalidOperationException("Select at least one authoritative maintenance asset, fixed asset, company asset, or job card before linking it to the project.");
-        }
 
         var tenantId = _currentUserProvider.TenantId;
-        if (dto.MaintenanceAssetId.HasValue && await _unitOfWork.Repository<MaintenanceAsset>().FirstOrDefaultAsync(x =>
-                x.Id == dto.MaintenanceAssetId.Value && x.TenantId == tenantId) == null)
-        {
+        if (dto.MaintenanceAssetId.HasValue && await _unitOfWork.Repository<MaintenanceAsset>().FirstOrDefaultAsync(x => x.Id == dto.MaintenanceAssetId.Value && x.TenantId == tenantId) == null)
             throw new InvalidOperationException("The selected maintenance asset is not available in this tenant.");
-        }
-
-        if (dto.FixedAssetId.HasValue && await _unitOfWork.Repository<FixedAsset>().FirstOrDefaultAsync(x =>
-                x.Id == dto.FixedAssetId.Value && x.TenantId == tenantId) == null)
-        {
+        if (dto.FixedAssetId.HasValue && await _unitOfWork.Repository<FixedAsset>().FirstOrDefaultAsync(x => x.Id == dto.FixedAssetId.Value && x.TenantId == tenantId) == null)
             throw new InvalidOperationException("The selected fixed asset is not available in this tenant.");
-        }
-
-        if (dto.CompanyAssetId.HasValue && await _unitOfWork.Repository<CompanyAsset>().FirstOrDefaultAsync(x =>
-                x.Id == dto.CompanyAssetId.Value && x.TenantId == tenantId) == null)
-        {
+        if (dto.CompanyAssetId.HasValue && await _unitOfWork.Repository<CompanyAsset>().FirstOrDefaultAsync(x => x.Id == dto.CompanyAssetId.Value && x.TenantId == tenantId) == null)
             throw new InvalidOperationException("The selected company asset is not available in this tenant.");
-        }
-
         if (dto.JobCardId.HasValue)
         {
             var jobCard = await _unitOfWork.Repository<JobCard>().FirstOrDefaultAsync(x => x.Id == dto.JobCardId.Value && x.TenantId == tenantId)
                 ?? throw new InvalidOperationException("The selected job card is not available in this tenant.");
             if (dto.MaintenanceAssetId.HasValue && jobCard.AssetId != dto.MaintenanceAssetId.Value)
-            {
                 throw new InvalidOperationException("The selected job card does not belong to the selected maintenance asset.");
-            }
         }
 
         var linkType = string.IsNullOrWhiteSpace(dto.LinkType) ? "Asset" : dto.LinkType.Trim();
@@ -3233,9 +3215,7 @@ public partial class ProjectService : IProjectService
         var repository = _unitOfWork.Repository<ProjectAssetLink>();
         var existing = await repository.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ReconciliationKey == reconciliationKey);
         if (existing != null)
-        {
             return (await GetAssetLinksAsync(projectId)).First(x => x.Id == existing.Id);
-        }
 
         var entity = new ProjectAssetLink
         {

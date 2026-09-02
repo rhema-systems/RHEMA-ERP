@@ -22,6 +22,10 @@ import {
 } from '@/services/inventoryRequisitionService';
 import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
+import {
+  InventoryTrackingExceptionSelect,
+  useAvailableInventoryTrackingExceptions,
+} from '@/components/inventory/InventoryTrackingExceptionSelect';
 
 interface ReturnRequisitionDialogProps {
   open: boolean;
@@ -32,6 +36,7 @@ interface ReturnRequisitionDialogProps {
 
 interface ReturnItemState {
   itemId: string;
+  inventoryItemId: string;
   itemCode: string;
   itemName: string;
   issuedQuantity: number;
@@ -70,6 +75,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
   const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
   const [evidence, setEvidence] = useState<InventoryControlEvidenceRequest[]>([]);
   const [vouchers, setVouchers] = useState<InventoryReturnVoucherDto[]>([]);
+  const trackingExceptions = useAvailableInventoryTrackingExceptions(open && Boolean(requisitionId));
 
   useEffect(() => {
     if (open && requisitionId) {
@@ -93,6 +99,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
       setVouchers(returnVouchers);
       setReturnItems(detail.items.map((item) => ({
         itemId: item.id,
+        inventoryItemId: item.inventoryItemId,
         itemCode: item.itemCode,
         itemName: item.itemName,
         issuedQuantity: item.issuedQuantity || 0,
@@ -304,7 +311,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                       />
                     </TableCell>
                     <TableCell>{item.locationName || requisition.locationName || 'Warehouse level'}</TableCell>
-                    <TableCell className="min-w-[280px]"><div className="grid grid-cols-3 gap-1"><Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} /><Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} /><Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} /><Input className="col-span-3" placeholder="Approved exception ID (if required)" value={item.inventoryTrackingExceptionId || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId: event.target.value || undefined } : value))} /></div></TableCell>
+                    <TableCell className="min-w-[360px]"><div className="grid grid-cols-3 gap-1"><Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} /><Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} /><Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} /><div className="col-span-3"><InventoryTrackingExceptionSelect value={item.inventoryTrackingExceptionId} onValueChange={inventoryTrackingExceptionId => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId } : value))} exceptions={trackingExceptions.exceptions} loading={trackingExceptions.loading} error={trackingExceptions.error} onRetry={trackingExceptions.refresh} context={{ inventoryItemId: item.inventoryItemId, warehouseId: requisition.warehouseId, locationId: item.locationId, referenceId: requisition.id, lotNumber: item.lotNumber, batchNumber: item.batchNumber, serialNumber: item.serialNumber }} /></div></div></TableCell>
                     <TableCell>{item.unitOfMeasure}</TableCell>
                   </TableRow>
                 ))}

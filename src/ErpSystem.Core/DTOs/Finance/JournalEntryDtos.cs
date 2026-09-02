@@ -12,7 +12,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public string JournalType { get; set; } = "General";
         public string? Description { get; set; }
         public string? Reference { get; set; }
+        public string? SourceModule { get; set; }
+        public string? OriginModuleCode { get; set; }
+        public Guid? SourceDocumentId { get; set; }
+        public string? SourceDocumentType { get; set; }
         public string BookClassification { get; set; } = "IFRS";
+        public Guid? FiscalPeriodId { get; set; }
         public decimal TotalDebit { get; set; }
         public decimal TotalCredit { get; set; }
         public string Status { get; set; } = "Draft";
@@ -36,6 +41,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? ApprovedByUserId { get; set; }
         public DateTime? ApprovedDate { get; set; }
         public string? RejectionReason { get; set; }
+        public string? WithdrawalReason { get; set; }
+        public Guid? WithdrawnByUserId { get; set; }
+        public DateTime? WithdrawnDate { get; set; }
         public bool HasAttachments { get; set; }
         public int AttachmentCount { get; set; }
         public List<Guid> AttachmentIds { get; set; } = new();
@@ -112,6 +120,14 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Comments { get; set; }
         /// <summary>Rejection reason (required when rejecting).</summary>
         public string? Reason { get; set; }
+    }
+
+    public class WithdrawApprovalDto
+    {
+        /// <summary>Business reason for recalling the pending approval request.</summary>
+        [Required]
+        [MaxLength(1000)]
+        public string Reason { get; set; } = string.Empty;
     }
 
     /// <summary>

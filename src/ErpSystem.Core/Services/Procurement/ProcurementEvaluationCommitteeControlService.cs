@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -30,6 +32,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementSodGuardService _sodGuard;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IWorkflowInstanceService _workflowInstances;
     private readonly INotificationTopicPublisher _notificationTopics;
 
@@ -39,6 +42,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         IProcurementAccessControlService accessControl,
         IProcurementSodGuardService sodGuard,
         IProcurementControlEventService controlEvents,
+        IProcurementSourcingCaseService sourcingCases,
         IWorkflowInstanceService workflowInstances,
         INotificationTopicPublisher notificationTopics)
     {
@@ -47,6 +51,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         _accessControl = accessControl;
         _sodGuard = sodGuard;
         _controlEvents = controlEvents;
+        _sourcingCases = sourcingCases;
         _workflowInstances = workflowInstances;
         _notificationTopics = notificationTopics;
     }
@@ -342,7 +347,17 @@ public sealed class ProcurementEvaluationCommitteeControlService
         }
         CaptureComposition(control);
         await Controls.AddAsync(control);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            IsCommitteeLineagePersistenceFailure(exception))
+        {
+            throw Conflict(
+                "EVALUATION_COMMITTEE_SOURCE_LINEAGE_REJECTED",
+                "The source's recorded procurement policy and configuration lineage could not be retained by the evaluation committee control. Refresh and retry; if the problem continues, an administrator must reconcile the source's immutable procurement lineage.");
+        }
         await RecordAsync(control, "Bound", ProcurementControlEventResult.Succeeded,
             new { request.CommitteeTemplateId, request.Purpose, request.RequiredRoles },
             new { control.Id, control.Version, control.CompositionIntegrityHash },
@@ -1347,18 +1362,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
             throw Validation("EVALUATION_SOURCE_REQUIRED", "SourceId is required.");
         if (sourceType == ProcurementEvaluationSourceType.Tender)
         {
-            var tender = await Tenders.GetQueryable(item =>
-                    item.Id == sourceId &&
-                    item.TenantId == _currentUser.TenantId &&
-                    !item.IsDeleted)
-                .Include(item => item.SourcingCase!)
-                    .ThenInclude(item => item.PolicySet)
-                        .ThenInclude(item => item.SourceConfigurationProfile)
-                .Include(item => item.SourcingCase!)
-                    .ThenInclude(item => item.MethodRule)
-                .AsNoTracking()
-                .FirstOrDefaultAsync(cancellationToken)
-                ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The tender was not found.");
+            var tender = await LoadTenderSourceAsync(sourceId, cancellationToken);
+            if (tender.SourcingCase is null)
+                tender = await RecoverTenderSourceLineageAsync(tender, cancellationToken);
             return SourceLineage.From(tender);
         }
         var rfq = await Rfqs.GetQueryable(item =>
@@ -1374,6 +1380,77 @@ public sealed class ProcurementEvaluationCommitteeControlService
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The RFQ was not found.");
         return SourceLineage.From(rfq);
+    }
+
+    private async Task<Tender> LoadTenderSourceAsync(
+        Guid sourceId,
+        CancellationToken cancellationToken) =>
+        await Tenders.GetQueryable(item =>
+                    item.Id == sourceId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    !item.IsDeleted)
+                .Include(item => item.SourcingCase!)
+                    .ThenInclude(item => item.PolicySet)
+                        .ThenInclude(item => item.SourceConfigurationProfile)
+                .Include(item => item.SourcingCase!)
+                    .ThenInclude(item => item.MethodRule)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The tender was not found.");
+
+    private async Task<Tender> RecoverTenderSourceLineageAsync(
+        Tender tender,
+        CancellationToken cancellationToken)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue ||
+            tender.SourcePurchaseRequisitionId.Value == Guid.Empty)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISSING",
+                "The tender has no approved purchase-requisition lineage from which its sourcing case can be recovered.");
+
+        var isRfq = string.Equals(tender.TenderType?.Trim(), "RFQ",
+            StringComparison.OrdinalIgnoreCase);
+        if (isRfq)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISSING",
+                "RFQ evaluation must use the governed request-for-quotation record rather than a tender shell.");
+        var gate = await _sourcingCases.RecoverTenderSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            tender.SourcingReleaseId,
+            tender.Id,
+            tender.TenderNumber,
+            $"evaluation-lineage:{tender.Id:N}",
+            cancellationToken);
+
+        if (!gate.SourcingCaseId.HasValue || gate.SourcingCaseId.Value == Guid.Empty)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISSING",
+                "The tender's current immutable release has no locked sourcing case.");
+        if (tender.SourcingReleaseId.HasValue &&
+            tender.SourcingReleaseId.Value != gate.SourcingReleaseId)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISMATCH",
+                "The tender does not match the current immutable sourcing release.");
+        if (tender.SourcingCaseId.HasValue &&
+            tender.SourcingCaseId.Value != gate.SourcingCaseId.Value)
+            throw Validation("EVALUATION_SOURCE_LINEAGE_MISMATCH",
+                "The tender does not match the sourcing case locked to its immutable release.");
+
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        tender.UpdatedAt = DateTime.UtcNow;
+        try
+        {
+            await Tenders.UpdateAsync(tender);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            exception.GetBaseException().Message.Contains(
+                "PR-linked Tender requires an approved requisition",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw Validation(
+                "EVALUATION_SOURCE_LINEAGE_PERSISTENCE_REJECTED",
+                "The tender's validated sourcing-case lineage could not be retained. Refresh the tender and retry the evaluation.");
+        }
+
+        return await LoadTenderSourceAsync(tender.Id, cancellationToken);
     }
 
     private async Task<WorkflowDefinition> LoadWorkflowAsync(
@@ -2444,12 +2521,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (_currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (_currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementEvaluationCommitteeAuthorizationException(
-            "A TDC procurement, audit, or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -2463,14 +2538,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
     }
 
     private bool CanAdminister() =>
-        _currentUser.Roles.Any(role =>
-            ProcurementAccessControlRegistry.RoleGrantsPermission(
-                role, ManagePermission));
+        _currentUser.HasRegisteredProcurementPermission(ManagePermission);
 
     private bool CanApprove() =>
-        _currentUser.Roles.Any(role =>
-            ProcurementAccessControlRegistry.FindRole(role)?.PermissionCodes
-                .Contains(ApprovePermission, StringComparer.OrdinalIgnoreCase) == true);
+        _currentUser.HasRegisteredProcurementPermission(ApprovePermission);
 
     private string ActorName() =>
         string.IsNullOrWhiteSpace(_currentUser.FullName)
@@ -2617,6 +2688,20 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private static string ComputeHash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
             .ToLowerInvariant();
+
+    internal static bool IsCommitteeLineagePersistenceFailure(Exception exception)
+    {
+        const string guardMessage =
+            "Evaluation committee source, template, policy, method, configuration, workflow, or tenant lineage is invalid.";
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains(guardMessage, StringComparison.OrdinalIgnoreCase) &&
+                (current is not SqlException sqlException || sqlException.Number == 51301))
+                return true;
+        }
+
+        return false;
+    }
 
     private static ProcurementEvaluationCommitteeNotFoundException NotFound(
         string code,

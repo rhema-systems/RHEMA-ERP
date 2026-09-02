@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import ProjectMobilePage from './page';
+import ProjectMobilePage, { buildCivilFeedbackStorageKey } from './page';
 import { projectService } from '@/services/projectService';
 import { civilEngineeringDirectTaskService } from '@/services/civil-engineering-direct-task.service';
 
@@ -11,18 +11,6 @@ vi.mock('sonner', () => ({
     error: vi.fn(),
   },
 }));
-
-vi.mock('@/lib/project-currency', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/project-currency')>('@/lib/project-currency');
-  return {
-    ...actual,
-    loadProjectCurrencyContext: vi.fn().mockResolvedValue({
-      activeCurrencies: [],
-      baseCurrency: actual.DEFAULT_PROJECT_CURRENCY,
-      rawBaseCurrency: null,
-    }),
-  };
-});
 
 vi.mock('@/services/projectService', async () => {
   const actual = await vi.importActual<typeof import('@/services/projectService')>('@/services/projectService');
@@ -71,7 +59,22 @@ describe('ProjectMobilePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    localStorage.setItem('user', JSON.stringify({ id: 'user-1' }));
+    localStorage.setItem(
+      'token',
+      'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJleHAiOjk5OTk5OTk5OTl9.c2lnbmF0dXJl'
+    );
+    localStorage.setItem(
+      'user',
+      JSON.stringify({ id: 'user-1', currentTenantId: 'tenant-1' })
+    );
+    localStorage.setItem(
+      'currentTenant',
+      JSON.stringify({ id: 'tenant-1', code: 'TDC' })
+    );
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
     vi.mocked(projectService.getMobileSummary).mockResolvedValue(summary);
     vi.mocked(projectService.getCatalogEntries).mockResolvedValue([]);
     vi.mocked(projectService.submitMobileTimesheet).mockResolvedValue({
@@ -186,16 +189,151 @@ describe('ProjectMobilePage', () => {
   it('routes governed Civil assignments only through the Civil feedback lifecycle', async () => {
     vi.mocked(projectService.getMobileSummary).mockResolvedValue({
       ...summary,
-      assignments: [{ ...summary.assignments[0], civilDirectTaskId: 'civil-task-1', civilDirectTaskStatus: 'Assigned', civilDirectTaskRowVersion: 'civil-row-version' }],
+      assignments: [
+        {
+          ...summary.assignments[0],
+          civilDirectTaskId: 'civil-task-1',
+          civilDirectTaskStatus: 'Assigned',
+          civilDirectTaskRowVersion: 'civil-row-version',
+        },
+      ],
     });
 
     render(<ProjectMobilePage />);
 
     expect(await screen.findByText('Governed Civil field feedback')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update Progress' })).not.toBeInTheDocument();
-    expect(civilEngineeringDirectTaskService.feedbackLookups).toHaveBeenCalledWith('proj-1', 'civil-task-1');
-    expect(civilEngineeringDirectTaskService.feedback).toHaveBeenCalledWith('proj-1', 'civil-task-1');
+    expect(civilEngineeringDirectTaskService.feedbackLookups).toHaveBeenCalledWith(
+      'proj-1',
+      'civil-task-1',
+    );
+    expect(civilEngineeringDirectTaskService.feedback).toHaveBeenCalledWith(
+      'proj-1',
+      'civil-task-1',
+    );
     expect(projectService.updateMobileWorkItemProgress).not.toHaveBeenCalled();
     expect(projectService.uploadProjectDocument).not.toHaveBeenCalled();
+  });
+
+  it('never synchronizes queued Civil feedback after the authenticated actor changes', async () => {
+    const civilSummary = {
+      ...summary,
+      assignments: [
+        {
+          ...summary.assignments[0],
+          civilDirectTaskId: 'civil-task-1',
+          civilDirectTaskStatus: 'Assigned',
+          civilDirectTaskRowVersion: 'civil-row-version',
+        },
+      ],
+    };
+    vi.mocked(projectService.getMobileSummary).mockResolvedValue(civilSummary);
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+    const storageKey = buildCivilFeedbackStorageKey(
+      'tenant-1',
+      'user-1',
+      'civil-task-1'
+    );
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        projectId: 'proj-1',
+        taskId: 'civil-task-1',
+        assignmentRowVersion: 'civil-row-version',
+        queuedAt: '2026-03-10T10:00:00Z',
+        request: {
+          clientRequestId: 'request-1',
+          action: 'Acknowledge',
+          rowVersion: 'civil-row-version',
+          capturedOfflineAtUtc: '2026-03-10T10:00:00Z',
+        },
+      })
+    );
+
+    render(<ProjectMobilePage />);
+
+    expect(await screen.findByText(/One offline field update is queued/)).toBeInTheDocument();
+    localStorage.setItem(
+      'user',
+      JSON.stringify({ id: 'user-2', currentTenantId: 'tenant-1' })
+    );
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+    fireEvent(window, new Event('online'));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/One offline field update is queued/)
+      ).not.toBeInTheDocument()
+    );
+    expect(
+      civilEngineeringDirectTaskService.submitAssigneeFeedback
+    ).not.toHaveBeenCalled();
+    expect(localStorage.getItem(storageKey)).not.toBeNull();
+  });
+
+  it('never synchronizes queued Civil feedback after task reassignment or a stale assignment version', async () => {
+    const civilSummary = {
+      ...summary,
+      assignments: [
+        {
+          ...summary.assignments[0],
+          civilDirectTaskId: 'civil-task-1',
+          civilDirectTaskStatus: 'Assigned',
+          civilDirectTaskRowVersion: 'civil-row-version',
+        },
+      ],
+    };
+    vi.mocked(projectService.getMobileSummary)
+      .mockResolvedValueOnce(civilSummary)
+      .mockResolvedValueOnce({ ...summary, assignments: [] });
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+    const storageKey = buildCivilFeedbackStorageKey(
+      'tenant-1',
+      'user-1',
+      'civil-task-1'
+    );
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        projectId: 'proj-1',
+        taskId: 'civil-task-1',
+        assignmentRowVersion: 'civil-row-version',
+        queuedAt: '2026-03-10T10:00:00Z',
+        request: {
+          clientRequestId: 'request-2',
+          action: 'Acknowledge',
+          rowVersion: 'civil-row-version',
+          capturedOfflineAtUtc: '2026-03-10T10:00:00Z',
+        },
+      })
+    );
+
+    render(<ProjectMobilePage />);
+
+    expect(await screen.findByText(/One offline field update is queued/)).toBeInTheDocument();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+    fireEvent(window, new Event('online'));
+
+    await waitFor(() => expect(projectService.getMobileSummary).toHaveBeenCalledTimes(2));
+    expect(
+      civilEngineeringDirectTaskService.submitAssigneeFeedback
+    ).not.toHaveBeenCalled();
+    expect(localStorage.getItem(storageKey)).not.toBeNull();
   });
 });

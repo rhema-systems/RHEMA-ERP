@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
 import React, { useState, useEffect, useMemo, use } from 'react';
@@ -7,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
@@ -14,14 +15,31 @@ import { Save, Send, CheckCircle, Loader2, ArrowLeft, RotateCcw } from 'lucide-r
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useAuth } from '@/hooks/use-auth';
-import type { BudgetReturn, BudgetScenario, BudgetEntryDto, BudgetAuditEvent } from '@/types/budget';
-import type { Account, FiscalPeriod } from '@/types/finance';
+import type { BudgetReturn, BudgetScenario, BudgetEntryDto, BudgetAuditEvent, BudgetDimensionAssignmentInput } from '@/types/budget';
+import type { Account, FinanceDimensionDefinition, FiscalPeriod } from '@/types/finance';
+import {
+    budgetDimensionCombinationKey,
+    budgetDimensionCombinationLabel,
+    buildBudgetDimensionCombinations,
+    isBudgetCombinationValidForPeriod,
+    isCompleteBudgetDimensionCombination,
+    LEGACY_BUDGET_COMBINATION_KEY,
+    type BudgetDimensionCombination,
+} from '@/lib/finance/budget-dimension-grid';
 
 interface PageProps {
     params: Promise<{
         id: string;
     }>;
 }
+
+interface BudgetGridCell {
+    amount: number;
+    id?: string;
+    rowVersion?: string;
+}
+
+type BudgetGrid = Record<string, Record<string, BudgetGridCell>>;
 
 export default function BudgetReturnEditorPage({ params }: PageProps) {
     const { id } = use(params);
@@ -33,6 +51,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
+    const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
     const [auditHistory, setAuditHistory] = useState<BudgetAuditEvent[]>([]);
 
     // UI State
@@ -42,9 +61,11 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     const [activeTab, setActiveTab] = useState('Expenses');
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-    // Form State (The Grid)
-    // Map<AccountId, Map<PeriodId, Amount>>
-    const [gridData, setGridData] = useState<Record<string, Record<string, number>>>({});
+    // One account/period grid per immutable budget-dimension combination.
+    const [gridData, setGridData] = useState<Record<string, BudgetGrid>>({});
+    const [dimensionCombinations, setDimensionCombinations] = useState<BudgetDimensionCombination[]>([]);
+    const [activeCombinationKey, setActiveCombinationKey] = useState('');
+    const [draftAssignments, setDraftAssignments] = useState<Record<string, string>>({});
 
     useEffect(() => {
         loadData();
@@ -58,29 +79,47 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
             setBudgetReturn(ret);
 
             // 2. Get Scenario & Entries & Accounts (Parallel)
-            const [scen, ent, allAccounts, auditData] = await Promise.all([
+            const [scen, ent, allAccounts, auditData, dimensions] = await Promise.all([
                 budgetDataService.getScenarioById(ret.budgetScenarioId),
                 budgetDataService.getEntries(id),
                 financeDataService.getAccounts({ status: 'Active' }),
                 budgetDataService.getReturnAuditHistory(id).catch(() => []),
+                financeDataService.getFinanceDimensions(true),
             ]);
             setScenario(scen);
             setAccounts(allAccounts.filter(account => account.status === 'Active' && account.allowDirectPosting));
             setAuditHistory(auditData);
+            setFinanceDimensions(dimensions);
 
-            // 3. Get Fiscal Year for Periods
-            const fy = await financeDataService.getFiscalYearById(scen.fiscalYearId);
-            // Sort periods by number
-            const sortedPeriods = [...(fy.periods || [])].sort((a, b) => a.periodNumber - b.periodNumber);
+            // Fiscal-year summaries intentionally do not embed their child periods. Load the
+            // tenant-scoped period collection explicitly so the worksheet cannot silently
+            // collapse to an Account/Total-only grid.
+            const fiscalPeriods = await financeDataService.getFiscalPeriods(scen.fiscalYearId);
+            const sortedPeriods = [...fiscalPeriods].sort((a, b) => a.periodNumber - b.periodNumber);
             setPeriods(sortedPeriods);
 
             // 4. Build Grid Data
-            const initialGrid: Record<string, Record<string, number>> = {};
+            const combinations = buildBudgetDimensionCombinations(ent, scen.controlDimensions, dimensions);
+            const initialGrid: Record<string, BudgetGrid> = {};
+            combinations.forEach(combination => { initialGrid[combination.key] = {}; });
             ent.forEach(e => {
-                if (!initialGrid[e.accountId]) initialGrid[e.accountId] = {};
-                initialGrid[e.accountId][e.fiscalPeriodId] = e.amount;
+                const assignments = e.dimensionAssignments.map(assignment => ({
+                    financeDimensionDefinitionId: assignment.financeDimensionDefinitionId,
+                    financeDimensionValueId: assignment.financeDimensionValueId,
+                }));
+                const combinationKey = budgetDimensionCombinationKey(assignments);
+                if (!initialGrid[combinationKey]) return;
+                if (!initialGrid[combinationKey][e.accountId]) initialGrid[combinationKey][e.accountId] = {};
+                initialGrid[combinationKey][e.accountId][e.fiscalPeriodId] = {
+                    amount: e.amount,
+                    id: e.id,
+                    rowVersion: e.rowVersion,
+                };
             });
             setGridData(initialGrid);
+            setDimensionCombinations(combinations);
+            setActiveCombinationKey(combinations[0]?.key || '');
+            setDraftAssignments({});
 
         } catch (error) {
             console.error('Failed to load budget return data:', error);
@@ -99,21 +138,61 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     const revenueAccounts = useMemo(() => accounts.filter(a => a.accountType === 'Revenue'), [accounts]);
 
     const handleInputChange = (accountId: string, periodId: string, value: string) => {
+        if (!activeCombinationKey) return;
         const numValue = value === '' ? 0 : parseFloat(value);
         setGridData(prev => ({
             ...prev,
-            [accountId]: {
-                ...prev[accountId],
-                [periodId]: numValue
+            [activeCombinationKey]: {
+                ...prev[activeCombinationKey],
+                [accountId]: {
+                    ...prev[activeCombinationKey]?.[accountId],
+                    [periodId]: {
+                        ...prev[activeCombinationKey]?.[accountId]?.[periodId],
+                        amount: numValue,
+                    },
+                },
             }
         }));
         setHasUnsavedChanges(true);
     };
 
     const calculateRowTotal = (accountId: string) => {
-        const row = gridData[accountId];
+        const row = gridData[activeCombinationKey]?.[accountId];
         if (!row) return 0;
-        return Object.values(row).reduce((sum, val) => sum + (val || 0), 0);
+        return Object.values(row).reduce((sum, cell) => sum + (cell.amount || 0), 0);
+    };
+
+    const handleAddCombination = () => {
+        if (!scenario) return;
+        const assignments = scenario.controlDimensions.map(control => ({
+            financeDimensionDefinitionId: control.financeDimensionDefinitionId,
+            financeDimensionValueId: draftAssignments[control.financeDimensionDefinitionId] || '',
+        }));
+        if (!isCompleteBudgetDimensionCombination(scenario.controlDimensions, assignments)
+            || assignments.some(assignment => !assignment.financeDimensionValueId)) {
+            toast({
+                title: 'Dimension values required',
+                description: 'Select one value for every budget-control dimension.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        const key = budgetDimensionCombinationKey(assignments);
+        const existing = dimensionCombinations.find(combination => combination.key === key);
+        if (existing) {
+            setActiveCombinationKey(existing.key);
+            return;
+        }
+        const combination: BudgetDimensionCombination = {
+            key,
+            assignments,
+            label: budgetDimensionCombinationLabel(assignments, scenario.controlDimensions, financeDimensions),
+        };
+        setDimensionCombinations(current => [...current, combination].sort((left, right) => left.label.localeCompare(right.label)));
+        setGridData(current => ({ ...current, [key]: {} }));
+        setActiveCombinationKey(key);
+        setDraftAssignments({});
+        setHasUnsavedChanges(true);
     };
 
     const handleSave = async (): Promise<BudgetReturn | null> => {
@@ -125,26 +204,22 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
             const entriesToSave: BudgetEntryDto[] = [];
 
             // Iterate over all accounts in the grid
-            Object.keys(gridData).forEach(accountId => {
-                Object.keys(gridData[accountId]).forEach(periodId => {
-                    const amount = gridData[accountId][periodId];
-                    // Only save if amount is not 0, or if it was previously saved (to clear it) -> Actually safer to just save everything or check diff.
-                    // For simplicity, we save all non-zero, or updates to existing.
-
-                    // Simple approach: Send everything that has a value.
-                    // Ideally we should map back to existing ID if updating.
-                    // The backend `BulkSave` should handle "Update if exists, Insert if new".
-                    // But we need to pass IDs if we have them to avoid duplicates if backend logic is weak? 
-                    // Our backend logic for 'BulkSave' usually deletes old and inserts new OR updates. 
-                    // Let's assume backend is smart enough to match on AccountId + PeriodId + ReturnId.
-
-                    entriesToSave.push({
-                        budgetReturnId: budgetReturn.id,
-                        accountId: accountId,
-                        fiscalPeriodId: periodId,
-                        amount: amount,
-                        currencyCode: scenario.baseCurrencyCode,
-                        exchangeRate: 1.0
+            dimensionCombinations.forEach(combination => {
+                const combinationGrid = gridData[combination.key] || {};
+                Object.keys(combinationGrid).forEach(accountId => {
+                    Object.keys(combinationGrid[accountId]).forEach(periodId => {
+                        const cell = combinationGrid[accountId][periodId];
+                        entriesToSave.push({
+                            id: cell.id,
+                            budgetReturnId: budgetReturn.id,
+                            accountId,
+                            fiscalPeriodId: periodId,
+                            amount: cell.amount,
+                            currencyCode: scenario.baseCurrencyCode,
+                            exchangeRate: 1.0,
+                            rowVersion: cell.rowVersion,
+                            dimensionAssignments: combination.assignments,
+                        });
                     });
                 });
             });
@@ -227,6 +302,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         || normalizedRoles.has('tenantadmin')
         || normalizedRoles.has('superadmin');
     const isAssignedUser = budgetReturn.assignedToUserId === user?.id;
+    const hasAssignee = Boolean(budgetReturn.assignedToUserId);
     const isDraftLike = budgetReturn.status === 'Draft' || budgetReturn.status === 'Rejected';
     const scenarioIsCollecting = scenario.status === 'Collecting';
     const isEditable = isDraftLike
@@ -234,13 +310,19 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Edit')));
     const canSubmit = isDraftLike
         && scenarioIsCollecting
+        && hasAssignee
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Submit')));
     const canRecall = budgetReturn.status === 'Submitted'
         && scenarioIsCollecting
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Submit')));
+    const activeCombination = dimensionCombinations.find(combination => combination.key === activeCombinationKey);
+    const hasControlledDimensions = scenario.controlDimensions.length > 0;
 
     const renderGrid = (accountList: Account[]) => (
-        <div className="h-full min-h-0 border rounded-md overflow-auto">
+        <div
+            data-testid="budget-account-period-grid"
+            className="h-full min-h-[24rem] overflow-auto rounded-md border"
+        >
             <Table>
                 <TableHeader>
                     <TableRow>
@@ -265,16 +347,28 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                                 </div>
                             </TableCell>
                             {periods.map(period => {
-                                const val = gridData[account.id]?.[period.id] || 0;
+                                const cell = activeCombinationKey
+                                    ? gridData[activeCombinationKey]?.[account.id]?.[period.id]
+                                    : undefined;
+                                const val = cell?.amount || 0;
+                                const dimensionValid = !activeCombination
+                                    || activeCombination.key === LEGACY_BUDGET_COMBINATION_KEY
+                                    || isBudgetCombinationValidForPeriod(
+                                        activeCombination.assignments,
+                                        financeDimensions,
+                                        period,
+                                    );
                                 return (
-                                    <TableCell key={period.id} className="p-1">
+                                    <TableCell key={period.id} className="p-1" title={dimensionValid
+                                        ? undefined
+                                        : 'One or more selected dimension values are not effective for this full fiscal period.'}>
                                         <Input
                                             type="number"
                                             className="text-right h-8 border-transparent hover:border-input focus:border-input bg-transparent"
                                             value={val === 0 ? '' : val}
                                             onChange={(e) => handleInputChange(account.id, period.id, e.target.value)}
-                                            disabled={!isEditable}
-                                            placeholder="-"
+                                            disabled={!isEditable || !dimensionValid || !activeCombinationKey}
+                                            placeholder={dimensionValid ? '-' : 'N/A'}
                                         />
                                     </TableCell>
                                 );
@@ -290,7 +384,10 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     );
 
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
+        <div
+            data-testid="budget-return-workspace"
+            className="flex min-h-[calc(100vh-4rem)] flex-col"
+        >
             {/* Header */}
             <div className="flex-none p-6 pb-2 space-y-4">
                 <Breadcrumb>
@@ -321,6 +418,11 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </p>
                     </div>
                     <div className="flex gap-2">
+                        {isDraftLike && scenarioIsCollecting && !hasAssignee && (
+                            <div className="flex max-w-xs items-center rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                Assign this return from the scenario page before submission.
+                            </div>
+                        )}
                         {(isEditable || canSubmit || canRecall) && (
                             <>
                                 {isEditable && (
@@ -366,11 +468,86 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         ))}
                     </div>
                 </details>
+                {hasControlledDimensions && (
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Budget dimension combination</CardTitle>
+                            <CardDescription>
+                                Amounts below belong only to the selected combination. Add another combination for a different department, cost centre, project, or other controlled value.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {dimensionCombinations.length > 0 && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="budget-combination">Current combination</Label>
+                                    <Select value={activeCombinationKey} onValueChange={setActiveCombinationKey}>
+                                        <SelectTrigger id="budget-combination">
+                                            <SelectValue placeholder="Select a combination" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {dimensionCombinations.map(combination => (
+                                                <SelectItem key={combination.key} value={combination.key}>
+                                                    {combination.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                            {isEditable && (
+                                <div className="grid gap-3 md:grid-cols-[repeat(auto-fit,minmax(190px,1fr))_auto] items-end rounded-md border p-3">
+                                    {[...scenario.controlDimensions]
+                                        .sort((left, right) => left.displayOrder - right.displayOrder)
+                                        .map(control => {
+                                            const definition = financeDimensions.find(item =>
+                                                item.id === control.financeDimensionDefinitionId);
+                                            const values = definition?.values.filter(value => value.isActive) || [];
+                                            return (
+                                                <div key={control.financeDimensionDefinitionId} className="space-y-2">
+                                                    <Label>{control.dimensionCode} — {control.dimensionName}</Label>
+                                                    <Select
+                                                        value={draftAssignments[control.financeDimensionDefinitionId] || ''}
+                                                        onValueChange={value => setDraftAssignments(current => ({
+                                                            ...current,
+                                                            [control.financeDimensionDefinitionId]: value,
+                                                        }))}
+                                                    >
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="Select value" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {values.map(value => (
+                                                                <SelectItem key={value.id} value={value.id}>
+                                                                    {value.code} — {value.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            );
+                                        })}
+                                    <Button type="button" variant="outline" onClick={handleAddCombination}>
+                                        Add / Select Combination
+                                    </Button>
+                                </div>
+                            )}
+                            {dimensionCombinations.length === 0 && !isEditable && (
+                                <p className="text-sm text-muted-foreground">No dimensioned budget cells were saved for this return.</p>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+                {!hasControlledDimensions && (
+                    <div className="rounded-md border bg-muted/20 px-4 py-3 text-sm">
+                        <span className="font-medium">Budget grain:</span>{' '}
+                        Account and period (legacy)
+                    </div>
+                )}
             </div>
 
-            {/* Content - Full Height Grid */}
-            <div className="flex-1 min-h-0 p-6 pt-2 overflow-hidden flex flex-col">
-                <Tabs defaultValue="Expenses" className="flex-1 min-h-0 flex flex-col" onValueChange={setActiveTab}>
+            {/* Keep the account grid visible when controlled dimensions make the header taller than the viewport. */}
+            <div className="flex min-h-[28rem] flex-1 flex-col p-6 pt-2">
+                <Tabs defaultValue="Expenses" className="flex min-h-[24rem] flex-1 flex-col" onValueChange={setActiveTab}>
                     <div className="flex items-center justify-between mb-2">
                         <TabsList>
                             <TabsTrigger value="Expenses">Expenses ({expenseAccounts.length})</TabsTrigger>
@@ -394,11 +571,19 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </div>
                     </div>
 
-                    <TabsContent value="Expenses" className="flex-1 min-h-0 overflow-auto bg-white relative">
-                        {renderGrid(expenseAccounts)}
+                    <TabsContent value="Expenses" className="relative min-h-[24rem] flex-1 overflow-auto bg-white">
+                        {activeCombinationKey ? renderGrid(expenseAccounts) : (
+                            <div className="flex h-full items-center justify-center rounded-md border text-sm text-muted-foreground">
+                                Add or select a complete dimension combination before entering amounts.
+                            </div>
+                        )}
                     </TabsContent>
-                    <TabsContent value="Revenue" className="flex-1 min-h-0 overflow-auto bg-white relative">
-                        {renderGrid(revenueAccounts)}
+                    <TabsContent value="Revenue" className="relative min-h-[24rem] flex-1 overflow-auto bg-white">
+                        {activeCombinationKey ? renderGrid(revenueAccounts) : (
+                            <div className="flex h-full items-center justify-center rounded-md border text-sm text-muted-foreground">
+                                Add or select a complete dimension combination before entering amounts.
+                            </div>
+                        )}
                     </TabsContent>
                 </Tabs>
             </div>

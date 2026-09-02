@@ -75,9 +75,19 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
     {
         get
         {
-            return _httpContextAccessor.HttpContext?.User?.FindFirst("full_name")?.Value ??
-                   _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.GivenName)?.Value ??
-                   Username;
+            var user = _httpContextAccessor.HttpContext?.User;
+            var fullName = user?.FindFirst("full_name")?.Value;
+            if (!string.IsNullOrWhiteSpace(fullName))
+            {
+                return fullName.Trim();
+            }
+
+            var givenName = user?.FindFirst(ClaimTypes.GivenName)?.Value;
+            var surname = user?.FindFirst(ClaimTypes.Surname)?.Value;
+            var displayName = string.Join(" ", new[] { givenName, surname }
+                .Where(part => !string.IsNullOrWhiteSpace(part))).Trim();
+
+            return string.IsNullOrWhiteSpace(displayName) ? Username : displayName;
         }
     }
 

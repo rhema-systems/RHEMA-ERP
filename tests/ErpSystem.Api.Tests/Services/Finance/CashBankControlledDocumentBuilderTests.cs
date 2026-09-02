@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -26,7 +27,8 @@ public sealed class CashBankControlledDocumentBuilderTests
     {
         var fixture = await CreateFixtureAsync();
         await using var db = fixture.Context;
-        var issueService = new FinanceControlledDocumentIssueService(db, fixture.CurrentUser.Object, fixture.Audit);
+        var issueService = new FinanceControlledDocumentIssueService(
+            db, fixture.CurrentUser.Object, fixture.Audit, fixture.Storage.Object);
         var builder = new CashBankPaymentSlipDocumentBuilder(
             db,
             fixture.CurrentUser.Object,
@@ -47,6 +49,10 @@ public sealed class CashBankControlledDocumentBuilderTests
         originalIssue.CopyNumber.Should().Be(1);
         originalIssue.CopyType.Should().Be(ControlledDocumentCopyTypes.Original);
         originalIssue.ContentSha256.Should().HaveLength(64);
+        originalIssue.StoragePath.Should().NotBeNullOrWhiteSpace();
+        originalIssue.FileSize.Should().Be(original.Content.LongLength);
+        originalIssue.RetainUntilUtc.Should().BeAfter(DateTime.UtcNow.AddYears(6));
+        (await issueService.GetRetainedAsync(originalIssue.Id)).Content.Should().Equal(original.Content);
 
         var duplicateOriginal = () => builder.RenderAsync(new DocumentRenderRequestDto
         {
@@ -83,6 +89,8 @@ public sealed class CashBankControlledDocumentBuilderTests
         var replacementIssue = await db.FinanceControlledDocumentIssues.SingleAsync(item => item.CopyNumber == 2);
         replacementIssue.CopyType.Should().Be(ControlledDocumentCopyTypes.Replacement);
         replacementIssue.ReplacementReason.Should().Be(replacementReason);
+        replacementIssue.StoragePath.Should().NotBeNullOrWhiteSpace();
+        (await issueService.GetRetainedAsync(replacementIssue.Id)).Content.Should().Equal(replacement.Content);
         fixture.Audit.Events.Should().Contain(item => item.EventType == FinanceAuditEvents.CashBankPaymentSlipIssued);
         fixture.Audit.Events.Should().Contain(item => item.EventType == FinanceAuditEvents.CashBankPaymentSlipReplacementIssued);
     }
@@ -93,7 +101,8 @@ public sealed class CashBankControlledDocumentBuilderTests
     {
         var fixture = await CreateFixtureAsync();
         await using var db = fixture.Context;
-        var issueService = new FinanceControlledDocumentIssueService(db, fixture.CurrentUser.Object, fixture.Audit);
+        var issueService = new FinanceControlledDocumentIssueService(
+            db, fixture.CurrentUser.Object, fixture.Audit, fixture.Storage.Object);
         var builder = new CustomerReceiptDocumentBuilder(
             db,
             fixture.CurrentUser.Object,
@@ -115,6 +124,10 @@ public sealed class CashBankControlledDocumentBuilderTests
         issue.SourceDocumentType.Should().Be(nameof(CustomerPayment));
         issue.SourceDocumentId.Should().Be(fixture.CustomerPayment.Id);
         issue.JournalEntryId.Should().Be(fixture.CustomerPayment.JournalEntryId);
+        issue.StoragePath.Should().NotBeNullOrWhiteSpace();
+        issue.FileSize.Should().Be(result.Content.LongLength);
+        issue.RetainUntilUtc.Should().BeAfter(DateTime.UtcNow.AddYears(6));
+        (await issueService.GetRetainedAsync(issue.Id)).Content.Should().Equal(result.Content);
         fixture.Audit.Events.Should().ContainSingle(item => item.EventType == FinanceAuditEvents.CustomerReceiptIssued);
         fixture.AccessScope.Verify(service => service.EnsureBankAccountAccessAsync(
             fixture.CustomerPayment.BankAccountId,
@@ -128,7 +141,8 @@ public sealed class CashBankControlledDocumentBuilderTests
     {
         var fixture = await CreateFixtureAsync();
         await using var db = fixture.Context;
-        var issueService = new FinanceControlledDocumentIssueService(db, fixture.CurrentUser.Object, fixture.Audit);
+        var issueService = new FinanceControlledDocumentIssueService(
+            db, fixture.CurrentUser.Object, fixture.Audit, fixture.Storage.Object);
         var paymentBuilder = new CashBankPaymentSlipDocumentBuilder(db, fixture.CurrentUser.Object, fixture.AccessScope.Object, issueService);
         var receiptBuilder = new CustomerReceiptDocumentBuilder(db, fixture.CurrentUser.Object, fixture.AccessScope.Object, issueService);
 
@@ -284,7 +298,36 @@ public sealed class CashBankControlledDocumentBuilderTests
                 It.IsAny<FinanceAccessLevel>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        return new Fixture(db, currentUser, accessScope, new CapturingAuditService(), cashPayment, customerPayment);
+        var stored = new Dictionary<string, byte[]>();
+        var storage = new Mock<IFileStorageService>();
+        storage.Setup(service => service.UploadFileAsync(It.IsAny<FileUploadRequest>()))
+            .ReturnsAsync((FileUploadRequest request) =>
+            {
+                using var buffer = new MemoryStream();
+                request.FileStream.CopyTo(buffer);
+                var path = $"private/{Guid.NewGuid():N}/{request.FileName}";
+                stored[path] = buffer.ToArray();
+                return new FileStorageResult
+                {
+                    Success = true,
+                    FileName = request.FileName,
+                    OriginalFileName = request.FileName,
+                    FilePath = path,
+                    PublicUrl = string.Empty,
+                    FileSize = request.FileSize,
+                    ContentType = request.ContentType,
+                    Category = request.Category,
+                    TenantId = request.TenantId,
+                    StorageProvider = "TestPrivateStorage"
+                };
+            });
+        storage.Setup(service => service.DownloadFileAsync(It.IsAny<string>(), It.IsAny<Guid>()))
+            .ReturnsAsync((string path, Guid _) => new MemoryStream(stored[path], writable: false));
+        storage.Setup(service => service.DeleteFileAsync(It.IsAny<string>()))
+            .ReturnsAsync((string path) => stored.Remove(path));
+        return new Fixture(
+            db, currentUser, accessScope, storage, stored,
+            new CapturingAuditService(), cashPayment, customerPayment);
     }
 
     private static Account Account(Guid tenantId, string number, string name, AccountType type)
@@ -355,6 +398,8 @@ public sealed class CashBankControlledDocumentBuilderTests
         ApplicationDbContext Context,
         Mock<ICurrentUserService> CurrentUser,
         Mock<IFinanceAccessScopeService> AccessScope,
+        Mock<IFileStorageService> Storage,
+        Dictionary<string, byte[]> Stored,
         CapturingAuditService Audit,
         CashTransaction CashPayment,
         CustomerPayment CustomerPayment);

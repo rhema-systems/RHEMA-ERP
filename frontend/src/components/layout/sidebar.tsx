@@ -2349,16 +2349,6 @@ export const navigationItems: NavItem[] = [
             icon: BarChart3,
           },
           {
-            title: 'Property / Site Operating View',
-            href: '/estate/facilities/EstateFacilityPropertySite',
-            icon: Building2,
-          },
-          {
-            title: 'Lease / Occupancy Coordination',
-            href: '/estate/facilities/EstateFacilityLease',
-            icon: FileCheck,
-          },
-          {
             title: 'Maintenance Intake',
             href: '/estate/facilities/EstateFacilityMaintenance',
             icon: Wrench,
@@ -2382,16 +2372,6 @@ export const navigationItems: NavItem[] = [
             title: 'Facilities Assets',
             href: '/estate/facilities/EstateFacilityAssetRegister',
             icon: Database,
-          },
-          {
-            title: 'Billing / Service Charge',
-            href: '/estate/facilities/EstateFacilityBillingServiceCharge',
-            icon: CreditCard,
-          },
-          {
-            title: 'Documents Index',
-            href: '/estate/facilities/EstateFacilityDocument',
-            icon: FileText,
           },
         ],
       },

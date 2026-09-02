@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
   Clock3,
+  Download,
   ExternalLink,
   FileCheck2,
   FileOutput,
@@ -13,6 +14,8 @@ import {
   RefreshCw,
   RotateCcw,
   Send,
+  ShieldCheck,
+  Upload,
   XCircle,
 } from 'lucide-react';
 
@@ -62,6 +65,7 @@ import {
   validateProcurementAppExport,
 } from '@/lib/procurement-app-submission';
 import { procurementAppSubmissionService } from '@/services/procurement-app-submission.service';
+import { fileUploadService } from '@/services/file-upload.service';
 import type {
   ProcurementAppEvidenceReference,
   ProcurementAppSubmission,
@@ -71,15 +75,13 @@ import type {
 } from '@/types/procurement-app-submission';
 
 type LifecycleAction = 'submit' | 'acknowledge' | 'reject' | 'resubmit';
+type EvidenceMode = 'None' | 'Upload' | 'ExternalReference';
 
 interface LifecycleForm {
   reference: string;
   reason: string;
   eventAt: string;
-  exportFileName: string;
   exportFormat: string;
-  exportTemplateVersion: string;
-  exportChecksumSha256: string;
   notes: string;
 }
 
@@ -98,10 +100,7 @@ const nowForInput = () => {
 
 const newExport = (): RecordProcurementAppExport => ({
   procurementPlanId: '',
-  exportFileName: '',
-  exportFormat: 'XLSX',
-  exportTemplateVersion: '',
-  exportChecksumSha256: '',
+  exportFormat: 'CSV',
   notes: '',
   evidence: [],
 });
@@ -110,10 +109,7 @@ const newLifecycle = (): LifecycleForm => ({
   reference: '',
   reason: '',
   eventAt: nowForInput(),
-  exportFileName: '',
-  exportFormat: 'XLSX',
-  exportTemplateVersion: '',
-  exportChecksumSha256: '',
+  exportFormat: 'CSV',
   notes: '',
 });
 
@@ -151,7 +147,9 @@ export default function ProcurementAppSubmissionsPage() {
   const [actionTarget, setActionTarget] = useState<ProcurementAppSubmission>();
   const [lifecycleForm, setLifecycleForm] =
     useState<LifecycleForm>(newLifecycle);
+  const [evidenceMode, setEvidenceMode] = useState<EvidenceMode>('None');
   const [evidenceValue, setEvidenceValue] = useState('');
+  const [evidenceFile, setEvidenceFile] = useState<File>();
 
   const summary = useQuery({
     queryKey: ['procurement-app-submission-summary'],
@@ -180,18 +178,44 @@ export default function ProcurementAppSubmissionsPage() {
   );
   const exportError = validateProcurementAppExport(exportForm);
 
-  const evidence = (
+  const evidence = async (
     requirementKey: string
-  ): ProcurementAppEvidenceReference[] => {
-    if (!evidenceValue.trim()) return [];
-    return [
-      {
-        referenceKind: 'ExternalReference',
-        reference: evidenceValue.trim(),
-        label: 'APP lifecycle evidence',
-        requirementKey,
-      },
-    ];
+  ): Promise<ProcurementAppEvidenceReference[]> => {
+    if (evidenceMode === 'Upload' && evidenceFile) {
+      const uploaded = await fileUploadService.uploadSingleFile(
+        evidenceFile,
+        'procurement-app-exchange'
+      );
+      if (!uploaded.fileId)
+        throw new Error(
+          'The supporting document upload did not return a file reference.'
+        );
+      return [
+        {
+          referenceKind: 'FileUploadRecord',
+          referenceId: uploaded.fileId,
+          label: uploaded.originalFileName,
+          requirementKey,
+        },
+      ];
+    }
+    if (evidenceMode === 'ExternalReference' && evidenceValue.trim()) {
+      return [
+        {
+          referenceKind: 'ExternalReference',
+          reference: evidenceValue.trim(),
+          label: 'APP lifecycle supporting reference',
+          requirementKey,
+        },
+      ];
+    }
+    return [];
+  };
+
+  const resetEvidence = () => {
+    setEvidenceMode('None');
+    setEvidenceValue('');
+    setEvidenceFile(undefined);
   };
 
   const selectExportPackage = async (
@@ -235,20 +259,20 @@ export default function ProcurementAppSubmissionsPage() {
   };
 
   const recordExport = useMutation({
-    mutationFn: () =>
+    mutationFn: async () =>
       procurementAppSubmissionService.recordExport({
         ...exportForm,
-        evidence: evidence('APP_EXPORT'),
+        evidence: await evidence('APP_EXPORT_SUPPORTING'),
       }),
     onSuccess: async (value) => {
       setExportOpen(false);
       setExportForm(newExport());
-      setEvidenceValue('');
+      resetEvidence();
       await invalidate(value.id);
       toast({
-        title: `${value.submissionNumber} registered`,
+        title: `${value.submissionNumber} generated`,
         description:
-          'The published plan export and checksum are now in the immutable APP timeline.',
+          'The APP package was stored and its server-calculated checksum was recorded in the immutable timeline.',
       });
     },
     onError: (error: Error) =>
@@ -264,7 +288,7 @@ export default function ProcurementAppSubmissionsPage() {
       if (!action || !actionTarget)
         throw new Error('Select an APP lifecycle action.');
       const eventAt = new Date(lifecycleForm.eventAt).toISOString();
-      const shared = evidence(`APP_${action.toUpperCase()}`);
+      const shared = await evidence(`APP_${action.toUpperCase()}`);
       switch (action) {
         case 'submit':
           return procurementAppSubmissionService.submit(actionTarget.id, {
@@ -293,10 +317,7 @@ export default function ProcurementAppSubmissionsPage() {
           });
         case 'resubmit':
           return procurementAppSubmissionService.resubmit(actionTarget.id, {
-            exportFileName: lifecycleForm.exportFileName,
             exportFormat: lifecycleForm.exportFormat,
-            exportTemplateVersion: lifecycleForm.exportTemplateVersion,
-            exportChecksumSha256: lifecycleForm.exportChecksumSha256,
             notes: lifecycleForm.notes || undefined,
             rowVersion: actionTarget.rowVersion,
             evidence: shared,
@@ -307,7 +328,7 @@ export default function ProcurementAppSubmissionsPage() {
       setAction(undefined);
       setActionTarget(undefined);
       setLifecycleForm(newLifecycle());
-      setEvidenceValue('');
+      resetEvidence();
       await invalidate(value.id);
       toast({
         title: `${value.submissionNumber} is ${value.status}`,
@@ -329,7 +350,7 @@ export default function ProcurementAppSubmissionsPage() {
     setAction(nextAction);
     setActionTarget(item);
     setLifecycleForm(newLifecycle());
-    setEvidenceValue('');
+    resetEvidence();
   };
 
   const actionValid = (() => {
@@ -337,14 +358,40 @@ export default function ProcurementAppSubmissionsPage() {
     if (action === 'resubmit')
       return !validateProcurementAppExport({
         procurementPlanId: actionTarget?.procurementPlanId ?? '',
-        exportFileName: lifecycleForm.exportFileName,
         exportFormat: lifecycleForm.exportFormat,
-        exportTemplateVersion: lifecycleForm.exportTemplateVersion,
-        exportChecksumSha256: lifecycleForm.exportChecksumSha256,
       });
     if (!lifecycleForm.reference.trim() || !lifecycleForm.eventAt) return false;
     return action !== 'reject' || Boolean(lifecycleForm.reason.trim());
   })();
+  const supportingEvidenceValid =
+    evidenceMode === 'None' ||
+    (evidenceMode === 'Upload' && Boolean(evidenceFile)) ||
+    (evidenceMode === 'ExternalReference' && Boolean(evidenceValue.trim()));
+
+  const downloadExport = async (item: ProcurementAppSubmission) => {
+    try {
+      const blob = await procurementAppSubmissionService.downloadExport(
+        item.id
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = item.exportFileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({
+        title: 'Unable to download APP package',
+        description:
+          error instanceof Error
+            ? error.message
+            : 'The generated package could not be downloaded.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const selected = detail.data;
   const selectedActions = selected
@@ -356,7 +403,9 @@ export default function ProcurementAppSubmissionsPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
         <div>
-          <h1 className="text-3xl font-bold">APP submission register</h1>
+          <h1 className="text-3xl font-bold">
+            Annual Procurement Plan (APP) submission register
+          </h1>
           <p className="mt-1 max-w-4xl text-muted-foreground">
             Control published procurement-plan exports, GHANEPS/PPA references,
             acknowledgements, rejections, resubmissions, and shared evidence
@@ -380,11 +429,11 @@ export default function ProcurementAppSubmissionsPage() {
             <Button
               onClick={() => {
                 setExportForm(newExport());
-                setEvidenceValue('');
+                resetEvidence();
                 setExportOpen(true);
               }}
             >
-              <Plus className="mr-2 h-4 w-4" /> Record export
+              <Plus className="mr-2 h-4 w-4" /> Generate export
             </Button>
           )}
         </div>
@@ -635,6 +684,14 @@ export default function ProcurementAppSubmissionsPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void downloadExport(selected)}
+              >
+                <Download className="mr-2 h-4 w-4" /> Download generated APP
+                package
+              </Button>
               <dl className="grid gap-4 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-muted-foreground">Export file</dt>
@@ -649,7 +706,9 @@ export default function ProcurementAppSubmissionsPage() {
                   </dd>
                 </div>
                 <div className="sm:col-span-2">
-                  <dt className="text-muted-foreground">SHA-256</dt>
+                  <dt className="text-muted-foreground">
+                    SHA-256 (calculated automatically)
+                  </dt>
                   <dd className="mt-1 break-all font-mono text-xs">
                     {selected.exportChecksumSha256}
                   </dd>
@@ -784,11 +843,10 @@ export default function ProcurementAppSubmissionsPage() {
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Record published-plan APP export</DialogTitle>
+            <DialogTitle>Generate Annual Procurement Plan export</DialogTitle>
             <DialogDescription>
-              Select the generated export package. Its file name, format and
-              integrity checksum are calculated automatically; the package
-              content is not uploaded by this screen.
+              The application generates the package, stores it in the controlled
+              file service and calculates its SHA-256 checksum automatically.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
@@ -823,38 +881,41 @@ export default function ProcurementAppSubmissionsPage() {
               )}
             </div>
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="app-export-package">Export package</Label>
-              <Input
-                id="app-export-package"
-                type="file"
-                accept=".xlsx,.xls,.csv,.xml,.json"
-                onChange={(event) =>
-                  void selectExportPackage(event.target.files?.[0], 'export')
-                }
-              />
-              {exportForm.exportFileName && (
-                <p className="text-xs text-muted-foreground">
-                  {exportForm.exportFileName} · {exportForm.exportFormat} ·
-                  integrity verified
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Template version</Label>
-              <Input
-                value={exportForm.exportTemplateVersion}
-                onChange={(event) =>
+              <Label>Format</Label>
+              <Select
+                value={exportForm.exportFormat}
+                onValueChange={(value) =>
                   setExportForm((current) => ({
                     ...current,
-                    exportTemplateVersion: event.target.value,
+                    exportFormat: value,
                   }))
                 }
-                placeholder="PPA-APP-v1"
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CSV">CSV</SelectItem>
+                  <SelectItem value="JSON">JSON</SelectItem>
+                  <SelectItem value="XML">XML</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                File name, template version and checksum are controlled by the
+                server.
+              </p>
             </div>
             <EvidenceFields
+              mode={evidenceMode}
               value={evidenceValue}
+              file={evidenceFile}
+              onMode={(mode) => {
+                setEvidenceMode(mode);
+                setEvidenceValue('');
+                setEvidenceFile(undefined);
+              }}
               onValue={setEvidenceValue}
+              onFile={setEvidenceFile}
             />
             <div className="space-y-2 sm:col-span-2">
               <Label>Notes</Label>
@@ -877,10 +938,16 @@ export default function ProcurementAppSubmissionsPage() {
               Cancel
             </Button>
             <Button
-              disabled={Boolean(exportError) || recordExport.isPending}
+              disabled={
+                Boolean(exportError) ||
+                !supportingEvidenceValid ||
+                recordExport.isPending
+              }
               onClick={() => recordExport.mutate()}
             >
-              {recordExport.isPending ? 'Recording…' : 'Record export'}
+              {recordExport.isPending
+                ? 'Generating…'
+                : 'Generate and register export'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -906,38 +973,28 @@ export default function ProcurementAppSubmissionsPage() {
             {action === 'resubmit' ? (
               <>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="app-replacement-package">
-                    Replacement export package
-                  </Label>
-                  <Input
-                    id="app-replacement-package"
-                    type="file"
-                    accept=".xlsx,.xls,.csv,.xml,.json"
-                    onChange={(event) =>
-                      void selectExportPackage(
-                        event.target.files?.[0],
-                        'resubmit'
-                      )
-                    }
-                  />
-                  {lifecycleForm.exportFileName && (
-                    <p className="text-xs text-muted-foreground">
-                      {lifecycleForm.exportFileName} ·{' '}
-                      {lifecycleForm.exportFormat} · integrity verified
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label>Template version</Label>
-                  <Input
-                    value={lifecycleForm.exportTemplateVersion}
-                    onChange={(event) =>
+                  <Label>Replacement package format</Label>
+                  <Select
+                    value={lifecycleForm.exportFormat}
+                    onValueChange={(value) =>
                       setLifecycleForm((current) => ({
                         ...current,
-                        exportTemplateVersion: event.target.value,
+                        exportFormat: value,
                       }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CSV">CSV</SelectItem>
+                      <SelectItem value="JSON">JSON</SelectItem>
+                      <SelectItem value="XML">XML</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    A new package and checksum will be generated automatically.
+                  </p>
                 </div>
               </>
             ) : (
@@ -990,8 +1047,16 @@ export default function ProcurementAppSubmissionsPage() {
               </>
             )}
             <EvidenceFields
+              mode={evidenceMode}
               value={evidenceValue}
+              file={evidenceFile}
+              onMode={(mode) => {
+                setEvidenceMode(mode);
+                setEvidenceValue('');
+                setEvidenceFile(undefined);
+              }}
               onValue={setEvidenceValue}
+              onFile={setEvidenceFile}
             />
             <div className="space-y-2 sm:col-span-2">
               <Label>Notes</Label>
@@ -1012,7 +1077,11 @@ export default function ProcurementAppSubmissionsPage() {
             </Button>
             <Button
               variant={action === 'reject' ? 'destructive' : 'default'}
-              disabled={!actionValid || runLifecycle.isPending}
+              disabled={
+                !actionValid ||
+                !supportingEvidenceValid ||
+                runLifecycle.isPending
+              }
               onClick={() => runLifecycle.mutate()}
             >
               {runLifecycle.isPending ? 'Recording…' : 'Confirm action'}
@@ -1025,20 +1094,74 @@ export default function ProcurementAppSubmissionsPage() {
 }
 
 function EvidenceFields({
+  mode,
   value,
+  file,
+  onMode,
   onValue,
+  onFile,
 }: {
+  mode: EvidenceMode;
   value: string;
+  file?: File;
+  onMode: (value: EvidenceMode) => void;
   onValue: (value: string) => void;
+  onFile: (value?: File) => void;
 }) {
   return (
-    <div className="space-y-2 sm:col-span-2">
-      <Label>External submission or acknowledgement reference (optional)</Label>
-      <Input
-        value={value}
-        onChange={(event) => onValue(event.target.value)}
-        placeholder="Official GHANEPS/PPA reference, if available"
-      />
-    </div>
+    <>
+      <div className="space-y-2 sm:col-span-2">
+        <Label>Supporting evidence (optional)</Label>
+        <Select
+          value={mode}
+          onValueChange={(next) => onMode(next as EvidenceMode)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="None">No additional evidence</SelectItem>
+            <SelectItem value="Upload">Upload supporting document</SelectItem>
+            <SelectItem value="ExternalReference">
+              Enter external reference
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {mode === 'Upload' && (
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="app-supporting-evidence">Supporting document</Label>
+          <Input
+            id="app-supporting-evidence"
+            type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.xml,.txt"
+            onChange={(event) => onFile(event.target.files?.[0])}
+          />
+          {file && (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Upload className="h-3.5 w-3.5" /> {file.name}
+            </p>
+          )}
+        </div>
+      )}
+      {mode === 'ExternalReference' && (
+        <div className="space-y-2 sm:col-span-2">
+          <Label>External evidence reference</Label>
+          <Input
+            value={value}
+            onChange={(event) => onValue(event.target.value)}
+            placeholder="Receipt, email, letter or acknowledgement reference"
+          />
+        </div>
+      )}
+      <Alert className="sm:col-span-2">
+        <ShieldCheck className="h-4 w-4" />
+        <AlertTitle>No technical record IDs required</AlertTitle>
+        <AlertDescription>
+          Uploaded files are virus-scanned and linked to the APP timeline by the
+          application. File-record and workflow-evidence IDs remain internal.
+        </AlertDescription>
+      </Alert>
+    </>
   );
 }

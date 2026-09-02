@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,7 @@ import {
 } from '@/services/inventoryManagementService';
 import { MovementDetailDialog } from '@/components/inventory/MovementDetailDialog';
 import { format } from 'date-fns';
+import { INVENTORY_MOVEMENT_REPORT_PATH } from '@/lib/inventory-report-navigation';
 
 // Movement type definitions with isInbound to determine direction
 const MovementTypes: { value: string; label: string; color: string; icon: typeof ArrowDown; isInbound: boolean | null }[] = [
@@ -162,7 +164,11 @@ export default function StockMovementsPage() {
         </div>
         <div className="flex items-center space-x-2">
           <Button variant="outline" onClick={fetchMovements}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
-          <Button variant="outline"><Download className="h-4 w-4 mr-2" />Export</Button>
+          <Button variant="outline" asChild>
+            <Link href={INVENTORY_MOVEMENT_REPORT_PATH}>
+              <Download className="h-4 w-4 mr-2" />Open report export
+            </Link>
+          </Button>
         </div>
       </div>
 

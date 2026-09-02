@@ -13,6 +13,71 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class TenderEvaluationsCommitteeGuardControllerTests
 {
     [Fact]
+    public async Task DraftCreateReturnsCreatedWithoutRequiringControllerCommitteeSetup()
+    {
+        var fixture = new Fixture();
+        var request = new CreateEvaluationDto { TenderBidId = Guid.NewGuid() };
+        var created = new TenderEvaluationDto
+        {
+            Id = Guid.NewGuid(),
+            TenderBidId = request.TenderBidId,
+            Status = "Draft"
+        };
+        fixture.Service.Setup(service => service.CreateEvaluationAsync(request))
+            .ReturnsAsync(created);
+
+        var result = await fixture.Controller.CreateEvaluation(request);
+
+        var response = result.Result.Should().BeOfType<CreatedAtActionResult>().Subject;
+        response.Value.Should().BeSameAs(created);
+        fixture.Service.VerifyAll();
+    }
+
+    [Fact]
+    public async Task DraftUpdateReturnsOkWithoutRequiringControllerCommitteeSetup()
+    {
+        var fixture = new Fixture();
+        var evaluationId = Guid.NewGuid();
+        var request = new UpdateEvaluationDto { QualityScore = 80m };
+        var updated = new TenderEvaluationDto
+        {
+            Id = evaluationId,
+            Status = "Draft",
+            QualityScore = request.QualityScore
+        };
+        fixture.Service.Setup(service => service.UpdateEvaluationAsync(evaluationId, request))
+            .ReturnsAsync(updated);
+
+        var result = await fixture.Controller.UpdateEvaluation(evaluationId, request);
+
+        var response = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+        response.Value.Should().BeSameAs(updated);
+        fixture.Service.VerifyAll();
+    }
+
+    [Fact]
+    public async Task SubmitWithoutActiveCommitteeReturnsStructuredScorerConflict()
+    {
+        var fixture = new Fixture();
+        var evaluationId = Guid.NewGuid();
+        var request = new SubmitEvaluationDto { ConfirmSubmission = true };
+        fixture.Service.Setup(service => service.SubmitEvaluationAsync(evaluationId, request))
+            .ThrowsAsync(new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORER_INELIGIBLE",
+                "No active evaluation committee control exists."));
+
+        var result = await fixture.Controller.SubmitEvaluation(evaluationId, request);
+
+        var conflict = result.Result.Should().BeOfType<ConflictObjectResult>().Subject;
+        var problem = conflict.Value.Should().BeAssignableTo<ProblemDetails>().Subject;
+        problem.Status.Should().Be(StatusCodes.Status409Conflict);
+        problem.Detail.Should().Be("No active evaluation committee control exists.");
+        problem.Extensions["code"].Should().Be("EVALUATION_SCORER_INELIGIBLE");
+        problem.Extensions["correlationId"].Should().Be("corr-legacy-evaluation");
+        fixture.Service.VerifyAll();
+    }
+
+    [Fact]
     public async Task SubmittedDeleteReturnsExplicitStructuredConflict()
     {
         var fixture = new Fixture();

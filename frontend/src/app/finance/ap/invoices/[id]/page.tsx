@@ -12,7 +12,8 @@ import {
     Ban,
     FileText,
     CheckCircle,
-    Loader2
+    Loader2,
+    RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,6 +39,13 @@ import {
     invoiceThreeWayMatchQueryKey,
 } from '@/components/finance/InvoiceThreeWayMatchControl';
 import { InvoiceMatchExceptionControl } from '@/components/finance/InvoiceMatchExceptionControl';
+import {
+    ApInvoicePrintDocument,
+    printApInvoiceDocument,
+} from '@/components/finance/ap/ApInvoicePrintDocument';
+import printStyles from '@/components/finance/ap/ApInvoicePrintDocument.module.css';
+import { useTenant } from '@/contexts/TenantContext';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -46,6 +54,7 @@ export default function VendorInvoiceDetailsPage() {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const { hasPermission, hasAnyPermission } = useAuth();
+    const { currentTenant, currentTenantCode } = useTenant();
     const [workflowSummary, setWorkflowSummary] = useState<WorkflowEntitySummaryDto | null>(null);
 
     const { data: invoice, isLoading } = useQuery({
@@ -124,6 +133,17 @@ export default function VendorInvoiceDetailsPage() {
         },
     });
 
+    const refreshBudgetMutation = useMutation({
+        mutationFn: () => accountsPayableService.refreshInvoiceBudget(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
+            toast({ title: 'Budget evidence refreshed', description: 'The reservation now reflects the current source dimensions.' });
+        },
+        onError: (error: any) => {
+            toast({ title: 'Budget refresh failed', description: error.message || 'Unable to refresh budget evidence', variant: 'destructive' });
+        },
+    });
+
     if (isLoading) {
         return <InvoiceDetailsSkeleton />;
     }
@@ -155,9 +175,12 @@ export default function VendorInvoiceDetailsPage() {
     };
 
     const mandatoryMatchReady = !invoice.purchaseOrderId || invoice.isOpeningBalance || matchReadiness?.approvalReady === true;
+    const hasBudgetLines = invoice.lineItems.some((line) => Boolean(line.budgetEntryId));
+    const budgetReady = !hasBudgetLines || invoice.financeDimensions?.budgetEvidenceStatus === 'Current';
 
     return (
-        <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
+        <>
+            <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
             {/* Header Actions */}
             <div className="flex items-center justify-between no-print">
                 <div className="flex items-center space-x-4">
@@ -170,16 +193,35 @@ export default function VendorInvoiceDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
-                    <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Button variant="outline" size="sm" onClick={printApInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
+                    {invoice.status === 'Draft'
+                        && hasBudgetLines
+                        && hasAnyPermission(['Finance.AP.Invoices.Edit', 'Finance.AP.Invoices.Write']) && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => refreshBudgetMutation.mutate()}
+                            disabled={refreshBudgetMutation.isPending}
+                        >
+                            {refreshBudgetMutation.isPending
+                                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                : <RefreshCw className="mr-2 h-4 w-4" />}
+                            Refresh budget
+                        </Button>
+                    )}
                     {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
                         <Button
                             size="sm"
                             variant="outline"
                             onClick={() => submitInvoiceMutation.mutate(invoice.id)}
-                            disabled={submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady}
-                            title={!mandatoryMatchReady ? 'Resolve the mandatory three-way match before submission.' : undefined}
+                            disabled={submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || !budgetReady}
+                            title={!mandatoryMatchReady
+                                ? 'Resolve the mandatory three-way match before submission.'
+                                : !budgetReady
+                                    ? 'Refresh dimension-aware budget evidence before submission.'
+                                    : undefined}
                         >
                             {submitInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                             Submit for Approval
@@ -223,6 +265,10 @@ export default function VendorInvoiceDetailsPage() {
                     <InvoiceMatchExceptionControl invoiceId={invoice.id} />
                 </>
             )}
+
+            <div className="no-print">
+                <SourceDocumentDimensionEvidence evidence={invoice.financeDimensions} />
+            </div>
 
             <Card className="print:shadow-none print:border-none">
                 <CardHeader className="flex flex-row justify-between items-start border-b pb-8">
@@ -346,7 +392,13 @@ export default function VendorInvoiceDetailsPage() {
                     )}
                 </CardContent>
             </Card>
-        </div>
+            </div>
+            <ApInvoicePrintDocument
+                invoice={invoice}
+                tenantName={currentTenant?.name}
+                tenantCode={currentTenant?.code || currentTenantCode}
+            />
+        </>
     );
 }
 

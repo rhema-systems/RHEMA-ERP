@@ -56,6 +56,30 @@ public sealed class CivilEngineeringAccessControlSeeder(
             permission.DeletedAt = null;
             permission.DeletedBy = null;
         }
+
+        var centralProjectAccess = await context.Permissions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(item => item.Name == CivilEngineeringAccessControlRegistry.CentralProjectAccess, token);
+        if (centralProjectAccess is null)
+        {
+            centralProjectAccess = new Permission
+            {
+                Id = Guid.NewGuid(),
+                Name = CivilEngineeringAccessControlRegistry.CentralProjectAccess,
+                DisplayName = "Access Project Management",
+                Description = "Access the project management module",
+                Category = "Module Access",
+                IsSystemPermission = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            };
+            context.Permissions.Add(centralProjectAccess);
+        }
+        else
+        {
+            centralProjectAccess.IsDeleted = false;
+            centralProjectAccess.DeletedAt = null;
+            centralProjectAccess.DeletedBy = null;
+        }
         await context.SaveChangesAsync(token);
 
         var roles = await context.Roles
@@ -63,6 +87,7 @@ public sealed class CivilEngineeringAccessControlSeeder(
             .ToDictionaryAsync(item => item.Name!, StringComparer.OrdinalIgnoreCase, token);
         var permissionCodes = CivilEngineeringAccessControlRegistry.Permissions
             .Select(item => item.Code)
+            .Append(CivilEngineeringAccessControlRegistry.CentralProjectAccess)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var permissions = (await context.Permissions
                 .Where(item => permissionCodes.Contains(item.Name))
@@ -78,7 +103,7 @@ public sealed class CivilEngineeringAccessControlSeeder(
                     .ToListAsync(token))
                 .ToHashSet();
 
-            foreach (var permissionCode in definition.Permissions)
+            foreach (var permissionCode in definition.Permissions.Append(CivilEngineeringAccessControlRegistry.CentralProjectAccess))
             {
                 var permission = permissions[permissionCode];
                 if (existingPermissionIds.Add(permission.Id))

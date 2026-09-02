@@ -23,14 +23,14 @@ export function getSubmissionControlPresentation(
   if (readiness.canSubmit) {
     return {
       tone: 'ready',
-      title: 'Ready for submission',
-      basisLabel: readiness.basis === 'ApprovedException' ? 'Approved exception' : 'Required details verified'
+      title: 'Ready for approval workflow',
+      basisLabel: 'Required details complete'
     };
   }
 
   return {
     tone: 'blocked',
     title: readiness.isCompliant ? 'Submission no longer available' : 'Required details incomplete',
-    basisLabel: readiness.isCompliant ? 'Current status' : 'Action required'
+    basisLabel: 'Action required'
   };
 }

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// before scheduled execution. Central Workflow, Security, Projects, DMS and Notifications
 /// remain the authoritative owners; this migration only freezes their governed references.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003700_GovernCivilInspectionPlanWorkflow")]
 public partial class GovernCivilInspectionPlanWorkflow : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

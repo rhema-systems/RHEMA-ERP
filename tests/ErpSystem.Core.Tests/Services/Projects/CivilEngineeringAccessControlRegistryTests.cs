@@ -38,6 +38,10 @@ public sealed class CivilEngineeringAccessControlRegistryTests
             .Should().OnlyHaveUniqueItems();
         CivilEngineeringAccessControlRegistry.Operations.Select(value => value.Permission)
             .Should().OnlyContain(value => permissions.Contains(value));
+        CivilEngineeringAccessControlRegistry.Roles
+            .Single(value => value.Code == CivilEngineeringAccessControlRegistry.CivilEngineerRole)
+            .Permissions.Should().Contain(CivilEngineeringAccessControlRegistry.AssignmentsManage,
+                "the controller and domain policy permit an independent Civil Engineer to review direct-task completion");
     }
 
     [Fact]
@@ -207,7 +211,8 @@ public sealed class CivilEngineeringAccessControlRegistryTests
                     value => value.Id,
                     (_, permission) => permission.Name)
                 .ToListAsync();
-            granted.Should().BeEquivalentTo(definition.Permissions);
+            granted.Should().BeEquivalentTo(
+                definition.Permissions.Append(CivilEngineeringAccessControlRegistry.CentralProjectAccess));
         }
     }
 

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Plus, Search, Edit, Trash2, Star, Users, Package, DollarSign, Clock
 } from 'lucide-react';
@@ -21,6 +22,20 @@ import {
 } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
 import { toast } from 'sonner';
+
+type ProblemDetailsPayload = {
+  detail?: string;
+  title?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  const problem = (error as { response?: { data?: ProblemDetailsPayload } })?.response?.data;
+  const detail = problem?.detail || problem?.title || (error instanceof Error ? error.message : fallback);
+  const code = problem?.code || problem?.extensions?.code;
+  return code ? `${detail} (${code})` : detail;
+};
 
 export default function ItemSuppliersPage() {
   const [items, setItems] = useState<InventoryItemDto[]>([]);
@@ -33,6 +48,8 @@ export default function ItemSuppliersPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<ItemSupplierDto | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<ItemSupplierDto | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const [formData, setFormData] = useState<CreateItemSupplierDto>({
     inventoryItemId: '', supplierId: '', supplierItemCode: '', supplierItemName: '',
@@ -137,14 +154,21 @@ export default function ItemSuppliersPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Remove this supplier from the item?')) return;
+  const confirmRemoveSupplier = async () => {
+    if (!removeTarget) return false;
+    setRemoving(true);
     try {
-      await inventoryManagementService.deleteItemSupplier(id);
-      setSuppliers(prev => prev.filter(s => s.id !== id));
+      await inventoryManagementService.deleteItemSupplier(removeTarget.id);
+      setSuppliers(prev => prev.filter(s => s.id !== removeTarget.id));
+      toast.success('Supplier removed from the item');
+      setRemoveTarget(null);
+      return true;
     } catch (err) {
       console.error('Error deleting supplier:', err);
-      toast.error('Failed to remove supplier');
+      toast.error(getErrorMessage(err, 'Failed to remove supplier'));
+      return false;
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -331,7 +355,7 @@ export default function ItemSuppliersPage() {
                             </Button>
                           )}
                           <Button size="sm" variant="outline" onClick={() => handleEdit(supplier)}><Edit className="h-4 w-4" /></Button>
-                          <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleDelete(supplier.id)}><Trash2 className="h-4 w-4" /></Button>
+                          <Button size="sm" variant="outline" className="text-red-600" onClick={() => setRemoveTarget(supplier)} aria-label={`Remove ${supplier.supplierName || 'supplier'}`}><Trash2 className="h-4 w-4" /></Button>
                         </div>
                       </div>
                     </div>
@@ -380,6 +404,17 @@ export default function ItemSuppliersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null); }}
+        title="Remove item supplier?"
+        description={`Remove ${removeTarget?.supplierName || 'this supplier'} from ${selectedItem?.name || 'the selected item'}? The supplier record itself will not be deleted.`}
+        confirmText="Remove supplier"
+        variant="destructive"
+        onConfirm={confirmRemoveSupplier}
+        isLoading={removing}
+      />
     </div>
   );
 }

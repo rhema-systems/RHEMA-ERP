@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -15,6 +16,13 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public sealed class ProcurementPolicyService : IProcurementPolicyService
 {
+    private static readonly ProcurementPolicyRuleKind[] RequiredSourcingRuleKinds =
+    [
+        ProcurementPolicyRuleKind.Category,
+        ProcurementPolicyRuleKind.Method,
+        ProcurementPolicyRuleKind.Threshold
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -24,15 +32,18 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
+    private readonly IRoleService _roleService;
     private readonly ILogger<ProcurementPolicyService> _logger;
 
     public ProcurementPolicyService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
+        IRoleService roleService,
         ILogger<ProcurementPolicyService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _roleService = roleService;
         _logger = logger;
     }
 
@@ -82,6 +93,34 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             PageSize = pageSize,
             TotalCount = total
         };
+    }
+
+    public async Task<IReadOnlyList<ProcurementPolicyRoleOptionDto>> GetRoleOptionsAsync(
+        Guid? workflowDefinitionId = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        var roles = (await _roleService.GetRolesForTenantAsync(_currentUser.TenantId, cancellationToken))
+            .Where(role => !string.IsNullOrWhiteSpace(role.Name))
+            .ToList();
+        HashSet<string>? workflowRoles = null;
+        if (workflowDefinitionId.HasValue)
+            workflowRoles = await GetWorkflowRoleKeysAsync(workflowDefinitionId.Value, cancellationToken);
+
+        return roles
+            .Where(role => workflowRoles is null ||
+                workflowRoles.Contains(role.Id.ToString()) ||
+                workflowRoles.Contains(role.Name!))
+            .OrderBy(role => role.Name)
+            .Select(role => new ProcurementPolicyRoleOptionDto
+            {
+                Id = role.Id,
+                Name = role.Name!,
+                Description = role.Description,
+                IsSystemRole = role.IsSystemRole,
+                IsAssignedToSelectedWorkflow = workflowRoles is not null
+            })
+            .ToList();
     }
 
     public async Task<ProcurementPolicySetDto> GetPolicySetAsync(Guid id, CancellationToken cancellationToken = default)
@@ -207,6 +246,7 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         var value = GetAndValidateRuleValue(request);
         EnsureRuleWithinPolicy(policySet, value);
         ValidateRuleValue(request.Kind, value);
+        await EnsureRoleReferencesAsync(value, cancellationToken);
         await EnsureWorkflowReferenceAsync(value, cancellationToken);
         await EnsureRuleCodeUniqueAsync(policySet.Id, request.Kind, value.RuleCode, ruleId, cancellationToken);
         await EnsureOverrideReferenceAsync(policySet, request.Kind, value, cancellationToken);
@@ -289,7 +329,7 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                 "The TDC access-management permission is required to publish an executable procurement policy.", PolicySnapshot(policySet), null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             throw new ProcurementPolicyAuthorizationException(
-                "The TDC ICT Administrator role is required to publish executable procurement policies.");
+                "SuperAdmin or the TDC ICT Administrator role is required to publish executable procurement policies.");
         }
 
         ProcurementPolicyLifecyclePolicy.EnsureCanPublish(policySet);
@@ -380,8 +420,9 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                 "The TDC access-management permission is required to retire an executable procurement policy.", PolicySnapshot(policySet), null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             throw new ProcurementPolicyAuthorizationException(
-                "The TDC ICT Administrator role is required to retire executable procurement policies.");
+                "SuperAdmin or the TDC ICT Administrator role is required to retire executable procurement policies.");
         }
+
         ProcurementPolicyLifecyclePolicy.EnsureCanRetire(policySet);
         EnsureRowVersion(policySet.RowVersion, request.RowVersion, "policy");
         var before = PolicySnapshot(policySet);
@@ -499,20 +540,10 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             AddError(errors, "BASE_POLICY_REQUIRED", "A tenant override requires an immutable base policy.");
 
         var rules = await GetRuleEntitiesAsync(policySet.Id, tracked: false, cancellationToken);
-        // Evidence and exception requirements are workflow/method-specific. They remain validated
-        // when configured, but are not universal policy-family publication prerequisites.
-        var requiredRuleFamilies = new[]
-        {
-            ProcurementPolicyRuleKind.Category,
-            ProcurementPolicyRuleKind.Method,
-            ProcurementPolicyRuleKind.Threshold,
-            ProcurementPolicyRuleKind.Authority,
-            ProcurementPolicyRuleKind.SegregationOfDuties
-        };
-        foreach (var kind in requiredRuleFamilies)
+        foreach (var kind in RequiredSourcingRuleKinds)
         {
             if (!rules.Any(item => item.Kind == kind && GetRuleEnabled(item.Entity)))
-                AddError(errors, "RULE_FAMILY_MISSING", $"At least one enabled {RuleKindLabel(kind)} rule is required.", kind);
+                AddError(errors, "RULE_FAMILY_MISSING", RequiredRuleFamilyMessage(kind), kind);
         }
 
         var duplicateCodes = rules.GroupBy(item => GetRuleCode(item.Entity), StringComparer.OrdinalIgnoreCase)
@@ -539,6 +570,7 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         await ValidateRfqWorkflowReferencesAsync(rules, errors, cancellationToken);
         ValidateAuthorityBounds(rules, errors);
         ValidateSodRules(rules, errors);
+        await ValidateRoleLineageAsync(rules, errors, cancellationToken);
         if (rules.Count > 0 && rules.All(item => !GetRuleEnabled(item.Entity)))
             warnings.Add(new ProcurementPolicyValidationIssueDto { Code = "ALL_RULES_DISABLED", Message = "Every policy rule is disabled.", Severity = "Warning" });
 
@@ -556,10 +588,6 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                 (!method.RequiresCompetition || method.MinimumQuotationCount <= 0))
                 AddError(errors, "RFQ_COMPETITION_REQUIRED",
                     "An enabled Request for Quotation rule must require competition and a positive minimum quotation count.",
-                    ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
-            if (method.Method == ProcurementMethodType.RequestForQuotation && !method.WorkflowDefinitionId.HasValue)
-                AddError(errors, "RFQ_WORKFLOW_REQUIRED",
-                    "An enabled Request for Quotation rule must select the shared evaluation approval workflow used at dispatch and award.",
                     ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
         }
     }
@@ -613,9 +641,13 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             if (threshold.UpperBound.HasValue && threshold.UpperBound.Value < threshold.LowerBound)
                 AddError(errors, "THRESHOLD_BOUNDS", "Upper bound cannot be below lower bound.", ProcurementPolicyRuleKind.Threshold, threshold.Id, threshold.RuleCode);
             if (!categories.Any(item => item.Category == threshold.Category && ServiceClassMatches(item.ServiceClass, threshold.ServiceClass)))
-                AddError(errors, "THRESHOLD_CATEGORY", "Threshold does not reference an enabled category rule.", ProcurementPolicyRuleKind.Threshold, threshold.Id, threshold.RuleCode);
+                AddError(errors, "THRESHOLD_CATEGORY",
+                    $"No enabled Category rule matches category {threshold.Category} and service class '{DisplayServiceClass(threshold.ServiceClass)}'. Select the intended Category rule again.",
+                    ProcurementPolicyRuleKind.Threshold, threshold.Id, threshold.RuleCode);
             if (!methods.Any(item => item.Category == threshold.Category && item.Method == threshold.Method && ServiceClassMatches(item.ServiceClass, threshold.ServiceClass)))
-                AddError(errors, "THRESHOLD_METHOD", "Threshold does not reference an enabled method rule.", ProcurementPolicyRuleKind.Threshold, threshold.Id, threshold.RuleCode);
+                AddError(errors, "THRESHOLD_METHOD",
+                    $"No enabled Method rule matches category {threshold.Category}, method {threshold.Method}, and service class '{DisplayServiceClass(threshold.ServiceClass)}'. Select the intended Method rule again.",
+                    ProcurementPolicyRuleKind.Threshold, threshold.Id, threshold.RuleCode);
         }
         for (var leftIndex = 0; leftIndex < thresholds.Count; leftIndex++)
         for (var rightIndex = leftIndex + 1; rightIndex < thresholds.Count; rightIndex++)
@@ -651,24 +683,10 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             if (string.Equals(sod.InitiatorRole.Trim(), sod.ConflictingRole.Trim(), StringComparison.OrdinalIgnoreCase))
                 AddError(errors, "SOD_ROLE_CONFLICT", "Initiator and conflicting roles must differ.", ProcurementPolicyRuleKind.SegregationOfDuties, sod.Id, sod.RuleCode);
 
-        foreach (var definition in ProcurementSodRequiredControlRegistry.Definitions)
-        {
-            var match = sodRules.SingleOrDefault(item => item.IsEnabled &&
-                string.Equals(item.RuleCode, definition.Code, StringComparison.OrdinalIgnoreCase));
-            if (match is null)
-            {
-                AddError(errors, "SOD_REQUIRED_CONTROL_MISSING",
-                    $"Required TDC SOD control '{definition.Code}' is missing.",
-                    ProcurementPolicyRuleKind.SegregationOfDuties, ruleCode: definition.Code);
-                continue;
-            }
-
-            if (!ProcurementSodRequiredControlRegistry.MatchesRequiredShape(definition,
-                    match.InitiatorRole, match.ConflictingRole, match.EntityType, match.Action, match.Enforcement))
-                AddError(errors, "SOD_REQUIRED_CONTROL_INVALID",
-                    $"Required TDC SOD control '{definition.Code}' must retain its prescribed roles, entity, action, and HardStop enforcement.",
-                    ProcurementPolicyRuleKind.SegregationOfDuties, match.Id, match.RuleCode);
-        }
+        // Policy-specific SOD declarations are optional. The shared workflow and
+        // authorization layer always enforces the system maker-checker baseline;
+        // an enabled policy rule is validated here only when a tenant elects to
+        // add a narrower transaction-specific conflict.
     }
 
     private async Task<int> MaterializeSourceRulesAsync(
@@ -685,8 +703,16 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                                   item.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved))
             throw ValidationException("SOURCE_CONFIGURATION_INCOMPLETE", "The source configuration does not contain fourteen approved decisions.");
 
+        var tenantRoles = (await _roleService.GetRolesForTenantAsync(_currentUser.TenantId, cancellationToken))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .ToList();
+        Guid? RoleId(string? name) => tenantRoles.SingleOrDefault(item =>
+            string.Equals(item.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase))?.Id;
+
         var count = 0;
         var dec001 = DeserializeDecision<ProcurementMethodThresholdDecisionValueDto>(decisions, "DEC-001");
+        var dec005 = DeserializeDecision<ProcurementPettyPurchaseDecisionValueDto>(decisions, "DEC-005");
+        var dec006 = DeserializeDecision<ProcurementExceptionPrerequisiteDecisionValueDto>(decisions, "DEC-006");
         var category = new ProcurementPolicyCategoryRule
         {
             TenantId = policySet.TenantId, PolicySetId = policySet.Id, RuleCode = $"CAT-{dec001.Category}".ToUpperInvariant(),
@@ -701,6 +727,9 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             TenantId = policySet.TenantId, PolicySetId = policySet.Id, RuleCode = $"METHOD-{dec001.Category}-{dec001.Method}".ToUpperInvariant(),
             Name = dec001.Method.ToString(), Category = dec001.Category, ServiceClass = dec001.ServiceClass, Method = dec001.Method,
             IsAllowed = true, RequiresCompetition = dec001.Method != ProcurementMethodType.PettyPurchase, MinimumQuotationCount = 0,
+            JustificationRequired = dec001.Method == ProcurementMethodType.PettyPurchase
+                ? dec005.JustificationRequired
+                : dec001.Method == dec006.Method,
             ApplicabilityConditions = "Materialized from approved DEC-001 configuration.", SourceDecisionKey = "DEC-001",
             EffectiveFrom = EnsureUtc(dec001.EffectiveFrom), EffectiveTo = EnsureUtc(dec001.EffectiveTo),
             CreatedAt = now, CreatedBy = _currentUser.FullName, CreatedById = _currentUser.UserId
@@ -723,33 +752,34 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             {
                 TenantId = policySet.TenantId, PolicySetId = policySet.Id,
                 RuleCode = $"AUTH-DEC-002-{applicableCategory}".ToUpperInvariant(), AuthorityName = dec002.AuthorityLevel,
-                AuthorityRole = dec002.AuthorityLevel, Category = applicableCategory, CurrencyCode = dec002.CurrencyCode,
+                AuthorityRoleId = RoleId(dec002.AuthorityLevel), AuthorityRole = dec002.AuthorityLevel,
+                Category = applicableCategory, CurrencyCode = dec002.CurrencyCode,
                 LowerBound = dec002.LowerBound, UpperBound = dec002.UpperBound, LowerInclusive = dec002.LowerInclusive,
-                UpperInclusive = dec002.UpperInclusive, EscalationAuthority = dec002.EscalationAuthority,
+                UpperInclusive = dec002.UpperInclusive, EscalationAuthorityRoleId = RoleId(dec002.EscalationAuthority),
+                EscalationAuthority = dec002.EscalationAuthority,
                 SourceDecisionKey = "DEC-002", EffectiveFrom = EnsureUtc(dec002.EffectiveFrom), EffectiveTo = EnsureUtc(dec002.EffectiveTo),
                 CreatedAt = now, CreatedBy = _currentUser.FullName, CreatedById = _currentUser.UserId
             }); count++;
         }
 
-        var dec005 = DeserializeDecision<ProcurementPettyPurchaseDecisionValueDto>(decisions, "DEC-005");
         await Exceptions.AddAsync(new ProcurementPolicyExceptionRule
         {
             TenantId = policySet.TenantId, PolicySetId = policySet.Id, RuleCode = "EXCEPTION-PETTY-PURCHASE",
             ExceptionName = "Petty purchase waiver", ExceptionType = "PettyPurchase", Method = ProcurementMethodType.PettyPurchase,
             Disposition = dec005.WaiverEligible ? ProcurementExceptionDisposition.ApprovalRequired : ProcurementExceptionDisposition.Prohibited,
             JustificationRequired = dec005.JustificationRequired, EvidenceRequired = dec005.EvidenceRequirements.Count > 0,
-            ApproverRole = dec005.ApproverRole, MaximumDurationDays = dec005.ExpiryDate.HasValue ? Math.Max(1, (int)(dec005.ExpiryDate.Value.Date - dec005.EffectiveFrom.Date).TotalDays) : null,
+            ApproverRoleId = RoleId(dec005.ApproverRole), ApproverRole = dec005.ApproverRole,
+            MaximumDurationDays = dec005.ExpiryDate.HasValue ? Math.Max(1, (int)(dec005.ExpiryDate.Value.Date - dec005.EffectiveFrom.Date).TotalDays) : null,
             SourceDecisionKey = "DEC-005", EffectiveFrom = EnsureUtc(dec005.EffectiveFrom), EffectiveTo = EnsureUtc(dec005.EffectiveTo),
             CreatedAt = now, CreatedBy = _currentUser.FullName, CreatedById = _currentUser.UserId
         }); count++;
-        var dec006 = DeserializeDecision<ProcurementExceptionPrerequisiteDecisionValueDto>(decisions, "DEC-006");
         await Exceptions.AddAsync(new ProcurementPolicyExceptionRule
         {
             TenantId = policySet.TenantId, PolicySetId = policySet.Id, RuleCode = "EXCEPTION-DEC-006",
             ExceptionName = $"{dec006.Method} prerequisites", ExceptionType = dec006.Method.ToString(), Method = dec006.Method,
             Disposition = ProcurementExceptionDisposition.ApprovalRequired, JustificationRequired = true,
             EvidenceRequired = dec006.MandatoryEvidenceChecklist.Count > 0, PostAwardFilingRequired = true,
-            ApproverRole = dec006.ApprovalAuthority, SourceDecisionKey = "DEC-006",
+            ApproverRoleId = RoleId(dec006.ApprovalAuthority), ApproverRole = dec006.ApprovalAuthority, SourceDecisionKey = "DEC-006",
             EffectiveFrom = EnsureUtc(dec006.EffectiveFrom), EffectiveTo = EnsureUtc(dec006.EffectiveTo),
             CreatedAt = now, CreatedBy = _currentUser.FullName, CreatedById = _currentUser.UserId
         }); count++;
@@ -878,7 +908,8 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             SourceConfigurationProfileId = source.Id, SourceConfigurationProfileCode = source.ProfileCode,
             SourceConfigurationProfileVersion = source.Version, DefaultCurrencyCode = policySet.DefaultCurrencyCode,
             EffectiveFrom = policySet.EffectiveFrom, EffectiveTo = policySet.EffectiveTo, IsDefault = policySet.IsDefault,
-            RuleCount = rules.Count, RuleFamilyCount = enabledFamilies, IsComplete = enabledFamilies == Enum.GetValues<ProcurementPolicyRuleKind>().Length,
+            RuleCount = rules.Count, RuleFamilyCount = enabledFamilies,
+            IsComplete = RequiredSourcingRuleKinds.All(kind => rules.Any(item => item.Kind == kind && item.IsEnabled)),
             UpdatedBy = policySet.UpdatedBy ?? policySet.CreatedBy, UpdatedAt = policySet.UpdatedAt ?? policySet.CreatedAt,
             RowVersion = Convert.ToBase64String(policySet.RowVersion)
         };
@@ -1043,6 +1074,9 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         value.SourceDecisionKey = value.SourceDecisionKey.Trim().ToUpperInvariant();
         value.EffectiveFrom = EnsureUtc(value.EffectiveFrom);
         value.EffectiveTo = EnsureUtc(value.EffectiveTo);
+        if (value is SaveProcurementPolicyEvidenceRuleValue evidence &&
+            string.IsNullOrWhiteSpace(evidence.SharedRequirementKey))
+            evidence.SharedRequirementKey = value.RuleCode;
         return value;
     }
 
@@ -1054,10 +1088,257 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             throw ValidationException("THRESHOLD_BOUNDS", "Threshold upper bound cannot be below lower bound.");
         if (value is SaveProcurementPolicyAuthorityRuleValue authority && authority.UpperBound.HasValue && authority.UpperBound.Value < authority.LowerBound)
             throw ValidationException("AUTHORITY_BOUNDS", "Authority upper bound cannot be below lower bound.");
-        if (value is SaveProcurementPolicySodRuleValue sod && string.Equals(sod.InitiatorRole.Trim(), sod.ConflictingRole.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (value is SaveProcurementPolicySodRuleValue sod &&
+            ((sod.InitiatorRoleId.HasValue && sod.InitiatorRoleId == sod.ConflictingRoleId) ||
+             (!string.IsNullOrWhiteSpace(sod.InitiatorRole) && !string.IsNullOrWhiteSpace(sod.ConflictingRole) &&
+              string.Equals(sod.InitiatorRole.Trim(), sod.ConflictingRole.Trim(), StringComparison.OrdinalIgnoreCase))))
             throw ValidationException("SOD_ROLE_CONFLICT", "Initiator and conflicting roles must differ.");
         if (kind == ProcurementPolicyRuleKind.Evidence && value is SaveProcurementPolicyEvidenceRuleValue evidence && evidence.IsMandatory && string.IsNullOrWhiteSpace(evidence.SharedRequirementKey))
             throw ValidationException("EVIDENCE_SHARED_KEY", "A mandatory evidence rule must reference a shared evidence requirement key.");
+    }
+
+    private async Task EnsureRoleReferencesAsync(
+        SaveProcurementPolicyRuleValueBase value,
+        CancellationToken cancellationToken)
+    {
+        if (value is not (SaveProcurementPolicyAuthorityRuleValue or
+            SaveProcurementPolicyExceptionRuleValue or SaveProcurementPolicySodRuleValue)) return;
+
+        var tenantRoles = (await _roleService.GetRolesForTenantAsync(_currentUser.TenantId, cancellationToken))
+            .Where(role => !string.IsNullOrWhiteSpace(role.Name))
+            .ToList();
+
+        ApplicationRole Required(Guid? id, string? legacyName, string field)
+        {
+            var role = id.HasValue
+                ? tenantRoles.SingleOrDefault(item => item.Id == id.Value)
+                : tenantRoles.SingleOrDefault(item => string.Equals(
+                    item.Name, legacyName?.Trim(), StringComparison.OrdinalIgnoreCase));
+            return role ?? throw ValidationException(
+                "POLICY_TENANT_ROLE_REQUIRED",
+                $"{field} must identify a configured role assigned to an active user in the current tenant.");
+        }
+
+        ApplicationRole? Optional(Guid? id, string? legacyName, string field)
+        {
+            if (!id.HasValue && string.IsNullOrWhiteSpace(legacyName)) return null;
+            return Required(id, legacyName, field);
+        }
+
+        if (value is SaveProcurementPolicyAuthorityRuleValue authority)
+        {
+            var role = Required(authority.AuthorityRoleId, authority.AuthorityRole, "Authority role");
+            authority.AuthorityRoleId = role.Id;
+            authority.AuthorityRole = role.Name!;
+            var escalation = Optional(authority.EscalationAuthorityRoleId, authority.EscalationAuthority, "Escalation authority");
+            authority.EscalationAuthorityRoleId = escalation?.Id;
+            authority.EscalationAuthority = escalation?.Name;
+            await EnsureWorkflowRolesAsync(authority.WorkflowDefinitionId,
+                new[] { ("Authority role", role), ("Escalation authority", escalation) }, cancellationToken);
+        }
+        else if (value is SaveProcurementPolicyExceptionRuleValue exception)
+        {
+            var role = Required(exception.ApproverRoleId, exception.ApproverRole, "Approver role");
+            exception.ApproverRoleId = role.Id;
+            exception.ApproverRole = role.Name!;
+            await EnsureWorkflowRolesAsync(exception.WorkflowDefinitionId,
+                new[] { ("Approver role", role) }, cancellationToken);
+        }
+        else if (value is SaveProcurementPolicySodRuleValue sod)
+        {
+            var initiator = Required(sod.InitiatorRoleId, sod.InitiatorRole, "Initiator role");
+            var conflicting = Required(sod.ConflictingRoleId, sod.ConflictingRole, "Conflicting role");
+            if (initiator.Id == conflicting.Id)
+                throw ValidationException("SOD_ROLE_CONFLICT", "Initiator and conflicting roles must differ.");
+            sod.InitiatorRoleId = initiator.Id;
+            sod.InitiatorRole = initiator.Name!;
+            sod.ConflictingRoleId = conflicting.Id;
+            sod.ConflictingRole = conflicting.Name!;
+        }
+    }
+
+    private async Task ValidateRoleLineageAsync(
+        IReadOnlyList<(ProcurementPolicyRuleKind Kind, object Entity)> rules,
+        ICollection<ProcurementPolicyValidationIssueDto> errors,
+        CancellationToken cancellationToken)
+    {
+        var tenantRoles = (await _roleService.GetRolesForTenantAsync(_currentUser.TenantId, cancellationToken))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .ToDictionary(item => item.Id);
+        var workflowIds = rules.Select(item => item.Entity switch
+            {
+                ProcurementPolicyAuthorityRule authority => authority.WorkflowDefinitionId,
+                ProcurementPolicyExceptionRule exception => exception.WorkflowDefinitionId,
+                _ => null
+            })
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .Distinct()
+            .ToArray();
+        var workflowDefinitions = workflowIds.Length == 0
+            ? new Dictionary<Guid, WorkflowDefinition>()
+            : (await WorkflowDefinitions.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && workflowIds.Contains(item.Id))
+                .Include(item => item.Steps)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken))
+                .ToDictionary(item => item.Id);
+
+        void Validate(Guid? roleId, string? snapshot, string field,
+            ProcurementPolicyRuleKind kind, Guid ruleId, string ruleCode)
+        {
+            if (!roleId.HasValue || !tenantRoles.TryGetValue(roleId.Value, out var role))
+            {
+                AddError(errors, "POLICY_TENANT_ROLE_REQUIRED",
+                    $"{field} must identify a role assigned to an active user in the current tenant.",
+                    kind, ruleId, ruleCode);
+                return;
+            }
+            if (!string.Equals(role.Name, snapshot?.Trim(), StringComparison.Ordinal))
+                AddError(errors, "POLICY_ROLE_SNAPSHOT_MISMATCH",
+                    $"{field} does not match its retained role-name snapshot. Re-select the role before publishing.",
+                    kind, ruleId, ruleCode);
+        }
+
+        void ValidateWorkflowRole(Guid? workflowDefinitionId, Guid? roleId, string? snapshot,
+            string field, ProcurementPolicyRuleKind kind, Guid ruleId, string ruleCode)
+        {
+            if (!workflowDefinitionId.HasValue) return;
+            if (!workflowDefinitions.TryGetValue(workflowDefinitionId.Value, out var workflow) ||
+                workflow.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published || !workflow.IsActive)
+            {
+                AddError(errors, "WORKFLOW_REFERENCE",
+                    "The selected workflow must remain active and Published in the current tenant.",
+                    kind, ruleId, ruleCode);
+                return;
+            }
+
+            var workflowRoles = ExtractWorkflowRoleKeys(workflow);
+            if (!roleId.HasValue || !tenantRoles.TryGetValue(roleId.Value, out var role) ||
+                (!workflowRoles.Contains(role.Id.ToString()) && !workflowRoles.Contains(role.Name!)))
+                AddError(errors, "POLICY_ROLE_WORKFLOW_MISMATCH",
+                    $"{field} '{snapshot}' is not assigned to a stage in the selected workflow.",
+                    kind, ruleId, ruleCode);
+        }
+
+        foreach (var authority in rules.Where(item => item.Kind == ProcurementPolicyRuleKind.Authority && GetRuleEnabled(item.Entity))
+                     .Select(item => (ProcurementPolicyAuthorityRule)item.Entity))
+        {
+            Validate(authority.AuthorityRoleId, authority.AuthorityRole, "Authority role",
+                ProcurementPolicyRuleKind.Authority, authority.Id, authority.RuleCode);
+            ValidateWorkflowRole(authority.WorkflowDefinitionId, authority.AuthorityRoleId,
+                authority.AuthorityRole, "Authority role",
+                ProcurementPolicyRuleKind.Authority, authority.Id, authority.RuleCode);
+            if (authority.EscalationAuthorityRoleId.HasValue || !string.IsNullOrWhiteSpace(authority.EscalationAuthority))
+            {
+                Validate(authority.EscalationAuthorityRoleId, authority.EscalationAuthority, "Escalation authority",
+                    ProcurementPolicyRuleKind.Authority, authority.Id, authority.RuleCode);
+                ValidateWorkflowRole(authority.WorkflowDefinitionId, authority.EscalationAuthorityRoleId,
+                    authority.EscalationAuthority, "Escalation authority",
+                    ProcurementPolicyRuleKind.Authority, authority.Id, authority.RuleCode);
+            }
+        }
+
+        foreach (var exception in rules.Where(item => item.Kind == ProcurementPolicyRuleKind.Exception && GetRuleEnabled(item.Entity))
+                     .Select(item => (ProcurementPolicyExceptionRule)item.Entity))
+        {
+            Validate(exception.ApproverRoleId, exception.ApproverRole, "Exception approver role",
+                ProcurementPolicyRuleKind.Exception, exception.Id, exception.RuleCode);
+            ValidateWorkflowRole(exception.WorkflowDefinitionId, exception.ApproverRoleId,
+                exception.ApproverRole, "Exception approver role",
+                ProcurementPolicyRuleKind.Exception, exception.Id, exception.RuleCode);
+        }
+
+        foreach (var sod in rules.Where(item => item.Kind == ProcurementPolicyRuleKind.SegregationOfDuties && GetRuleEnabled(item.Entity))
+                     .Select(item => (ProcurementPolicySodRule)item.Entity))
+        {
+            Validate(sod.InitiatorRoleId, sod.InitiatorRole, "SOD initiator role",
+                ProcurementPolicyRuleKind.SegregationOfDuties, sod.Id, sod.RuleCode);
+            Validate(sod.ConflictingRoleId, sod.ConflictingRole, "SOD conflicting role",
+                ProcurementPolicyRuleKind.SegregationOfDuties, sod.Id, sod.RuleCode);
+        }
+    }
+
+    private async Task EnsureWorkflowRolesAsync(
+        Guid? workflowDefinitionId,
+        IEnumerable<(string Field, ApplicationRole? Role)> roles,
+        CancellationToken cancellationToken)
+    {
+        if (!workflowDefinitionId.HasValue) return;
+        var workflowRoles = await GetWorkflowRoleKeysAsync(workflowDefinitionId.Value, cancellationToken);
+        if (workflowRoles.Count == 0)
+            throw ValidationException("POLICY_WORKFLOW_ROLES_REQUIRED",
+                "The selected workflow has no configured stage roles. Configure and publish its approval stages first.");
+        foreach (var (field, role) in roles.Where(item => item.Role is not null))
+            if (!workflowRoles.Contains(role!.Id.ToString()) && !workflowRoles.Contains(role.Name!))
+                throw ValidationException("POLICY_ROLE_WORKFLOW_MISMATCH",
+                    $"{field} '{role.Name}' is not assigned to a stage in the selected workflow.");
+    }
+
+    private async Task<HashSet<string>> GetWorkflowRoleKeysAsync(
+        Guid workflowDefinitionId,
+        CancellationToken cancellationToken)
+    {
+        var definition = await WorkflowDefinitions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == workflowDefinitionId &&
+                item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                item.IsActive)
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw ValidationException("WORKFLOW_REFERENCE",
+                "Workflow references must identify an active Published workflow definition in this tenant.");
+        return ExtractWorkflowRoleKeys(definition);
+    }
+
+    private static HashSet<string> ExtractWorkflowRoleKeys(WorkflowDefinition definition)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var step in definition.Steps.Where(item => !item.IsDeleted))
+        {
+            AddRoleKey(result, step.RequiredRole);
+            CollectRoleKeys(result, step.Configuration);
+            CollectRoleKeys(result, step.AssignmentConfiguration);
+        }
+        return result;
+    }
+
+    private static void AddRoleKey(ISet<string> target, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)) target.Add(value.Trim());
+    }
+
+    private static void CollectRoleKeys(ISet<string> target, string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            Visit(document.RootElement, null);
+        }
+        catch (JsonException)
+        {
+            // Invalid workflow JSON is rejected by workflow publication. A malformed legacy
+            // configuration must not make unrelated policy reads fail.
+        }
+
+        void Visit(JsonElement element, string? propertyName)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    foreach (var property in element.EnumerateObject()) Visit(property.Value, property.Name);
+                    break;
+                case JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray()) Visit(item, propertyName);
+                    break;
+                case JsonValueKind.String when propertyName is not null &&
+                    propertyName.Contains("role", StringComparison.OrdinalIgnoreCase):
+                    AddRoleKey(target, element.GetString());
+                    break;
+            }
+        }
     }
 
     private static void EnsureRuleWithinPolicy(ProcurementPolicySet policySet, SaveProcurementPolicyRuleValueBase value)
@@ -1137,25 +1418,25 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     private static void Apply(ProcurementPolicyCategoryRule entity, SaveProcurementPolicyCategoryRuleValue value)
     { ApplyCommon(entity, value); entity.Name = value.Name.Trim(); entity.Category = value.Category; entity.ServiceClass = NullIfWhiteSpace(value.ServiceClass); entity.Description = NullIfWhiteSpace(value.Description); entity.RequiresSpecification = value.RequiresSpecification; entity.SpecificationTemplateCode = NullIfWhiteSpace(value.SpecificationTemplateCode); }
     private static void Apply(ProcurementPolicyMethodRule entity, SaveProcurementPolicyMethodRuleValue value)
-    { ApplyCommon(entity, value); entity.Name = value.Name.Trim(); entity.Category = value.Category; entity.ServiceClass = NullIfWhiteSpace(value.ServiceClass); entity.Method = value.Method; entity.IsAllowed = value.IsAllowed; entity.RequiresCompetition = value.RequiresCompetition; entity.MinimumQuotationCount = value.MinimumQuotationCount; entity.WorkflowDefinitionId = value.WorkflowDefinitionId; entity.ApplicabilityConditions = NullIfWhiteSpace(value.ApplicabilityConditions); }
+    { ApplyCommon(entity, value); entity.Name = value.Name.Trim(); entity.Category = value.Category; entity.ServiceClass = NullIfWhiteSpace(value.ServiceClass); entity.Method = value.Method; entity.IsAllowed = value.IsAllowed; entity.RequiresCompetition = value.RequiresCompetition; entity.JustificationRequired = value.JustificationRequired; entity.MinimumQuotationCount = value.MinimumQuotationCount; entity.WorkflowDefinitionId = value.WorkflowDefinitionId; entity.ApplicabilityConditions = NullIfWhiteSpace(value.ApplicabilityConditions); }
     private static void Apply(ProcurementPolicyThresholdRule entity, SaveProcurementPolicyThresholdRuleValue value)
     { ApplyCommon(entity, value); entity.Name = value.Name.Trim(); entity.Category = value.Category; entity.ServiceClass = NullIfWhiteSpace(value.ServiceClass); entity.Method = value.Method; entity.CurrencyCode = NormalizeCurrency(value.CurrencyCode); entity.LowerBound = value.LowerBound; entity.UpperBound = value.UpperBound; entity.LowerInclusive = value.LowerInclusive; entity.UpperInclusive = value.UpperInclusive; entity.StatutoryReference = value.StatutoryReference.Trim(); }
     private static void Apply(ProcurementPolicyAuthorityRule entity, SaveProcurementPolicyAuthorityRuleValue value)
-    { ApplyCommon(entity, value); entity.AuthorityName = value.AuthorityName.Trim(); entity.AuthorityRole = value.AuthorityRole.Trim(); entity.Category = value.Category; entity.CurrencyCode = NormalizeCurrency(value.CurrencyCode); entity.LowerBound = value.LowerBound; entity.UpperBound = value.UpperBound; entity.LowerInclusive = value.LowerInclusive; entity.UpperInclusive = value.UpperInclusive; entity.Sequence = value.Sequence; entity.Quorum = value.Quorum; entity.IsObserver = value.IsObserver; entity.EscalationAuthority = NullIfWhiteSpace(value.EscalationAuthority); entity.WorkflowDefinitionId = value.WorkflowDefinitionId; }
+    { ApplyCommon(entity, value); entity.AuthorityName = value.AuthorityName.Trim(); entity.AuthorityRoleId = value.AuthorityRoleId; entity.AuthorityRole = value.AuthorityRole.Trim(); entity.Category = value.Category; entity.CurrencyCode = NormalizeCurrency(value.CurrencyCode); entity.LowerBound = value.LowerBound; entity.UpperBound = value.UpperBound; entity.LowerInclusive = value.LowerInclusive; entity.UpperInclusive = value.UpperInclusive; entity.Sequence = value.Sequence; entity.Quorum = value.Quorum; entity.IsObserver = value.IsObserver; entity.EscalationAuthorityRoleId = value.EscalationAuthorityRoleId; entity.EscalationAuthority = NullIfWhiteSpace(value.EscalationAuthority); entity.WorkflowDefinitionId = value.WorkflowDefinitionId; }
     private static void Apply(ProcurementPolicyEvidenceRule entity, SaveProcurementPolicyEvidenceRuleValue value)
     { ApplyCommon(entity, value); entity.EvidenceName = value.EvidenceName.Trim(); entity.Stage = value.Stage; entity.Category = value.Category; entity.Method = value.Method; entity.SharedRequirementKey = NullIfWhiteSpace(value.SharedRequirementKey); entity.IsMandatory = value.IsMandatory; entity.RequiresVerification = value.RequiresVerification; entity.MaximumAgeDays = value.MaximumAgeDays; }
     private static void Apply(ProcurementPolicyExceptionRule entity, SaveProcurementPolicyExceptionRuleValue value)
-    { ApplyCommon(entity, value); entity.ExceptionName = value.ExceptionName.Trim(); entity.ExceptionType = value.ExceptionType.Trim(); entity.Category = value.Category; entity.Method = value.Method; entity.Disposition = value.Disposition; entity.JustificationRequired = value.JustificationRequired; entity.EvidenceRequired = value.EvidenceRequired; entity.PostAwardFilingRequired = value.PostAwardFilingRequired; entity.ApproverRole = value.ApproverRole.Trim(); entity.WorkflowDefinitionId = value.WorkflowDefinitionId; entity.MaximumDurationDays = value.MaximumDurationDays; }
+    { ApplyCommon(entity, value); entity.ExceptionName = value.ExceptionName.Trim(); entity.ExceptionType = value.ExceptionType.Trim(); entity.Category = value.Category; entity.Method = value.Method; entity.Disposition = value.Disposition; entity.JustificationRequired = value.JustificationRequired; entity.EvidenceRequired = value.EvidenceRequired; entity.PostAwardFilingRequired = value.PostAwardFilingRequired; entity.ApproverRoleId = value.ApproverRoleId; entity.ApproverRole = value.ApproverRole.Trim(); entity.WorkflowDefinitionId = value.WorkflowDefinitionId; entity.MaximumDurationDays = value.MaximumDurationDays; }
     private static void Apply(ProcurementPolicySodRule entity, SaveProcurementPolicySodRuleValue value)
-    { ApplyCommon(entity, value); entity.Name = value.Name.Trim(); entity.InitiatorRole = value.InitiatorRole.Trim(); entity.ConflictingRole = value.ConflictingRole.Trim(); entity.EntityType = value.EntityType.Trim(); entity.Action = value.Action.Trim(); entity.Enforcement = value.Enforcement; entity.Explanation = NullIfWhiteSpace(value.Explanation); }
+    { ApplyCommon(entity, value); entity.Name = value.Name.Trim(); entity.InitiatorRoleId = value.InitiatorRoleId; entity.InitiatorRole = value.InitiatorRole.Trim(); entity.ConflictingRoleId = value.ConflictingRoleId; entity.ConflictingRole = value.ConflictingRole.Trim(); entity.EntityType = value.EntityType.Trim(); entity.Action = value.Action.Trim(); entity.Enforcement = value.Enforcement; entity.Explanation = NullIfWhiteSpace(value.Explanation); }
 
     private static SaveProcurementPolicyCategoryRuleValue ToValue(ProcurementPolicyCategoryRule e) => new() { RuleCode=e.RuleCode,Name=e.Name,Category=e.Category,ServiceClass=e.ServiceClass,Description=e.Description,RequiresSpecification=e.RequiresSpecification,SpecificationTemplateCode=e.SpecificationTemplateCode,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
-    private static SaveProcurementPolicyMethodRuleValue ToValue(ProcurementPolicyMethodRule e) => new() { RuleCode=e.RuleCode,Name=e.Name,Category=e.Category,ServiceClass=e.ServiceClass,Method=e.Method,IsAllowed=e.IsAllowed,RequiresCompetition=e.RequiresCompetition,MinimumQuotationCount=e.MinimumQuotationCount,WorkflowDefinitionId=e.WorkflowDefinitionId,ApplicabilityConditions=e.ApplicabilityConditions,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
+    private static SaveProcurementPolicyMethodRuleValue ToValue(ProcurementPolicyMethodRule e) => new() { RuleCode=e.RuleCode,Name=e.Name,Category=e.Category,ServiceClass=e.ServiceClass,Method=e.Method,IsAllowed=e.IsAllowed,RequiresCompetition=e.RequiresCompetition,JustificationRequired=e.JustificationRequired,MinimumQuotationCount=e.MinimumQuotationCount,WorkflowDefinitionId=e.WorkflowDefinitionId,ApplicabilityConditions=e.ApplicabilityConditions,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
     private static SaveProcurementPolicyThresholdRuleValue ToValue(ProcurementPolicyThresholdRule e) => new() { RuleCode=e.RuleCode,Name=e.Name,Category=e.Category,ServiceClass=e.ServiceClass,Method=e.Method,CurrencyCode=e.CurrencyCode,LowerBound=e.LowerBound,UpperBound=e.UpperBound,LowerInclusive=e.LowerInclusive,UpperInclusive=e.UpperInclusive,StatutoryReference=e.StatutoryReference,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
-    private static SaveProcurementPolicyAuthorityRuleValue ToValue(ProcurementPolicyAuthorityRule e) => new() { RuleCode=e.RuleCode,AuthorityName=e.AuthorityName,AuthorityRole=e.AuthorityRole,Category=e.Category,CurrencyCode=e.CurrencyCode,LowerBound=e.LowerBound,UpperBound=e.UpperBound,LowerInclusive=e.LowerInclusive,UpperInclusive=e.UpperInclusive,Sequence=e.Sequence,Quorum=e.Quorum,IsObserver=e.IsObserver,EscalationAuthority=e.EscalationAuthority,WorkflowDefinitionId=e.WorkflowDefinitionId,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
+    private static SaveProcurementPolicyAuthorityRuleValue ToValue(ProcurementPolicyAuthorityRule e) => new() { RuleCode=e.RuleCode,AuthorityName=e.AuthorityName,AuthorityRoleId=e.AuthorityRoleId,AuthorityRole=e.AuthorityRole,Category=e.Category,CurrencyCode=e.CurrencyCode,LowerBound=e.LowerBound,UpperBound=e.UpperBound,LowerInclusive=e.LowerInclusive,UpperInclusive=e.UpperInclusive,Sequence=e.Sequence,Quorum=e.Quorum,IsObserver=e.IsObserver,EscalationAuthorityRoleId=e.EscalationAuthorityRoleId,EscalationAuthority=e.EscalationAuthority,WorkflowDefinitionId=e.WorkflowDefinitionId,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
     private static SaveProcurementPolicyEvidenceRuleValue ToValue(ProcurementPolicyEvidenceRule e) => new() { RuleCode=e.RuleCode,EvidenceName=e.EvidenceName,Stage=e.Stage,Category=e.Category,Method=e.Method,SharedRequirementKey=e.SharedRequirementKey,IsMandatory=e.IsMandatory,RequiresVerification=e.RequiresVerification,MaximumAgeDays=e.MaximumAgeDays,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
-    private static SaveProcurementPolicyExceptionRuleValue ToValue(ProcurementPolicyExceptionRule e) => new() { RuleCode=e.RuleCode,ExceptionName=e.ExceptionName,ExceptionType=e.ExceptionType,Category=e.Category,Method=e.Method,Disposition=e.Disposition,JustificationRequired=e.JustificationRequired,EvidenceRequired=e.EvidenceRequired,PostAwardFilingRequired=e.PostAwardFilingRequired,ApproverRole=e.ApproverRole,WorkflowDefinitionId=e.WorkflowDefinitionId,MaximumDurationDays=e.MaximumDurationDays,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
-    private static SaveProcurementPolicySodRuleValue ToValue(ProcurementPolicySodRule e) => new() { RuleCode=e.RuleCode,Name=e.Name,InitiatorRole=e.InitiatorRole,ConflictingRole=e.ConflictingRole,EntityType=e.EntityType,Action=e.Action,Enforcement=e.Enforcement,Explanation=e.Explanation,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
+    private static SaveProcurementPolicyExceptionRuleValue ToValue(ProcurementPolicyExceptionRule e) => new() { RuleCode=e.RuleCode,ExceptionName=e.ExceptionName,ExceptionType=e.ExceptionType,Category=e.Category,Method=e.Method,Disposition=e.Disposition,JustificationRequired=e.JustificationRequired,EvidenceRequired=e.EvidenceRequired,PostAwardFilingRequired=e.PostAwardFilingRequired,ApproverRoleId=e.ApproverRoleId,ApproverRole=e.ApproverRole,WorkflowDefinitionId=e.WorkflowDefinitionId,MaximumDurationDays=e.MaximumDurationDays,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
+    private static SaveProcurementPolicySodRuleValue ToValue(ProcurementPolicySodRule e) => new() { RuleCode=e.RuleCode,Name=e.Name,InitiatorRoleId=e.InitiatorRoleId,InitiatorRole=e.InitiatorRole,ConflictingRoleId=e.ConflictingRoleId,ConflictingRole=e.ConflictingRole,EntityType=e.EntityType,Action=e.Action,Enforcement=e.Enforcement,Explanation=e.Explanation,Priority=e.Priority,IsEnabled=e.IsEnabled,EffectiveFrom=e.EffectiveFrom,EffectiveTo=e.EffectiveTo,OverrideAction=e.OverrideAction,SourceRuleId=e.SourceRuleId,SourceDecisionKey=e.SourceDecisionKey };
 
     private async Task AddRuleEntityAsync(object entity, ProcurementPolicyRuleKind kind)
     {
@@ -1235,12 +1516,14 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         EnsureAuthenticatedTenant();
         if (!CanManageAccess())
             throw new ProcurementPolicyAuthorizationException(
-                "The TDC ICT Administrator role is required to administer procurement policy.");
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement policy.");
     }
 
-    private bool CanManageAccess() => _currentUser.Roles.Any(role =>
-        ProcurementAccessControlRegistry.RoleGrantsPermission(
-            role, "procurement.access.manage"));
+    private bool CanManageAccess() =>
+        _currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) ||
+        _currentUser.Roles.Any(role =>
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage"));
 
     private void Touch(ProcurementPolicySet policySet)
     {
@@ -1283,6 +1566,11 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     private static void ValidateDatesForResult(DateTime from, DateTime? to, ICollection<ProcurementPolicyValidationIssueDto> errors, string code, string message) { if (from == default || (to.HasValue && to.Value < from)) AddError(errors, code, message); }
     private static void AddError(ICollection<ProcurementPolicyValidationIssueDto> errors, string code, string message, ProcurementPolicyRuleKind? kind = null, Guid? ruleId = null, string? ruleCode = null) => errors.Add(new ProcurementPolicyValidationIssueDto { Code = code, Message = message, RuleKind = kind, RuleId = ruleId, RuleCode = ruleCode });
     private static string RuleKindLabel(ProcurementPolicyRuleKind kind) => kind == ProcurementPolicyRuleKind.SegregationOfDuties ? "segregation-of-duties" : kind.ToString().ToLowerInvariant();
+    private static string RequiredRuleFamilyMessage(ProcurementPolicyRuleKind kind) => kind switch
+    {
+        _ => $"At least one enabled {RuleKindLabel(kind)} rule is required."
+    };
+    private static string DisplayServiceClass(string? value) => string.IsNullOrWhiteSpace(value) ? "(none)" : value.Trim();
     private static bool ServiceClassMatches(string? left, string? right) => string.Equals(left?.Trim() ?? string.Empty, right?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     private static bool DateRangesOverlap(DateTime leftFrom, DateTime? leftTo, DateTime rightFrom, DateTime? rightTo) => leftFrom <= (rightTo ?? DateTime.MaxValue) && rightFrom <= (leftTo ?? DateTime.MaxValue);
     private static bool AmountRangesOverlap(ProcurementPolicyThresholdRule left, ProcurementPolicyThresholdRule right)

@@ -18,6 +18,43 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
+    [Fact]
+    public void SqlCommitteeLineageGuardIsRecognisedForStructuredErrorMapping()
+    {
+        var exception = new DbUpdateException(
+            "Committee write failed.",
+            new InvalidOperationException(
+                "Evaluation committee source, template, policy, method, configuration, workflow, or tenant lineage is invalid."));
+
+        ProcurementEvaluationCommitteeControlService
+            .IsCommitteeLineagePersistenceFailure(exception)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void UnrelatedPersistenceFailureIsNotReclassifiedAsCommitteeLineage()
+    {
+        var exception = new DbUpdateException(
+            "Committee write failed.",
+            new InvalidOperationException("A different database rule rejected the write."));
+
+        ProcurementEvaluationCommitteeControlService
+            .IsCommitteeLineagePersistenceFailure(exception)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SupersededConfigurationSnapshotDoesNotInvalidateAnExistingSourcingCase()
+    {
+        await using var fixture = new Fixture();
+        fixture.RetireConfigurationAfterSourceCreation();
+
+        var committee = await fixture.BindDraftAsync();
+
+        committee.ConfigurationProfileId.Should().Be(fixture.Profile.Id);
+        committee.ConfigurationProfileVersion.Should().Be(fixture.Profile.Version);
+    }
+
     [Theory]
     [InlineData("SuperAdmin")]
     [InlineData("TenantAdmin")]
@@ -53,6 +90,29 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
 
         officerReadiness.AllowedActions.Should().ContainSingle("bind");
+    }
+
+    [Fact]
+    public async Task MissingTenderCaseLinkIsRecoveredFromItsCurrentImmutableRelease()
+    {
+        await using var fixture = new Fixture();
+        fixture.RemoveTenderCaseLink();
+
+        var readiness = await fixture.Service.GetReadinessAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        readiness.SourceExists.Should().BeTrue();
+        var retained = await fixture.Context.Tenders.AsNoTracking()
+            .SingleAsync(item => item.Id == fixture.Tender.Id);
+        retained.SourcingReleaseId.Should().Be(fixture.SourcingCase.SourcingReleaseId);
+        retained.SourcingCaseId.Should().Be(fixture.SourcingCase.Id);
+        fixture.SourcingCases.Verify(service => service.RecoverTenderSourceEntryAsync(
+            fixture.Tender.SourcePurchaseRequisitionId!.Value,
+            fixture.SourcingCase.SourcingReleaseId,
+            fixture.Tender.Id,
+            fixture.Tender.TenderNumber,
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -171,6 +231,33 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
     }
 
     [Fact]
+    public async Task DraftCommitteeDoesNotAdvertiseOrAcceptAppointmentResponses()
+    {
+        await using var fixture = new Fixture();
+        var bound = await fixture.BindDraftAsync();
+        var member = bound.Members.First();
+        fixture.SwitchUser(member.UserId);
+
+        var draft = await fixture.Service.GetAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        draft.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Draft);
+        draft.AllowedActions.Should().NotContain("respondToAppointment");
+        await fixture.Service.Invoking(service => service.RespondToAppointmentAsync(
+                member.Id,
+                new RespondProcurementEvaluationAppointmentRequest
+                {
+                    Accept = true,
+                    SignatureReference = "sig://draft-response",
+                    EvidenceReference = "evidence://draft-response",
+                    RowVersion = member.RowVersion,
+                    IdempotencyKey = "accept-draft"
+                }, "accept-draft"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception => exception.Code == "EVALUATION_COMMITTEE_NOT_ACTIVE");
+    }
+
+    [Fact]
     public async Task AcceptanceAndConflictDeclarationAreSelfOnlyAndSigned()
     {
         await using var fixture = new Fixture();
@@ -222,6 +309,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         await using var fixture = new Fixture();
         var control = await fixture.PrepareEligibleCommitteeAsync();
         fixture.SwitchAdministrator();
+        fixture.Access.Invocations.Clear();
         var meeting = await fixture.Service.CreateMeetingAsync(control.Id,
             new CreateProcurementEvaluationMeetingRequest
             {
@@ -234,6 +322,11 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 CommitteeRowVersion = control.RowVersion,
                 IdempotencyKey = "meeting-technical"
             }, "meeting-technical");
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.administer" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
 
         foreach (var member in control.Members)
         {
@@ -257,6 +350,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         fixture.SwitchAdministrator();
         var currentControl = await fixture.Service.GetAsync(
             ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        fixture.Access.Invocations.Clear();
         var confirmed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
             new ConfirmProcurementEvaluationQuorumRequest
             {
@@ -266,6 +360,11 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 RemoteMeetingEvidenceReference = "evidence://remote-session",
                 IdempotencyKey = "quorum-technical"
             }, "quorum-technical");
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.administer" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
 
         confirmed.QuorumMet.Should().BeTrue();
         confirmed.ChairPresent.Should().BeTrue();
@@ -320,8 +419,9 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         replay.Attempt.Should().Be(1);
         replay.Status.Should().Be(ProcurementEvaluationScoreSheetStatus.Locked);
         locked.IntegrityHash.Should().HaveLength(64);
-        fixture.TenderControl.Status =
-            ProcurementTenderControlStatus.FinancialEvaluated;
+        var tenderControl = await fixture.Context.ProcurementTenderControls
+            .SingleAsync(item => item.Id == fixture.TenderControl.Id);
+        tenderControl.Status = ProcurementTenderControlStatus.FinancialEvaluated;
         await fixture.Context.SaveChangesAsync();
 
         await fixture.Service.Invoking(service => service.RequestScoreRecallAsync(
@@ -386,6 +486,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         await using var fixture = new Fixture();
         var seeded = await fixture.SeedRecallDecisionAsync(
             WorkflowInstanceStatus.Completed, Guid.NewGuid());
+        fixture.Access.Invocations.Clear();
 
         var decided = await fixture.Service.DecideScoreRecallAsync(seeded.Recall.Id,
             fixture.Decision(seeded.Recall, approve: true), "decide-recall");
@@ -393,6 +494,11 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         decided.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.Approved);
         decided.AuthorizedNewAttempt.Should().Be(2);
         decided.DecisionEvidenceReference.Should().Be("evidence://recall-decision");
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.approve" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -507,7 +613,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 IsEnabled = true,
                 EffectiveFrom = DateTime.UtcNow.AddDays(-30)
             };
-            var sourcingCase = new ProcurementSourcingCase
+            SourcingCase = new ProcurementSourcingCase
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
@@ -545,19 +651,21 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 Title = "Evaluation-controlled tender",
                 TenderType = "NCT",
                 Status = "Closed",
-                SourcingCaseId = sourcingCase.Id
+                SourcePurchaseRequisitionId = SourcingCase.PurchaseRequisitionId,
+                SourcingReleaseId = SourcingCase.SourcingReleaseId,
+                SourcingCaseId = SourcingCase.Id
             };
             TenderControl = new ProcurementTenderControl
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 TenderId = Tender.Id,
-                SourcingCaseId = sourcingCase.Id,
+                SourcingCaseId = SourcingCase.Id,
                 MethodRuleId = rule.Id,
-                AuthorityRouteId = sourcingCase.AuthorityRouteId,
+                AuthorityRouteId = SourcingCase.AuthorityRouteId!.Value,
                 Method = rule.Method,
                 MethodRuleCode = rule.RuleCode,
-                AuthorityRouteReference = sourcingCase.AuthorityRouteReference,
+                AuthorityRouteReference = SourcingCase.AuthorityRouteReference!,
                 Status = ProcurementTenderControlStatus.TechnicalEvaluated,
                 AdvertisementReference = "ADV-001",
                 PublicationChannel = "GHANEPS",
@@ -651,9 +759,10 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
                 IsActive = true
             };
-            Context.AddRange(Profile, Policy, rule, sourcingCase, Tender,
+            Context.AddRange(Profile, Policy, rule, SourcingCase, Tender,
                 TenderControl, role, Committee, workflowEntityType, Workflow);
             Context.SaveChanges();
+            Context.ChangeTracker.Clear();
 
             _unitOfWork = new UnitOfWork(Context);
             _current = new Mock<ICurrentUserProvider>();
@@ -699,9 +808,25 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     TenantId = TenantId
                 });
             var notifications = new Mock<INotificationTopicPublisher>();
+            SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                    Tender.SourcePurchaseRequisitionId!.Value,
+                    SourcingCase.SourcingReleaseId,
+                    Tender.Id,
+                    Tender.TenderNumber,
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+                {
+                    SourcingReleaseId = SourcingCase.SourcingReleaseId,
+                    SourcingCaseId = SourcingCase.Id,
+                    SelectedMethod = SourcingCase.SelectedMethod,
+                    EstimatedValue = SourcingCase.EstimatedValue,
+                    CurrencyCode = SourcingCase.CurrencyCode
+                });
             Service = new ProcurementEvaluationCommitteeControlService(
                 _unitOfWork, _current.Object, access.Object, sod.Object,
-                events.Object, workflowInstances.Object, notifications.Object);
+                events.Object, SourcingCases.Object, workflowInstances.Object,
+                notifications.Object);
         }
 
         public Guid TenantId { get; }
@@ -709,13 +834,23 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         public ApplicationDbContext Context { get; }
         public ProcurementConfigurationProfile Profile { get; }
         public ProcurementPolicySet Policy { get; }
+        public ProcurementSourcingCase SourcingCase { get; }
         public Tender Tender { get; }
         public ProcurementTenderControl TenderControl { get; }
         public ProcurementCommittee Committee { get; }
         public ErpSystem.Core.Entities.Workflow.WorkflowDefinition Workflow { get; }
         public List<Guid> MemberUserIds { get; } = new();
+        public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         public ProcurementEvaluationCommitteeControlService Service { get; }
         public Mock<IProcurementAccessControlService> Access { get; }
+
+        public void RemoveTenderCaseLink()
+        {
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.SourcingCaseId = null;
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
 
         public void SwitchTenant(Guid tenantId) => _currentTenantId = tenantId;
 
@@ -748,6 +883,17 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     Allowed = allowed,
                     Message = allowed ? "Allowed" : "Denied"
                 });
+
+        public void RetireConfigurationAfterSourceCreation()
+        {
+            var profile = Context.ProcurementConfigurationProfiles
+                .Single(item => item.Id == Profile.Id);
+            profile.PublishedAt ??= profile.CreatedAt.AddMinutes(-1);
+            profile.LifecycleStatus = ProcurementConfigurationProfileStatus.Retired;
+            profile.RetiredAt = SourcingCase.CreatedAt.AddMinutes(1);
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
 
         public Task<ProcurementEvaluationCommitteeDto> BindDraftAsync() =>
             Service.BindAsync(

@@ -8,6 +8,29 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+// The first five Civil Engineering migrations keep their authoritative attributes in
+// generated designers for full builds. Fast Debug builds omit those designers, so these
+// lightweight partial registrations preserve runtime discovery without duplicating the
+// inline attributes retained by every later Civil migration.
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814205757_AddCivilEngineeringConfigurationLifecycle")] partial class AddCivilEngineeringConfigurationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814234022_AddCivilEngineeringDesignWorkflow")] partial class AddCivilEngineeringDesignWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815005453_AddCivilEngineeringReconnaissance")] partial class AddCivilEngineeringReconnaissance { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815031044_AddCivilEngineeringDesignInputRequests")] partial class AddCivilEngineeringDesignInputRequests { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815135156_AddCivilEngineeringDocumentRegister")] partial class AddCivilEngineeringDocumentRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260820120000_AddDmsGenerationTemplateWordSource")] partial class AddDmsGenerationTemplateWordSource { }
+
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage")] partial class AllowReceiptDocumentDefaultsWithAuditLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster")] partial class AlignRfqCommercialIdentityWithReceiptItemMaster { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827090000_AlignSupplierOnboardingPartnerCategories")] partial class AlignSupplierOnboardingPartnerCategories { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes")] partial class AlignPurchaseOrderSourceTriggerWithSupportedRoutes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826190000_AlignPurchaseOrderCommitmentWithRequisition")] partial class AlignPurchaseOrderCommitmentWithRequisition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826180000_AllowReleaseOnlyPurchaseOrderSourceLineage")] partial class AllowReleaseOnlyPurchaseOrderSourceLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826170000_AllowReleaseOnlyRfqAwardTransition")] partial class AllowReleaseOnlyRfqAwardTransition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825170000_AllowReleaseOnlyProcurementSourceEntry")] partial class AllowReleaseOnlyProcurementSourceEntry { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825143000_HardenProcurementPolicyRoleLineage")] partial class HardenProcurementPolicyRoleLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824183000_SimplifyPurchaseRequisitionControls")] partial class SimplifyPurchaseRequisitionControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824162000_BackfillPlanLinkedPurchaseRequisitionCostCenters")] partial class BackfillPlanLinkedPurchaseRequisitionCostCenters { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825120000_SimplifyProcurementSourcingCaseLineage")] partial class SimplifyProcurementSourcingCaseLineage { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813150000_INVREQFU003AllowPostedFullReturnReversal")] partial class INVREQFU003AllowPostedFullReturnReversal { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813171000_INVREQFU004RequireCleanTransferEvidence")] partial class INVREQFU004RequireCleanTransferEvidence { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813143000_INVREQFU003ReturnReversalAllocationGate")] partial class INVREQFU003ReturnReversalAllocationGate { }
@@ -193,36 +216,3 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260812195409_INVREQFU001GovernedReceiptSourceEvidence")] partial class INVREQFU001GovernedReceiptSourceEvidence { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813063001_INVREQFU002MaintenanceReservationLifecycle")] partial class INVREQFU002MaintenanceReservationLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813103157_INVREQFU003IssueFinanceAssetLifecycle")] partial class INVREQFU003IssueFinanceAssetLifecycle { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260814205757_AddCivilEngineeringConfigurationLifecycle")] partial class AddCivilEngineeringConfigurationLifecycle { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260814234022_AddCivilEngineeringDesignWorkflow")] partial class AddCivilEngineeringDesignWorkflow { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260815005453_AddCivilEngineeringReconnaissance")] partial class AddCivilEngineeringReconnaissance { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260815031044_AddCivilEngineeringDesignInputRequests")] partial class AddCivilEngineeringDesignInputRequests { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260815135156_AddCivilEngineeringDocumentRegister")] partial class AddCivilEngineeringDocumentRegister { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260820233000_AddCivilEngineeringIpcEndorsements")] partial class AddCivilEngineeringIpcEndorsements { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821033000_AddCivilEngineeringMaintenanceIntakes")] partial class AddCivilEngineeringMaintenanceIntakes { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821050000_AddCivilEngineeringMaintenanceAssessments")] partial class AddCivilEngineeringMaintenanceAssessments { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs")] partial class AddCivilEngineeringMaintenanceCostingHandoffs { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821060000_AddCivilEngineeringMaintenanceExecutionLinks")] partial class AddCivilEngineeringMaintenanceExecutionLinks { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821063000_AddCivilEngineeringMaintenanceCompletionControls")] partial class AddCivilEngineeringMaintenanceCompletionControls { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821110000_AddCivilEngineeringDevelopmentApprovalFiles")] partial class AddCivilEngineeringDevelopmentApprovalFiles { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs")] partial class AddCivilEngineeringDevelopmentApprovalFileHandoffs { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821143000_AddCivilEngineeringPermittingEngineeringReviews")] partial class AddCivilEngineeringPermittingEngineeringReviews { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821153000_AddCivilEngineeringPermittingHodDecisions")] partial class AddCivilEngineeringPermittingHodDecisions { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821170000_AddCivilEngineeringDirectTaskControls")] partial class AddCivilEngineeringDirectTaskControls { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow")] partial class AddCivilEngineeringDirectTaskFeedbackWorkflow { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821190000_AddCivilEngineeringUrgentTaskControls")] partial class AddCivilEngineeringUrgentTaskControls { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821200000_AddCivilEngineeringMobileFieldFeedback")] partial class AddCivilEngineeringMobileFieldFeedback { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821210000_AddCivilEngineeringMigrationWorkbench")] partial class AddCivilEngineeringMigrationWorkbench { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821220000_AddCivilEngineeringDmsGovernanceBaseline")] partial class AddCivilEngineeringDmsGovernanceBaseline { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260821230000_AddCivilEngineeringWorksCaseInitiation")] partial class AddCivilEngineeringWorksCaseInitiation { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822000000_AddCivilEngineeringPlanningGisValidation")] partial class AddCivilEngineeringPlanningGisValidation { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822001000_HardenCivilEngineeringPlanningGisEvidenceBinding")] partial class HardenCivilEngineeringPlanningGisEvidenceBinding { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822002000_HardenCivilEngineeringSiteInstructionLifecycle")] partial class HardenCivilEngineeringSiteInstructionLifecycle { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003000_AddCivilEngineeringInspectionControls")] partial class AddCivilEngineeringInspectionControls { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003100_HardenCivilEngineeringInspectionAuditActions")] partial class HardenCivilEngineeringInspectionAuditActions { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003200_GovernCivilWeeklyProgressControls")] partial class GovernCivilWeeklyProgressControls { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003300_SnapshotCivilWeeklyMilestoneSchedule")] partial class SnapshotCivilWeeklyMilestoneSchedule { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003400_AddCivilEngineeringExtensionOfTimeControls")] partial class AddCivilEngineeringExtensionOfTimeControls { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003500_AddProjectAssetLinkFixedAssetReconciliation")] partial class AddProjectAssetLinkFixedAssetReconciliation { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue")] partial class ReconcileCivilEngineeringConfigurationDecisionCatalogue { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260822003700_GovernCivilInspectionPlanWorkflow")] partial class GovernCivilInspectionPlanWorkflow { }

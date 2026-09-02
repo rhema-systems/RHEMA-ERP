@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0404 immutable HOD decision evidence over the existing shared permitting-review workflow.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821153000_AddCivilEngineeringPermittingHodDecisions")]
 public partial class AddCivilEngineeringPermittingHodDecisions : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

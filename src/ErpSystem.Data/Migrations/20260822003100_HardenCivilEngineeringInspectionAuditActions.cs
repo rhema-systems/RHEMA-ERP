@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Extends the append-only inspection revision action allowlist after the initial
 /// inspection migration was applied. No owner data or lifecycle state is changed.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003100_HardenCivilEngineeringInspectionAuditActions")]
 public partial class HardenCivilEngineeringInspectionAuditActions : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

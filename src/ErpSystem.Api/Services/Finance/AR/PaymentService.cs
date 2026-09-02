@@ -350,8 +350,23 @@ namespace ErpSystem.Api.Services.Finance.AR
             };
         }
 
-        public async Task<CustomerPaymentDto> CreateAsync(PaymentCreateDto dto, CancellationToken cancellationToken = default)
+        public Task<CustomerPaymentDto> CreateAsync(
+            PaymentCreateDto dto,
+            CancellationToken cancellationToken = default) =>
+            CreateAsync(dto, cancellationToken, executionStrategyScope: false);
+
+        private async Task<CustomerPaymentDto> CreateAsync(
+            PaymentCreateDto dto,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => CreateAsync(dto, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
+
             if (dto.IsCreditNote)
             {
                 // FIN-LIM-0013: CustomerPayment.IsCreditNote is retained only so historical rows
@@ -557,8 +572,19 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment, customer);
             }
-            catch
+            catch (Exception ex)
             {
+                if (ex is DbUpdateConcurrencyException concurrencyException)
+                {
+                    var staleEntities = concurrencyException.Entries
+                        .Select(entry => $"{entry.Metadata.ClrType.Name}:{entry.Property("Id").CurrentValue}")
+                        .ToArray();
+                    _logger.LogError(
+                        concurrencyException,
+                        "AR receipt creation hit optimistic concurrency for {Entities}",
+                        string.Join(", ", staleEntities));
+                }
+
                 if (transactionStarted)
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
@@ -1589,7 +1615,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                     CreatedBy = UserName
                 };
 
-                payment.Allocations.Add(allocation);
+                // Keep the new allocation in Added state when the tracked payment graph is
+                // updated below. With a client-generated Guid, graph Update otherwise treats
+                // this row as existing and issues an UPDATE that cannot match any database row.
+                await _unitOfWork.Repository<PaymentAllocation>().AddAsync(allocation);
                 createdAllocations.Add(allocation);
 
                 // Update invoice balances
@@ -1709,7 +1738,34 @@ namespace ErpSystem.Api.Services.Finance.AR
                     $"Invoice '{wrongCustomer.InvoiceNumber}' does not belong to the customer selected for this receipt.");
             }
 
+            foreach (var invoice in invoices)
+            {
+                EnsureInvoiceCollectibleForReceipt(invoice);
+            }
+
             return invoices.ToDictionary(i => i.Id);
+        }
+
+        internal static void EnsureInvoiceCollectibleForReceipt(Invoice invoice)
+        {
+            var collectibleStatus = invoice.Status is
+                InvoiceStatus.Sent or
+                InvoiceStatus.PartiallyPaid or
+                InvoiceStatus.Overdue;
+
+            if (!collectibleStatus)
+            {
+                throw new InvalidOperationException(
+                    $"Invoice '{invoice.InvoiceNumber}' is not collectible while its status is {invoice.Status}.");
+            }
+
+            // Opening balances become operational receivables only after their governed
+            // approval has produced immutable GL evidence. Do not infer posting from Sent alone.
+            if (invoice.IsOpeningBalance && !invoice.JournalEntryId.HasValue)
+            {
+                throw new InvalidOperationException(
+                    $"Opening-balance invoice '{invoice.InvoiceNumber}' has no posting evidence and cannot receive a customer receipt.");
+            }
         }
 
         private async Task<PaymentAllocationResultDto> AllocatePostedCustomerAdvanceAsync(
@@ -2509,7 +2565,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.TenantId == TenantId &&
                     i.BusinessPartnerId == customerId &&
                     (i.TotalAmount - i.PaidAmount) > 0 &&
-                    (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue))
+                    (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue) &&
+                    (!i.IsOpeningBalance || i.JournalEntryId.HasValue))
                 .OrderBy(i => i.InvoiceDate)
                 .ToListAsync(cancellationToken);
 

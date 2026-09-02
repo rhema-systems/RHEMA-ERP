@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0402 append-only inter-section routing over the immutable CIV-0401 file register.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs")]
 public partial class AddCivilEngineeringDevelopmentApprovalFileHandoffs : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

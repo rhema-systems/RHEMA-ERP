@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,7 @@ import {
   AlertCircle,
   Loader2,
   Edit,
+  FilePenLine,
   AlertTriangle,
   MapPin,
   CreditCard
@@ -52,11 +53,19 @@ import {
 } from '@/services/purchasingService';
 import { PurchaseOrderComplianceGate } from '@/components/procurement/PurchaseOrderComplianceGate';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
+import { PurchaseOrderBudgetCommitment } from '@/components/procurement/PurchaseOrderBudgetCommitment';
 import { PurchaseOrderAmendmentWorkspace } from '@/components/procurement/PurchaseOrderAmendmentWorkspace';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { useAuth } from '@/hooks/use-auth';
-import { getPurchaseOrderActionAccess } from '@/lib/procurement-purchase-order-actions';
+import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
+import { exportProcurementDocumentPdf, printProcurementDocument } from '@/lib/procurement-document-output';
+import {
+  getPurchaseOrderStatusPresentation,
+  isPurchaseOrderStatus,
+  PurchaseOrderStatusKey,
+} from '@/lib/purchase-order-status';
 
 const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Freight / Shipping' },
@@ -71,16 +80,21 @@ const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
 const getLandedCostTypeLabel = (costType: number) =>
   LANDED_COST_TYPES.find(t => t.value === costType)?.label || 'Other';
 
-const POStatuses = [
-  { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800', icon: FileText },
-  { value: 'Pending Approval', label: 'Pending Approval', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
-  { value: 'Approved', label: 'Approved', color: 'bg-green-100 text-green-800', icon: CheckCircle },
-  { value: 'Sent', label: 'Sent', color: 'bg-blue-100 text-blue-800', icon: Send },
-  { value: 'Acknowledged', label: 'Acknowledged', color: 'bg-indigo-100 text-indigo-800', icon: CheckCircle },
-  { value: 'Partially Received', label: 'Partially Received', color: 'bg-purple-100 text-purple-800', icon: Package },
-  { value: 'Received', label: 'Received', color: 'bg-teal-100 text-teal-800', icon: TruckIcon },
-  { value: 'Cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-800', icon: XCircle }
-];
+const POStatusIcons: Partial<
+  Record<PurchaseOrderStatusKey, React.ComponentType<{ className?: string }>>
+> = {
+  Draft: FileText,
+  Submitted: Clock,
+  'Pending Approval': Clock,
+  Approved: CheckCircle,
+  Rejected: XCircle,
+  Sent: Send,
+  Acknowledged: CheckCircle,
+  'Partially Received': Package,
+  Received: TruckIcon,
+  Cancelled: XCircle,
+  Closed: CheckCircle,
+};
 
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
@@ -97,6 +111,9 @@ export default function PurchaseOrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [amendmentEditorRequest, setAmendmentEditorRequest] = useState(0);
+  const [documentAction, setDocumentAction] = useState<'print' | 'pdf' | null>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
   
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
@@ -127,12 +144,12 @@ export default function PurchaseOrderDetailPage() {
   }, [id]);
 
   const getStatusBadge = (status: string) => {
-    const statusConfig = POStatuses.find(s => s.value === status);
-    const Icon = statusConfig?.icon || FileText;
+    const statusConfig = getPurchaseOrderStatusPresentation(status);
+    const Icon = POStatusIcons[statusConfig.key] || FileText;
     return (
-      <Badge className={statusConfig?.color || 'bg-gray-100'}>
+      <Badge variant="outline" className={statusConfig.badgeClass}>
         <Icon className="h-3 w-3 mr-1" />
-        {statusConfig?.label || status}
+        {statusConfig.label}
       </Badge>
     );
   };
@@ -140,9 +157,7 @@ export default function PurchaseOrderDetailPage() {
   const complianceIsCurrent =
     complianceReadiness?.purchaseOrderId === id;
   const complianceForwardBlocked =
-    (order?.status === 'Draft' ||
-      order?.status === 'Pending Approval' ||
-      order?.status === 'Submitted') &&
+    isPurchaseOrderStatus(order?.status, 'Draft', 'Pending Approval', 'Submitted') &&
     (!complianceIsCurrent || complianceReadiness?.isCompliant !== true);
   const complianceBlockedReason = complianceIsCurrent
     ? complianceReadiness?.blockedReasons[0] ||
@@ -150,8 +165,7 @@ export default function PurchaseOrderDetailPage() {
     : 'Wait for the purchase-order compliance check to finish.';
   const sodIsCurrent = sodReadiness?.purchaseOrderId === id;
   const sodApprovalBlocked =
-    (order?.status === 'Pending Approval' ||
-      order?.status === 'Submitted') &&
+    isPurchaseOrderStatus(order?.status, 'Pending Approval', 'Submitted') &&
     (!sodIsCurrent || sodReadiness?.canApprove !== true);
   const sodApprovalBlockedReason = sodIsCurrent
     ? sodReadiness?.checks.find((check) => check.key === 'approval')?.message ||
@@ -168,8 +182,8 @@ export default function PurchaseOrderDetailPage() {
     ? sodReadiness?.checks.find((check) => check.key === 'receipt')?.message ||
       'The PO creator cannot confirm its goods receipt.'
     : 'Wait for the purchase-order role-separation check to finish.';
-  const actionAccess = getPurchaseOrderActionAccess(
-    order?.status || '',
+  const actionAccess = resolvePurchaseOrderActionAccess(
+    order?.status,
     hasPermission
   );
 
@@ -206,6 +220,32 @@ export default function PurchaseOrderDetailPage() {
     return Math.min((receivedQty / orderedQty) * 100, 100);
   };
 
+  const handlePrint = () => {
+    if (!documentRef.current || !order) return;
+    try {
+      setDocumentAction('print');
+      printProcurementDocument(documentRef.current, order.orderNumber);
+      toast.success('Purchase order print view opened');
+    } catch (printError: any) {
+      toast.error(printError?.message || 'Failed to open the purchase order print view');
+    } finally {
+      setDocumentAction(null);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!documentRef.current || !order) return;
+    try {
+      setDocumentAction('pdf');
+      await exportProcurementDocumentPdf(documentRef.current, order.orderNumber);
+      toast.success('Purchase order PDF downloaded');
+    } catch (exportError: any) {
+      toast.error(exportError?.message || 'Failed to export the purchase order PDF');
+    } finally {
+      setDocumentAction(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -236,11 +276,17 @@ export default function PurchaseOrderDetailPage() {
   }
 
   const canEdit = actionAccess.canEdit;
-  const canReceive = order.status === 'Approved' || order.status === 'Sent' || 
-                     order.status === 'Acknowledged' || order.status === 'Partially Received';
+  const canAmend = actionAccess.canAmend;
+  const canReceive = isPurchaseOrderStatus(
+    order.status,
+    'Approved',
+    'Sent',
+    'Acknowledged',
+    'Partially Received'
+  );
 
   return (
-    <div className="space-y-6">
+    <div ref={documentRef} className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -252,7 +298,7 @@ export default function PurchaseOrderDetailPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold">{order.orderNumber}</h1>
               {getStatusBadge(order.status)}
-              {(order.status === 'Pending Approval' || order.status === 'Submitted') && order.currentWorkflowStepName && (
+              {isPurchaseOrderStatus(order.status, 'Pending Approval', 'Submitted') && order.currentWorkflowStepName && (
                 <Badge variant="outline" className="text-xs">
                   Step: {order.currentWorkflowStepName}
                 </Badge>
@@ -262,7 +308,7 @@ export default function PurchaseOrderDetailPage() {
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-document-exclude="true">
           {canEdit && (
             <Link href={`/procurement/purchase-orders/${id}/edit`}>
               <Button variant="outline">
@@ -271,9 +317,23 @@ export default function PurchaseOrderDetailPage() {
               </Button>
             </Link>
           )}
+          {canAmend && (
+            <Button
+              variant="outline"
+              title="Change this approved purchase order through a controlled amendment"
+              onClick={() => {
+                setActiveTab('amendments');
+                setAmendmentEditorRequest((request) => request + 1);
+              }}
+            >
+              <FilePenLine className="h-4 w-4 mr-2" />
+              Amend PO
+            </Button>
+          )}
           
           <WorkflowApprovalActions
             {...workflow.actionProps}
+            submitCopyMode="approval"
             forwardActionsDisabled={forwardActionsBlocked}
             forwardActionsDisabledReason={forwardActionsBlockedReason}
           />
@@ -293,13 +353,13 @@ export default function PurchaseOrderDetailPage() {
             </Button>
           )}
           
-          <Button variant="outline">
-            <Printer className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={handlePrint} disabled={documentAction !== null}>
+            {documentAction === 'print' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Printer className="h-4 w-4 mr-2" />}
             Print
           </Button>
           
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={() => void handleExportPdf()} disabled={documentAction !== null}>
+            {documentAction === 'pdf' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
             Export PDF
           </Button>
         </div>
@@ -400,6 +460,11 @@ export default function PurchaseOrderDetailPage() {
             status={order.status}
             onReadinessChange={setSodReadiness}
           />
+          {order.budgetCommitment && (
+            <PurchaseOrderBudgetCommitment
+              commitment={order.budgetCommitment}
+            />
+          )}
 
           {/* Order Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -578,44 +643,49 @@ export default function PurchaseOrderDetailPage() {
             <CardContent>
               <div className="space-y-3">
                 <div className="flex justify-between">
+                  <span className="text-muted-foreground">PO Currency:</span>
+                  <span className="font-medium">{order.currency}</span>
+                </div>
+
+                <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal:</span>
                   <span className="font-medium">
-                    ${order.subTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.subTotal, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Tax:</span>
                   <span className="font-medium">
-                    ${order.taxAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.taxAmount, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Shipping:</span>
                   <span className="font-medium">
-                    ${order.shippingCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.shippingCost, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Miscellaneous:</span>
                   <span className="font-medium">
-                    ${(order.miscellaneousCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.miscellaneousCost || 0, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Additional Cost:</span>
                   <span className="font-medium">
-                    ${(order.totalAdditionalCost || (order.shippingCost + (order.miscellaneousCost || 0))).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.totalAdditionalCost || (order.shippingCost + (order.miscellaneousCost || 0)), order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Discount:</span>
                   <span className="font-medium text-green-600">
-                    -${order.discountAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    -{formatProcurementMoney(order.discountAmount, order.currency)}
                   </span>
                 </div>
 
@@ -650,7 +720,7 @@ export default function PurchaseOrderDetailPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Total Amount:</span>
                   <span className="text-2xl font-bold text-primary">
-                    ${order.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.totalAmount, order.currency)}
                   </span>
                 </div>
               </div>
@@ -666,7 +736,7 @@ export default function PurchaseOrderDetailPage() {
                   Planned Landed Costs (carried to GRN)
                 </CardTitle>
                 <CardDescription>
-                  Total planned ({(landedCostPlan.currency || 'USD').toUpperCase()}):{' '}
+                  Total planned ({(landedCostPlan.currency || order.currency).toUpperCase()}):{' '}
                   {(landedCostPlan.totalPlannedCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </CardDescription>
               </CardHeader>
@@ -705,7 +775,7 @@ export default function PurchaseOrderDetailPage() {
                           <TableCell className="text-right">
                             {i.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
-                          <TableCell>{(i.currency || landedCostPlan.currency || 'USD').toUpperCase()}</TableCell>
+                          <TableCell>{(i.currency || landedCostPlan.currency || order.currency).toUpperCase()}</TableCell>
                           <TableCell className="text-right">
                             {(i.exchangeRate || 1).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                           </TableCell>
@@ -815,10 +885,10 @@ export default function PurchaseOrderDetailPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            ${item.unitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatProcurementMoney(item.unitPrice, order.currency)}
                           </TableCell>
                           <TableCell className="text-right font-medium">
-                            ${item.lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatProcurementMoney(item.lineTotal, order.currency)}
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
@@ -925,6 +995,7 @@ export default function PurchaseOrderDetailPage() {
           <PurchaseOrderAmendmentWorkspace
             order={order}
             onApplied={fetchOrder}
+            editorRequestToken={amendmentEditorRequest}
           />
         </TabsContent>
 

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Records the authoritative milestone planned/actual dates as an immutable weekly-report
 /// snapshot. This is a forward repair for the already applied governed-progress migration.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003300_SnapshotCivilWeeklyMilestoneSchedule")]
 public partial class SnapshotCivilWeeklyMilestoneSchedule : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { procurementBudgetService, commonService, type ProcurementBudgetDetailDto, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto, type DepartmentDto } from '@/services/procurementPlanningService';
 import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 export default function EditProcurementBudgetPage() {
   const router = useRouter();
@@ -34,6 +35,7 @@ export default function EditProcurementBudgetPage() {
   const [allocationDialogOpen, setAllocationDialogOpen] = useState(false);
   const [editingAllocation, setEditingAllocation] = useState<{ index: number; data: CreateProcurementBudgetAllocationDto } | null>(null);
   const [allocationForm, setAllocationForm] = useState<CreateProcurementBudgetAllocationDto>({ categoryName: '', categoryDescription: '', allocatedAmount: 0, notes: '' });
+  const [allocationToRemove, setAllocationToRemove] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -96,9 +98,12 @@ export default function EditProcurementBudgetPage() {
     toast.success(editingAllocation ? 'Allocation updated' : 'Allocation added');
   };
 
-  const handleRemoveAllocation = (index: number) => {
-    if (!confirm('Remove this allocation?')) return;
-    setFormData(prev => ({ ...prev, allocations: prev.allocations?.filter((_, i) => i !== index) || [] }));
+  const handleRemoveAllocation = () => {
+    if (allocationToRemove === null) return false;
+    setFormData(prev => ({
+      ...prev,
+      allocations: prev.allocations?.filter((_, index) => index !== allocationToRemove) || [],
+    }));
     toast.success('Allocation removed');
   };
 
@@ -239,7 +244,7 @@ export default function EditProcurementBudgetPage() {
                           <TableCell>
                             <div className="flex gap-2">
                               <Button type="button" variant="ghost" size="sm" onClick={() => handleOpenEditAllocation(index)}><Edit className="h-4 w-4" /></Button>
-                              <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveAllocation(index)} className="text-red-600"><Trash2 className="h-4 w-4" /></Button>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => setAllocationToRemove(index)} className="text-red-600"><Trash2 className="h-4 w-4" /></Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -274,6 +279,16 @@ export default function EditProcurementBudgetPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={allocationToRemove !== null}
+        onOpenChange={(open) => { if (!open) setAllocationToRemove(null); }}
+        title="Remove budget allocation?"
+        description="The allocation will be removed from this draft. Save the budget to persist the change."
+        confirmText="Remove allocation"
+        variant="destructive"
+        onConfirm={handleRemoveAllocation}
+      />
     </div>
   );
 }

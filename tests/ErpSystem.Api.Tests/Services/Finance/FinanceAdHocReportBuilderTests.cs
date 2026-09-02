@@ -130,6 +130,22 @@ public sealed class FinanceAdHocReportBuilderTests
             .Should().Be(FinancePermissions.RunFinanceReports);
     }
 
+    [Fact]
+    public void DefinitionLifecycle_WrapsEveryTransactionInTheConfiguredRetryStrategy()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api",
+            "Services", "Finance", "Reporting", "FinanceAdHocReportService.cs"));
+
+        source.Should().Contain("CreateExecutionStrategy()",
+            "SQL Server retrying execution is enabled for the application DbContext");
+        source.Split("ExecuteInTransactionAsync", StringSplitOptions.None).Length.Should().Be(4,
+            "create, update, and delete must each execute as one retryable transaction");
+        source.Should().NotContain(".Database.BeginTransactionAsync",
+            "a user-initiated transaction outside the execution strategy causes saves to fail");
+        source.Split("_db.ChangeTracker.Clear()", StringSplitOptions.None).Length.Should().BeGreaterThan(3,
+            "rolled-back tracked state must not leak into a retried lifecycle operation");
+    }
+
     [Theory]
     [InlineData("GetWorkspace", FinancePermissions.BuildAdHocReports)]
     [InlineData("Create", FinancePermissions.BuildAdHocReports)]
@@ -247,6 +263,15 @@ public sealed class FinanceAdHocReportBuilderTests
         Status = "published",
         Query = FinanceAdHocReportValues.QueryPrefix + definitionId
     };
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+            directory = directory.Parent;
+        return directory?.FullName
+            ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+    }
 
     private static Report StaticSystemReport(string name, string query, Guid tenantId) => new()
     {

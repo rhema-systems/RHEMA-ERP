@@ -16,6 +16,11 @@ public interface ICurrentUserService
     string? UserName { get; }
 
     /// <summary>
+    /// Gets the current user's display/full name for human-facing labels.
+    /// </summary>
+    string FullName { get; }
+
+    /// <summary>
     /// Gets the current user's email
     /// </summary>
     string? Email { get; }

@@ -26,7 +26,12 @@ import {
   projectService,
 } from '@/services/projectService';
 import { civilEngineeringDirectTaskService } from '@/services/civil-engineering-direct-task.service';
-import type { CivilEngineeringDirectTaskFeedback, CivilEngineeringDirectTaskFeedbackAction, CivilEngineeringDirectTaskFeedbackLookups, ProcessCivilEngineeringDirectTaskFeedbackRequest } from '@/types/civil-engineering-direct-task';
+import type {
+  CivilEngineeringDirectTaskFeedback,
+  CivilEngineeringDirectTaskFeedbackAction,
+  CivilEngineeringDirectTaskFeedbackLookups,
+  ProcessCivilEngineeringDirectTaskFeedbackRequest,
+} from '@/types/civil-engineering-direct-task';
 
 const DEFAULT_TASK_STATUSES = ['Assigned', 'InProgress', 'Blocked', 'PendingReview', 'Completed'];
 const DEFAULT_WORK_TYPES = ['Field', 'Standard', 'Travel', 'Support'];
@@ -67,14 +72,88 @@ function getCurrentUserId(): string {
   }
 }
 
-const civilNone = '__civil_select__';
-type QueuedCivilFieldFeedback = { request: ProcessCivilEngineeringDirectTaskFeedbackRequest; queuedAt: string };
+type CivilOfflineActor = {
+  tenantId: string;
+  userId: string;
+};
 
-function CivilMobileFieldFeedback({ projectId, taskId, title, rowVersion, onSaved }: { projectId: string; taskId: string; title: string; rowVersion: string; onSaved: () => Promise<void> }) {
-  const storageKey = `civil-mobile-field-feedback:${taskId}`;
-  const [lookups, setLookups] = useState<CivilEngineeringDirectTaskFeedbackLookups>();
+function getCurrentCivilOfflineActor(): CivilOfflineActor | null {
+  if (typeof window === 'undefined') return null;
+  const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+  if (!token) return null;
+
+  try {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) return null;
+    const user = JSON.parse(rawUser);
+    const rawTenant = localStorage.getItem('currentTenant');
+    const tenant = rawTenant ? JSON.parse(rawTenant) : null;
+    const userId = String(user?.id || user?.userId || '').trim();
+    const tenantId = String(
+      user?.currentTenantId || user?.tenantId || tenant?.id || tenant?.tenantId || ''
+    ).trim();
+    return userId && tenantId ? { tenantId, userId } : null;
+  } catch {
+    return null;
+  }
+}
+
+export const buildCivilFeedbackStorageKey = (
+  tenantId: string,
+  userId: string,
+  taskId: string
+) =>
+  `civil-mobile-field-feedback:v2:${encodeURIComponent(tenantId)}:${encodeURIComponent(userId)}:${encodeURIComponent(taskId)}`;
+
+const civilNone = '__civil_select__';
+
+type QueuedCivilFieldFeedback = {
+  tenantId: string;
+  userId: string;
+  projectId: string;
+  taskId: string;
+  assignmentRowVersion: string;
+  request: ProcessCivilEngineeringDirectTaskFeedbackRequest;
+  queuedAt: string;
+};
+
+const queuedFeedbackMatches = (
+  queuedFeedback: QueuedCivilFieldFeedback,
+  actor: CivilOfflineActor,
+  projectId: string,
+  taskId: string
+) =>
+  queuedFeedback.tenantId === actor.tenantId &&
+  queuedFeedback.userId === actor.userId &&
+  queuedFeedback.projectId === projectId &&
+  queuedFeedback.taskId === taskId;
+
+function CivilMobileFieldFeedback({
+  projectId,
+  taskId,
+  title,
+  rowVersion,
+  onSaved,
+}: {
+  projectId: string;
+  taskId: string;
+  title: string;
+  rowVersion: string;
+  onSaved: () => Promise<void>;
+}) {
+  const offlineActor = useMemo(() => getCurrentCivilOfflineActor(), []);
+  const storageKey = offlineActor
+    ? buildCivilFeedbackStorageKey(
+        offlineActor.tenantId,
+        offlineActor.userId,
+        taskId
+      )
+    : null;
+  const [lookups, setLookups] =
+    useState<CivilEngineeringDirectTaskFeedbackLookups>();
   const [history, setHistory] = useState<CivilEngineeringDirectTaskFeedback[]>([]);
-  const [action, setAction] = useState<CivilEngineeringDirectTaskFeedbackAction | ''>('');
+  const [action, setAction] =
+    useState<CivilEngineeringDirectTaskFeedbackAction | ''>('');
   const [message, setMessage] = useState('');
   const [progress, setProgress] = useState('');
   const [measurementValue, setMeasurementValue] = useState('');
@@ -83,9 +162,23 @@ function CivilMobileFieldFeedback({ projectId, taskId, title, rowVersion, onSave
   const [currentRowVersion, setCurrentRowVersion] = useState(rowVersion);
   const [queued, setQueued] = useState<QueuedCivilFieldFeedback>();
   const [saving, setSaving] = useState(false);
-  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
-  const selectedDocument = useMemo(() => lookups?.documents.find((item) => item.centralDocumentVersionId === documentVersionId), [documentVersionId, lookups]);
-  const availableActions = useMemo(() => (lookups?.availableActions || []).filter((item) => item !== 'Accept' && item !== 'Return'), [lookups]);
+  const [isOnline, setIsOnline] = useState(
+    () => typeof navigator === 'undefined' || navigator.onLine
+  );
+  const selectedDocument = useMemo(
+    () =>
+      lookups?.documents.find(
+        item => item.centralDocumentVersionId === documentVersionId
+      ),
+    [documentVersionId, lookups]
+  );
+  const availableActions = useMemo(
+    () =>
+      (lookups?.availableActions || []).filter(
+        item => item !== 'Accept' && item !== 'Return'
+      ),
+    [lookups]
+  );
 
   const load = useCallback(async () => {
     const [feedbackLookups, feedbackHistory] = await Promise.all([
@@ -96,27 +189,75 @@ function CivilMobileFieldFeedback({ projectId, taskId, title, rowVersion, onSave
     setHistory(feedbackHistory);
   }, [projectId, taskId]);
 
-  const applySaved = useCallback(async (saved: { rowVersion: string }) => {
-    setCurrentRowVersion(saved.rowVersion);
-    localStorage.removeItem(storageKey);
-    setQueued(undefined);
-    setAction(''); setMessage(''); setProgress(''); setMeasurementValue(''); setMeasurementUnitId(civilNone); setDocumentVersionId(civilNone);
-    await Promise.all([load(), onSaved()]);
-  }, [load, onSaved, storageKey]);
+  const applySaved = useCallback(
+    async (saved: { rowVersion: string }) => {
+      setCurrentRowVersion(saved.rowVersion);
+      if (storageKey) localStorage.removeItem(storageKey);
+      setQueued(undefined);
+      setAction('');
+      setMessage('');
+      setProgress('');
+      setMeasurementValue('');
+      setMeasurementUnitId(civilNone);
+      setDocumentVersionId(civilNone);
+      await Promise.all([load(), onSaved()]);
+    },
+    [load, onSaved, storageKey]
+  );
 
   const flushQueued = useCallback(async () => {
-    if (typeof window === 'undefined' || !navigator.onLine) return;
+    if (
+      typeof window === 'undefined' ||
+      !navigator.onLine ||
+      !storageKey ||
+      !offlineActor
+    ) return;
+    const currentActor = getCurrentCivilOfflineActor();
+    if (
+      !currentActor ||
+      currentActor.tenantId !== offlineActor.tenantId ||
+      currentActor.userId !== offlineActor.userId
+    ) {
+      setQueued(undefined);
+      return;
+    }
     const stored = localStorage.getItem(storageKey);
     if (!stored) return;
     try {
       const pending = JSON.parse(stored) as QueuedCivilFieldFeedback;
-      const saved = await civilEngineeringDirectTaskService.submitAssigneeFeedback(projectId, taskId, pending.request);
+      if (!queuedFeedbackMatches(pending, currentActor, projectId, taskId)) {
+        localStorage.removeItem(storageKey);
+        setQueued(undefined);
+        return;
+      }
+      const mobileSummary = await projectService.getMobileSummary();
+      const currentAssignment = mobileSummary.assignments.find(
+        item =>
+          item.projectId === projectId &&
+          item.civilDirectTaskId === taskId &&
+          item.civilDirectTaskRowVersion === pending.assignmentRowVersion
+      );
+      if (!currentAssignment) {
+        toast.error(
+          'Queued Civil feedback was not synchronized because the task is no longer assigned to this user or has changed.'
+        );
+        return;
+      }
+      const saved =
+        await civilEngineeringDirectTaskService.submitAssigneeFeedback(
+          projectId,
+          taskId,
+          pending.request
+        );
       await applySaved(saved);
       toast.success('Queued Civil field feedback synchronized');
     } catch (error: any) {
-      toast.error(error.message || 'Queued Civil field feedback needs attention before it can be synchronized');
+      toast.error(
+        error.message ||
+          'Queued Civil field feedback needs attention before it can be synchronized'
+      );
     }
-  }, [applySaved, projectId, storageKey, taskId]);
+  }, [applySaved, offlineActor, projectId, storageKey, taskId]);
 
   useEffect(() => {
     setCurrentRowVersion(rowVersion);
@@ -124,68 +265,321 @@ function CivilMobileFieldFeedback({ projectId, taskId, title, rowVersion, onSave
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) setQueued(JSON.parse(stored) as QueuedCivilFieldFeedback);
+      const stored = storageKey ? localStorage.getItem(storageKey) : null;
+      if (stored && offlineActor && storageKey) {
+        const pending = JSON.parse(stored) as QueuedCivilFieldFeedback;
+        if (queuedFeedbackMatches(pending, offlineActor, projectId, taskId)) {
+          setQueued(pending);
+        } else {
+          localStorage.removeItem(storageKey);
+        }
+      }
     } catch {
-      localStorage.removeItem(storageKey);
+      if (storageKey) localStorage.removeItem(storageKey);
     }
-    void load().catch((error: any) => toast.error(error.message || 'Failed to load governed Civil task controls'));
+    void load().catch((error: any) =>
+      toast.error(error.message || 'Failed to load governed Civil task controls')
+    );
     void flushQueued();
-    const handleOnline = () => { setIsOnline(true); void flushQueued(); };
+    const handleOnline = () => {
+      setIsOnline(true);
+      void flushQueued();
+    };
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, [flushQueued, load, storageKey]);
 
   const submit = async () => {
-    if (!action) { toast.error('Select a governed Civil task action'); return; }
-    if ((action === 'UpdateProgress' && (!progress || Number(progress) >= 100)) || ((action === 'UpdateProgress' || action === 'Complete') && !message.trim())) {
-      toast.error(action === 'UpdateProgress' ? 'Enter a field progress value from 0 to 99.99 and a site note.' : 'Enter a field completion note.');
+    if (!action) {
+      toast.error('Select a governed Civil task action');
       return;
     }
-    if (measurementValue && measurementUnitId === civilNone) { toast.error('Select an active measurement unit.'); return; }
-    if (action === 'Complete' && lookups?.requireFeedbackEvidence && !selectedDocument) { toast.error('Select the required current Published central-DMS evidence.'); return; }
+    if (
+      (action === 'UpdateProgress' && (!progress || Number(progress) >= 100)) ||
+      ((action === 'UpdateProgress' || action === 'Complete') && !message.trim())
+    ) {
+      toast.error(
+        action === 'UpdateProgress'
+          ? 'Enter a field progress value from 0 to 99.99 and a site note.'
+          : 'Enter a field completion note.'
+      );
+      return;
+    }
+    if (measurementValue && measurementUnitId === civilNone) {
+      toast.error('Select an active measurement unit.');
+      return;
+    }
+    if (
+      action === 'Complete' &&
+      lookups?.requireFeedbackEvidence &&
+      !selectedDocument
+    ) {
+      toast.error('Select the required current Published central-DMS evidence.');
+      return;
+    }
+
     const request: ProcessCivilEngineeringDirectTaskFeedbackRequest = {
-      clientRequestId: crypto.randomUUID(), action, message: message.trim() || undefined,
+      clientRequestId: crypto.randomUUID(),
+      action,
+      message: message.trim() || undefined,
       progressPercent: action === 'UpdateProgress' ? Number(progress) : undefined,
       measurementValue: measurementValue ? Number(measurementValue) : undefined,
-      measurementUnitId: measurementUnitId === civilNone ? undefined : measurementUnitId,
+      measurementUnitId:
+        measurementUnitId === civilNone ? undefined : measurementUnitId,
       centralDocumentRecordId: selectedDocument?.centralDocumentRecordId,
       centralDocumentVersionId: selectedDocument?.centralDocumentVersionId,
       rowVersion: currentRowVersion,
     };
+
     if (!isOnline) {
-      const pending: QueuedCivilFieldFeedback = { request: { ...request, capturedOfflineAtUtc: new Date().toISOString() }, queuedAt: new Date().toISOString() };
+      const currentActor = getCurrentCivilOfflineActor();
+      if (
+        !storageKey ||
+        !offlineActor ||
+        !currentActor ||
+        currentActor.tenantId !== offlineActor.tenantId ||
+        currentActor.userId !== offlineActor.userId
+      ) {
+        toast.error(
+          'Sign in to the current tenant again before queuing Civil field feedback.'
+        );
+        return;
+      }
+      const pending: QueuedCivilFieldFeedback = {
+        tenantId: currentActor.tenantId,
+        userId: currentActor.userId,
+        projectId,
+        taskId,
+        assignmentRowVersion: currentRowVersion,
+        request: {
+          ...request,
+          capturedOfflineAtUtc: new Date().toISOString(),
+        },
+        queuedAt: new Date().toISOString(),
+      };
       localStorage.setItem(storageKey, JSON.stringify(pending));
       setQueued(pending);
-      toast.success('Field update queued locally and will synchronize once this device is online.');
+      toast.success(
+        'Field update queued locally and will synchronize once this device is online.'
+      );
       return;
     }
+
     setSaving(true);
     try {
-      const saved = await civilEngineeringDirectTaskService.submitAssigneeFeedback(projectId, taskId, request);
+      const saved =
+        await civilEngineeringDirectTaskService.submitAssigneeFeedback(
+          projectId,
+          taskId,
+          request
+        );
       await applySaved(saved);
       toast.success('Governed Civil field feedback saved');
     } catch (error: any) {
       toast.error(error.message || 'Failed to save governed Civil field feedback');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  return <div className="space-y-4 rounded-lg border border-primary/30 bg-primary/[0.03] p-4">
-    <div><div className="font-medium">Governed Civil field feedback</div><p className="mt-1 text-sm text-muted-foreground">This task uses the Civil task lifecycle. Site notes, progress, measurements and current Published central-DMS photo/evidence are recorded in the immutable task feedback history.</p></div>
-    {queued ? <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">One offline field update is queued from {format(new Date(queued.queuedAt), 'PP p')}. Reconnect and use Sync queued update; subsequent entries stay blocked until this one is accepted.</div> : null}
-    <div className="grid gap-4 md:grid-cols-3">
-      <div className="grid gap-2"><Label>Controlled action</Label><Select value={action || civilNone} onValueChange={(value) => setAction(value === civilNone ? '' : value as CivilEngineeringDirectTaskFeedbackAction)} disabled={Boolean(queued)}><SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger><SelectContent><SelectItem value={civilNone} disabled>Select action</SelectItem>{availableActions.map((item) => <SelectItem key={item} value={item}>{item === 'UpdateProgress' ? 'Update progress' : item}</SelectItem>)}</SelectContent></Select></div>
-      {action === 'UpdateProgress' ? <div className="grid gap-2"><Label>Progress (%)</Label><Input type="number" min={0} max={99.99} step={0.01} value={progress} onChange={(event) => setProgress(event.target.value)} disabled={Boolean(queued)} /></div> : null}
-      <div className="grid gap-2"><Label>Measurement value (optional)</Label><Input type="number" min={0} step={0.0001} value={measurementValue} onChange={(event) => { const value = event.target.value; setMeasurementValue(value); if (!value) setMeasurementUnitId(civilNone); }} disabled={Boolean(queued)} /></div>
-      <div className="grid gap-2"><Label>Measurement unit</Label><Select value={measurementUnitId} onValueChange={setMeasurementUnitId} disabled={Boolean(queued)}><SelectTrigger><SelectValue placeholder="No measurement" /></SelectTrigger><SelectContent><SelectItem value={civilNone}>No measurement</SelectItem>{lookups?.measurementUnits.map((unit) => <SelectItem key={unit.id} value={unit.id}>{unit.symbol || unit.code} · {unit.name}</SelectItem>)}</SelectContent></Select></div>
-      <div className="grid gap-2 md:col-span-2"><Label>Central-DMS photo / evidence{action === 'Complete' && lookups?.requireFeedbackEvidence ? '' : ' (optional)'}</Label><Select value={documentVersionId} onValueChange={setDocumentVersionId} disabled={Boolean(queued)}><SelectTrigger><SelectValue placeholder="Select current Published central-DMS file" /></SelectTrigger><SelectContent><SelectItem value={civilNone}>No evidence file</SelectItem>{lookups?.documents.map((document) => <SelectItem key={document.centralDocumentVersionId} value={document.centralDocumentVersionId}>{document.documentReference} · {document.title}</SelectItem>)}</SelectContent></Select></div>
+  return (
+    <div className="space-y-4 rounded-lg border border-primary/30 bg-primary/[0.03] p-4">
+      <div>
+        <div className="font-medium">Governed Civil field feedback</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          This task uses the Civil task lifecycle. Site notes, progress,
+          measurements and current Published central-DMS photo/evidence are
+          recorded in the immutable task feedback history.
+        </p>
+      </div>
+      {queued ? (
+        <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+          One offline field update is queued from{' '}
+          {format(new Date(queued.queuedAt), 'PP p')}. Reconnect and use Sync
+          queued update; subsequent entries stay blocked until this one is
+          accepted.
+        </div>
+      ) : null}
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-2">
+          <Label>Controlled action</Label>
+          <Select
+            value={action || civilNone}
+            onValueChange={value =>
+              setAction(
+                value === civilNone
+                  ? ''
+                  : (value as CivilEngineeringDirectTaskFeedbackAction)
+              )
+            }
+            disabled={Boolean(queued)}
+          >
+            <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={civilNone} disabled>Select action</SelectItem>
+              {availableActions.map(item => (
+                <SelectItem key={item} value={item}>
+                  {item === 'UpdateProgress' ? 'Update progress' : item}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {action === 'UpdateProgress' ? (
+          <div className="grid gap-2">
+            <Label>Progress (%)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={99.99}
+              step={0.01}
+              value={progress}
+              onChange={event => setProgress(event.target.value)}
+              disabled={Boolean(queued)}
+            />
+          </div>
+        ) : null}
+        <div className="grid gap-2">
+          <Label>Measurement value (optional)</Label>
+          <Input
+            type="number"
+            min={0}
+            step={0.0001}
+            value={measurementValue}
+            onChange={event => {
+              const value = event.target.value;
+              setMeasurementValue(value);
+              if (!value) setMeasurementUnitId(civilNone);
+            }}
+            disabled={Boolean(queued)}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label>Measurement unit</Label>
+          <Select
+            value={measurementUnitId}
+            onValueChange={setMeasurementUnitId}
+            disabled={Boolean(queued)}
+          >
+            <SelectTrigger><SelectValue placeholder="No measurement" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={civilNone}>No measurement</SelectItem>
+              {lookups?.measurementUnits.map(unit => (
+                <SelectItem key={unit.id} value={unit.id}>
+                  {unit.symbol || unit.code} · {unit.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2 md:col-span-2">
+          <Label>
+            Central-DMS photo / evidence
+            {action === 'Complete' && lookups?.requireFeedbackEvidence
+              ? ''
+              : ' (optional)'}
+          </Label>
+          <Select
+            value={documentVersionId}
+            onValueChange={setDocumentVersionId}
+            disabled={Boolean(queued)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select current Published central-DMS file" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={civilNone}>No evidence file</SelectItem>
+              {lookups?.documents.map(document => (
+                <SelectItem
+                  key={document.centralDocumentVersionId}
+                  value={document.centralDocumentVersionId}
+                >
+                  {document.documentReference} · {document.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Label>
+          {action === 'Complete'
+            ? 'Completion note'
+            : action === 'UpdateProgress'
+              ? 'Site progress note'
+              : 'Site note (optional)'}
+        </Label>
+        <Textarea
+          rows={3}
+          maxLength={2000}
+          value={message}
+          onChange={event => setMessage(event.target.value)}
+          disabled={Boolean(queued)}
+          placeholder="Record site conditions, measurements, observations and constraints accurately."
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={!action || saving || Boolean(queued)}
+          onClick={() => void submit()}
+        >
+          {saving ? 'Saving...' : isOnline ? 'Save field feedback' : 'Queue field feedback'}
+        </Button>
+        {queued ? (
+          <Button
+            variant="outline"
+            disabled={!isOnline || saving}
+            onClick={() => void flushQueued()}
+          >
+            Sync queued update
+          </Button>
+        ) : null}
+      </div>
+      <div className="space-y-2">
+        <div className="text-sm font-medium">Civil feedback history · {title}</div>
+        {history.length ? (
+          history.map(entry => (
+            <div key={entry.id} className="rounded border bg-background p-3 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{entry.action}</Badge>
+                {entry.progressPercent != null ? <span>{entry.progressPercent}%</span> : null}
+                {entry.measurementValue != null ? (
+                  <span>{entry.measurementValue} {entry.measurementUnitLabel || ''}</span>
+                ) : null}
+                <span className="text-muted-foreground">
+                  {format(new Date(entry.createdAt), 'PP p')}
+                </span>
+              </div>
+              {entry.message ? (
+                <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+                  {entry.message}
+                </p>
+              ) : null}
+              {entry.documentReference ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Central-DMS evidence: {entry.documentReference}
+                </p>
+              ) : null}
+              {entry.capturedOfflineAtUtc ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Captured offline: {format(new Date(entry.capturedOfflineAtUtc), 'PP p')}
+                </p>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No governed Civil field feedback has been recorded.
+          </p>
+        )}
+      </div>
     </div>
-    <div className="grid gap-2"><Label>{action === 'Complete' ? 'Completion note' : action === 'UpdateProgress' ? 'Site progress note' : 'Site note (optional)'}</Label><Textarea rows={3} maxLength={2000} value={message} onChange={(event) => setMessage(event.target.value)} disabled={Boolean(queued)} placeholder="Record site conditions, measurements, observations and constraints accurately." /></div>
-    <div className="flex flex-wrap gap-2"><Button disabled={!action || saving || Boolean(queued)} onClick={() => void submit()}>{saving ? 'Saving...' : isOnline ? 'Save field feedback' : 'Queue field feedback'}</Button>{queued ? <Button variant="outline" disabled={!isOnline || saving} onClick={() => void flushQueued()}>Sync queued update</Button> : null}</div>
-    <div className="space-y-2"><div className="text-sm font-medium">Civil feedback history · {title}</div>{history.length ? history.map((entry) => <div key={entry.id} className="rounded border bg-background p-3 text-sm"><div className="flex flex-wrap gap-2"><Badge variant="outline">{entry.action}</Badge>{entry.progressPercent != null ? <span>{entry.progressPercent}%</span> : null}{entry.measurementValue != null ? <span>{entry.measurementValue} {entry.measurementUnitLabel || ''}</span> : null}<span className="text-muted-foreground">{format(new Date(entry.createdAt), 'PP p')}</span></div>{entry.message ? <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{entry.message}</p> : null}{entry.documentReference ? <p className="mt-1 text-xs text-muted-foreground">Central-DMS evidence: {entry.documentReference}</p> : null}{entry.capturedOfflineAtUtc ? <p className="mt-1 text-xs text-muted-foreground">Captured offline: {format(new Date(entry.capturedOfflineAtUtc), 'PP p')}</p> : null}</div>) : <p className="text-sm text-muted-foreground">No governed Civil field feedback has been recorded.</p>}</div>
-  </div>;
+  );
 }
 
 export default function ProjectMobilePage() {
@@ -532,7 +926,16 @@ export default function ProjectMobilePage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {item.civilDirectTaskId && item.civilDirectTaskRowVersion ? <CivilMobileFieldFeedback projectId={item.projectId} taskId={item.civilDirectTaskId} title={item.workItemTitle} rowVersion={item.civilDirectTaskRowVersion} onSaved={load} /> : <>
+            {item.civilDirectTaskId && item.civilDirectTaskRowVersion ? (
+              <CivilMobileFieldFeedback
+                projectId={item.projectId}
+                taskId={item.civilDirectTaskId}
+                title={item.workItemTitle}
+                rowVersion={item.civilDirectTaskRowVersion}
+                onSaved={load}
+              />
+            ) : (
+              <>
             <div className="text-sm text-muted-foreground">
               {item.projectTitle}
               {item.plannedEndDate ? ` | due ${format(new Date(item.plannedEndDate), 'MMM dd, yyyy')}` : ''}
@@ -708,7 +1111,8 @@ export default function ProjectMobilePage() {
               <Button variant="outline" onClick={() => submitTimesheet(item.projectId, item.workItemId)}>Submit Time</Button>
               <Button variant="outline" onClick={() => submitExpense(item.projectId, item.workItemId)}>Submit Expense</Button>
             </div>
-            </>}
+              </>
+            )}
           </CardContent>
         </Card>
       ))}

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Adds a governed Civil inspection envelope over the authoritative Projects quality
 /// checkpoint and non-conformance records. Planning/GIS and central DMS remain owners.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003000_AddCivilEngineeringInspectionControls")]
 public partial class AddCivilEngineeringInspectionControls : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

@@ -15,31 +15,68 @@ import { evaluationTemplateService, EvaluationTemplate, EvaluationTemplateListIt
 interface BasicInformationProps {
   formData: TenderFormData;
   updateFormData: (data: Partial<TenderFormData>) => void;
+  procurementCategory?: string;
+  sourceCurrency?: string;
 }
 
 const CURRENCIES = ['USD', 'GHS', 'EUR', 'GBP'];
 
-export default function BasicInformation({ formData, updateFormData }: BasicInformationProps) {
+export default function BasicInformation({
+  formData,
+  updateFormData,
+  procurementCategory,
+  sourceCurrency,
+}: BasicInformationProps) {
   const [evaluationTemplates, setEvaluationTemplates] = useState<EvaluationTemplateListItem[]>([]);
   const [selectedTemplateDetails, setSelectedTemplateDetails] = useState<EvaluationTemplate | null>(null);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [templateLoadError, setTemplateLoadError] = useState<string | null>(null);
+  const [templateReloadKey, setTemplateReloadKey] = useState(0);
 
-  // Load evaluation templates on mount
+  // Load only active templates applicable to this tender source and tender type.
   useEffect(() => {
+    let cancelled = false;
+
     const loadTemplates = async () => {
       try {
         setLoadingTemplates(true);
-        const templates = await evaluationTemplateService.getForDropdown();
+        setTemplateLoadError(null);
+        const templates = await evaluationTemplateService.getForDropdown(
+          procurementCategory,
+          formData.tenderType
+        );
+        if (cancelled) return;
         setEvaluationTemplates(templates);
+
+        if (formData.evaluationTemplateId &&
+            !templates.some(template => template.id === formData.evaluationTemplateId)) {
+          updateFormData({ evaluationTemplateId: null, evaluationTemplateName: '' });
+          setSelectedTemplateDetails(null);
+        } else if (!formData.evaluationTemplateId) {
+          const defaultTemplate = templates.find(template => template.isDefault);
+          if (defaultTemplate) {
+            updateFormData({
+              evaluationTemplateId: defaultTemplate.id,
+              evaluationTemplateName: defaultTemplate.templateName
+            });
+          }
+        }
       } catch (error) {
+        if (cancelled) return;
         console.error('Failed to load evaluation templates:', error);
+        setEvaluationTemplates([]);
+        setTemplateLoadError(error instanceof Error
+          ? error.message
+          : 'Evaluation templates could not be loaded.');
       } finally {
-        setLoadingTemplates(false);
+        if (!cancelled) setLoadingTemplates(false);
       }
     };
     loadTemplates();
-  }, []);
+
+    return () => { cancelled = true; };
+  }, [procurementCategory, formData.tenderType, templateReloadKey]);
 
   // Load template details when selection changes and auto-populate QCBS settings
   useEffect(() => {
@@ -156,6 +193,7 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
             <Select
               value={formData.currency}
               onValueChange={(value) => updateFormData({ currency: value })}
+              disabled={Boolean(sourceCurrency)}
             >
               <SelectTrigger id="currency">
                 <SelectValue placeholder="Select currency" />
@@ -250,6 +288,18 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>Loading templates...</span>
               </div>
+            ) : templateLoadError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <p>Evaluation templates could not be loaded.</p>
+                <p className="mt-1 text-xs">{templateLoadError}</p>
+                <button
+                  type="button"
+                  className="mt-2 font-medium underline"
+                  onClick={() => setTemplateReloadKey(value => value + 1)}
+                >
+                  Retry
+                </button>
+              </div>
             ) : (
               <Select
                 value={formData.evaluationTemplateId || 'none'}
@@ -267,6 +317,11 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
                   ))}
                 </SelectContent>
               </Select>
+            )}
+            {!loadingTemplates && !templateLoadError && evaluationTemplates.length === 0 && (
+              <p className="text-sm text-amber-700">
+                No active evaluation template matches {procurementCategory || 'this category'} and {formData.tenderType}.
+              </p>
             )}
           </div>
 

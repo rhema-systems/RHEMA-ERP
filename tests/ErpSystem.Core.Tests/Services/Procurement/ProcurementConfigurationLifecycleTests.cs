@@ -160,38 +160,20 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
-    public async Task LegacyTenantAdministratorCannotApproveOrPublishConfiguration()
+    public async Task PermissionAuthorizedConfigurationActorReachesPublicationValidationWithoutLegacyRoleRejection()
     {
         await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-3");
-        var decision = created.Decisions.Single(item => item.DecisionKey == "DEC-001");
-        using var document = JsonDocument.Parse(ProcurementConfigurationDecisionRegistryTests.ValidDec001Json);
-        fixture.SetRoles("TenantAdmin");
-
-        await fixture.Service.Invoking(service => service.SaveDecisionAsync(created.Id, "DEC-001",
-                new SaveProcurementConfigurationDecisionRequest
-                {
-                    SchemaVersion = 1,
-                    OwnerGroup = decision.OwnerGroup,
-                    Status = ProcurementConfigurationDecisionStatus.Approved,
-                    ApprovalStatus = ProcurementConfigurationApprovalStatus.Approved,
-                    Value = document.RootElement.Clone(),
-                    DecisionDate = DateTime.UtcNow,
-                    ApprovalReference = "MINUTE-001",
-                    RowVersion = decision.RowVersion
-                }, "approve-3"))
-            .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
 
         await fixture.Service.Invoking(service => service.PublishProfileAsync(created.Id,
                 new ProcurementConfigurationLifecycleRequest { RowVersion = created.RowVersion }, "publish-3"))
-            .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
+            .Should().ThrowAsync<ProcurementConfigurationValidationException>();
 
-        (await fixture.Service.GetProfileAsync(created.Id)).Decisions.Single(item => item.DecisionKey == "DEC-001")
-            .Status.Should().Be(ProcurementConfigurationDecisionStatus.Draft);
-
-        (await fixture.Context.ProcurementConfigurationRevisions
-                .AnyAsync(item => item.ProfileId == created.Id && item.Result == "Rejected"))
-            .Should().BeFalse("legacy generic roles are rejected before entering configuration mutation logic");
+        var rejected = await fixture.Context.ProcurementConfigurationRevisions
+            .Where(item => item.ProfileId == created.Id && item.Result == "Rejected")
+            .Select(item => item.Action)
+            .ToListAsync();
+        rejected.Should().Contain("Publish");
     }
 
     [Fact]
@@ -379,7 +361,7 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
-    public async Task OnlyTdcAccessManagerCanReturnApprovedDecisionToProposed_ForGovernedRework()
+    public async Task PermissionAuthorizedConfigurationActorCanApproveAndReturnDecisionForGovernedRework()
     {
         await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var profile = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-rework");
@@ -408,22 +390,6 @@ public sealed class ProcurementConfigurationServiceTests
 
         approved.EvidenceStatus.Should().Be(ProcurementConfigurationEvidenceStatus.Verified);
 
-        fixture.SetRoles("TenantAdmin");
-        await fixture.Service.Invoking(service => service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
-                new SaveProcurementConfigurationDecisionRequest
-                {
-                    SchemaVersion = approved.SchemaVersion,
-                    OwnerGroup = approved.OwnerGroup,
-                    Status = ProcurementConfigurationDecisionStatus.Proposed,
-                    ApprovalStatus = ProcurementConfigurationApprovalStatus.Pending,
-                    Value = approved.Value,
-                    DecisionDate = approved.DecisionDate,
-                    ApprovalReference = approved.ApprovalReference,
-                    RowVersion = approved.RowVersion,
-                    Reason = "Unauthorized rework attempt"
-                }, "return-rework-rejected"))
-            .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
-        fixture.SetRoles(ProcurementAccessControlRegistry.IctAdministratorRole);
         approved = (await fixture.Service.GetProfileAsync(profile.Id)).Decisions.Single(item => item.DecisionKey == "DEC-001");
         var returned = await fixture.Service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
             new SaveProcurementConfigurationDecisionRequest
@@ -476,8 +442,7 @@ public sealed class ProcurementConfigurationServiceTests
                     Reason = "Attach governed test evidence"
                 }, $"evidence-{definition.DecisionKey}");
             current = (await service.GetProfileAsync(profileId)).Decisions.Single(item => item.DecisionKey == definition.DecisionKey);
-            await service.SaveDecisionAsync(profileId, definition.DecisionKey,
-                new SaveProcurementConfigurationDecisionRequest
+            var request = new SaveProcurementConfigurationDecisionRequest
                 {
                     SchemaVersion = definition.SchemaVersion,
                     OwnerGroup = definition.OwnerGroup,
@@ -489,7 +454,18 @@ public sealed class ProcurementConfigurationServiceTests
                     SourceLineage = "TDC-0001 automated publication fixture",
                     RowVersion = current.RowVersion,
                     Reason = "Approve governed test decision"
-                }, $"approve-{definition.DecisionKey}");
+                };
+            try
+            {
+                await service.SaveDecisionAsync(profileId, definition.DecisionKey,
+                    request, $"approve-{definition.DecisionKey}");
+            }
+            catch (ProcurementConfigurationValidationException exception)
+            {
+                var details = string.Join("; ", exception.Validation.Errors.Select(error => error.Message));
+                throw new InvalidOperationException(
+                    $"Fixture value for {definition.DecisionKey} is invalid: {details}", exception);
+            }
         }
     }
 

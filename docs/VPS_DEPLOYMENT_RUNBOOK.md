@@ -255,6 +255,20 @@ StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment=true
 CorsSettings__AllowedOrigins__0=https://149.102.145.190:8443
 ```
 
+Syncfusion licensing is held in the protected API service configuration, not
+in a deployed `appsettings.json` or `.env` file. The service XML must contain a
+non-empty `Syncfusion__LicenseKey` environment entry. The release pipeline
+reuses that protected value over SSH to run the local Syncfusion frontend
+license activator before the Next.js production build. The value is retained
+only in process memory and must never be printed, written to a release manifest,
+or committed. Preflight and post-deployment verification report only
+`SYNCFUSION_LICENSE|CONFIGURED` and fail closed when it is missing.
+
+The key must be compatible with the deployed Syncfusion package version and
+cover both the server document SDK and browser UI/PDF Viewer editions. Adding
+the key only to the API service does not license an already-built React bundle;
+a new licensed frontend artifact must be built and deployed.
+
 Rules:
 
 - Keep only the HTTPS CORS origin. Remove any HTTP origin.

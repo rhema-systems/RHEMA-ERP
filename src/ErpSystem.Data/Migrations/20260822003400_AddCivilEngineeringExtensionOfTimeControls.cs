@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Adds a Civil workflow envelope over the existing Projects EOT record. Quantity Survey
 /// retains variation/budget application; Procurement retains the contract; central DMS owns files.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003400_AddCivilEngineeringExtensionOfTimeControls")]
 public partial class AddCivilEngineeringExtensionOfTimeControls : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

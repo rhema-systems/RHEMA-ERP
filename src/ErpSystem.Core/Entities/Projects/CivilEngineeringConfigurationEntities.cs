@@ -26,6 +26,7 @@ public sealed class CivilEngineeringConfigurationProfile : TenantEntity
     public ICollection<CivilEngineeringConfigurationDecision> Decisions { get; set; } = new List<CivilEngineeringConfigurationDecision>();
     public ICollection<CivilEngineeringConfigurationEvidenceLink> EvidenceLinks { get; set; } = new List<CivilEngineeringConfigurationEvidenceLink>();
 }
+
 [Table("CivilEngineeringConfigurationDecisions")]
 public sealed class CivilEngineeringConfigurationDecision : TenantEntity
 {
@@ -84,3 +85,4 @@ public sealed class CivilEngineeringConfigurationRevision : TenantEntity
     [Column(TypeName = "nvarchar(max)")] public string? BeforeJson { get; set; }
     [Column(TypeName = "nvarchar(max)")] public string? AfterJson { get; set; }
 }
+

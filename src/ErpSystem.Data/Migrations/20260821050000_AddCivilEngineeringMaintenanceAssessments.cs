@@ -1,9 +1,12 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace ErpSystem.Data.Migrations;
 
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821050000_AddCivilEngineeringMaintenanceAssessments")]
 public partial class AddCivilEngineeringMaintenanceAssessments : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

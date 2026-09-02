@@ -1267,6 +1267,7 @@ public class ProjectSubmittal : TenantEntity
 
     [ForeignKey(nameof(ProjectPackageId))]
     public virtual ProjectPackage? ProjectPackage { get; set; }
+
 }
 
 public class ProjectRfi : TenantEntity
@@ -3452,8 +3453,8 @@ public class ProjectAssetLink : TenantEntity
 
     public Guid? MaintenanceAssetId { get; set; }
     /// <summary>
-    /// Authoritative Finance fixed-asset register link.  This deliberately does not create or
-    /// update a FixedAsset; Finance remains the sole owner of capitalization and its history.
+    /// Authoritative Finance fixed-asset register link. Finance remains the sole owner of
+    /// capitalization and fixed-asset history.
     /// </summary>
     public Guid? FixedAssetId { get; set; }
 
@@ -3461,10 +3462,6 @@ public class ProjectAssetLink : TenantEntity
     public Guid? CompanyAssetId { get; set; }
     public Guid? JobCardId { get; set; }
 
-    /// <summary>
-    /// SHA-256 identity for a controlled project-to-owner reconciliation.  New links use this
-    /// immutable identity so retrying the same request cannot create a second history link.
-    /// </summary>
     [MaxLength(64)]
     public string? ReconciliationKey { get; set; }
 

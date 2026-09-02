@@ -1,11 +1,6 @@
 'use client';
 
-import React, {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -33,6 +28,7 @@ import {
   readGhanepsContentFile,
   validateGhanepsContent,
 } from '@/lib/procurement-ghaneps-exchange';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementGhanepsExchangeService as service } from '@/services/procurement-ghaneps-exchange.service';
 import type {
   ProcurementGhanepsAttemptOutcome,
@@ -76,9 +72,6 @@ export type GhanepsExchangeAction =
       event: ProcurementGhanepsExchangeEvent;
       resolveExistingMismatch: boolean;
     };
-
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'The request could not be completed.';
 
 export function GhanepsExchangeActionDialog({
   sourceType,
@@ -129,9 +122,7 @@ export function GhanepsExchangeActionDialog({
     idempotencyKeyRef.current = actionType
       ? createGhanepsIdempotencyKey(actionType)
       : '';
-    setReference(
-      isSourcePayloadAction ? sourceReference : ''
-    );
+    setReference(isSourcePayloadAction ? sourceReference : '');
     setEvidenceReference('');
     setPayloadContent('');
     setFileName('');
@@ -142,12 +133,7 @@ export function GhanepsExchangeActionDialog({
     setFailureCode('');
     setReason('');
     setFileReadError('');
-  }, [
-    actionIdentity,
-    actionType,
-    isSourcePayloadAction,
-    sourceReference,
-  ]);
+  }, [actionIdentity, actionType, isSourcePayloadAction, sourceReference]);
 
   const updatePayloadContent = (value: string) => {
     setPayloadContent(value);
@@ -158,15 +144,12 @@ export function GhanepsExchangeActionDialog({
     if (!file || !configuredContentType) return;
     setFileReadError('');
     try {
-      const content = await readGhanepsContentFile(
-        file,
-        configuredContentType
-      );
+      const content = await readGhanepsContentFile(file, configuredContentType);
       setPayloadContent(content);
       setFileName(file.name);
       setChecksum('');
     } catch (error) {
-      setFileReadError(errorMessage(error));
+      setFileReadError(getProcurementProblemMessage(error));
     }
   };
 
@@ -191,13 +174,9 @@ export function GhanepsExchangeActionDialog({
     setSubmitting(true);
     try {
       const idempotencyKey =
-        idempotencyKeyRef.current ||
-        createGhanepsIdempotencyKey(action.type);
+        idempotencyKeyRef.current || createGhanepsIdempotencyKey(action.type);
       idempotencyKeyRef.current = idempotencyKey;
-      if (
-        action.type === 'prepare-export' ||
-        action.type === 'record-import'
-      ) {
+      if (action.type === 'prepare-export' || action.type === 'record-import') {
         const request = {
           sourceType,
           sourceId,
@@ -217,23 +196,18 @@ export function GhanepsExchangeActionDialog({
             transportReference,
           });
       } else if (action.type === 'record-attempt') {
-        await service.recordAttempt(
-          sourceType,
-          sourceId,
-          action.event.id,
-          {
-            payloadId: action.payload.id,
-            outcome: outcome as ProcurementGhanepsAttemptOutcome,
-            transportReference: transportReference || undefined,
-            failureCode:
-              outcome === 'Failed' ? failureCode || undefined : undefined,
-            failureMessage:
-              outcome === 'Failed' ? reason || undefined : undefined,
-            evidenceReference: evidenceReference || undefined,
-            idempotencyKey,
-            expectedRowVersion: action.event.rowVersion,
-          }
-        );
+        await service.recordAttempt(sourceType, sourceId, action.event.id, {
+          payloadId: action.payload.id,
+          outcome: outcome as ProcurementGhanepsAttemptOutcome,
+          transportReference: transportReference || undefined,
+          failureCode:
+            outcome === 'Failed' ? failureCode || undefined : undefined,
+          failureMessage:
+            outcome === 'Failed' ? reason || undefined : undefined,
+          evidenceReference: evidenceReference || undefined,
+          idempotencyKey,
+          expectedRowVersion: action.event.rowVersion,
+        });
       } else if (action.type === 'retry') {
         await service.retry(sourceType, sourceId, action.event.id, {
           payloadId: action.payload.id,
@@ -243,8 +217,9 @@ export function GhanepsExchangeActionDialog({
             outcome === 'Failed' ? failureCode || undefined : undefined,
           failureMessage:
             outcome === 'Failed' ? reason || undefined : undefined,
-          replacementPayloadContent:
-            payloadContent.trim() ? payloadContent : undefined,
+          replacementPayloadContent: payloadContent.trim()
+            ? payloadContent
+            : undefined,
           fileName: fileName || undefined,
           evidenceReference: evidenceReference || undefined,
           idempotencyKey,
@@ -266,26 +241,21 @@ export function GhanepsExchangeActionDialog({
           }
         );
       } else {
-        await service.reconcile(
-          sourceType,
-          sourceId,
-          action.event.id,
-          {
-            resolveExistingMismatch: action.resolveExistingMismatch,
-            actualReference: reference,
-            actualChecksumSha256: checksum,
-            notes: reason || undefined,
-            evidenceReference,
-            idempotencyKey,
-            expectedRowVersion: action.event.rowVersion,
-          }
-        );
+        await service.reconcile(sourceType, sourceId, action.event.id, {
+          resolveExistingMismatch: action.resolveExistingMismatch,
+          actualReference: reference,
+          actualChecksumSha256: checksum,
+          notes: reason || undefined,
+          evidenceReference,
+          idempotencyKey,
+          expectedRowVersion: action.event.rowVersion,
+        });
       }
       toast.success(metadata.success);
       onOpenChange(false);
       await onChanged();
     } catch (error) {
-      toast.error(errorMessage(error));
+      toast.error(getProcurementProblemMessage(error));
     } finally {
       setSubmitting(false);
     }
@@ -295,8 +265,7 @@ export function GhanepsExchangeActionDialog({
     action?.type === 'prepare-export' || action?.type === 'record-import'
       ? action.mapping
       : undefined;
-  const event =
-    action && 'event' in action ? action.event : undefined;
+  const event = action && 'event' in action ? action.event : undefined;
   const acknowledgementAttempt =
     action?.type === 'acknowledge'
       ? action.event.attempts
@@ -373,8 +342,7 @@ export function GhanepsExchangeActionDialog({
             </>
           )}
 
-          {(action?.type === 'record-attempt' ||
-            action?.type === 'retry') && (
+          {(action?.type === 'record-attempt' || action?.type === 'retry') && (
             <>
               <ReadOnlyLine
                 label="Payload version"
@@ -503,8 +471,7 @@ export function GhanepsExchangeActionDialog({
           {action && (
             <Field
               label={`Shared evidence reference${
-                action.type === 'acknowledge' ||
-                action.type === 'reconcile'
+                action.type === 'acknowledge' || action.type === 'reconcile'
                   ? ' *'
                   : ''
               }`}
@@ -769,7 +736,10 @@ function validate(input: {
     input.action.type === 'prepare-export' ||
     input.action.type === 'record-import'
   ) {
-    if (input.action.type === 'record-import' && !input.transportReference.trim())
+    if (
+      input.action.type === 'record-import' &&
+      !input.transportReference.trim()
+    )
       return 'Transport reference is required.';
     if (!input.configuredContentType)
       return 'The DEC-009 payload representation is unavailable.';
@@ -780,24 +750,15 @@ function validate(input: {
     );
     if (contentValidation) return contentValidation;
   }
-  if (
-    input.action.type === 'record-attempt' ||
-    input.action.type === 'retry'
-  ) {
+  if (input.action.type === 'record-attempt' || input.action.type === 'retry') {
     if (!input.outcome) return 'Attempt outcome is required.';
-    if (
-      input.outcome === 'Succeeded' &&
-      !input.transportReference.trim()
-    )
+    if (input.outcome === 'Succeeded' && !input.transportReference.trim())
       return 'A successful attempt requires a transport reference.';
     if (input.outcome === 'Failed') {
       if (!input.failureCode.trim()) return 'Failure code is required.';
       if (!input.reason.trim()) return 'Failure message is required.';
     }
-    if (
-      input.action.type === 'retry' &&
-      input.payloadContent.trim()
-    ) {
+    if (input.action.type === 'retry' && input.payloadContent.trim()) {
       if (!input.configuredContentType)
         return 'The DEC-009 payload representation is unavailable.';
       const contentValidation = validateGhanepsContent(

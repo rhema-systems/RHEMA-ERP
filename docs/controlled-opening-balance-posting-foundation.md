@@ -36,7 +36,7 @@ Rejected or deferred:
 
 - `ALL_ACTIVE_BOOKS`.
 - Unbalanced or single-sided imports.
-- Foreign-currency GL opening lines. The current model stores functional debit/credit amounts only and therefore rejects a non-functional transaction currency before approval or posting rather than inventing an original foreign amount or FX snapshot.
+- Free-form foreign-currency GL opening lines. A later governed bank-opening path supports foreign bank accounts only when it can freeze an approved, effective exchange-rate record and preserve both native and functional amounts; generic lines still cannot invent foreign amounts or FX evidence.
 - Silent suspense/equity plug creation.
 - Direct mutation of `Account.Balance`.
 - Direct mutation of `BankAccount.CurrentBalance`.

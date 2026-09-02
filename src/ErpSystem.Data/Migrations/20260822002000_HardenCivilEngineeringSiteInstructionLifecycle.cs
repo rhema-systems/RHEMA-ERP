@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -10,6 +11,8 @@ namespace ErpSystem.Data.Migrations;
 /// existing Projects instruction, Procurement contract, Business Partner, DMS,
 /// Workflow and Audit owners remain authoritative.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822002000_HardenCivilEngineeringSiteInstructionLifecycle")]
 public partial class HardenCivilEngineeringSiteInstructionLifecycle : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

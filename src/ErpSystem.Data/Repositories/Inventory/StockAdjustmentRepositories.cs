@@ -105,14 +105,17 @@ public class StockAdjustmentRepository : GenericRepository<StockAdjustment>, ISt
     /// <summary>
     /// Generates a new adjustment number
     /// </summary>
-    public async Task<string> GenerateAdjustmentNumberAsync()
+    public async Task<string> GenerateAdjustmentNumberAsync(Guid tenantId)
     {
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
 
         // Get all adjustments for the current year to find max sequence
+        // The number is immutable and remains protected by a non-filtered unique index,
+        // so soft-deleted rows must continue to consume their original sequence.
         var adjustmentsInYear = await _dbSet
-            .Where(sa => sa.AdjustmentNumber.StartsWith($"ADJ{yearPrefix}") && !sa.IsDeleted)
+            .IgnoreQueryFilters()
+            .Where(sa => sa.TenantId == tenantId && sa.AdjustmentNumber.StartsWith($"ADJ{yearPrefix}"))
             .Select(sa => sa.AdjustmentNumber)
             .ToListAsync();
 

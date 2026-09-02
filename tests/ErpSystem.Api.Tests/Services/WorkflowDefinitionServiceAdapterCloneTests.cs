@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.Workflow;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Repositories;
@@ -7,6 +8,7 @@ using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -15,6 +17,86 @@ namespace ErpSystem.Api.Tests.Services;
 
 public class WorkflowDefinitionServiceAdapterCloneTests
 {
+    [Fact]
+    public async Task UpdateWorkflowDefinitionAsync_ShouldReplaceGraphAtomicallyWithFreshStepIds()
+    {
+        await using var context = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var entityType = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Name = "ProcurementBudget",
+            Code = "PROCUREMENT_BUDGET",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        var definition = new WorkflowDefinition
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            EntityTypeId = entityType.Id,
+            Name = "TDC Procurement Budget Approval",
+            Version = 1,
+            LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft,
+            IsActive = false,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        var originalStart = Step(definition, "Submitted", 1, isStart: true);
+        var originalApproval = Step(definition, "Approval", 2);
+        var originalEnd = Step(definition, "Completed", 3, isEnd: true);
+        var originalTransitionOne = Transition(definition, originalStart, originalApproval, "Submit for approval");
+        var originalTransitionTwo = Transition(definition, originalApproval, originalEnd, "Approve");
+        context.Add(entityType);
+        context.Add(definition);
+        context.AddRange(originalStart, originalApproval, originalEnd);
+        context.AddRange(originalTransitionOne, originalTransitionTwo);
+        await context.SaveChangesAsync();
+
+        var service = CreateService(context, tenantId, userId);
+        var updated = await service.UpdateWorkflowDefinitionAsync(definition.Id, new UpdateWorkflowDefinitionDto
+        {
+            Name = definition.Name,
+            EntityType = entityType.Name,
+            Steps = new List<CreateWorkflowStepDto>
+            {
+                new() { Id = originalStart.Id, Name = "Submitted", Order = 1, StepType = WorkflowStepType.Manual },
+                new() { Id = originalApproval.Id, Name = "Approval", Order = 2, StepType = WorkflowStepType.Approval },
+                new() { Id = originalEnd.Id, Name = "Completed", Order = 3, StepType = WorkflowStepType.Automatic }
+            },
+            Transitions = new List<CreateWorkflowTransitionDto>
+            {
+                new() { FromStepId = originalStart.Id, ToStepId = originalApproval.Id, Name = "Submit for approval", IsDefault = true },
+                new() { FromStepId = originalApproval.Id, ToStepId = originalEnd.Id, Name = "Approve", IsDefault = true }
+            }
+        });
+
+        var activeSteps = await context.WorkflowSteps
+            .Where(step => step.WorkflowDefinitionId == definition.Id && !step.IsDeleted)
+            .OrderBy(step => step.Order)
+            .ToListAsync();
+        var activeTransitions = await context.WorkflowTransitions
+            .Where(transition => transition.WorkflowDefinitionId == definition.Id && !transition.IsDeleted)
+            .ToListAsync();
+        var originalStepIds = new[] { originalStart.Id, originalApproval.Id, originalEnd.Id };
+
+        updated.Steps.Should().HaveCount(3);
+        activeSteps.Should().HaveCount(3);
+        activeSteps.Select(step => step.Id).Should().NotIntersectWith(originalStepIds);
+        activeTransitions.Should().HaveCount(2);
+        activeTransitions
+            .SelectMany(transition => new[] { transition.FromStepId, transition.ToStepId })
+            .Should()
+            .OnlyContain(stepId => activeSteps.Any(step => step.Id == stepId));
+        (await context.WorkflowSteps.IgnoreQueryFilters()
+                .CountAsync(step => originalStepIds.Contains(step.Id) && step.IsDeleted))
+            .Should()
+            .Be(3);
+    }
+
     [Fact]
     public async Task CloneWorkflowDefinitionDraftAsync_ShouldRemapTransitionsToFinalClonedStepIds()
     {
@@ -97,6 +179,7 @@ public class WorkflowDefinitionServiceAdapterCloneTests
             new WorkflowStepRepository(context),
             new WorkflowTransitionRepository(context),
             new WorkflowEntityTypeRepository(context),
+            new UnitOfWork(context),
             Mock.Of<ILogger<WorkflowDefinitionServiceAdapter>>());
     }
 
@@ -104,6 +187,7 @@ public class WorkflowDefinitionServiceAdapterCloneTests
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         return new ApplicationDbContext(options);

@@ -50,7 +50,7 @@ describe('getAuthorityControlPresentation', () => {
     });
   });
 
-  it('shows unconfigured policy metadata as advisory', () => {
+  it('shows missing policy authority coverage as optional guidance', () => {
     expect(getAuthorityControlPresentation(readiness())).toMatchObject({
       tone: 'neutral',
       title: 'Optional policy guidance not configured',

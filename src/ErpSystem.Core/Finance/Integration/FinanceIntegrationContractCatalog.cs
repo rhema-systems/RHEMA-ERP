@@ -56,11 +56,11 @@ public static class FinanceIntegrationContractCatalog
             "Calling module",
             "Finance / General Ledger",
             FinanceIntegrationContractStatus.Available,
-            "1.0",
-            "IFinancePostingEngine.PostAsync(FinancePostingRequestDto)",
+            "1.2",
+            "IFinancePostingEngine.PostAsync(FinancePostingRequestDto, FinancePostingProducerContext)",
             "Defined by the calling adapter",
             null,
-            "Use only after the producer has completed its own approval; Finance owns period, balance, currency, idempotency and audit validation."),
+            "Use only after the producer has completed its own approval; Finance owns period, balance, currency, idempotency, canonical dimension-set resolution and line-specific historical evidence. Structured dimensions remain additive; trusted route identity comes from a compiled FinancePostingProducerContext and required enforcement follows tenant certification."),
         new(
             "FIN-INT-002",
             "Accepted procurement stock receipt to inventory and GRV accrual",
@@ -170,7 +170,57 @@ public static class FinanceIntegrationContractCatalog
             "Not defined",
             "Not defined",
             null,
-            "TDC must define SH Fund, PF, ESB and fuel-allocation source systems, events, balances and reconciliation outcomes before an interface can be designed.")
+            "TDC must define SH Fund, PF, ESB and fuel-allocation source systems, events, balances and reconciliation outcomes before an interface can be designed."),
+
+        // FIN-INT-012 and FIN-INT-013 deliberately model two different business dates. Dispatching
+        // accepted stock back to a supplier does not prove that the supplier has accepted a credit,
+        // refund or replacement. Procurement owns the Return-to-Vendor lifecycle, Inventory owns
+        // quantity movements and carrying-cost layers, and Finance owns AP/GRV, tax and GL effects.
+        // The modules exchange immutable contract DTOs; no module may write another module's tables.
+        new(
+            "FIN-INT-012",
+            "Post-acceptance supplier return dispatch and valuation handoff",
+            "Procurement and Inventory",
+            "Finance / Accounts Payable, GRV and General Ledger",
+            FinanceIntegrationContractStatus.Planned,
+            "0.1",
+            "SupplierReturnFinanceAdapter.ConsumeDispatchAsync (fail-closed)",
+            "SupplierReturnDispatch v0.1",
+            null,
+            "Procurement owns the approved return and dispatch lifecycle; Inventory owns the authoritative outbound quantity movement and carrying-cost layers; Finance owns AP/GRV and GL treatment. Producers must not write Finance tables directly. Keep Planned until the callable Finance consumer and producer consumer-contract tests pass."),
+        new(
+            "FIN-INT-013",
+            "Supplier return commercial resolution to AP, tax and settlement",
+            "Procurement",
+            "Finance / Accounts Payable, Tax and Cash",
+            FinanceIntegrationContractStatus.Planned,
+            "0.1",
+            "SupplierReturnFinanceAdapter.ConsumeCommercialResolutionAsync (fail-closed)",
+            "SupplierReturnCommercialResolution v0.1",
+            null,
+            "Procurement owns the supplier credit, refund, replacement or warranty-resolution evidence; Inventory remains authoritative for quantity and cost layers; Finance owns AP application, GRV clearing, tax, cash/refund and GL effects. Producers must not write Finance tables directly. Keep Planned until the callable Finance consumer and producer consumer-contract tests pass."),
+        new(
+            "FIN-INT-015",
+            "Approved Procurement demand to Finance budget commitment",
+            "Procurement",
+            "Finance / Budget",
+            FinanceIntegrationContractStatus.Available,
+            "1.0",
+            "IFinanceBudgetCommitmentService",
+            "ProcurementRequisition",
+            null,
+            "Finance provides canonical adopted-budget selection, availability, reservations, idempotency and GL-derived actuals. Procurement owns its workflow and must add the consumer adapter without writing Finance tables or reserving again at purchase-order issue."),
+        new(
+            "FIN-INT-016",
+            "Direct AP expense invoice to Finance budget commitment",
+            "Finance / Accounts Payable",
+            "Finance / Budget and General Ledger",
+            FinanceIntegrationContractStatus.Available,
+            "1.0",
+            "IVendorInvoiceService and IFinanceBudgetCommitmentService",
+            "VendorInvoice",
+            null,
+            "Direct budget-controlled expense lines select an adopted Finance Budget Entry, reserve before the existing AP approval workflow, release on rejection and consume atomically with central GL posting. Opening, PO/GRV, Inventory and Fixed Asset lines are excluded to prevent duplicate commitments.")
     ];
 
     public static FinanceIntegrationContractDefinition GetRequired(string id)

@@ -52,6 +52,7 @@ export interface BusinessPartnerDto {
   creditLimit?: number;
   outstandingBalance?: number;
   isOnCreditHold?: boolean;
+  categories?: string[];
 
   // Workflow display helpers (optional)
   currentWorkflowStepName?: string;
@@ -124,7 +125,6 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   documents?: BusinessPartnerDocumentDto[];
   financialRecords?: BusinessPartnerFinancialDto[];
   financialInfo?: BusinessPartnerFinancialDto[]; // Alias for financialRecords
-  categories?: PartnerCategoryDto[];
   specializations?: ContractorSpecializationDto[];
 }
 

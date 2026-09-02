@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -244,6 +245,158 @@ public sealed class JournalEntryLifecycleBatch5Tests
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentId == journal.Id && e.PostingAction == "Reverse")).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalInquiry")]
+    public async Task GetJournalEntriesAsync_ShouldFilterProcurementSource_AndExposeSourceLineage()
+    {
+        var tenantId = Guid.NewGuid();
+        var fiscalPeriodId = Guid.NewGuid();
+        var procurementDocumentId = Guid.NewGuid();
+        var postingDate = new DateTime(2026, 8, 29);
+        await using var db = CreateContext();
+
+        db.JournalEntries.AddRange(
+            new JournalEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryNumber = "PRO-20260829-0001",
+                JournalType = "System Generated",
+                EntryDate = postingDate,
+                Description = "Supplier onboarding token payment TEST-001",
+                SourceModule = "Procurement",
+                OriginModuleCode = "PROC",
+                SourceDocumentId = procurementDocumentId,
+                SourceDocumentType = "SupplierOnboardingTokenPayment",
+                FiscalPeriodId = fiscalPeriodId,
+                PostingStatus = "Posted",
+                CreatedAt = postingDate
+            },
+            new JournalEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryNumber = "AP-20260829-0001",
+                JournalType = "System Generated",
+                EntryDate = postingDate,
+                Description = "Vendor invoice",
+                SourceModule = "AP",
+                FiscalPeriodId = fiscalPeriodId,
+                PostingStatus = "Posted",
+                CreatedAt = postingDate
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateJournalService(db, tenantId);
+        var entries = await service.GetJournalEntriesAsync(
+            status: "posted",
+            startDate: postingDate,
+            endDate: postingDate,
+            fiscalPeriodId: fiscalPeriodId,
+            sourceModule: "PROCUREMENT");
+
+        var entry = entries.Should().ContainSingle().Subject;
+        entry.SourceModule.Should().Be("Procurement");
+        entry.OriginModuleCode.Should().Be("PROC");
+        entry.SourceDocumentType.Should().Be("SupplierOnboardingTokenPayment");
+        entry.SourceDocumentId.Should().Be(procurementDocumentId);
+        entry.FiscalPeriodId.Should().Be(fiscalPeriodId);
+    }
+
+    [Fact]
+    [Trait("Category", "JournalApprovalWithdrawal")]
+    public async Task WithdrawApproval_ShouldPersistDistinctMetadata_ReleaseBudget_AndNotifyPendingApprover()
+    {
+        var tenantId = Guid.NewGuid();
+        var withdrawingUserId = Guid.NewGuid();
+        var approverId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var notifications = new Mock<INotificationService>();
+        notifications
+            .Setup(x => x.CreateInAppNotificationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<Dictionary<string, object>?>(),
+                tenantId))
+            .Returns(Task.CompletedTask);
+        var budgetControl = new Mock<IFinanceBudgetControlService>();
+        budgetControl
+            .Setup(x => x.ReleaseManualJournalAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = CreateJournalService(
+            db,
+            tenantId,
+            withdrawingUserId,
+            notifications,
+            budgetControl.Object);
+        var journal = await service.CreateJournalEntryAsync(CreateJournalDto(debitAccount.Id, creditAccount.Id));
+        await service.UpdateApprovalStatusAsync(journal.Id, "Pending Approval", "Pending");
+
+        var entityType = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "JournalEntry", Name = "Journal Entry"
+        };
+        var definition = new WorkflowDefinition
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Name = "Journal approval", EntityTypeId = entityType.Id
+        };
+        var step = new WorkflowStep
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, WorkflowDefinitionId = definition.Id,
+            Name = "Finance approval", StepType = WorkflowStepType.Approval, Order = 1
+        };
+        var instance = new WorkflowInstance
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, WorkflowDefinitionId = definition.Id,
+            EntityTypeId = entityType.Id, EntityId = journal.Id, InitiatedById = withdrawingUserId,
+            Status = WorkflowInstanceStatus.Cancelled, CompletedDate = DateTime.UtcNow
+        };
+        var stepInstance = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, WorkflowInstanceId = instance.Id,
+            WorkflowStepId = step.Id, Status = WorkflowStepInstanceStatus.Cancelled,
+            AssignedToId = approverId
+        };
+        db.AddRange(entityType, definition, step, instance, stepInstance);
+        db.WorkflowApprovals.Add(new WorkflowApproval
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, StepInstanceId = stepInstance.Id,
+            ApproverId = approverId, Status = WorkflowApprovalStatus.Expired
+        });
+        await db.SaveChangesAsync();
+
+        const string reason = "Incorrect supporting schedule selected.";
+        await service.WithdrawApprovalAsync(journal.Id, withdrawingUserId, reason);
+
+        var stored = await db.JournalEntries.SingleAsync(x => x.Id == journal.Id);
+        stored.PostingStatus.Should().Be("Draft");
+        stored.ApprovalStatus.Should().Be("Withdrawn");
+        stored.RejectionReason.Should().BeNull();
+        stored.WithdrawalReason.Should().Be(reason);
+        stored.WithdrawnByUserId.Should().Be(withdrawingUserId);
+        stored.WithdrawnDate.Should().NotBeNull();
+        budgetControl.Verify(
+            x => x.ReleaseManualJournalAsync(journal.Id, reason, It.IsAny<CancellationToken>()),
+            Times.Once);
+        notifications.Verify(
+            x => x.CreateInAppNotificationAsync(
+                approverId,
+                "Journal approval request withdrawn",
+                It.Is<string>(message => message.Contains(reason)),
+                "FinanceJournalApprovalWithdrawn",
+                It.IsAny<Dictionary<string, object>?>(),
+                tenantId),
+            Times.Once);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -254,9 +407,14 @@ public sealed class JournalEntryLifecycleBatch5Tests
         return new ApplicationDbContext(options);
     }
 
-    private static JournalEntryService CreateJournalService(ApplicationDbContext db, Guid tenantId)
+    private static JournalEntryService CreateJournalService(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid? currentUserId = null,
+        Mock<INotificationService>? notification = null,
+        IFinanceBudgetControlService? budgetControl = null)
     {
-        var currentUser = CreateCurrentUser(tenantId);
+        var currentUser = CreateCurrentUser(tenantId, currentUserId);
         var engine = new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
 
         var gl = new Mock<IGeneralLedgerService>();
@@ -277,7 +435,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
                 It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
 
-        var notification = new Mock<INotificationService>();
+        notification ??= new Mock<INotificationService>();
         var books = new Mock<IAccountingBookService>();
 
         return new JournalEntryService(
@@ -287,12 +445,13 @@ public sealed class JournalEntryLifecycleBatch5Tests
             audit.Object,
             notification.Object,
             books.Object,
-            engine);
+            engine,
+            budgetControl: budgetControl);
     }
 
-    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
+    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId, Guid? currentUserId = null)
     {
-        var userId = Guid.NewGuid();
+        var userId = currentUserId ?? Guid.NewGuid();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());

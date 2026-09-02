@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
@@ -43,14 +44,14 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
-        private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
-        private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
-        private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
-        private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
+        private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
         private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
+        private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
+        private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
         private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
@@ -85,19 +86,6 @@ namespace ErpSystem.Web.Services
                     "Independent final payment authorization before posting, clearing, or settlement finalization.")
             };
 
-        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> BudgetRevisionApprovalStages =
-            new List<WorkflowApprovalStageSeed>
-            {
-                new(
-                    "Finance Manager Review",
-                    new[] { "Finance Manager" },
-                    "Confirms the virement or supplementary-budget arithmetic, available balances, effective date, and supporting Board resolution."),
-                new(
-                    "Managing Director Final Authority",
-                    new[] { "Managing Director" },
-                    "Records TDC executive authority against the cited Board resolution before Finance may create the successor official budget.")
-            };
-
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
 
         private sealed record FinanceWorkflowSeedSpec(
@@ -112,6 +100,24 @@ namespace ErpSystem.Web.Services
             IReadOnlyCollection<string> RoleNames,
             string Description);
 
+        private sealed record EstateSopWorkflowSeedSpec(
+            string EntityCode,
+            string EntityName,
+            string DefinitionName,
+            string Description,
+            IReadOnlyList<EstateSopWorkflowStepSeed> Steps);
+
+        private sealed record EstateSopWorkflowStepSeed(
+            string StepName,
+            WorkflowStepType StepType,
+            string RoleName,
+            string Description,
+            IReadOnlyList<string> Checklist,
+            IReadOnlyList<string> Documents,
+            string TaskActionType = "estate-sop-example",
+            string DocumentType = "EstateSopEvidence",
+            string? Instructions = null);
+
         public DatabaseSeedingService(
             ApplicationDbContext context,
             UserManager<ApplicationUser> userManager,
@@ -120,16 +126,16 @@ namespace ErpSystem.Web.Services
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
-            QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
-            QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
-            CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
-            CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
             ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
-            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null,
+            QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
+            QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
             QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
+            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null,
+            CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
+            CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
             CivilEngineeringStatutoryReportSeeder? civilEngineeringStatutoryReportSeeder = null)
         {
             _context = context;
@@ -139,14 +145,14 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
-            _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
-            _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
-            _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
-            _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
+            _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
             _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
+            _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
+            _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
             _civilEngineeringStatutoryReportSeeder = civilEngineeringStatutoryReportSeeder;
             _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
@@ -225,18 +231,6 @@ namespace ErpSystem.Web.Services
                     await _procurementAccessControlSeeder.SeedAsync();
                 }
 
-                if (_quantitySurveyConfigurationProfileSeeder is not null)
-                {
-                    _logger.LogInformation("Ensuring draft quantity-survey configuration profiles are seeded...");
-                    await _quantitySurveyConfigurationProfileSeeder.SeedAsync();
-                }
-
-                if (_quantitySurveyAccessControlSeeder is not null)
-                {
-                    _logger.LogInformation("Ensuring quantity-survey configuration permissions and roles are seeded...");
-                    await _quantitySurveyAccessControlSeeder.SeedAsync();
-                }
-
                 if (_civilEngineeringConfigurationProfileSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring draft Civil Engineering configuration profiles are seeded...");
@@ -245,8 +239,20 @@ namespace ErpSystem.Web.Services
 
                 if (_civilEngineeringAccessControlSeeder is not null)
                 {
-                    _logger.LogInformation("Ensuring Civil Engineering configuration permissions are seeded...");
+                    _logger.LogInformation("Ensuring Civil Engineering roles and permissions are seeded...");
                     await _civilEngineeringAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey access roles, permissions, and workflow entity types are seeded...");
+                    await _quantitySurveyAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft TDC Quantity Survey configuration profiles are seeded...");
+                    await _quantitySurveyConfigurationProfileSeeder.SeedAsync();
                 }
 
                 if (_procurementStatutoryReportSeeder is not null)
@@ -269,7 +275,7 @@ namespace ErpSystem.Web.Services
 
                 if (_quantitySurveyStatutoryReportSeeder is not null)
                 {
-                    _logger.LogInformation("Ensuring TDC Quantity Survey report catalogue is seeded...");
+                    _logger.LogInformation("Ensuring TDC Quantity Survey statutory report catalogue is seeded...");
                     await _quantitySurveyStatutoryReportSeeder.SeedAsync();
                 }
 
@@ -298,6 +304,8 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring development test users exist...");
                     await SeedTestUsersAsync();
+                    _logger.LogInformation("Ensuring Estate SOP example cases are seeded...");
+                    await EnsureEstateSopExampleCasesSeededAsync();
                     _logger.LogInformation("Ensuring project demo data is seeded...");
                     await EnsureProjectDemoDataSeededAsync();
 
@@ -390,12 +398,31 @@ namespace ErpSystem.Web.Services
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
             await EnsureBusinessPartnerWorkflowsSeededAsync();
-            _logger.LogInformation("Ensuring procurement receipt workflows are seeded...");
-            await EnsureProcurementWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring procurement receipt-inspection workflow is seeded...");
+            await EnsureProcurementOperationalWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring project workflows are seeded...");
             await EnsureProjectWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
+            await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Legal procedure workflows are seeded...");
+            await EnsureLegalProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
+
+            // Program.cs invokes this lightweight path during every permitted VPS
+            // startup. Keep the UAT PO route here so Draft templates are repaired and
+            // published before operators can submit purchase orders.
+            if (_procurementAccessControlSeeder is not null &&
+                StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+                    _environment.EnvironmentName,
+                    _allowDevelopmentDataSeedingOutsideDevelopment))
+            {
+                _logger.LogInformation(
+                    "Ensuring TDC Draft workflow templates and the UAT Purchase Order approval workflow are ready...");
+                await _procurementAccessControlSeeder.SeedAsync();
+                await _procurementAccessControlSeeder
+                    .EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync();
+            }
         }
 
         private async Task EnsureFinancePermissionAssignmentsAsync()
@@ -405,6 +432,77 @@ namespace ErpSystem.Web.Services
             // required by Finance authorization policies exists before those policies are enforced.
             await SeedRolesAsync();
             await SeedRolePermissionAssignmentsAsync();
+        }
+
+        private async Task EnsureProcurementOperationalWorkflowsSeededAsync()
+        {
+            try
+            {
+                const string entityCode = "PROCUREMENT_RECEIPT_INSPECTION";
+                const string definitionName = "Procurement Receipt Inspection Approval";
+                const string approverRole = "TDC_STORES_MANAGER";
+                var stages = new[]
+                {
+                    new WorkflowApprovalStageSeed(
+                        "PendingApproval",
+                        new[] { approverRole },
+                        "Independent Stores Manager approval of accepted, rejected, damaged, and short receipt quantities.")
+                };
+                var tenants = await _context.Tenants
+                    .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                foreach (var tenant in tenants)
+                {
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode,
+                        "Procurement Receipt Inspection",
+                        typeof(ProcurementReceiptInspectionCase).FullName,
+                        definitionName,
+                        "Stores maker-checker approval before accepted receipt quantities become stock and AP eligible.",
+                        stages);
+
+                    // Earlier system seed data assigned this step to Head of Procurement.
+                    // Pending approval rows contain no decision and are safe to realign to
+                    // the corrected Stores Manager workflow role. Completed rows remain immutable.
+                    var pendingApprovals = await _context.WorkflowApprovals
+                        .Include(approval => approval.StepInstance)
+                            .ThenInclude(instance => instance.WorkflowStep)
+                                .ThenInclude(step => step.WorkflowDefinition)
+                        .Where(approval =>
+                            approval.TenantId == tenant.Id &&
+                            !approval.IsDeleted &&
+                            approval.Status == WorkflowApprovalStatus.Pending &&
+                            approval.ApproverId == null &&
+                            approval.ApproverRole != approverRole &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.CreatedBy == "System" &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.Name.StartsWith(definitionName))
+                        .ToListAsync();
+
+                    if (pendingApprovals.Count == 0)
+                        continue;
+
+                    var repairedAt = DateTime.UtcNow;
+                    foreach (var approval in pendingApprovals)
+                    {
+                        approval.ApproverRole = approverRole;
+                        approval.UpdatedAt = repairedAt;
+                        approval.UpdatedBy = "System";
+                    }
+
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation(
+                        "Realigned {Count} pending receipt-inspection approval assignment(s) to {Role} for tenant {TenantId}",
+                        pendingApprovals.Count,
+                        approverRole,
+                        tenant.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed procurement operational workflows");
+            }
         }
 
         private async Task EnsureProjectWorkflowsSeededAsync()
@@ -448,6 +546,510 @@ namespace ErpSystem.Web.Services
             }
         }
 
+        private async Task EnsureEstateSopWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetEstateSopWorkflowSeedSpecs())
+                    {
+                        await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, spec);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Estate SOP example workflows");
+            }
+        }
+
+        private async Task EnsureLegalProcedureWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetLegalProcedureWorkflowSeedSpecs())
+                    {
+                        await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, spec);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Legal procedure workflows");
+            }
+        }
+
+        private async Task EnsureEstateSopWorkflowDefinitionSeededAsync(Guid tenantId, EstateSopWorkflowSeedSpec spec)
+        {
+            var entityType = await EnsureWorkflowEntityTypeAsync(
+                tenantId,
+                spec.EntityCode,
+                spec.EntityName,
+                null,
+                spec.Description);
+
+            var definitions = await _context.WorkflowDefinitions
+                .Include(item => item.Steps)
+                .Where(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.EntityTypeId == entityType.Id
+                    && item.Name.StartsWith(spec.DefinitionName))
+                .ToListAsync();
+
+            var matchingDefinition = definitions
+                .Where(item => HasExpectedEstateSopSteps(item, spec.Steps))
+                .OrderByDescending(item => item.Version)
+                .ThenByDescending(item => item.PublishedAt ?? item.CreatedAt)
+                .FirstOrDefault();
+
+            if (matchingDefinition is not null)
+            {
+                var changed = false;
+                var now = DateTime.UtcNow;
+
+                if (!matchingDefinition.IsActive)
+                {
+                    matchingDefinition.IsActive = true;
+                    changed = true;
+                }
+
+                if (matchingDefinition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published)
+                {
+                    matchingDefinition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+                    matchingDefinition.PublishedAt ??= now;
+                    matchingDefinition.RetiredAt = null;
+                    matchingDefinition.RetiredById = null;
+                    changed = true;
+                }
+
+                if (matchingDefinition.Description != spec.Description)
+                {
+                    matchingDefinition.Description = spec.Description;
+                    changed = true;
+                }
+
+                if (EnsureEstateSopStepConfigurations(matchingDefinition, spec.Steps, now))
+                {
+                    changed = true;
+                }
+
+                if (RetireSupersededEstateSopExampleDefinitions(definitions, matchingDefinition.Id, spec, now))
+                {
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    matchingDefinition.UpdatedAt = now;
+                    matchingDefinition.UpdatedBy = "System";
+                    await _context.SaveChangesAsync();
+                }
+
+                return;
+            }
+
+            var createdAt = DateTime.UtcNow;
+            var version = definitions.Count == 0 ? 1 : definitions.Max(item => item.Version) + 1;
+            var definitionName = definitions.Any(item => string.Equals(item.Name, spec.DefinitionName, StringComparison.OrdinalIgnoreCase))
+                ? $"{spec.DefinitionName} v{version}"
+                : spec.DefinitionName;
+            var definitionId = Guid.NewGuid();
+
+            var steps = spec.Steps
+                .Select((step, index) => new WorkflowStep
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    WorkflowDefinitionId = definitionId,
+                    Name = step.StepName,
+                    Description = step.Description,
+                    StepType = step.StepType,
+                    RequiredRole = step.RoleName,
+                    AssignmentType = "Role",
+                    Order = index + 1,
+                    IsStartStep = index == 0,
+                    IsEndStep = index == spec.Steps.Count - 1,
+                    IsRequired = true,
+                    Configuration = BuildEstateSopStepConfigurationJson(step),
+                    CreatedAt = createdAt,
+                    CreatedBy = "System"
+                })
+                .ToList();
+
+            _context.WorkflowDefinitions.Add(new WorkflowDefinition
+            {
+                Id = definitionId,
+                DefinitionKey = definitionId,
+                TenantId = tenantId,
+                Name = definitionName,
+                Description = spec.Description,
+                EntityTypeId = entityType.Id,
+                Version = version,
+                IsActive = true,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                PublishedAt = createdAt,
+                CreatedAt = createdAt,
+                CreatedBy = "System"
+            });
+
+            _context.WorkflowSteps.AddRange(steps);
+
+            for (var index = 0; index < steps.Count - 1; index++)
+            {
+                _context.WorkflowTransitions.Add(new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    WorkflowDefinitionId = definitionId,
+                    FromStepId = steps[index].Id,
+                    ToStepId = steps[index + 1].Id,
+                    Name = steps[index + 1].StepType == WorkflowStepType.Approval
+                        ? "Submit for approval"
+                        : index == steps.Count - 2
+                            ? "Close"
+                            : "Complete step",
+                    IsDefault = true,
+                    Priority = 0,
+                    CreatedAt = createdAt,
+                    CreatedBy = "System"
+                });
+            }
+
+            RetireSupersededEstateSopExampleDefinitions(definitions, definitionId, spec, createdAt);
+            await _context.SaveChangesAsync();
+        }
+
+        private static bool HasExpectedEstateSopSteps(
+            WorkflowDefinition definition,
+            IReadOnlyList<EstateSopWorkflowStepSeed> expectedSteps)
+        {
+            var actualSteps = definition.Steps
+                .Where(item => !item.IsDeleted)
+                .OrderBy(item => item.Order)
+                .Select(item => NormalizeWorkflowEntityTypeKey(item.Name))
+                .ToList();
+
+            return actualSteps.SequenceEqual(expectedSteps.Select(item => NormalizeWorkflowEntityTypeKey(item.StepName)));
+        }
+
+        private static bool EnsureEstateSopStepConfigurations(
+            WorkflowDefinition definition,
+            IReadOnlyList<EstateSopWorkflowStepSeed> expectedSteps,
+            DateTime now)
+        {
+            var changed = false;
+            foreach (var expectedStep in expectedSteps)
+            {
+                var step = definition.Steps.FirstOrDefault(item =>
+                    !item.IsDeleted && WorkflowEntityTypeKeyMatches(item.Name, expectedStep.StepName));
+
+                if (step is null)
+                {
+                    continue;
+                }
+
+                var expectedConfiguration = BuildEstateSopStepConfigurationJson(expectedStep);
+                if (step.Configuration != expectedConfiguration)
+                {
+                    step.Configuration = expectedConfiguration;
+                    changed = true;
+                }
+
+                if (step.RequiredRole != expectedStep.RoleName)
+                {
+                    step.RequiredRole = expectedStep.RoleName;
+                    changed = true;
+                }
+
+                if (step.StepType != expectedStep.StepType)
+                {
+                    step.StepType = expectedStep.StepType;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    step.UpdatedAt = now;
+                    step.UpdatedBy = "System";
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool RetireSupersededEstateSopExampleDefinitions(
+            IEnumerable<WorkflowDefinition> definitions,
+            Guid activeDefinitionId,
+            EstateSopWorkflowSeedSpec spec,
+            DateTime now)
+        {
+            var changed = false;
+            foreach (var definition in definitions.Where(item =>
+                         item.Id != activeDefinitionId
+                         && item.IsActive
+                         && string.Equals(item.CreatedBy, "System", StringComparison.OrdinalIgnoreCase)
+                         && item.Name.StartsWith(spec.DefinitionName, StringComparison.OrdinalIgnoreCase)))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt ??= now;
+                definition.UpdatedAt = now;
+                definition.UpdatedBy = "System";
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static string BuildEstateSopStepConfigurationJson(EstateSopWorkflowStepSeed step)
+        {
+            var configuration = new WorkflowStepConfigurationDto
+            {
+                QualityConfig = new WorkflowQualityConfigDto
+                {
+                    QualityChecks = step.Checklist
+                        .Select((check, index) => new WorkflowQualityCheckDto
+                        {
+                            Id = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-CHECK-{index + 1}",
+                            Name = check,
+                            Description = check,
+                            IsRequired = true
+                        })
+                        .ToList()
+                },
+                TaskConfig = new WorkflowTaskConfigDto
+                {
+                    TaskActionType = step.TaskActionType,
+                    RequiresDocument = false,
+                    Instructions = step.Instructions ?? $"Example SOP step for {step.RoleName}. Replace or refine this in Workflow Setup for the live operating procedure.",
+                    DocumentRequirements = step.Documents
+                        .Select((document, index) => new WorkflowDocumentRequirementDto
+                        {
+                            Id = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-DOC-{index + 1}",
+                            RequirementKey = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-DOC-{index + 1}",
+                            DocumentName = document,
+                            DocumentType = step.DocumentType,
+                            IsRequired = true
+                        })
+                        .ToList()
+                }
+            };
+
+            if (step.StepType == WorkflowStepType.Approval)
+            {
+                configuration.ApprovalConfig = BuildApprovalConfig([step.RoleName]);
+            }
+
+            return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
+        }
+
+        private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetEstateSopWorkflowSeedSpecs()
+        {
+            var registryToManager = new[]
+            {
+                Step("Registry Intake", WorkflowStepType.Manual, "Registry Officer",
+                    ["Request logged in registry / movement book", "Property file reference captured", "Approved form/template selected"],
+                    ["Application letter / request form", "File movement trace"]),
+                Step("Estate Officer Processing", WorkflowStepType.Manual, "Estate Officer",
+                    ["SOP section and fee appendix reference captured", "Finance/Records/Legal handoff need assessed"],
+                    ["Property file extract", "Approved fee schedule or appendix extract"]),
+                Step("Estate Manager Approval", WorkflowStepType.Approval, "Estate Manager",
+                    ["Completeness, arrears, and required evidence reviewed"],
+                    ["Approval, recommendation, or routing note"]),
+                Step("Records and DMS Closeout", WorkflowStepType.Manual, "Records Officer",
+                    ["Records update reference captured", "Final output indexed in Central DMS"],
+                    ["Records amendment evidence", "Central DMS reference"])
+            };
+
+            var transferSteps = new[]
+            {
+                Step("Registry Intake", WorkflowStepType.Manual, "Registry Officer",
+                    ["Transfer request logged", "House / plot / shop number captured"],
+                    ["Application letter / request form", "Property file extract"]),
+                Step("Transfer Evidence Review", WorkflowStepType.Manual, "Records Officer",
+                    ["Transferor and transferee details captured", "Voluntary vacation evidence checked", "New lessee address captured"],
+                    ["Transfer Declaration form completed by transferor and transferee", "Voluntary vacation of tenancy evidence", "New lessee address evidence"]),
+                Step("Finance and Legal Review", WorkflowStepType.Manual, "Estate Officer",
+                    ["Transfer fee / arrears status checked", "Legal completion or registered instrument reference captured"],
+                    ["Transfer fee payment confirmation", "Registered transfer instrument or Legal completion note"]),
+                Step("Estate Manager Approval", WorkflowStepType.Approval, "Estate Manager",
+                    ["Transfer amendment approved before records are changed"],
+                    ["Approval, recommendation, or routing note"]),
+                Step("Revenue and Estate Records Update", WorkflowStepType.Manual, "Records Officer",
+                    ["Estate register updated", "Revenue register / ledger updated", "Records amendment confirmation entered"],
+                    ["Revenue and Estate Records amendment confirmation", "Records amendment evidence"])
+            };
+
+            var housingSteps = new[]
+            {
+                Step("Housing Intake", WorkflowStepType.Manual, "Housing Officer",
+                    ["Housing request type selected", "Tenant/unit reference captured"],
+                    ["Recognition or HOS application", "Rental Transfer Form"]),
+                Step("Revenue and Records Check", WorkflowStepType.Manual, "Records Officer",
+                    ["Rent card/register checked", "Payment completion status captured", "HOS ledger impact assessed"],
+                    ["Rent Card", "Revenue and Estate Records amendment confirmation"]),
+                Step("Estate Manager Approval", WorkflowStepType.Approval, "Estate Manager",
+                    ["Recognition, rental transfer, or HOS conversion approved"],
+                    ["HOS Offer Letter", "Approval, recommendation, or routing note"]),
+                Step("HOS Ledger and DMS Closeout", WorkflowStepType.Manual, "Housing Officer",
+                    ["HOS ledger updated", "Lease request generated where property purchased"],
+                    ["HOS ledger and Estate Records update evidence", "Lease request for purchased house"])
+            };
+
+            var feeAndOfferSteps = new[]
+            {
+                Step("Application Intake", WorkflowStepType.Manual, "Registry Officer",
+                    ["Application form/letter logged", "Land use and plot size captured"],
+                    ["Application form or application letter", "Property file extract"]),
+                Step("LMF and Ground Rent Calculation", WorkflowStepType.Manual, "Estate Officer",
+                    ["Approved fee schedule selected", "LMF calculated", "Ground rent calculated"],
+                    ["LMF and Ground Rent calculation worksheet", "Approved fee schedule or appendix extract"]),
+                Step("Estate Manager Approval", WorkflowStepType.Approval, "Estate Manager",
+                    ["Proposal/offer terms reviewed", "Finance receipt dependency confirmed"],
+                    ["Proposal Letter with LMF and Ground Rent", "Approval, recommendation, or routing note"]),
+                Step("Offer and Right of Entry Closeout", WorkflowStepType.Manual, "Estate Officer",
+                    ["Offer Letter reference captured", "Right of Entry reference captured", "Quarterly reporting reference captured"],
+                    ["Offer Letter", "Right of Entry"])
+            };
+
+            var reportingSteps = new[]
+            {
+                Step("Report Compilation", WorkflowStepType.Manual, "Estate Officer",
+                    ["Source schedule selected", "Period and source counts captured", "Exception summary captured"],
+                    ["Quarterly productivity report", "Allocation and expected revenue report"]),
+                Step("Records and Finance Reconciliation", WorkflowStepType.Manual, "Records Officer",
+                    ["Rent roll / debtor list checked", "Transfer and assignment return checked", "Fee appendix control sheet attached"],
+                    ["Rent roll", "Debtor list", "Approved appendix fee schedule control sheet"]),
+                Step("Estate Manager Review", WorkflowStepType.Approval, "Estate Manager",
+                    ["Report pack reviewed for Board / management submission"],
+                    ["Control exception register", "Board summary / approved report pack"]),
+                Step("Published Report Closeout", WorkflowStepType.Manual, "Estate Officer",
+                    ["Board submission reference captured", "DMS/audit trail reference captured"],
+                    ["Approved report pack", "Central DMS reference"])
+            };
+
+            return
+            [
+                Spec("EstateRegistrySecretariat", "Secretarial and Estates Registry", registryToManager),
+                Spec("EstateRecordsManagement", "Estate Records Management", registryToManager),
+                Spec("EstateInspection", "Land and Landed Property Inspection", registryToManager),
+                Spec("EstateSearchApplication", "Search Application", registryToManager),
+                Spec("EstateRecordAmendment", "Change of Address and Record Amendment", registryToManager),
+                Spec("EstateCertifiedTrueCopy", "Certified True Copies", registryToManager),
+                Spec("EstateJointOwnership", "Joint Ownership / Addition of Name", transferSteps),
+                Spec("EstateTransfer", "Transfer / Portion Transfer of Plot", transferSteps),
+                Spec("EstateAssignment", "Assignment", transferSteps),
+                Spec("EstateMortgageConsent", "Consent to Mortgage / Mortgage in Principle", registryToManager),
+                Spec("EstateLeasePreparation", "Lease Preparation", registryToManager),
+                Spec("EstateAdditionalLand", "Additional Land Application", feeAndOfferSteps),
+                Spec("EstateLayoutRevision", "Revision of Layout", registryToManager),
+                Spec("EstateChangeOfUse", "Change of Land Use", feeAndOfferSteps),
+                Spec("EstateReminderRateRevision", "Reminder and Rate Revision Notices", registryToManager),
+                Spec("EstateLeaseRenewal", "Lease Surrender and Renewal", registryToManager),
+                Spec("EstateServicedPlotAllocation", "Serviced Plots and HOS Allocation", feeAndOfferSteps),
+                Spec("EstateLandsPartiallyServiced", "Lands / Partially Serviced Schedule", feeAndOfferSteps),
+                Spec("EstateHousingHomeOwnership", "Housing and Home Ownership Scheme", housingSteps),
+                Spec("EstateTraditionalLands", "Traditional Lands", feeAndOfferSteps),
+                Spec("EstateTenancyRegularisation", "Tenancy Regularisation", feeAndOfferSteps),
+                Spec("EstateReportingControls", "Estate Reporting and SOP Controls", reportingSteps)
+            ];
+
+            static EstateSopWorkflowStepSeed Step(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> documents)
+                => new(name, type, role, string.Join(" ", checks), checks, documents);
+
+            static EstateSopWorkflowSeedSpec Spec(
+                string entityCode,
+                string entityName,
+                IReadOnlyList<EstateSopWorkflowStepSeed> steps)
+                => new(
+                    entityCode,
+                    entityName,
+                    $"Estate SOP Example - {entityName}",
+                    $"Example TDC Estate SOP workflow for {entityName}. It provides practical stages, checklist controls, and document requirements that can be cloned/refined in Workflow Setup.",
+                    steps);
+        }
+
+        private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetLegalProcedureWorkflowSeedSpecs()
+        {
+            const string TaskActionType = "legal-property-agreement-review";
+            const string DocumentType = "LegalAgreementReviewEvidence";
+
+            return
+            [
+                new(
+                    "LegalPropertyAgreementReview",
+                    "LegalPropertyAgreementReview",
+                    "Legal Property Agreement Review",
+                    "Workflow for Legal review of draft rental, lease, and sale agreements submitted from Property Management.",
+                    [
+                        LegalStep(
+                            "Legal Intake",
+                            WorkflowStepType.Manual,
+                            "Legal Admin Assistant",
+                            [
+                                "Confirm Estate source reference",
+                                "Confirm draft agreement is attached",
+                                "Assign Legal Officer"
+                            ],
+                            [
+                                "Generated draft agreement"
+                            ]),
+                        LegalStep(
+                            "Agreement Vetting",
+                            WorkflowStepType.Manual,
+                            "Legal Officer",
+                            [
+                                "Verify parties and property",
+                                "Review clauses and schedules",
+                                "Approve or return for correction"
+                            ],
+                            [
+                                "Legal review note"
+                            ]),
+                        LegalStep(
+                            "Head of Legal Release",
+                            WorkflowStepType.Approval,
+                            "Head of Legal",
+                            [
+                                "Confirm Legal Officer recommendation",
+                                "Record release decision",
+                                "Return approved reference to Property Management"
+                            ],
+                            [
+                                "Approved / released agreement"
+                            ])
+                    ])
+            ];
+
+            static EstateSopWorkflowStepSeed LegalStep(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> documents)
+                => new(
+                    name,
+                    type,
+                    role,
+                    string.Join(" ", checks),
+                    checks,
+                    documents,
+                    TaskActionType,
+                    DocumentType,
+                    $"Complete the {name} task for the property agreement review workflow.");
+        }
+
         private async Task EnsureFinanceWorkflowsSeededAsync()
         {
             try
@@ -455,16 +1057,14 @@ namespace ErpSystem.Web.Services
                 var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
                 foreach (var tenant in tenants)
                 {
+                    var tenantId = tenant.Id;
+                    await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
-                        var approvalStages = spec.EntityCode switch
-                        {
-                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException" => FinancePaymentApprovalStages,
-                            // TDC budget changes are governed separately from routine
-                            // accounting approvals because FR-BG-012 requires Board authority.
-                            "BudgetRevision" => BudgetRevisionApprovalStages,
-                            _ => FinanceApprovalStages
-                        };
+                        var approvalStages = spec.EntityCode is
+                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                            ? FinancePaymentApprovalStages
+                            : FinanceApprovalStages;
 
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
@@ -506,6 +1106,62 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogError(ex, "Failed to seed finance workflows");
             }
+        }
+
+        private async Task RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(Guid tenantId)
+        {
+            // Finance owns SupplierDebitNote commercial/AP approval only. FIN-INT-012/013 remain
+            // quarantined, so historical SupplierReturn definitions must not authorize a Procurement/
+            // Inventory return dispatch or imply that Finance owns the producer transaction.
+            var activeDefinitions = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.IsActive)
+                .ToListAsync();
+
+            var retiredAt = DateTime.UtcNow;
+            var retiredCount = RetireQuarantinedSupplierReturnWorkflowDefinitions(activeDefinitions, retiredAt);
+            if (retiredCount == 0)
+                return;
+
+            await _context.SaveChangesAsync();
+            _logger.LogWarning(
+                "Retired {WorkflowDefinitionCount} active SupplierReturn workflow definition(s) for tenant {TenantId}; FIN-INT-012/013 remain quarantined.",
+                retiredCount,
+                tenantId);
+        }
+
+        private static int RetireQuarantinedSupplierReturnWorkflowDefinitions(
+            IEnumerable<WorkflowDefinition> definitions,
+            DateTime retiredAt)
+        {
+            var retiredCount = 0;
+            foreach (var definition in definitions.Where(item =>
+                         item.IsActive &&
+                         !item.IsDeleted &&
+                         item.EntityType != null &&
+                         item.EntityType.TenantId == item.TenantId &&
+                         !item.EntityType.IsDeleted &&
+                         (WorkflowEntityTypeKeyMatches(item.EntityType.Code, "SupplierReturn") ||
+                          WorkflowEntityTypeKeyMatches(item.EntityType.Name, "SupplierReturn") ||
+                          string.Equals(
+                              item.EntityType.EntityClassName,
+                              typeof(SupplierReturn).FullName,
+                              StringComparison.Ordinal))))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt = retiredAt;
+                definition.RetiredById = null;
+                definition.UpdatedAt = retiredAt;
+                definition.UpdatedBy = "System";
+                definition.LastModifiedById = null;
+                retiredCount++;
+            }
+
+            return retiredCount;
         }
 
         private async Task EnsureVendorPaymentControlWorkflowSeededAsync(Guid tenantId)
@@ -804,8 +1460,11 @@ namespace ErpSystem.Web.Services
                     "Manual supplier payment authorization before posting, clearing, or settlement finalization."),
                 new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
                     "Bulk supplier payment batch approval before processing."),
-                new("SupplierReturn", "Supplier Return", typeof(SupplierReturn).FullName, "Supplier Return Approval",
-                    "Supplier return approval before goods are shipped back, debit notes are issued, or refunds are tracked."),
+                // Finance owns the buyer-side commercial credit/AP correction only. This does
+                // not lift the SupplierReturn integration quarantine or authorize stock dispatch.
+                new("SupplierDebitNote", "Supplier Debit Note", typeof(SupplierDebitNote).FullName,
+                    "Supplier Debit Note Approval",
+                    "Independent Finance approval of the buyer-side AP debit note before central posting and settlement application."),
 
                 // Accounts Receivable
                 new("Quote", "Quotation", typeof(Quote).FullName, "Quotation Approval",
@@ -830,8 +1489,8 @@ namespace ErpSystem.Web.Services
                     "Budget scenario approval before locking, activation, or archival."),
                 new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
                     "Department budget worksheet approval workflow before consolidation."),
-                new("BudgetRevision", "Budget Revision", typeof(BudgetRevision).FullName, "Budget Revision Board Approval",
-                    "TDC virement and supplementary-budget approval supported by a Board resolution before a successor official budget can be applied."),
+                new("FinanceBudgetOverride", "Finance Budget Override", typeof(FinanceBudgetOverrideRequest).FullName, "Finance Budget Override Approval",
+                    "Independent Finance approval of a precise manual-journal budget shortfall. Approval is bound to the immutable evaluation hash and expires when the journal changes."),
                 new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",
                     "Unit accounting journal approval before posting quantity balances."),
                 new("UnitAccountBudget", "Unit Budget", typeof(UnitAccountBudget).FullName, "Unit Budget Approval",
@@ -889,31 +1548,6 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed business partner workflows");
-            }
-        }
-
-        private async Task EnsureProcurementWorkflowsSeededAsync()
-        {
-            try
-            {
-                var tenants = await _context.Tenants
-                    .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
-                    .ToListAsync();
-                foreach (var tenant in tenants)
-                {
-                    await EnsureWorkflowDefinitionSeededAsync(
-                        tenant.Id,
-                        entityCode: "PROCUREMENT_RECEIPT_INSPECTION",
-                        entityName: "PROCUREMENT_RECEIPT_INSPECTION",
-                        entityClassName: typeof(ProcurementReceiptInspectionCase).FullName,
-                        definitionName: "Procurement Receipt Inspection Approval",
-                        description: "Independent receipt-inspection approval before accepted stock and Finance posting.",
-                        approvalRoleNames: new[] { "TDC_HEAD_OF_PROCUREMENT" });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to seed procurement receipt workflows");
             }
         }
 
@@ -6674,6 +7308,8 @@ namespace ErpSystem.Web.Services
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.officer2", First = "Abena", Last = "Legal", Role = "Legal Officer", Number = "LA-LEG-002" },
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager1", First = "Fiifi", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-003" },
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager2", First = "Mansa", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-004" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.admin", First = "Efua", Last = "Admin", Role = "Legal Admin Assistant", Number = "LA-LEG-005" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.head", First = "Yaw", Last = "Head", Role = "Head of Legal", Number = "LA-LEG-006" },
 
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "finance.officer", First = "Daniel", Last = "Finance", Role = "Finance Officer", Number = "LA-FIN-001" },
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "acquisition.finance.manager", First = "Grace", Last = "Finance", Role = "Finance Manager", Number = "LA-FIN-002" },
@@ -6817,6 +7453,378 @@ namespace ErpSystem.Web.Services
                         string.Join(", ", result.Errors.Select(error => error.Description)));
                 }
             }
+        }
+
+        private async Task EnsureEstateSopExampleCasesSeededAsync()
+        {
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted)
+                ?? await _context.Tenants.FirstOrDefaultAsync(item => item.Status == TenantStatus.Active && !item.IsDeleted);
+            if (tenant is null)
+            {
+                return;
+            }
+
+            var owner = await _userManager.FindByNameAsync("estate.manager")
+                ?? await _userManager.FindByNameAsync("admin");
+            var ownerId = owner?.Id ?? Guid.Empty;
+            var now = DateTime.UtcNow;
+
+            foreach (var seed in GetEstateSopExampleCaseSeeds())
+            {
+                var exists = await _context.ProcedureCases.AnyAsync(item =>
+                    item.TenantId == tenant.Id
+                    && !item.IsDeleted
+                    && item.ReferenceNumber == seed.ReferenceNumber);
+                if (exists)
+                {
+                    continue;
+                }
+
+                var procedureCase = new ProcedureCase
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenant.Id,
+                    Module = "Estate",
+                    EntityType = seed.EntityType,
+                    Title = seed.Title,
+                    ReferenceNumber = seed.ReferenceNumber,
+                    ApplicantName = seed.ApplicantName,
+                    SourceDepartment = seed.SourceDepartment,
+                    ReceivedDate = now.Date.AddDays(seed.AgeDays * -1),
+                    Description = seed.Description,
+                    Status = "Open",
+                    CurrentStageIndex = 0,
+                    CurrentStageName = seed.CurrentStageName,
+                    CurrentStageOwner = seed.CurrentStageOwner,
+                    CurrentAssignedRole = seed.CurrentStageOwner,
+                    OpenedById = ownerId,
+                    LastActionById = ownerId,
+                    CreatedById = ownerId,
+                    CreatedBy = "System",
+                    CreatedAt = now
+                };
+
+                foreach (var field in seed.Fields)
+                {
+                    procedureCase.Fields.Add(new ProcedureCaseField
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Key = field.Key,
+                        Label = ToEstateSopFieldLabel(field.Key),
+                        FieldType = InferEstateSopFieldType(field.Key),
+                        Value = field.Value,
+                        CreatedById = ownerId,
+                        CreatedBy = "System",
+                        CreatedAt = now
+                    });
+                }
+
+                foreach (var check in seed.Checklist)
+                {
+                    procedureCase.ChecklistItems.Add(new ProcedureCaseChecklistItem
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        StageIndex = 0,
+                        StageName = seed.CurrentStageName,
+                        Text = check,
+                        IsCompleted = true,
+                        CompletedById = ownerId,
+                        CompletedAt = now,
+                        CreatedById = ownerId,
+                        CreatedBy = "System",
+                        CreatedAt = now
+                    });
+                }
+
+                foreach (var document in seed.Documents)
+                {
+                    procedureCase.Documents.Add(new ProcedureCaseDocument
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Name = document,
+                        RequiredFrom = seed.CurrentStageOwner,
+                        IsMandatory = true,
+                        Notes = "Example SOP evidence placeholder. Replace with uploaded live document in real cases.",
+                        CreatedById = ownerId,
+                        CreatedBy = "System",
+                        CreatedAt = now
+                    });
+                }
+
+                procedureCase.Activities.Add(new ProcedureCaseActivity
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenant.Id,
+                    Action = "Example seeded",
+                    StageName = seed.CurrentStageName,
+                    Details = "Development example case showing how the Estate SOP fields, evidence, and handoff references should be filled.",
+                    PerformedById = ownerId,
+                    PerformedAt = now,
+                    CreatedById = ownerId,
+                    CreatedBy = "System",
+                    CreatedAt = now
+                });
+
+                _context.ProcedureCases.Add(procedureCase);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static IReadOnlyList<EstateSopExampleCaseSeed> GetEstateSopExampleCaseSeeds() =>
+        [
+            new(
+                "EstateTransfer",
+                "EXAMPLE - Transfer of Property with Records Amendment",
+                "EXAMPLE-EST-SOP-TRANSFER-001",
+                "Kwesi Mensah / Ama Tetteh",
+                "Estate Records",
+                "Transfer Evidence Review",
+                "Records Officer",
+                5,
+                "Shows Transfer Declaration, voluntary vacation, new lessee address, Finance/Legal checks, and Revenue/Estate Records amendment references.",
+                new Dictionary<string, string?>
+                {
+                    ["sopSectionReference"] = "3.9 / Records: Transfer Of Property",
+                    ["propertyNumber"] = "C5/SHOP/014",
+                    ["housePlotShopNumber"] = "C5/SHOP/014",
+                    ["transferProcessType"] = "Transfer of interest",
+                    ["transferorName"] = "Kwesi Mensah",
+                    ["transfereeName"] = "Ama Tetteh",
+                    ["newLesseeAddress"] = "Plot 21, Community 5, Tema",
+                    ["transferEffectiveDate"] = "2026-08-01",
+                    ["transferDeclarationReference"] = "TD-FORM-2026-001",
+                    ["voluntaryVacationReference"] = "VAC-2026-001",
+                    ["considerationAmount"] = "185000",
+                    ["transferFeePayable"] = "9250",
+                    ["approvedFeeScheduleReference"] = "Appendix D - Transfer Fees",
+                    ["documentTemplateReference"] = "EST-TRANSFER-DECLARATION",
+                    ["financeHandoffStatus"] = "Receipt confirmed",
+                    ["legalHandoffStatus"] = "Legal completed",
+                    ["recordsHandoffStatus"] = "Pending Records update",
+                    ["revenueRecordsReference"] = "REV-AMD-2026-001",
+                    ["estateRecordsReference"] = "EST-REC-AMD-2026-001"
+                },
+                ["Transferor and transferee details captured", "Voluntary vacation evidence checked", "Finance and Legal handoffs referenced"],
+                ["Transfer Declaration form completed by transferor and transferee", "Voluntary vacation of tenancy evidence", "Revenue and Estate Records amendment confirmation"]),
+            new(
+                "EstateHousingHomeOwnership",
+                "EXAMPLE - Rental Unit Conversion to HOS",
+                "EXAMPLE-EST-SOP-HOS-001",
+                "Abena Owusu",
+                "Housing",
+                "Revenue and Records Check",
+                "Housing Officer",
+                4,
+                "Shows rental-to-HOS conversion data including HOS form, rent card, selling price, purchase amount, and ledger update readiness.",
+                new Dictionary<string, string?>
+                {
+                    ["sopSectionReference"] = "6.3 Conversion of Rental Units to HOS",
+                    ["housingRequestType"] = "Conversion to HOS",
+                    ["propertyNumber"] = "C6/HSE/088",
+                    ["unitNumber"] = "C6/HSE/088",
+                    ["applicantName"] = "Abena Owusu",
+                    ["hosFormReference"] = "HOS-FORM-2026-014",
+                    ["tenantNamesChangingToHos"] = "Abena Owusu",
+                    ["houseType"] = "Two-bedroom terrace",
+                    ["rentCardNumber"] = "RC-C6-088",
+                    ["rentRegisterReference"] = "RENT-LEDGER-C6-088",
+                    ["sellingPrice"] = "245000",
+                    ["purchaseAmount"] = "245000",
+                    ["purchaseDate"] = "2026-08-05",
+                    ["paymentCompletionStatus"] = "Full selling price paid",
+                    ["ledgerUpdateStatus"] = "HOS ledger updated",
+                    ["approvedFeeScheduleReference"] = "Appendix D - HOS / rental conversion fees",
+                    ["documentTemplateReference"] = "EST-HOS-CONVERSION, EST-RENT-CARD",
+                    ["recordsUpdateReference"] = "HOS-LEDGER-2026-014"
+                },
+                ["HOS form reference captured", "Payment completion confirmed", "HOS ledger update reference captured"],
+                ["House Ownership Scheme form for rental-to-HOS conversion", "House type and selling price / purchase amount schedule", "HOS ledger and Estate Records update evidence"]),
+            new(
+                "EstateLandsPartiallyServiced",
+                "EXAMPLE - Partially Serviced Plot Proposal",
+                "EXAMPLE-EST-SOP-LAND-001",
+                "Tema Industrial Works Ltd",
+                "Lands / Partially Serviced",
+                "LMF and Ground Rent Calculation",
+                "Estate Officer",
+                3,
+                "Shows application intake, approved fee appendix, LMF, ground rent, proposal, offer, and ROE references.",
+                new Dictionary<string, string?>
+                {
+                    ["sopSectionReference"] = "5.3 Proposal Letters / LMF and Ground Rent",
+                    ["landUse"] = "Industrial",
+                    ["plotSizeAcres"] = "1.25",
+                    ["lmfRatePerAcre"] = "125000",
+                    ["landManagementFeePayable"] = "156250",
+                    ["groundRentRatePerAcre"] = "2500",
+                    ["groundRentComputed"] = "3125",
+                    ["groundRentPayable"] = "3125",
+                    ["paymentFrequency"] = "Annual",
+                    ["approvedFeeScheduleReference"] = "Appendix D - Approved Fees and Charges",
+                    ["documentTemplateReference"] = "EST-PROPOSAL-LETTER, EST-OFFER-LETTER, EST-RIGHT-ENTRY",
+                    ["proposalLetterReference"] = "PROP-LPS-2026-007",
+                    ["offerLetterReference"] = "OL-LPS-2026-007",
+                    ["rightOfEntryReference"] = "ROE-LPS-2026-007",
+                    ["financeHandoffStatus"] = "Pending invoice",
+                    ["reportingReference"] = "Q3-LPS-PIPELINE"
+                },
+                ["Approved fee schedule selected", "LMF calculated", "Ground rent calculated"],
+                ["LMF and Ground Rent calculation worksheet", "Proposal Letter with LMF and Ground Rent", "Offer Letter", "Right of Entry"]),
+            new(
+                "EstateLeasePreparation",
+                "EXAMPLE - Lease Agreement Preparation",
+                "EXAMPLE-EST-SOP-LEASE-001",
+                "Tema Industrial Works Ltd",
+                "Estate / Legal",
+                "Estate Officer Processing",
+                "Estate Officer",
+                4,
+                "Shows lease-request intake, cadastral and lease preparation fees, legal handoff, agreement template, and registered lease return.",
+                new Dictionary<string, string?>
+                {
+                    ["sopSectionReference"] = "3.11 / Lease Preparation",
+                    ["propertyNumber"] = "RP/23/A/23",
+                    ["applicantName"] = "Tema Industrial Works Ltd",
+                    ["landUse"] = "Industrial",
+                    ["leaseTermYears"] = "50",
+                    ["leaseCommencementDate"] = "2026-09-01",
+                    ["groundRentPayable"] = "3125",
+                    ["paymentFrequency"] = "Annual",
+                    ["leasePreparationFee"] = "1500",
+                    ["cadastralInvoiceReference"] = "CAD-INV-2026-044",
+                    ["cadastralFeeReceiptReference"] = "CAD-RCPT-2026-044",
+                    ["leaseRequestFormReference"] = "LRF-2026-020",
+                    ["approvedFeeScheduleReference"] = "Appendix B / Appendix D - cadastral and lease preparation fees",
+                    ["documentTemplateReference"] = "EST-LEASE-REQUEST, EST-LEASE-AGREEMENT",
+                    ["legalHandoffStatus"] = "Sent to Legal",
+                    ["legalLeasePreparationStatus"] = "Legal drafting",
+                    ["registeredLeaseReference"] = "LC-REG-2026-020"
+                },
+                ["Lease request captured", "Cadastral and lease-preparation fees referenced", "Legal handoff captured"],
+                ["Lease Request Form", "Cadastral and Lease Preparation invoice", "Draft / registered lease agreement"]),
+            new(
+                "EstateLeaseRenewal",
+                "EXAMPLE - Lease Renewal and Deed of Variation",
+                "EXAMPLE-EST-SOP-RENEW-001",
+                "Akosua Boateng",
+                "Estate / LRTC",
+                "Finance and Legal Review",
+                "Estate Officer",
+                5,
+                "Shows surrender/renewal review, premium and improved ground-rent approval, LRTC reference, and Deed of Variation control.",
+                new Dictionary<string, string?>
+                {
+                    ["sopSectionReference"] = "3.14 Lease Renewal / Surrender and Renewal",
+                    ["propertyNumber"] = "C11/PLOT/039",
+                    ["applicantName"] = "Akosua Boateng",
+                    ["originalLeaseReference"] = "LEASE-C11-039-1977",
+                    ["variationReason"] = "Lease renewal after surrender option discussion",
+                    ["existingLeaseExpiryDate"] = "2029-12-31",
+                    ["yearsToExpiry"] = "3",
+                    ["unexpiredTermBand"] = "10 years or less",
+                    ["surrenderOptionStatus"] = "Surrender accepted",
+                    ["renewalPremium"] = "42000",
+                    ["improvedGroundRent"] = "1800",
+                    ["approvedFeeScheduleReference"] = "LRTC approved renewal premium and improved Ground Rent",
+                    ["documentTemplateReference"] = "EST-DEED-VARIATION, EST-RATE-REVISION",
+                    ["lrtcReference"] = "LRTC-2026-018",
+                    ["committeeDecision"] = "Approved",
+                    ["deedOfVariationReference"] = "DOV-C11-039-2026"
+                },
+                ["LRTC approval captured", "Premium and improved ground rent recorded", "Deed of Variation reference captured"],
+                ["LRTC approval form", "Offer / Deed of Variation", "Approved premium and improved Ground Rent schedule"]),
+            new(
+                "EstateReportingControls",
+                "EXAMPLE - Estate Quarterly SOP Report Pack",
+                "EXAMPLE-EST-SOP-REPORT-001",
+                "Estate Management",
+                "Estate Management",
+                "Report Compilation",
+                "Estate Officer",
+                2,
+                "Shows quarterly report control data for productivity, rent roll, debtor list, transfer/assignment return, fee appendix control, and Board submission.",
+                new Dictionary<string, string?>
+                {
+                    ["sopSectionReference"] = "Quarterly Reports / Board Summary",
+                    ["reportType"] = "Board summary",
+                    ["reportingPeriod"] = "2026 Q3",
+                    ["sourceSchedule"] = "All Estate",
+                    ["applicationsReceived"] = "42",
+                    ["applicationsProcessed"] = "31",
+                    ["expectedRevenue"] = "860000",
+                    ["paymentsReceived"] = "510000",
+                    ["debtorCount"] = "18",
+                    ["transfersCompleted"] = "6",
+                    ["leasesOrMortgagesProcessed"] = "9",
+                    ["appendixFeeVersion"] = "Appendix D - 2016 approved fees baseline",
+                    ["boardSubmissionReference"] = "BOARD-EST-Q3-2026",
+                    ["auditTrailReference"] = "DMS-EST-RPT-Q3-2026"
+                },
+                ["Period and source schedule captured", "Finance/Records report inputs reconciled", "Board submission reference captured"],
+                ["Quarterly productivity report", "Transfer and assignment report", "Approved appendix fee schedule control sheet", "Board summary / approved report pack"])
+        ];
+
+        private sealed record EstateSopExampleCaseSeed(
+            string EntityType,
+            string Title,
+            string ReferenceNumber,
+            string ApplicantName,
+            string SourceDepartment,
+            string CurrentStageName,
+            string CurrentStageOwner,
+            int AgeDays,
+            string Description,
+            IReadOnlyDictionary<string, string?> Fields,
+            IReadOnlyList<string> Checklist,
+            IReadOnlyList<string> Documents);
+
+        private static string InferEstateSopFieldType(string key)
+        {
+            if (key.Contains("Amount", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Fee", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Rent", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Price", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Revenue", StringComparison.OrdinalIgnoreCase))
+            {
+                return "currency";
+            }
+
+            if (key.Contains("Date", StringComparison.OrdinalIgnoreCase))
+            {
+                return "date";
+            }
+
+            if (key.Contains("Status", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Type", StringComparison.OrdinalIgnoreCase))
+            {
+                return "select";
+            }
+
+            if (key.Contains("Address", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Summary", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("Names", StringComparison.OrdinalIgnoreCase))
+            {
+                return "textarea";
+            }
+
+            return "text";
+        }
+
+        private static string ToEstateSopFieldLabel(string key)
+        {
+            var chars = key.SelectMany((character, index) =>
+                index > 0 && char.IsUpper(character)
+                    ? new[] { ' ', character }
+                    : new[] { character });
+
+            var label = new string(chars.ToArray()).Trim();
+            return string.IsNullOrWhiteSpace(label)
+                ? key
+                : char.ToUpperInvariant(label[0]) + label[1..];
         }
         
         public async Task SeedMaintenanceE2ETestDataAsync()
@@ -6983,6 +7991,10 @@ namespace ErpSystem.Web.Services
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
                 new { Name = "Procurement User", Description = "User with access to procurement module" },
                 new { Name = "Marketing User", Description = "User with access to marketing module" },
+                new { Name = "Registry Officer", Description = "Estate registry intake, form issue, file movement, and dispatch officer" },
+                new { Name = "Records Officer", Description = "Estate records, register, ledger, amendment, and DMS indexing officer" },
+                new { Name = "Housing Officer", Description = "Estate housing, rent card, HOS conversion, and housing records officer" },
+                new { Name = "Planning Officer", Description = "Planning/site-plan coordination role for Estate SOP handoffs" },
                 new { Name = "Estate Officer", Description = "Captures and submits land identification records" },
                 new { Name = "Estate Manager", Description = "Reviews land suitability assessments" },
                 new { Name = PropertyManagementRoles.Officer, Description = "Handles Property Management intake, handoffs, and customer updates" },
@@ -6992,6 +8004,8 @@ namespace ErpSystem.Web.Services
                 new { Name = "Senior Surveyor", Description = "Verifies cadastral surveys" },
                 new { Name = "Legal Officer", Description = "Handles ownership classification and instrument execution" },
                 new { Name = "Legal Manager", Description = "Approves ownership verification and statutory consent" },
+                new { Name = "Legal Admin Assistant", Description = "Records Legal intake, files, dispatch, and matter routing" },
+                new { Name = "Head of Legal", Description = "Approves Legal release, signatures, and final legal decisions" },
                 new { Name = "Acquisition Committee", Description = "Handles land agreement negotiations" },
                 new { Name = "Executive Approver", Description = "Approves negotiated land agreements" },
                 new { Name = "Lands Commission Liaison", Description = "Submits statutory consent applications" },
@@ -7095,7 +8109,7 @@ namespace ErpSystem.Web.Services
                 new { ModuleName = "HR", Description = "HR and employee reports" },
                 new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
-                new { ModuleName = "Project Management", Description = "Projects, development, quantity survey, and civil engineering operations" },
+                new { ModuleName = "Project Management", Description = "Projects, Quantity Survey, and Civil Engineering reports" },
                 new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
                 new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };
@@ -7370,6 +8384,41 @@ namespace ErpSystem.Web.Services
                 },
                 new
                 {
+                    Name = FinancePermissions.ManageApSupplierDebitNotes,
+                    DisplayName = "Manage AP Supplier Debit Notes",
+                    Description = "Create, edit, and cancel controlled supplier debit notes",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.SubmitApSupplierDebitNotes,
+                    DisplayName = "Submit AP Supplier Debit Notes",
+                    Description = "Submit supplier debit notes for independent approval",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.ApproveApSupplierDebitNotes,
+                    DisplayName = "Approve AP Supplier Debit Notes",
+                    Description = "Approve or reject submitted supplier debit notes",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.PostApSupplierDebitNotes,
+                    DisplayName = "Post AP Supplier Debit Notes",
+                    Description = "Post approved supplier debit notes through the Finance engine",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.ReverseApSupplierDebitNotes,
+                    DisplayName = "Reverse AP Supplier Debit Notes",
+                    Description = "Reverse posted supplier debit notes with compensating evidence",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
                     Name = "Finance.AR.Invoices.Create",
                     DisplayName = "Create AR Invoices",
                     Description = "Create customer invoices",
@@ -7533,6 +8582,14 @@ namespace ErpSystem.Web.Services
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
                 [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
                 [PropertyManagementRoles.Manager] = PropertyManagementPermissions.ManagerNames,
+                ["Estate Officer"] = new[]
+                {
+                    "estate.land.project-readiness"
+                },
+                ["Estate Manager"] = new[]
+                {
+                    "estate.land.project-readiness"
+                },
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -7615,6 +8672,10 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
@@ -7650,6 +8711,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Process",
                     "Finance.CashBank.Documents.Issue",
                     "Finance.JournalEntries.Create",
@@ -7699,6 +8763,10 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Process",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
@@ -7715,8 +8783,6 @@ namespace ErpSystem.Web.Services
                     "Finance.Banking.Deposits.Submit",
                     "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
-                    "Finance.Reports.AdHoc.Build",
-                    "Finance.Reports.Schedules.View",
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Request",
                     "Finance.Workflow.Submit",
@@ -7743,6 +8809,7 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalBatches.Export",
                     "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Approve",
                     "Finance.AR.Invoices.ApprovePost",
                     "Finance.AR.Invoices.Void",
@@ -7762,13 +8829,6 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodReopen",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export",
-                    "Finance.Reports.AdHoc.Build",
-                    "Finance.Reports.AdHoc.Share",
-                    // Finance Managers own the operational schedule lifecycle;
-                    // pinned templates and immutable executions preserve control.
-                    "Finance.Reports.Schedules.View",
-                    "Finance.Reports.Schedules.Manage",
-                    "Finance.Reports.Schedules.Run",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
@@ -7777,17 +8837,12 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Approve",
-                    "Finance.Budgeting.Lock",
-                    "Finance.BudgetRevisions.Read"
+                    "Finance.Budgeting.Lock"
                 },
                 ["Chief Accountant"] = new[]
                 {
                     "Finance.Read",
                     "Finance.Write",
-                    // Direct-payment policies assign their independent first-stage authority to
-                    // the Chief Accountant. The queue separately requires this permission, so the
-                    // role must be able to execute the approval it is configured to receive.
-                    "Finance.AP.Payments.Approve",
                     "Finance.BankAccounts.Manage",
                     "Finance.BankReconciliation.Perform",
                     "Finance.BankReconciliation.Approve",
@@ -7808,17 +8863,18 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Approve",
                     "Finance.PeriodReopen.Approve",
+                    "Finance.AP.Payments.Approve",
+                    FinancePermissions.PostApSupplierDebitNotes,
+                    FinancePermissions.ReverseApSupplierDebitNotes,
                     "Finance.Workflow.Submit",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
                     "Finance.Reports.Run",
-                    "Finance.Reports.AdHoc.Build",
-                    "Finance.Reports.AdHoc.Share",
-                    "Finance.Reports.Schedules.View",
-                    "Finance.Reports.Schedules.Manage",
-                    "Finance.Reports.Schedules.Run"
+                    // Chief Accountants own period-end review and controlled financial-report
+                    // distribution. Export remains separately permission-gated at the API/UI.
+                    "Finance.Reports.Export"
                 },
                 ["Managing Director"] = new[]
                 {
@@ -7827,13 +8883,11 @@ namespace ErpSystem.Web.Services
                     // administer transactions merely because they hold final authority.
                     "Finance.Read",
                     "Finance.AP.Payments.Approve",
-                    "Finance.BudgetRevisions.Read",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Reports.Run",
-                    "Finance.Reports.Export",
-                    "Finance.Reports.Schedules.View"
+                    "Finance.Reports.Export"
                 },
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
@@ -7843,10 +8897,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
-                    "Finance.BudgetReturns.Submit",
-                    "Finance.BudgetRevisions.Read",
-                    "Finance.BudgetRevisions.Write",
-                    "Finance.BudgetRevisions.Submit"
+                    "Finance.BudgetReturns.Submit"
                 },
                 // "HR User" is the role this seeder actually creates; note the HR controllers'
                 // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded
@@ -8279,6 +9330,15 @@ namespace ErpSystem.Web.Services
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();
+            services.AddScoped<ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ProcurementAccessControlSeeder>();
+            services.AddScoped<ProcurementStatutoryReportSeeder>();
+            services.AddScoped<InventoryStatutoryReportSeeder>();
+            services.AddScoped<AuditComplianceReportSeeder>();
+            services.AddScoped<QuantitySurveyAccessControlSeeder>();
+            services.AddScoped<QuantitySurveyConfigurationProfileSeeder>();
+            services.AddScoped<QuantitySurveyStatutoryReportSeeder>();
+            services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
             return services;
         }
 

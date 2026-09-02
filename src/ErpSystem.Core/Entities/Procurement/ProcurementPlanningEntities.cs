@@ -67,6 +67,8 @@ public class ProcurementPlan : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal TotalEstimatedBudget { get; set; }
 
+    public Guid? BudgetId { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal ApprovedBudget { get; set; }
 
@@ -103,6 +105,7 @@ public class ProcurementPlan : TenantEntity
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ApplicationUser? PublishedBy { get; set; }
     public virtual ProcurementPlan? PreviousVersion { get; set; }
+    public virtual ProcurementBudget? Budget { get; set; }
     public virtual ICollection<ProcurementPlanItem> Items { get; set; } = new List<ProcurementPlanItem>();
     public virtual ICollection<ProcurementBudget> Budgets { get; set; } = new List<ProcurementBudget>();
     public virtual ICollection<ProcurementSchedule> Schedules { get; set; } = new List<ProcurementSchedule>();
@@ -709,7 +712,12 @@ public class PriceHistory : TenantEntity
 
     // Navigation Properties
     public virtual MarketAnalysis? MarketAnalysis { get; set; }
-    public virtual Supplier? Supplier { get; set; }
+    /// <summary>
+    /// Authoritative supplier master record. Procurement transactions use the
+    /// unified BusinessPartner store; the legacy Supplier table is not a valid
+    /// owner for new market-survey references.
+    /// </summary>
+    public virtual BusinessPartner? Supplier { get; set; }
 }
 
 #endregion

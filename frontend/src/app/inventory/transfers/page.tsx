@@ -23,7 +23,10 @@ import { TransferDialog } from '@/components/inventory/TransferDialog';
 import { ShipTransferDialog } from '@/components/inventory/ShipTransferDialog';
 import { ReceiveTransferDialog } from '@/components/inventory/ReceiveTransferDialog';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
+import { currencyService } from '@/services/financeCommonService';
+import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
 
 const TransferStatuses = [
   { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800' },
@@ -39,6 +42,7 @@ const TransferStatuses = [
 
 export default function InventoryTransfersPage() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const router = useRouter();
   const [transfers, setTransfers] = useState<InventoryTransferDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
@@ -48,6 +52,7 @@ export default function InventoryTransfersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTransfer, setSelectedTransfer] = useState<InventoryTransferDto | null>(null);
+  const [currencyCode, setCurrencyCode] = useState('GHS');
 
   const { summariesById: workflowSummariesById } = useWorkflowEntitySummaries(
     'InventoryTransfer',
@@ -57,6 +62,7 @@ export default function InventoryTransfersPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'create' | 'edit' | 'view'>('create');
+  const [dialogInitialTab, setDialogInitialTab] = useState<'details' | 'items' | 'approvals' | 'controls'>('details');
 
   // Ship dialog state
   const [shipDialogOpen, setShipDialogOpen] = useState(false);
@@ -95,6 +101,22 @@ export default function InventoryTransfersPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    currencyService.getBaseCurrency()
+      .then((currency) => {
+        if (!cancelled) setCurrencyCode(normalizeInventoryCurrency(currency?.code));
+      })
+      .catch(() => {
+        if (!cancelled) setCurrencyCode(normalizeInventoryCurrency());
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     let filtered = transfers;
     if (searchTerm) {
       filtered = filtered.filter(t =>
@@ -110,18 +132,28 @@ export default function InventoryTransfersPage() {
   const openCreateDialog = () => {
     setSelectedTransfer(null);
     setDialogMode('create');
+    setDialogInitialTab('details');
     setDialogOpen(true);
   };
 
   const openEditDialog = (transfer: InventoryTransferDto) => {
     setSelectedTransfer(transfer);
     setDialogMode('edit');
+    setDialogInitialTab('details');
     setDialogOpen(true);
   };
 
   const openViewDialog = (transfer: InventoryTransferDto) => {
     setSelectedTransfer(transfer);
     setDialogMode('view');
+    setDialogInitialTab('details');
+    setDialogOpen(true);
+  };
+
+  const openControlsDialog = (transfer: InventoryTransferDto) => {
+    setSelectedTransfer(transfer);
+    setDialogMode('view');
+    setDialogInitialTab('controls');
     setDialogOpen(true);
   };
 
@@ -213,6 +245,7 @@ export default function InventoryTransfersPage() {
 
   const inTransitCount = transfers.filter(t => t.status === 'InTransit').length;
   const pendingCount = transfers.filter(t => t.status === 'Submitted' || t.status === 'Approved').length;
+  const canManageTransfers = hasPermission('procurement.inventory.transfer');
 
   return (
     <div className="space-y-6">
@@ -342,7 +375,11 @@ export default function InventoryTransfersPage() {
                           </p>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                             <Badge variant="outline">
-                              Addl. Cost: ${((transfer.totalAdditionalCost ?? ((transfer.shippingCost || 0) + (transfer.miscellaneousCost || 0))) || 0).toFixed(2)}
+                              Addl. Cost: {formatInventoryMoney(
+                                (transfer.totalAdditionalCost ??
+                                  ((transfer.shippingCost || 0) + (transfer.miscellaneousCost || 0))) || 0,
+                                currencyCode
+                              )}
                             </Badge>
                             <Badge variant="outline">
                               Method: {getAllocationMethodLabel(transfer.costAllocationMethod)}
@@ -358,6 +395,11 @@ export default function InventoryTransfersPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <Button size="sm" variant="outline" onClick={() => openViewDialog(transfer)}><Eye className="h-4 w-4 mr-1" />View</Button>
+                        {transfer.status === 'Received' && canManageTransfers && (
+                          <Button size="sm" variant="outline" onClick={() => openControlsDialog(transfer)}>
+                            <ShieldCheck className="h-4 w-4 mr-1" />Resolve / Close
+                          </Button>
+                        )}
                         {transfer.status === 'Draft' && (
                           <Button size="sm" variant="outline" onClick={() => openEditDialog(transfer)}><Pencil className="h-4 w-4 mr-1" />Edit</Button>
                         )}
@@ -460,6 +502,7 @@ export default function InventoryTransfersPage() {
         onOpenChange={setDialogOpen}
         transfer={selectedTransfer}
         mode={dialogMode}
+        initialTab={dialogInitialTab}
         warehouses={warehouses}
         onSuccess={fetchData}
       />

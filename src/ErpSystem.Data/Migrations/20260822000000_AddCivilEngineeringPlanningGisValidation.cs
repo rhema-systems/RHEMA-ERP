@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// Civil design case. Estate, permitting files, central DMS and shared audit
 /// remain the authoritative owners; this migration creates no GIS or file store.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822000000_AddCivilEngineeringPlanningGisValidation")]
 public partial class AddCivilEngineeringPlanningGisValidation : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

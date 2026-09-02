@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0401 narrowly registers Building Inspectorate development files and central-DMS evidence.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821110000_AddCivilEngineeringDevelopmentApprovalFiles")]
 public partial class AddCivilEngineeringDevelopmentApprovalFiles : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

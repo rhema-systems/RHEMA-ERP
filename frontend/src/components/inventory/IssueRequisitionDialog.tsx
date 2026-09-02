@@ -20,6 +20,10 @@ import {
 } from '@/services/inventoryRequisitionService';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import {
+  InventoryTrackingExceptionSelect,
+  useAvailableInventoryTrackingExceptions,
+} from '@/components/inventory/InventoryTrackingExceptionSelect';
 
 interface IssueRequisitionDialogProps {
   open: boolean;
@@ -30,6 +34,7 @@ interface IssueRequisitionDialogProps {
 
 interface IssueItemState {
   itemId: string;
+  inventoryItemId: string;
   itemCode: string;
   itemName: string;
   requestedQuantity: number;
@@ -85,6 +90,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   const [vouchers, setVouchers] = useState<InventoryIssueVoucherDto[]>([]);
   const [acknowledgementComment, setAcknowledgementComment] = useState('');
   const [voucherActionId, setVoucherActionId] = useState<string | null>(null);
+  const trackingExceptions = useAvailableInventoryTrackingExceptions(open && Boolean(requisitionId));
 
   useEffect(() => {
     if (open && requisitionId) {
@@ -115,6 +121,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       // Initialize issue items from requisition items
       const items: IssueItemState[] = detail.items.map(item => ({
         itemId: item.id,
+        inventoryItemId: item.inventoryItemId,
         itemCode: item.itemCode,
         itemName: item.itemName,
         requestedQuantity: item.requestedQuantity,
@@ -394,7 +401,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                       ) : '-'}
                     </TableCell>
                     <TableCell>{item.locationName || requisition.locationName || 'Warehouse level'}</TableCell>
-                    <TableCell className="min-w-[280px]"><div className="grid grid-cols-3 gap-1"><Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} /><Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} /><Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} /><Input className="col-span-3" placeholder="Approved exception ID (if required)" value={item.inventoryTrackingExceptionId || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId: event.target.value || undefined } : value))} /></div></TableCell>
+                    <TableCell className="min-w-[360px]"><div className="grid grid-cols-3 gap-1"><Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} /><Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} /><Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} /><div className="col-span-3"><InventoryTrackingExceptionSelect value={item.inventoryTrackingExceptionId} onValueChange={inventoryTrackingExceptionId => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId } : value))} exceptions={trackingExceptions.exceptions} loading={trackingExceptions.loading} error={trackingExceptions.error} onRetry={trackingExceptions.refresh} context={{ inventoryItemId: item.inventoryItemId, warehouseId: requisition.warehouseId, locationId: item.locationId, referenceId: requisition.id, lotNumber: item.lotNumber, batchNumber: item.batchNumber, serialNumber: item.serialNumber }} /></div></div></TableCell>
                     <TableCell>{item.unitOfMeasure}</TableCell>
                   </TableRow>
                 ))}

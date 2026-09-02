@@ -33,6 +33,7 @@ public sealed record CivilEngineeringAccessDecision(bool IsAllowed, string Code,
 public static class CivilEngineeringAccessControlRegistry
 {
     public const string Category = "Civil Engineering";
+    public const string CentralProjectAccess = "project.access";
 
     public const string ConfigurationRead = "civil-engineering.configuration.read";
     public const string ConfigurationManage = "civil-engineering.configuration.manage";
@@ -92,7 +93,7 @@ public static class CivilEngineeringAccessControlRegistry
         new(SupervisingEngineerRole, "TDC Supervising Civil Engineer", "Reviews, assigns and supervises Civil Engineering work within configured authority and assigned scope.",
             [ConfigurationRead, ConfigurationManage, AuditRead, WorkspaceRead, DesignManage, DesignInputRespond, SupervisionManage, CommercialManage, MaintenanceManage, PermittingManage, AssignmentsManage, AssignedWorkManage, DocumentsManage, TransactionsApprove, ReportsRead, ReportsExport, MigrationManage, ExternalAccessManage]),
         new(CivilEngineerRole, "TDC Civil Engineer", "Prepares and supervises Civil Engineering work within assigned projects, assets/buildings, sections and tasks.",
-            [ConfigurationRead, AuditRead, WorkspaceRead, DesignManage, DesignInputRespond, SupervisionManage, CommercialManage, MaintenanceManage, PermittingManage, AssignedWorkManage, DocumentsManage, ReportsRead, ReportsExport]),
+            [ConfigurationRead, AuditRead, WorkspaceRead, DesignManage, DesignInputRespond, SupervisionManage, CommercialManage, MaintenanceManage, PermittingManage, AssignmentsManage, AssignedWorkManage, DocumentsManage, ReportsRead, ReportsExport]),
         new(ProjectEngineerRole, "TDC Project Engineer", "Manages field supervision and engineering evidence within assigned projects and tasks.",
             [ConfigurationRead, WorkspaceRead, SupervisionManage, MaintenanceManage, AssignedWorkManage, DocumentsManage, ReportsRead]),
         new(DraftsmanRole, "TDC Draftsman", "Prepares controlled drawings and design evidence only within assigned projects and tasks.",

@@ -7,6 +7,8 @@ import {
     ArrowLeft,
     BarChart3,
     CheckCircle2,
+    ChevronDown,
+    ChevronRight,
     Download,
     Loader2,
     RefreshCw,
@@ -21,7 +23,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { budgetDataService } from '@/services/finance/budget-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { BudgetDimensionCellDrilldown } from '@/components/finance/budgeting/BudgetDimensionCellDrilldown';
+import { useAuth } from '@/hooks/use-auth';
 import type {
+    BudgetDimensionCellPosition,
     BudgetReportContribution,
     BudgetScenario,
     BudgetScenarioComparison,
@@ -42,6 +49,7 @@ interface AccountMatrixRow {
     actual: number;
     variance: number;
     contributions: BudgetReportContribution[];
+    dimensionCells: Array<BudgetDimensionCellPosition & { periodCode: string }>;
 }
 
 const comparableStatuses = new Set(['Approved', 'Superseded']);
@@ -49,6 +57,8 @@ const comparableStatuses = new Set(['Approved', 'Superseded']);
 export default function ConsolidatedBudgetPage({ params }: PageProps) {
     const { id } = use(params);
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
     const [view, setView] = useState<ConsolidatedBudgetView | null>(null);
     const [candidates, setCandidates] = useState<BudgetScenario[]>([]);
@@ -57,6 +67,7 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
     const [approvedOnly, setApprovedOnly] = useState(true);
     const [search, setSearch] = useState('');
     const [accountType, setAccountType] = useState('all');
+    const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
     const [isLoading, setIsLoading] = useState(true);
     const [isComparing, setIsComparing] = useState(false);
 
@@ -117,6 +128,7 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                 actual: 0,
                 variance: 0,
                 contributions: [],
+                dimensionCells: [],
             };
             row.periods[line.fiscalPeriodId] =
                 (row.periods[line.fiscalPeriodId] || 0) + line.budgetAmount;
@@ -129,6 +141,9 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                 );
                 if (existing) existing.budgetAmount += contribution.budgetAmount;
                 else row.contributions.push({ ...contribution });
+            }
+            for (const cell of line.dimensionCells ?? []) {
+                row.dimensionCells.push({ ...cell, periodCode: line.periodCode });
             }
             rows.set(key, row);
         }
@@ -188,21 +203,46 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
         }
     };
 
+    const downloadComparisonPdf = async () => {
+        if (!comparison) return;
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeBudgetScenarioComparison,
+            { baseScenarioId: id, comparisonScenarioId: comparison.comparisonScenarioId },
+        );
+    };
+
+    const printComparison = async () => {
+        if (!comparison) return;
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeBudgetScenarioComparison,
+            { baseScenarioId: id, comparisonScenarioId: comparison.comparisonScenarioId },
+        );
+    };
+
     const exportCsv = () => {
         if (!view) return;
         const quote = (value: string | number) =>
             `"${String(value).replaceAll('"', '""')}"`;
         const rows = [
-            ['Account Code', 'Account Name', 'Type', 'Period', 'Budget', 'Actual', 'Variance'],
-            ...view.lines.map(line => [
+            ['Account Code', 'Account Name', 'Type', 'Period', 'Dimensions', 'Budget', 'Actual', 'Reserved', 'Available', 'Variance'],
+            ...view.lines.flatMap(line => (line.dimensionCells?.length ? line.dimensionCells : [{
+                dimensionDisplayValue: 'Legacy / no dimensions',
+                budgetAmount: line.budgetAmount,
+                actualAmount: line.actualAmount,
+                reservedAmount: 0,
+                availableAmount: line.budgetAmount - line.actualAmount,
+            }]).map(cell => [
                 line.accountCode,
                 line.accountName,
                 line.accountType,
                 line.periodCode,
-                line.budgetAmount,
-                line.actualAmount,
-                line.varianceAmount,
-            ]),
+                cell.dimensionDisplayValue,
+                cell.budgetAmount,
+                cell.actualAmount,
+                cell.reservedAmount,
+                cell.availableAmount,
+                cell.actualAmount - cell.budgetAmount,
+            ])),
         ];
         const blob = new Blob(
             [rows.map(row => row.map(quote).join(',')).join('\r\n')],
@@ -268,10 +308,24 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                     >
                         Approved returns only
                     </Button>
-                    <Button variant="outline" onClick={exportCsv}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Export CSV
-                    </Button>
+                    {canExport && (
+                        <>
+                            <Button variant="outline" onClick={exportCsv}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Export CSV
+                            </Button>
+                            <ReportPdfActions
+                                reportName="consolidated budget"
+                                onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                    DOCUMENT_TYPES.financeBudgetConsolidated,
+                                    { scenarioId: id, approvedOnly })}
+                                onPrint={() => documentOutputService.printReportDocument(
+                                    DOCUMENT_TYPES.financeBudgetConsolidated,
+                                    { scenarioId: id, approvedOnly })}
+                                disabled={isLoading || !view}
+                            />
+                        </>
+                    )}
                     <Button variant="outline" size="icon" onClick={() => void load(approvedOnly)}>
                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                     </Button>
@@ -378,44 +432,80 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                                                 No budget lines match the current view.
                                             </TableCell>
                                         </TableRow>
-                                    ) : accountRows.map(row => (
-                                        <TableRow key={row.accountId}>
-                                            <TableCell>
-                                                <p className="font-medium">{row.accountCode} — {row.accountName}</p>
-                                                <div className="mt-1 flex items-center gap-2">
-                                                    <Badge variant="outline">{row.accountType}</Badge>
-                                                    {row.contributions.length > 0 && (
-                                                        <details className="text-xs text-muted-foreground">
-                                                            <summary className="cursor-pointer">
-                                                                {row.contributions.length} contributing return(s)
-                                                            </summary>
-                                                            <div className="mt-2 space-y-1 rounded border bg-muted/30 p-2">
-                                                                {row.contributions.map(item => (
-                                                                    <p key={item.budgetReturnId}>
-                                                                        {item.segmentCode} {item.segmentName}: {money(item.budgetAmount)}
-                                                                    </p>
-                                                                ))}
-                                                            </div>
-                                                        </details>
-                                                    )}
-                                                </div>
-                                            </TableCell>
-                                            {view.periods.map(period => (
-                                                <TableCell key={period.fiscalPeriodId} className="text-right">
-                                                    {money(row.periods[period.fiscalPeriodId] || 0)}
-                                                </TableCell>
-                                            ))}
-                                            <TableCell className="font-medium text-right">{money(row.budget)}</TableCell>
-                                            <TableCell className="text-right">{money(row.actual)}</TableCell>
-                                            <TableCell className={`text-right font-medium ${
-                                                row.variance > 0 && row.accountType === 'Expense'
-                                                    ? 'text-red-600'
-                                                    : row.variance !== 0 ? 'text-green-700' : ''
-                                            }`}>
-                                                {money(row.variance)}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
+                                    ) : accountRows.map(row => {
+                                        const isExpanded = expandedAccountIds.has(row.accountId);
+                                        return (
+                                            <React.Fragment key={row.accountId}>
+                                                <TableRow>
+                                                    <TableCell>
+                                                        <p className="font-medium">{row.accountCode} — {row.accountName}</p>
+                                                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                                                            <Badge variant="outline">{row.accountType}</Badge>
+                                                            {row.dimensionCells.length > 0 && (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    className="h-7 px-2 text-xs"
+                                                                    aria-expanded={isExpanded}
+                                                                    aria-label={`${isExpanded ? 'Hide' : 'Show'} dimension cells for ${row.accountCode}`}
+                                                                    onClick={() => setExpandedAccountIds(current => {
+                                                                        const next = new Set(current);
+                                                                        if (next.has(row.accountId)) next.delete(row.accountId);
+                                                                        else next.add(row.accountId);
+                                                                        return next;
+                                                                    })}
+                                                                >
+                                                                    {isExpanded
+                                                                        ? <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                                                                        : <ChevronRight className="mr-1 h-3.5 w-3.5" />}
+                                                                    {row.dimensionCells.length} dimension cell(s)
+                                                                </Button>
+                                                            )}
+                                                            {row.contributions.length > 0 && (
+                                                                <details className="text-xs text-muted-foreground">
+                                                                    <summary className="cursor-pointer">
+                                                                        {row.contributions.length} contributing return(s)
+                                                                    </summary>
+                                                                    <div className="mt-2 space-y-1 rounded border bg-muted/30 p-2">
+                                                                        {row.contributions.map(item => (
+                                                                            <p key={item.budgetReturnId}>
+                                                                                {item.segmentCode} {item.segmentName}: {money(item.budgetAmount)}
+                                                                            </p>
+                                                                        ))}
+                                                                    </div>
+                                                                </details>
+                                                            )}
+                                                        </div>
+                                                    </TableCell>
+                                                    {view.periods.map(period => (
+                                                        <TableCell key={period.fiscalPeriodId} className="text-right">
+                                                            {money(row.periods[period.fiscalPeriodId] || 0)}
+                                                        </TableCell>
+                                                    ))}
+                                                    <TableCell className="font-medium text-right">{money(row.budget)}</TableCell>
+                                                    <TableCell className="text-right">{money(row.actual)}</TableCell>
+                                                    <TableCell className={`text-right font-medium ${
+                                                        row.variance > 0 && row.accountType === 'Expense'
+                                                            ? 'text-red-600'
+                                                            : row.variance !== 0 ? 'text-green-700' : ''
+                                                    }`}>
+                                                        {money(row.variance)}
+                                                    </TableCell>
+                                                </TableRow>
+                                                {isExpanded && (
+                                                    <TableRow>
+                                                        <TableCell colSpan={view.periods.length + 4} className="p-3">
+                                                            <BudgetDimensionCellDrilldown
+                                                                cells={row.dimensionCells}
+                                                                currencyCode={view.currencyCode}
+                                                            />
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })}
                                 </TableBody>
                             </Table>
                         </CardContent>
@@ -526,6 +616,13 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                                     {isComparing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Compare
                                 </Button>
+                                {canExport && comparison && (
+                                    <ReportPdfActions
+                                        reportName="budget scenario comparison"
+                                        onDownloadPdf={downloadComparisonPdf}
+                                        onPrint={printComparison}
+                                    />
+                                )}
                             </div>
 
                             {candidates.length === 0 && (

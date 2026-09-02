@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,6 +9,8 @@ namespace ErpSystem.Data.Migrations;
 /// Adds the Civil Engineering intake overlay for Maintenance schedules, Estate buildings/properties
 /// and Helpdesk complaints. The source modules, shared Workflow, central DMS and AuditLogs remain owners.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821033000_AddCivilEngineeringMaintenanceIntakes")]
 public partial class AddCivilEngineeringMaintenanceIntakes : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

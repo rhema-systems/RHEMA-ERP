@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Save, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { businessPartnerService, BusinessPartnerDetailDto, UpdateBusinessPartnerDto, BusinessPartnerDto } from '@/services/businessPartnerService';
-import { paymentTermService, currencyService } from '@/services/financeCommonService';
+import { paymentTermService, procurementCurrencyService } from '@/services/financeCommonService';
 import type { PaymentTermListDto, CurrencyListDto } from '@/services/financeCommonService';
 import { priceListService, PriceListDto, PriceListType } from '@/services/priceListService';
 
@@ -72,7 +72,7 @@ export default function EditBusinessPartnerPage() {
       const [partnerData, termsData, currenciesData, partnersData] = await Promise.all([
         businessPartnerService.getPartnerById(id),
         paymentTermService.getActive().catch((err) => { console.error('Error loading payment terms:', err); return []; }),
-        currencyService.getActive().catch((err) => { console.error('Error loading currencies:', err); return []; }),
+        procurementCurrencyService.getActive().catch((err) => { console.error('Error loading currencies:', err); return []; }),
         businessPartnerService.getAllPartnersForDropdown().catch((err) => { console.error('Error loading partners:', err); return []; })
       ]);
       

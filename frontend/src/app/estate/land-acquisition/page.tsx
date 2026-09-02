@@ -57,6 +57,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -70,11 +71,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import { useAuth } from '@/hooks/use-auth';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import type { WorkflowTaskAttachmentDto } from '@/types/workflow';
 import {
   businessPartnerService,
   type BusinessPartnerDto,
 } from '@/services/businessPartnerService';
+import {
+  documentManagementService,
+  type CentralDocumentGenerationTemplate,
+  type GeneratedCentralDocumentResult,
+} from '@/services/document-management.service';
 import {
   ACQUISITION_STAGES,
   estateAcquisitionService,
@@ -96,7 +103,7 @@ const ProcedurePdfViewer = dynamic(
   { ssr: false }
 );
 
-const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 10, 12]);
+const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 11, 13]);
 
 type FieldType =
   | 'text'
@@ -152,6 +159,7 @@ const stageIcons: Record<
   'ownership-verification': FileCheck2,
   'agreement-negotiation': WalletCards,
   'agreement-approval': BadgeCheck,
+  'vendor-payment': WalletCards,
   execution: FileSignature,
   'statutory-consent': Landmark,
   'statutory-consent-approval': CheckCircle2,
@@ -233,13 +241,7 @@ const SUITABILITY_DECISION_FIELDS: WorkspaceField[] = [
     'Return for More Information',
     'Reject Site',
   ]),
-  field(
-    'approvalNotes',
-    'Physical Assessment Notes',
-    'textarea',
-    undefined,
-    2
-  ),
+  field('approvalNotes', 'Physical Assessment Notes', 'textarea', undefined, 2),
 ];
 
 const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
@@ -265,9 +267,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('openingNotes', 'Opening Notes', 'textarea', undefined, 2),
     ...SUITABILITY_CAPTURE_FIELDS,
   ],
-  'suitability-approval': [
-    ...SUITABILITY_DECISION_FIELDS,
-  ],
+  'suitability-approval': [...SUITABILITY_DECISION_FIELDS],
   'cadastral-survey': [
     field('cadastreDescription', 'Cadastre Description'),
     field('regionId', 'Region', 'region'),
@@ -420,11 +420,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('titleSearchCompleted', 'Title Search Completed', 'check'),
     field('ownerIdentityVerified', 'Owner Identity Verified', 'check'),
     field('authorityToSellVerified', 'Authority To Sell Verified', 'check'),
-    field(
-      'overlapCleared',
-      'Ownership / Title Overlap Cleared',
-      'check'
-    ),
+    field('overlapCleared', 'Ownership / Title Overlap Cleared', 'check'),
     field('encumbrancesFound', 'Encumbrances Found', 'check'),
     field('litigationFound', 'Litigation Found', 'check'),
     field(
@@ -511,6 +507,81 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       2
     ),
   ],
+  'vendor-payment': [
+    field('vendorName', 'Vendor / Seller', 'text', undefined, 1, true),
+    field('paymentPurpose', 'Payment Purpose', 'text', undefined, 1, true),
+    field('agreedAmount', 'Agreed Amount', 'text', undefined, 1, true),
+    field(
+      'vendorPaymentDueDate',
+      'Payment Due Date',
+      'date',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'vendorPaymentMethod',
+      'Agreement Payment Method',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'boardApprovalReference',
+      'Approval Reference',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayableInvoiceNumber',
+      'AP Invoice',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayableInvoiceStatus',
+      'Invoice Status',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayablePaymentNumber',
+      'AP Payment',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayablePaymentStatus',
+      'Payment Status',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field('receiptNumber', 'Receipt Number', 'text', undefined, 1, true),
+    field('paymentReference', 'Payment Reference', 'text', undefined, 1, true),
+    field('paymentDate', 'Payment Date', 'date', undefined, 1, true),
+    field('amountPaid', 'Amount Paid', 'text', undefined, 1, true),
+    field(
+      'paymentMethod',
+      'Processed Payment Method',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field('isPaid', 'Paid', 'check', undefined, 1, true),
+    field('paymentNotes', 'Payment Notes', 'textarea', undefined, 2, true),
+  ],
   execution: [
     field('instrumentType', 'Instrument Type', 'select', [
       'Conveyance',
@@ -574,10 +645,38 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('approvalNotes', 'Approval Notes', 'textarea', undefined, 2),
   ],
   'stamp-duty-payment': [
-    field('accountsPayableInvoiceNumber', 'AP Invoice', 'text', undefined, 1, true),
-    field('accountsPayableInvoiceStatus', 'Invoice Status', 'text', undefined, 1, true),
-    field('accountsPayablePaymentNumber', 'AP Payment', 'text', undefined, 1, true),
-    field('accountsPayablePaymentStatus', 'Payment Status', 'text', undefined, 1, true),
+    field(
+      'accountsPayableInvoiceNumber',
+      'AP Invoice',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayableInvoiceStatus',
+      'Invoice Status',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayablePaymentNumber',
+      'AP Payment',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayablePaymentStatus',
+      'Payment Status',
+      'text',
+      undefined,
+      1,
+      true
+    ),
     field('receiptNumber', 'Receipt Number', 'text', undefined, 1, true),
     field('paymentReference', 'Payment Reference', 'text', undefined, 1, true),
     field('paymentDate', 'Payment Date', 'date', undefined, 1, true),
@@ -919,6 +1018,46 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
   ],
+  'vendor-payment': [
+    {
+      title: 'Approved vendor consideration',
+      description:
+        'Review the seller, approved amount, due date, payment method, and approval reference from the negotiated agreement.',
+      keys: [
+        'vendorName',
+        'paymentPurpose',
+        'agreedAmount',
+        'vendorPaymentDueDate',
+        'vendorPaymentMethod',
+        'boardApprovalReference',
+      ],
+    },
+    {
+      title: 'Accounts Payable status',
+      description:
+        'Create the AP request and process the vendor payment before moving to instrument execution.',
+      keys: [
+        'accountsPayableInvoiceNumber',
+        'accountsPayableInvoiceStatus',
+        'accountsPayablePaymentNumber',
+        'accountsPayablePaymentStatus',
+      ],
+    },
+    {
+      title: 'Processed vendor payment',
+      description:
+        'Payment evidence is synchronized from Accounts Payable after the vendor payment is completed.',
+      keys: [
+        'receiptNumber',
+        'paymentReference',
+        'paymentDate',
+        'amountPaid',
+        'paymentMethod',
+        'isPaid',
+        'paymentNotes',
+      ],
+    },
+  ],
   execution: [
     {
       title: 'Instrument execution',
@@ -1123,12 +1262,22 @@ function defaultsFor(
   return values;
 }
 
-function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: WorkspaceValues) {
-  if (kind === 'stamp-duty-payment') {
+function missingWorkspaceInputs(
+  kind: AcquisitionWorkspaceKind,
+  values: WorkspaceValues
+) {
+  if (kind === 'vendor-payment' || kind === 'stamp-duty-payment') {
     const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
-    const paid = values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
-    if (!invoiceId) return [field('accountsPayableRequest', 'Accounts Payable Request')];
-    return paid ? [] : [field('accountsPayablePayment', 'Accounts Payable Payment')];
+    const paymentId = `${values.accountsPayablePaymentId ?? ''}`.trim();
+    const paid =
+      values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
+    if (!invoiceId)
+      return [field('accountsPayableRequest', 'Accounts Payable Request')];
+    if (!paymentId)
+      return [field('accountsPayablePayment', 'Accounts Payable Payment')];
+    return paid
+      ? []
+      : [field('accountsPayablePaymentProcessing', 'Finance Processing')];
   }
 
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
@@ -1225,8 +1374,10 @@ function hasCompleteWitnessOath(values: WorkspaceValues) {
   if (witnessOneSworn === witnessTwoSworn) return false;
 
   const witnessNumber = witnessOneSworn ? 1 : 2;
-  const swornBefore = `${values[`witnessOathSwornBefore${witnessNumber}`] ?? ''}`.trim();
-  const swornDate = `${values[`witnessOathSwornDate${witnessNumber}`] ?? ''}`.trim();
+  const swornBefore =
+    `${values[`witnessOathSwornBefore${witnessNumber}`] ?? ''}`.trim();
+  const swornDate =
+    `${values[`witnessOathSwornDate${witnessNumber}`] ?? ''}`.trim();
   return Boolean(swornBefore && swornDate);
 }
 
@@ -1316,6 +1467,7 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
   labels.set('vendorId', 'Linked Vendor / Owner');
   labels.set('stageDocuments', 'Stage Documents');
   labels.set('witnessOath', 'Witness Oath');
+  labels.set('accountsPayablePaymentProcessing', 'Finance Processing');
   return keys.map((key) => labels.get(key) || key);
 }
 
@@ -1390,7 +1542,9 @@ const emptyPastOwner = (): PastOwnerDraft => ({
   dateGapReason: '',
 });
 
-function parsePastOwners(value: string | boolean | undefined): PastOwnerDraft[] {
+function parsePastOwners(
+  value: string | boolean | undefined
+): PastOwnerDraft[] {
   if (typeof value !== 'string' || !value.trim()) return [];
 
   try {
@@ -1431,7 +1585,9 @@ function completedWorkflowActionLabel(action: string) {
   return action;
 }
 
-function numberFromWorkspace(value: string | boolean | undefined): number | undefined {
+function numberFromWorkspace(
+  value: string | boolean | undefined
+): number | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
@@ -1449,14 +1605,21 @@ function parseBoundaryWorkspacePoints(value: string | boolean | undefined) {
         const northing = Number(
           Array.isArray(item)
             ? item[0]
-            : item?.northing ?? item?.Northing ?? item?.northingFeet ?? item?.NorthingFeet
+            : (item?.northing ??
+                item?.Northing ??
+                item?.northingFeet ??
+                item?.NorthingFeet)
         );
         const easting = Number(
           Array.isArray(item)
             ? item[1]
-            : item?.easting ?? item?.Easting ?? item?.eastingFeet ?? item?.EastingFeet
+            : (item?.easting ??
+                item?.Easting ??
+                item?.eastingFeet ??
+                item?.EastingFeet)
         );
-        if (!Number.isFinite(northing) || !Number.isFinite(easting)) return null;
+        if (!Number.isFinite(northing) || !Number.isFinite(easting))
+          return null;
 
         return {
           label: `${item?.beacon ?? item?.Beacon ?? item?.beaconIndex ?? item?.BeaconIndex ?? `Beacon ${index + 1}`}`,
@@ -1464,19 +1627,26 @@ function parseBoundaryWorkspacePoints(value: string | boolean | undefined) {
           easting,
         };
       })
-      .filter((item): item is { label: string; northing: number; easting: number } => Boolean(item));
+      .filter(
+        (item): item is { label: string; northing: number; easting: number } =>
+          Boolean(item)
+      );
   } catch {
     return [];
   }
 }
 
 function cadastralPointsFromValues(values: WorkspaceValues) {
-  const boundaryPoints = parseBoundaryWorkspacePoints(values.boundaryCoordinates);
+  const boundaryPoints = parseBoundaryWorkspacePoints(
+    values.boundaryCoordinates
+  );
   if (boundaryPoints.length > 0) return boundaryPoints;
 
   return [1, 2, 3, 4]
     .map((index) => {
-      const northing = numberFromWorkspace(values[`beacon${index}NorthingFeet`]);
+      const northing = numberFromWorkspace(
+        values[`beacon${index}NorthingFeet`]
+      );
       const easting = numberFromWorkspace(values[`beacon${index}EastingFeet`]);
       if (northing == null || easting == null) return null;
 
@@ -1486,19 +1656,29 @@ function cadastralPointsFromValues(values: WorkspaceValues) {
         easting,
       };
     })
-    .filter((item): item is { label: string; northing: number; easting: number } => Boolean(item));
+    .filter(
+      (item): item is { label: string; northing: number; easting: number } =>
+        Boolean(item)
+    );
 }
 
 function ownerPointsFromValues(values: WorkspaceValues) {
   return [1, 2, 3, 4]
     .map((index) => {
-      const northing = numberFromWorkspace(values[`ownerBeacon${index}NorthingFeet`]);
-      const easting = numberFromWorkspace(values[`ownerBeacon${index}EastingFeet`]);
+      const northing = numberFromWorkspace(
+        values[`ownerBeacon${index}NorthingFeet`]
+      );
+      const easting = numberFromWorkspace(
+        values[`ownerBeacon${index}EastingFeet`]
+      );
       if (northing == null || easting == null) return null;
 
       return { label: `Beacon ${index}`, northing, easting };
     })
-    .filter((item): item is { label: string; northing: number; easting: number } => Boolean(item));
+    .filter(
+      (item): item is { label: string; northing: number; easting: number } =>
+        Boolean(item)
+    );
 }
 
 function coordinateComparisonRows(
@@ -1637,6 +1817,7 @@ export default function LandAcquisitionPage() {
         .some((value) => `${value}`.toLowerCase().includes(normalized))
     );
   }, [query, selectedStage]);
+  const acquisitionPages = usePaginatedItems(filteredItems, 10);
 
   const metrics = React.useMemo(() => {
     const actionable = allItems.filter((item) =>
@@ -1665,7 +1846,9 @@ export default function LandAcquisitionPage() {
   );
   const canEditSelectedStage =
     canManageWorkflows ||
-    (selectedItemStage ? hasAnyRole([selectedItemStage.requiredRole]) : false) ||
+    (selectedItemStage
+      ? hasAnyRole([selectedItemStage.requiredRole])
+      : false) ||
     selectedItemIsAssignedApprovalStage;
   const canCreateAcquisition = stages.some((stage) => stage.order === 0);
   const requestedAcquisitionId = searchParams.get('acquisitionId');
@@ -1742,16 +1925,21 @@ export default function LandAcquisitionPage() {
     const routeKey = `${requestedAcquisitionId}:${requestedStage || ''}`;
     if (openedFromRouteRef.current === routeKey) return;
 
-    const item = allItems.find((candidate) => candidate.id === requestedAcquisitionId);
+    const item = allItems.find(
+      (candidate) => candidate.id === requestedAcquisitionId
+    );
     if (!item) {
       setQuery(requestedAcquisitionId);
       return;
     }
 
-    const parsedStage = requestedStage ? Number(requestedStage) : item.stageOrder;
+    const parsedStage = requestedStage
+      ? Number(requestedStage)
+      : item.stageOrder;
     const targetStage =
-      stages.find((stage) => stage.order === parsedStage || stage.id === parsedStage) ||
-      stages.find((stage) => stage.order === item.stageOrder);
+      stages.find(
+        (stage) => stage.order === parsedStage || stage.id === parsedStage
+      ) || stages.find((stage) => stage.order === item.stageOrder);
     if (!targetStage) return;
 
     openedFromRouteRef.current = routeKey;
@@ -1975,106 +2163,149 @@ export default function LandAcquisitionPage() {
         />
       </div>
 
-      <div className="rounded-lg border bg-card p-2 text-card-foreground shadow-sm">
-        <ScrollArea className="w-full whitespace-nowrap">
-          <div className="flex gap-2 pb-2">
-            {stages.map((stage) => (
-              <StageButton
-                key={stage.id}
-                stage={stage}
-                active={stage.id === selectedStageId}
-                onClick={() => {
-                  setSelectedStageId(stage.id);
-                  setSelectedItemId(stage.items[0]?.id || null);
-                }}
-              />
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[440px_1fr]">
-        <section className="rounded-lg border bg-card text-card-foreground shadow-sm">
-          <div className="border-b p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">
-                  {selectedStage?.title}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {selectedStage?.description}
-                </p>
-              </div>
-              <Badge variant="secondary">
-                Procedure {selectedStage?.id ?? 0}
-              </Badge>
-            </div>
-            <div className="relative mt-4">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="pl-9"
-                placeholder="Search acquisitions"
-              />
-            </div>
-          </div>
-          <ScrollArea className="h-[620px]">
-            <div className="space-y-3 p-4">
-              {filteredItems.length === 0 ? (
-                <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  No acquisitions are currently waiting at this procedure.
-                </div>
-              ) : (
-                filteredItems.map((item) => (
-                  <AcquisitionCard
-                    key={item.id}
-                    item={item}
-                    active={selectedItem?.id === item.id}
-                    onSelect={() => setSelectedItemId(item.id)}
-                    onOpen={() => openWorkspace(item)}
-                  />
-                ))
-              )}
-            </div>
-          </ScrollArea>
-        </section>
-
-        <section className="rounded-lg border bg-card text-card-foreground shadow-sm">
-          {selectedItem && selectedItemStage ? (
-            <AcquisitionDetail
-              item={selectedItem}
-              stage={selectedItemStage}
-              onOpenWorkspace={() => openWorkspace(selectedItem)}
-              onPrimary={(comments) =>
-                runAction(selectedItem, selectedItemStage, 'primary', comments)
-              }
-              onReject={(comments) =>
-                runAction(selectedItem, selectedItemStage, 'reject', comments)
-              }
-              onCompleteTask={(stepInstanceId, comments) =>
-                completeWorkflowTask(selectedItem, stepInstanceId, comments)
-              }
-              onReload={reload}
-              documentRequirements={
-                stageDocumentRequirements[selectedItemStage.id] ||
-                stageDocumentRequirements[selectedItemStage.order] ||
-                []
-              }
-              onOpenWorkflows={() =>
+      {stages.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Workflow not configured</CardTitle>
+            <CardDescription>
+              Configure and publish the Land Acquisition workflow in
+              Administration &gt; Workflow Setup. The acquisition board will
+              show the stages, documents, checklist items, roles, and
+              assignments returned by that workflow.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              onClick={() =>
                 router.push(
                   '/administration/workflow?entityType=LandAcquisition'
                 )
               }
-              canManageWorkflows={canManageWorkflows}
-            />
-          ) : (
-            <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
-              Select an acquisition to view workflow details.
-            </div>
-          )}
-        </section>
-      </div>
+            >
+              <FolderOpen className="mr-2 h-4 w-4" />
+              Open Workflow Setup
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {stages.length > 0 ? (
+        <>
+          <div className="rounded-lg border bg-card p-2 text-card-foreground shadow-sm">
+            <ScrollArea className="w-full whitespace-nowrap">
+              <div className="flex gap-2 pb-2">
+                {stages.map((stage) => (
+                  <StageButton
+                    key={stage.id}
+                    stage={stage}
+                    active={stage.id === selectedStageId}
+                    onClick={() => {
+                      setSelectedStageId(stage.id);
+                      setSelectedItemId(stage.items[0]?.id || null);
+                    }}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-[440px_1fr]">
+            <section className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              <div className="border-b p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-foreground">
+                      {selectedStage?.title}
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {selectedStage?.description}
+                    </p>
+                  </div>
+                  <Badge variant="secondary">
+                    Procedure {selectedStage?.id ?? 0}
+                  </Badge>
+                </div>
+                <div className="relative mt-4">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="pl-9"
+                    placeholder="Search acquisitions"
+                  />
+                </div>
+              </div>
+              <ScrollArea className="h-[620px]">
+                <div className="space-y-3 p-4">
+                  {filteredItems.length === 0 ? (
+                    <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                      No acquisitions are currently waiting at this procedure.
+                    </div>
+                  ) : (
+                    acquisitionPages.items.map((item) => (
+                      <AcquisitionCard
+                        key={item.id}
+                        item={item}
+                        active={selectedItem?.id === item.id}
+                        onSelect={() => setSelectedItemId(item.id)}
+                        onOpen={() => openWorkspace(item)}
+                      />
+                    ))
+                  )}
+                  {filteredItems.length > acquisitionPages.pageSize ? <Pagination currentPage={acquisitionPages.currentPage} totalPages={acquisitionPages.totalPages} totalItems={acquisitionPages.totalItems} pageSize={acquisitionPages.pageSize} onPageChange={acquisitionPages.setCurrentPage} /> : null}
+                </div>
+              </ScrollArea>
+            </section>
+
+            <section className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              {selectedItem && selectedItemStage ? (
+                <AcquisitionDetail
+                  item={selectedItem}
+                  stage={selectedItemStage}
+                  stages={stages}
+                  onOpenWorkspace={() => openWorkspace(selectedItem)}
+                  onPrimary={(comments) =>
+                    runAction(
+                      selectedItem,
+                      selectedItemStage,
+                      'primary',
+                      comments
+                    )
+                  }
+                  onReject={(comments) =>
+                    runAction(
+                      selectedItem,
+                      selectedItemStage,
+                      'reject',
+                      comments
+                    )
+                  }
+                  onCompleteTask={(stepInstanceId, comments) =>
+                    completeWorkflowTask(selectedItem, stepInstanceId, comments)
+                  }
+                  onReload={reload}
+                  documentRequirements={
+                    stageDocumentRequirements[selectedItemStage.id] ||
+                    stageDocumentRequirements[selectedItemStage.order] ||
+                    []
+                  }
+                  onOpenWorkflows={() =>
+                    router.push(
+                      '/administration/workflow?entityType=LandAcquisition'
+                    )
+                  }
+                  canManageWorkflows={canManageWorkflows}
+                />
+              ) : (
+                <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
+                  Select an acquisition to view workflow details.
+                </div>
+              )}
+            </section>
+          </div>
+        </>
+      ) : null}
 
       {(draftItem || selectedItem) && workspaceStage && (
         <WorkspaceDialog
@@ -2228,6 +2459,7 @@ function AcquisitionCard({
 function AcquisitionDetail({
   item,
   stage,
+  stages,
   onOpenWorkspace,
   onPrimary,
   onReject,
@@ -2239,6 +2471,7 @@ function AcquisitionDetail({
 }: {
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
+  stages: LandAcquisitionStage[];
   onOpenWorkspace: () => void;
   onPrimary: (comments?: string) => Promise<void>;
   onReject: (comments?: string) => Promise<void>;
@@ -2257,6 +2490,9 @@ function AcquisitionDetail({
     null
   );
   const [summaryLoading, setSummaryLoading] = React.useState(false);
+  const [summaryLocations, setSummaryLocations] = React.useState<
+    HrLocationLookup[]
+  >([]);
   const [stageDocuments, setStageDocuments] = React.useState<
     LandAcquisitionDocument[]
   >([]);
@@ -2267,7 +2503,8 @@ function AcquisitionDetail({
     item.missingInputs || []
   );
   const isAssetCreationStage = stage.workspaceKind === 'asset-creation';
-  const hasCreatedLandAsset = isAssetCreationStage && item.hasLandAsset === true;
+  const hasCreatedLandAsset =
+    isAssetCreationStage && item.hasLandAsset === true;
   const hasPublishedLandAsset =
     isAssetCreationStage && item.status === 'Approved';
   const captureStageActionLabel = hasCreatedLandAsset
@@ -2292,12 +2529,18 @@ function AcquisitionDetail({
     stage.order > 0 &&
     !ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id) &&
     ['Pending Approval', 'Submitted', 'Rejected'].includes(item.status);
+  const timelineStages = stages.length > 0 ? stages : [stage];
 
   const openSummary = async () => {
     setSummaryOpen(true);
     setSummaryLoading(true);
     try {
-      setSummary(await estateAcquisitionService.getSummary(item.id));
+      const [nextSummary, locations] = await Promise.all([
+        estateAcquisitionService.getSummary(item.id),
+        estateAcquisitionService.getActiveHrLocations().catch(() => []),
+      ]);
+      setSummary(nextSummary);
+      setSummaryLocations(locations);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -2335,58 +2578,59 @@ function AcquisitionDetail({
     };
   }, [item.id, item.documents, stage.id]);
 
-  const workflowStageAttachments =
-    React.useMemo<WorkflowTaskAttachmentDto[]>(() => {
-      const stageRequirementKey = `${stage.workspaceKind}-documents`;
+  const workflowStageAttachments = React.useMemo<
+    WorkflowTaskAttachmentDto[]
+  >(() => {
+    const stageRequirementKey = `${stage.workspaceKind}-documents`;
 
-      return stageDocuments.flatMap((document) => {
-        const matchingRequirements = documentRequirements.filter(
-          (requirement) => matchesRequirement(document, requirement)
-        );
-        const targets =
-          matchingRequirements.length > 0
-            ? matchingRequirements
-            : [
-                {
-                  id: stageRequirementKey,
-                  requirementKey: stageRequirementKey,
-                  documentName: `${stage.title} Documents`,
-                  documentType: document.documentType,
-                  isRequired: true,
-                },
-              ];
+    return stageDocuments.flatMap((document) => {
+      const matchingRequirements = documentRequirements.filter((requirement) =>
+        matchesRequirement(document, requirement)
+      );
+      const targets =
+        matchingRequirements.length > 0
+          ? matchingRequirements
+          : [
+              {
+                id: stageRequirementKey,
+                requirementKey: stageRequirementKey,
+                documentName: `${stage.title} Documents`,
+                documentType: document.documentType,
+                isRequired: true,
+              },
+            ];
 
-        return [
-          {
-            id: `estate-stage-${document.id}-${stageRequirementKey}`,
-            requirementKey: stageRequirementKey,
-            documentName: `${stage.title} Documents`,
-            documentType: document.documentType,
-            fileName: document.fileName,
-            filePath: document.id,
-            contentType: 'application/octet-stream',
-            fileSizeBytes: 0,
-            uploadedAt: document.uploadedAt,
-            uploadedById: document.landAcquisitionId,
-            uploadedByName: document.uploadedBy || 'Estate/Facility',
-          },
-          ...targets.map((requirement) => ({
-            id: `estate-stage-${document.id}-${requirement.requirementKey}`,
-            requirementKey: requirement.requirementKey,
-            checklistItemId: requirement.id,
-            documentName: requirement.documentName,
-            documentType: requirement.documentType || document.documentType,
-            fileName: document.fileName,
-            filePath: document.id,
-            contentType: 'application/octet-stream',
-            fileSizeBytes: 0,
-            uploadedAt: document.uploadedAt,
-            uploadedById: document.landAcquisitionId,
-            uploadedByName: document.uploadedBy || 'Estate/Facility',
-          })),
-        ];
-      });
-    }, [documentRequirements, stage.title, stage.workspaceKind, stageDocuments]);
+      return [
+        {
+          id: `estate-stage-${document.id}-${stageRequirementKey}`,
+          requirementKey: stageRequirementKey,
+          documentName: `${stage.title} Documents`,
+          documentType: document.documentType,
+          fileName: document.fileName,
+          filePath: document.id,
+          contentType: 'application/octet-stream',
+          fileSizeBytes: 0,
+          uploadedAt: document.uploadedAt,
+          uploadedById: document.landAcquisitionId,
+          uploadedByName: document.uploadedBy || 'Estate/Facility',
+        },
+        ...targets.map((requirement) => ({
+          id: `estate-stage-${document.id}-${requirement.requirementKey}`,
+          requirementKey: requirement.requirementKey,
+          checklistItemId: requirement.id,
+          documentName: requirement.documentName,
+          documentType: requirement.documentType || document.documentType,
+          fileName: document.fileName,
+          filePath: document.id,
+          contentType: 'application/octet-stream',
+          fileSizeBytes: 0,
+          uploadedAt: document.uploadedAt,
+          uploadedById: document.landAcquisitionId,
+          uploadedByName: document.uploadedBy || 'Estate/Facility',
+        })),
+      ];
+    });
+  }, [documentRequirements, stage.title, stage.workspaceKind, stageDocuments]);
 
   const submitCaptureStage = async () => {
     if (!item.stageInputsComplete) {
@@ -2527,7 +2771,7 @@ function AcquisitionDetail({
               Procedure Timeline
             </h3>
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              {ACQUISITION_STAGES.map((candidate) => {
+              {timelineStages.map((candidate) => {
                 const done =
                   candidate.order < stage.order ||
                   (hasPublishedLandAsset && candidate.order <= stage.order);
@@ -2683,8 +2927,10 @@ function AcquisitionDetail({
           ) : summary?.stages.length ? (
             <div className="space-y-4">
               {summary.stages.map((savedStage) => {
-                const definition = ACQUISITION_STAGES.find(
-                  (candidate) => candidate.id === savedStage.procedureId
+                const definition = timelineStages.find(
+                  (candidate) =>
+                    candidate.id === savedStage.procedureId ||
+                    candidate.order === savedStage.procedureId
                 );
                 const labels = new Map(
                   (definition
@@ -2695,8 +2941,14 @@ function AcquisitionDetail({
                     workspaceField.label,
                   ])
                 );
-                const entries = Object.entries(savedStage.values).filter(
-                  ([, value]) => value !== null && value !== ''
+                const fields = definition
+                  ? WORKSPACE_FIELDS[definition.workspaceKind]
+                  : [];
+                const entries = summaryEntries(
+                  savedStage.values,
+                  fields,
+                  labels,
+                  summaryLocations
                 );
                 return (
                   <section
@@ -2713,14 +2965,11 @@ function AcquisitionDetail({
                     </div>
                     {entries.length ? (
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {entries.map(([key, value]) => (
+                        {entries.map((entry) => (
                           <Field
-                            key={key}
-                            label={
-                              labels.get(key) ||
-                              key.replace(/([a-z])([A-Z])/g, '$1 $2')
-                            }
-                            value={formatSummaryValue(value)}
+                            key={entry.key}
+                            label={entry.label}
+                            value={entry.value}
                           />
                         ))}
                       </div>
@@ -2750,6 +2999,96 @@ function AcquisitionDetail({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+type SummaryValue = string | boolean | number | null;
+
+type SummaryEntry = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+function summaryEntries(
+  values: Record<string, SummaryValue>,
+  fields: WorkspaceField[],
+  labels: Map<string, string>,
+  locations: HrLocationLookup[]
+): SummaryEntry[] {
+  const fieldByKey = new Map(
+    fields.map((fieldConfig) => [fieldConfig.key, fieldConfig])
+  );
+
+  return Object.entries(values).flatMap(([key, value]) => {
+    if (value === null || value === '') return [];
+
+    if (key === 'pastOwnersJson') {
+      return pastOwnerSummaryEntries(value);
+    }
+
+    const config = fieldByKey.get(key);
+    return [
+      {
+        key,
+        label: labels.get(key) || key.replace(/([a-z])([A-Z])/g, '$1 $2'),
+        value: formatSummaryValue(
+          resolveSummaryValue(key, value, config, locations)
+        ),
+      },
+    ];
+  });
+}
+
+function pastOwnerSummaryEntries(value: SummaryValue): SummaryEntry[] {
+  const owners = parsePastOwners(
+    typeof value === 'string' ? value : undefined
+  ).filter((owner) =>
+    Object.values(owner).some((entry) => `${entry || ''}`.trim())
+  );
+
+  return owners.map((owner, index) => ({
+    key: `pastOwnersJson-${index}`,
+    label: `Past Owner ${index + 1}`,
+    value: [
+      owner.ownerName,
+      owner.contactNumber ? `Contact: ${owner.contactNumber}` : '',
+      owner.address ? `Address: ${owner.address}` : '',
+      owner.identificationNumber
+        ? `ID: ${owner.identificationType || 'Identification'} ${owner.identificationNumber}`
+        : '',
+      owner.ownershipStartDate || owner.ownershipEndDate
+        ? `Ownership: ${owner.ownershipStartDate || 'Not recorded'} to ${owner.ownershipEndDate || 'Not recorded'}`
+        : '',
+      owner.dateGapReason ? `Gap reason: ${owner.dateGapReason}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | '),
+  }));
+}
+
+function resolveSummaryValue(
+  key: string,
+  value: SummaryValue,
+  config: WorkspaceField | undefined,
+  locations: HrLocationLookup[]
+): SummaryValue {
+  if (typeof value !== 'string') return value;
+
+  const isLocationField =
+    config?.type === 'region' ||
+    config?.type === 'district' ||
+    /(region|district|country|town)id$/i.test(key);
+  if (!isLocationField) return value;
+
+  return (
+    locations.find(
+      (location) =>
+        location.id === value ||
+        location.name.localeCompare(value, undefined, {
+          sensitivity: 'accent',
+        }) === 0
+    )?.name || value
   );
 }
 
@@ -2804,7 +3143,8 @@ function CoordinateComparisonPanel({
             Coordinate comparison
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Compare survey-plan beacons against the ownership classification beacons.
+            Compare survey-plan beacons against the ownership classification
+            beacons.
           </p>
         </div>
         <Badge variant={matched ? 'secondary' : 'outline'}>
@@ -2818,7 +3158,8 @@ function CoordinateComparisonPanel({
 
       {capturedRows.length === 0 ? (
         <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          No saved cadastral or ownership classification coordinates are available yet.
+          No saved cadastral or ownership classification coordinates are
+          available yet.
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -2850,11 +3191,17 @@ function CoordinateComparisonPanel({
                       {formatFeet(row.classificationEasting)}
                     </td>
                     <td className="px-3 py-2">
-                      {hasDeviation ? `${row.deviationFeet?.toFixed(2)} ft` : '-'}
+                      {hasDeviation
+                        ? `${row.deviationFeet?.toFixed(2)} ft`
+                        : '-'}
                     </td>
                     <td className="px-3 py-2">
                       <Badge variant={rowMatched ? 'secondary' : 'outline'}>
-                        {hasDeviation ? (rowMatched ? 'Match' : 'Review') : 'Incomplete'}
+                        {hasDeviation
+                          ? rowMatched
+                            ? 'Match'
+                            : 'Review'
+                          : 'Incomplete'}
                       </Badge>
                     </td>
                   </tr>
@@ -2877,10 +3224,7 @@ function PastOwnersPanel({
   disabled: boolean;
   onChange: (owners: PastOwnerDraft[]) => void;
 }) {
-  const updateOwner = (
-    index: number,
-    patch: Partial<PastOwnerDraft>
-  ) => {
+  const updateOwner = (index: number, patch: Partial<PastOwnerDraft>) => {
     onChange(
       owners.map((owner, row) =>
         row === index ? { ...owner, ...patch } : owner
@@ -3141,6 +3485,13 @@ function WorkspaceDialog({
     null
   );
   const [syncingPayable, setSyncingPayable] = React.useState(false);
+  const [generationTemplates, setGenerationTemplates] = React.useState<
+    CentralDocumentGenerationTemplate[]
+  >([]);
+  const [selectedTemplateCode, setSelectedTemplateCode] = React.useState('');
+  const [generatingAgreement, setGeneratingAgreement] = React.useState(false);
+  const [generatedAgreement, setGeneratedAgreement] =
+    React.useState<GeneratedCentralDocumentResult | null>(null);
   const [preview, setPreview] = React.useState<{
     url: string;
     name: string;
@@ -3152,18 +3503,35 @@ function WorkspaceDialog({
   const assignmentMessage = ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id)
     ? `You are not assigned to ${stage.title}. Required role: ${stage.requiredRole} or the active workflow assignee.`
     : `You are not assigned to ${stage.title}. Required role: ${stage.requiredRole}.`;
-  const accountsPayableInvoiceId = `${values.accountsPayableInvoiceId || ''}`.trim();
-  const accountsPayableSupplierId = `${values.accountsPayableSupplierId || ''}`.trim();
-  const accountsPayablePaymentId = `${values.accountsPayablePaymentId || ''}`.trim();
+  const accountsPayableInvoiceId =
+    `${values.accountsPayableInvoiceId || ''}`.trim();
+  const accountsPayableSupplierId =
+    `${values.accountsPayableSupplierId || ''}`.trim();
+  const accountsPayablePaymentId =
+    `${values.accountsPayablePaymentId || ''}`.trim();
   const accountsPayablePaid =
     Boolean(accountsPayableInvoiceId) &&
     (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+  const isAccountsPayableWorkspace =
+    stage.workspaceKind === 'vendor-payment' ||
+    stage.workspaceKind === 'stamp-duty-payment';
+  const isAgreementWorkspace =
+    stage.workspaceKind === 'agreement-negotiation' ||
+    stage.workspaceKind === 'agreement-approval';
+  const accountsPayableSubject =
+    stage.workspaceKind === 'vendor-payment'
+      ? 'vendor payment'
+      : 'stamp duty payment';
   const isPublishedAssetWorkspace =
     stage.workspaceKind === 'asset-creation' && item.status === 'Approved';
   const workspaceCanEdit = canEdit && !isPublishedAssetWorkspace;
   const workspaceLockedMessage = isPublishedAssetWorkspace
     ? 'This asset has already been published to Estate Land Bank, so the workspace is read-only.'
     : assignmentMessage;
+
+  React.useEffect(() => {
+    setGeneratedAgreement(null);
+  }, [item.id, open, stage.id]);
 
   React.useEffect(() => {
     if (
@@ -3179,7 +3547,10 @@ function WorkspaceDialog({
     if (!item.id) return;
     try {
       setSyncingPayable(true);
-      const workspace = await estateAcquisitionService.getWorkspace(item.id, stage.id);
+      const workspace = await estateAcquisitionService.getWorkspace(
+        item.id,
+        stage.id
+      );
       onChange(workspace.values);
       await onReload();
       toast.success(
@@ -3188,7 +3559,9 @@ function WorkspaceDialog({
           : 'Accounts Payable status refreshed.'
       );
     } catch (error: any) {
-      toast.error(error?.message || 'Unable to refresh Accounts Payable status.');
+      toast.error(
+        error?.message || 'Unable to refresh Accounts Payable status.'
+      );
     } finally {
       setSyncingPayable(false);
     }
@@ -3204,9 +3577,127 @@ function WorkspaceDialog({
       await onReload();
       toast.success('Accounts Payable request created.');
     } catch (error: any) {
-      toast.error(error?.message || 'Unable to create the Accounts Payable request.');
+      toast.error(
+        error?.message || 'Unable to create the Accounts Payable request.'
+      );
     } finally {
       setSyncingPayable(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (!open || !isAgreementWorkspace) {
+      return;
+    }
+
+    let mounted = true;
+    const loadTemplates = async () => {
+      try {
+        const templates =
+          await documentManagementService.getGenerationTemplates('Estate');
+        if (!mounted) return;
+        const agreementTemplates = templates.filter((template) => {
+          const text =
+            `${template.templateCode} ${template.title} ${template.documentType} ${template.body}`.toLowerCase();
+          return (
+            text.includes('agreement') ||
+            text.includes('conveyance') ||
+            text.includes('assignment') ||
+            text.includes('lease') ||
+            text.includes('acquisition')
+          );
+        });
+        const available = agreementTemplates.length
+          ? agreementTemplates
+          : templates;
+        setGenerationTemplates(available);
+        setSelectedTemplateCode(
+          (current) => current || available[0]?.templateCode || ''
+        );
+      } catch {
+        setGenerationTemplates([]);
+      }
+    };
+
+    void loadTemplates();
+    return () => {
+      mounted = false;
+    };
+  }, [isAgreementWorkspace, open]);
+
+  const generateAgreement = async () => {
+    if (!item.id || !selectedTemplateCode || !workspaceCanEdit) {
+      return;
+    }
+
+    try {
+      setGeneratingAgreement(true);
+      const result =
+        await documentManagementService.generateDocumentFromTemplate({
+          templateCode: selectedTemplateCode,
+          sourceModule: 'Estate',
+          sourceLabel: 'Land acquisition agreement',
+          sourceEntityType: 'LandAcquisition',
+          sourceRecordReference: item.projectReference,
+          sourceRecordId: item.id,
+          caseTitle: `${item.projectReference} - ${item.location}`,
+          caseReference: item.projectReference,
+          applicantName:
+            `${values.grantorName || values.ownerName || item.ownerName || ''}` ||
+            item.projectReference,
+          purpose: 'Land acquisition agreement generation',
+          mergeValues: {
+            ...Object.fromEntries(
+              Object.entries(values).map(([key, value]) => [
+                key,
+                `${value ?? ''}`,
+              ])
+            ),
+            CaseReference: item.projectReference,
+            Location: item.location,
+            IntendedUse: item.intendedUse,
+            EstimatedSize: item.estimatedSize,
+            OwnerName: item.ownerName || '',
+            GrantorName: `${values.grantorName || values.ownerName || item.ownerName || ''}`,
+            GrantorAddress: `${values.grantorAddress || values.address || ''}`,
+            GranteeName: `${values.granteeName || ''}`,
+            GranteeAddress: `${values.granteeAddress || ''}`,
+            NegotiatedValue: `${values.negotiatedValue || values.offerAmount || ''}`,
+            PaymentType: `${values.agreementPaymentType || values.paymentType || ''}`,
+            PaymentAmount: `${values.agreementPaymentAmount || values.negotiatedValue || ''}`,
+            PaymentSchedule: `${values.paymentSchedule || ''}`,
+            SpecialConditions: `${values.specialConditions || ''}`,
+            RootOfTitle: `${values.rootOfTitle || ''}`,
+            AgreementDate: `${values.agreementDate || ''}`,
+            Witness1Name: `${values.agreementWitness1Name || ''}`,
+            Witness1Address: `${values.agreementWitness1Address || ''}`,
+            Witness2Name: `${values.agreementWitness2Name || ''}`,
+            Witness2Address: `${values.agreementWitness2Address || ''}`,
+          },
+        });
+      const nextValues: WorkspaceValues = {
+        ...values,
+        agreementGenerated: true,
+        agreementTemplateReference: selectedTemplateCode,
+        generatedAgreementReference: result.dmsReference,
+        agreementDmsReference: result.dmsReference,
+      };
+      onChange(nextValues);
+      await estateAcquisitionService.saveWorkspace({
+        acquisitionId: item.id,
+        procedureId: stage.id,
+        workspaceKind: stage.workspaceKind,
+        values: nextValues,
+      });
+      setGeneratedAgreement(result);
+      await onReload();
+      toast.success('Agreement generated.', {
+        description: result.dmsReference,
+      });
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to generate the agreement.');
+    } finally {
+      setGeneratingAgreement(false);
     }
   };
 
@@ -3222,7 +3713,9 @@ function WorkspaceDialog({
       invoiceId: accountsPayableInvoiceId,
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
-      description: `Stamp duty payment for ${item.projectReference}`,
+      description: `${accountsPayableSubject} for ${item.projectReference}`,
+      source: 'land-acquisition',
+      locked: 'true',
     });
     router.push(`/finance/ap/payments/create?${params.toString()}`);
   };
@@ -3373,7 +3866,8 @@ function WorkspaceDialog({
 
         if (!mounted) return;
         setCadastralComparisonValues(cadastral.values);
-        if (classification) setClassificationComparisonValues(classification.values);
+        if (classification)
+          setClassificationComparisonValues(classification.values);
       } catch (error) {
         console.error(error);
         if (mounted) {
@@ -3429,7 +3923,9 @@ function WorkspaceDialog({
     }
   };
 
-  const attachDocument = async (pendingDocument: PendingAcquisitionDocument) => {
+  const attachDocument = async (
+    pendingDocument: PendingAcquisitionDocument
+  ) => {
     if (!workspaceCanEdit) {
       toast.error(workspaceLockedMessage);
       return;
@@ -3560,7 +4056,7 @@ function WorkspaceDialog({
                 }
               />
             )}
-            {stage.workspaceKind === 'stamp-duty-payment' && (
+            {isAccountsPayableWorkspace && (
               <section className="rounded-lg border bg-card p-4">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
@@ -3568,7 +4064,9 @@ function WorkspaceDialog({
                       <h3 className="text-sm font-semibold text-foreground">
                         Accounts Payable request
                       </h3>
-                      <Badge variant={accountsPayablePaid ? 'secondary' : 'outline'}>
+                      <Badge
+                        variant={accountsPayablePaid ? 'secondary' : 'outline'}
+                      >
                         {accountsPayablePaid
                           ? 'Paid'
                           : accountsPayableInvoiceId
@@ -3579,7 +4077,9 @@ function WorkspaceDialog({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {accountsPayableInvoiceId
                         ? `Invoice ${values.accountsPayableInvoiceNumber || accountsPayableInvoiceId} is the payment source for this acquisition.`
-                        : 'Create the payable from the approved stamp duty assessment before processing payment.'}
+                        : stage.workspaceKind === 'vendor-payment'
+                          ? 'Create the payable from the approved agreement amount before processing vendor payment.'
+                          : 'Create the payable from the approved stamp duty assessment before processing payment.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -3601,7 +4101,9 @@ function WorkspaceDialog({
                         size="sm"
                         onClick={() => void createAccountsPayableRequest()}
                         disabled={syncingPayable || !workspaceCanEdit}
-                        title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
+                        title={
+                          !workspaceCanEdit ? workspaceLockedMessage : undefined
+                        }
                       >
                         {syncingPayable ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -3629,6 +4131,125 @@ function WorkspaceDialog({
                 </div>
               </section>
             )}
+            {isAgreementWorkspace && (
+              <section className="rounded-lg border bg-card p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Agreement generation
+                      </h3>
+                      {values.agreementDmsReference ||
+                      values.generatedAgreementReference ? (
+                        <Badge variant="secondary">
+                          {`${values.agreementDmsReference || values.generatedAgreementReference}`}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">Not generated</Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Generate the acquisition agreement from a Central DMS Word
+                      template, then route it for approval and internal
+                      signature through workflow.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Select
+                      value={selectedTemplateCode || undefined}
+                      onValueChange={setSelectedTemplateCode}
+                      disabled={
+                        generationTemplates.length === 0 ||
+                        generatingAgreement ||
+                        !workspaceCanEdit
+                      }
+                    >
+                      <SelectTrigger className="w-full sm:w-[260px]">
+                        <SelectValue placeholder="Select DMS template" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {generationTemplates.map((template) => (
+                          <SelectItem
+                            key={template.templateCode}
+                            value={template.templateCode}
+                          >
+                            {template.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      onClick={() => void generateAgreement()}
+                      disabled={
+                        generatingAgreement ||
+                        generationTemplates.length === 0 ||
+                        !selectedTemplateCode ||
+                        !workspaceCanEdit
+                      }
+                      title={
+                        !workspaceCanEdit ? workspaceLockedMessage : undefined
+                      }
+                    >
+                      {generatingAgreement ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FileSignature className="mr-2 h-4 w-4" />
+                      )}
+                      Generate
+                    </Button>
+                  </div>
+                </div>
+                {generationTemplates.length === 0 ? (
+                  <p className="mt-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    No Estate agreement templates are active in Central DMS.
+                  </p>
+                ) : null}
+                {generatedAgreement ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                    <span>
+                      Generated DMS reference{' '}
+                      <span className="font-semibold">
+                        {generatedAgreement.dmsReference}
+                      </span>
+                    </span>
+                    {generatedAgreement.wordUrl ? (
+                      <Button
+                        asChild
+                        variant="link"
+                        size="sm"
+                        className="h-auto px-0 text-emerald-900"
+                      >
+                        <a
+                          href={generatedAgreement.wordUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                          Download Word
+                        </a>
+                      </Button>
+                    ) : generatedAgreement.pdfUrl ? (
+                      <Button
+                        asChild
+                        variant="link"
+                        size="sm"
+                        className="h-auto px-0 text-emerald-900"
+                      >
+                        <a
+                          href={generatedAgreement.pdfUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                          Open PDF
+                        </a>
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+            )}
             <section className="rounded-lg border bg-card p-4">
               <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
@@ -3636,42 +4257,48 @@ function WorkspaceDialog({
                     Stage documents
                   </h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Attach the configured documents required for this procedure stage.
+                    Attach the configured documents required for this procedure
+                    stage.
                   </p>
                 </div>
                 {!hasRequirements &&
                   (workspaceCanEdit ? (
-                  <Button variant="outline" size="sm" asChild>
-                    <label>
+                    <Button variant="outline" size="sm" asChild>
+                      <label>
+                        <Upload className="mr-2 h-4 w-4" />
+                        Add Files
+                        <input
+                          className="sr-only"
+                          type="file"
+                          multiple
+                          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []);
+                            void Promise.all(
+                              files.map((file) =>
+                                attachDocument({
+                                  file,
+                                  documentType: stage.title,
+                                  documentName: file.name,
+                                })
+                              )
+                            );
+                            event.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      title={workspaceLockedMessage}
+                    >
                       <Upload className="mr-2 h-4 w-4" />
                       Add Files
-                      <input
-                        className="sr-only"
-                        type="file"
-                        multiple
-                        accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
-                        onChange={(event) => {
-                          const files = Array.from(event.target.files || []);
-                          void Promise.all(
-                            files.map((file) =>
-                              attachDocument({
-                                file,
-                                documentType: stage.title,
-                                documentName: file.name,
-                              })
-                            )
-                          );
-                          event.currentTarget.value = '';
-                        }}
-                      />
-                    </label>
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" disabled title={workspaceLockedMessage}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Add Files
-                  </Button>
-                ))}
+                    </Button>
+                  ))}
               </div>
               {documentRequirementsError && (
                 <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
@@ -3732,7 +4359,11 @@ function WorkspaceDialog({
                               variant="outline"
                               size="sm"
                               disabled={uploadingDocuments || !workspaceCanEdit}
-                              title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
+                              title={
+                                !workspaceCanEdit
+                                  ? workspaceLockedMessage
+                                  : undefined
+                              }
                               asChild={workspaceCanEdit}
                             >
                               {workspaceCanEdit ? (
@@ -3747,13 +4378,12 @@ function WorkspaceDialog({
                                       const file = event.target.files?.[0];
                                       if (!file) return;
                                       void attachDocument({
-                                          file,
-                                          requirementId: requirement.id,
-                                          documentType:
-                                            requirement.documentType ||
-                                            stage.title,
-                                          documentName:
-                                            requirement.documentName,
+                                        file,
+                                        requirementId: requirement.id,
+                                        documentType:
+                                          requirement.documentType ||
+                                          stage.title,
+                                        documentName: requirement.documentName,
                                       });
                                       event.currentTarget.value = '';
                                     }}
@@ -3826,7 +4456,11 @@ function WorkspaceDialog({
                                   type="button"
                                   variant="ghost"
                                   disabled={!workspaceCanEdit}
-                                  title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
+                                  title={
+                                    !workspaceCanEdit
+                                      ? workspaceLockedMessage
+                                      : undefined
+                                  }
                                   onClick={() =>
                                     setPendingDocuments((current) =>
                                       current.filter(
@@ -3886,52 +4520,56 @@ function WorkspaceDialog({
                   </div>
                 ))}
                 {pendingDocuments
-                  .filter((document) => !hasRequirements || !document.requirementId)
+                  .filter(
+                    (document) => !hasRequirements || !document.requirementId
+                  )
                   .map((document, index) => (
-                  <div
-                    key={`${document.file.name}-${index}`}
-                    className="grid gap-2 rounded-md border border-dashed p-3 md:grid-cols-[1fr_180px_auto]"
-                  >
-                    <Input
-                      value={document.documentName}
-                      onChange={(event) =>
-                        setPendingDocuments((current) =>
-                          current.map((item, row) =>
-                            row === index
-                              ? { ...item, documentName: event.target.value }
-                              : item
-                          )
-                        )
-                      }
-                    />
-                    <Input
-                      value={document.documentType}
-                      onChange={(event) =>
-                        setPendingDocuments((current) =>
-                          current.map((item, row) =>
-                            row === index
-                              ? { ...item, documentType: event.target.value }
-                              : item
-                          )
-                        )
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={!workspaceCanEdit}
-                      title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
-                      onClick={() =>
-                        setPendingDocuments((current) =>
-                          current.filter((_, row) => row !== index)
-                        )
-                      }
+                    <div
+                      key={`${document.file.name}-${index}`}
+                      className="grid gap-2 rounded-md border border-dashed p-3 md:grid-cols-[1fr_180px_auto]"
                     >
-                      <Ban className="mr-1 h-4 w-4" />
-                      Remove
-                    </Button>
-                  </div>
-                ))}
+                      <Input
+                        value={document.documentName}
+                        onChange={(event) =>
+                          setPendingDocuments((current) =>
+                            current.map((item, row) =>
+                              row === index
+                                ? { ...item, documentName: event.target.value }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                      <Input
+                        value={document.documentType}
+                        onChange={(event) =>
+                          setPendingDocuments((current) =>
+                            current.map((item, row) =>
+                              row === index
+                                ? { ...item, documentType: event.target.value }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={!workspaceCanEdit}
+                        title={
+                          !workspaceCanEdit ? workspaceLockedMessage : undefined
+                        }
+                        onClick={() =>
+                          setPendingDocuments((current) =>
+                            current.filter((_, row) => row !== index)
+                          )
+                        }
+                      >
+                        <Ban className="mr-1 h-4 w-4" />
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
               </div>
             </section>
             {sections.map((section) => (
@@ -3963,262 +4601,276 @@ function WorkspaceDialog({
                         )
                     )
                     .map((config) =>
-                    config.key === 'vendorName' &&
-                    stage.workspaceKind === 'parcel-identification' ? (
-                      <div key={config.key} className="space-y-2">
-                        <Label>
-                          Vendor / Owner{' '}
-                          <span className="text-destructive">*</span>
-                        </Label>
-                        <Select
-                          value={`${values.vendorId || ''}`}
-                          disabled={vendorsLoading || !workspaceCanEdit}
-                          onValueChange={(vendorId) => {
-                            const vendor = vendors.find(
-                              (candidate) => candidate.id === vendorId
-                            );
-                            onChange((current) => ({
-                              ...current,
-                              vendorId,
-                              vendorName: vendor?.partnerName || '',
-                            }));
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue
-                              placeholder={
-                                vendorsLoading
-                                  ? 'Loading vendors...'
-                                  : 'Select a captured vendor'
-                              }
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {vendors.map((vendor) => (
-                              <SelectItem key={vendor.id} value={vendor.id}>
-                                {vendor.partnerName} ({vendor.partnerCode})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {vendorsError && (
-                          <p className="text-xs text-destructive">
-                            {vendorsError}
-                          </p>
-                        )}
-                        {!vendorsLoading &&
-                          !vendorsError &&
-                          vendors.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              No active approved vendors are available in the
-                              business partner register.
+                      config.key === 'vendorName' &&
+                      stage.workspaceKind === 'parcel-identification' ? (
+                        <div key={config.key} className="space-y-2">
+                          <Label>
+                            Vendor / Owner{' '}
+                            <span className="text-destructive">*</span>
+                          </Label>
+                          <Select
+                            value={`${values.vendorId || ''}`}
+                            disabled={vendorsLoading || !workspaceCanEdit}
+                            onValueChange={(vendorId) => {
+                              const vendor = vendors.find(
+                                (candidate) => candidate.id === vendorId
+                              );
+                              onChange((current) => ({
+                                ...current,
+                                vendorId,
+                                vendorName: vendor?.partnerName || '',
+                              }));
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue
+                                placeholder={
+                                  vendorsLoading
+                                    ? 'Loading vendors...'
+                                    : 'Select a captured vendor'
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {vendors.map((vendor) => (
+                                <SelectItem key={vendor.id} value={vendor.id}>
+                                  {vendor.partnerName} ({vendor.partnerCode})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {vendorsError && (
+                            <p className="text-xs text-destructive">
+                              {vendorsError}
                             </p>
                           )}
-                      </div>
-                    ) : config.key === 'ownerName' &&
-                      stage.workspaceKind === 'ownership-classification' ? (
-                      <div key={config.key} className="space-y-2">
-                        <Label>
-                          {values.isCurrentOwner === true
-                            ? 'Business Partner / Current Owner'
-                            : 'Past Owner Name'}{' '}
-                          <span className="text-destructive">*</span>
-                        </Label>
-                        {values.isCurrentOwner === true ? (
-                          <>
-                            <Select
-                              value={`${values.vendorId || ''}`}
-                              disabled={vendorsLoading || !workspaceCanEdit}
-                              onValueChange={(vendorId) => {
-                                const vendor = vendors.find(
-                                  (candidate) => candidate.id === vendorId
-                                );
-                                onChange((current) => ({
-                                  ...current,
-                                  vendorId,
-                                  vendorName: vendor?.partnerName || '',
-                                  ownerName: vendor?.partnerName || '',
-                                  contactNumber:
-                                    vendor?.phone ||
-                                    `${current.contactNumber || ''}`,
-                                  address:
-                                    vendor?.physicalAddress ||
-                                    `${current.address || ''}`,
-                                  identificationType: '',
-                                  identificationNumber: '',
-                                  ownershipEndDate: '',
-                                }));
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    vendorsLoading
-                                      ? 'Loading business partners...'
-                                      : 'Select business partner'
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {vendors.map((vendor) => (
-                                  <SelectItem key={vendor.id} value={vendor.id}>
-                                    {vendor.partnerName} ({vendor.partnerCode})
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {vendorsError && (
-                              <p className="text-xs text-destructive">
-                                {vendorsError}
+                          {!vendorsLoading &&
+                            !vendorsError &&
+                            vendors.length === 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                No active approved vendors are available in the
+                                business partner register.
                               </p>
                             )}
-                            {!vendorsLoading &&
-                              !vendorsError &&
-                              vendors.length === 0 && (
-                                <p className="text-xs text-muted-foreground">
-                                  No active approved business partners are
-                                  available for current-owner classification.
+                        </div>
+                      ) : config.key === 'ownerName' &&
+                        stage.workspaceKind === 'ownership-classification' ? (
+                        <div key={config.key} className="space-y-2">
+                          <Label>
+                            {values.isCurrentOwner === true
+                              ? 'Business Partner / Current Owner'
+                              : 'Past Owner Name'}{' '}
+                            <span className="text-destructive">*</span>
+                          </Label>
+                          {values.isCurrentOwner === true ? (
+                            <>
+                              <Select
+                                value={`${values.vendorId || ''}`}
+                                disabled={vendorsLoading || !workspaceCanEdit}
+                                onValueChange={(vendorId) => {
+                                  const vendor = vendors.find(
+                                    (candidate) => candidate.id === vendorId
+                                  );
+                                  onChange((current) => ({
+                                    ...current,
+                                    vendorId,
+                                    vendorName: vendor?.partnerName || '',
+                                    ownerName: vendor?.partnerName || '',
+                                    contactNumber:
+                                      vendor?.phone ||
+                                      `${current.contactNumber || ''}`,
+                                    address:
+                                      vendor?.physicalAddress ||
+                                      `${current.address || ''}`,
+                                    identificationType: '',
+                                    identificationNumber: '',
+                                    ownershipEndDate: '',
+                                  }));
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue
+                                    placeholder={
+                                      vendorsLoading
+                                        ? 'Loading business partners...'
+                                        : 'Select business partner'
+                                    }
+                                  />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {vendors.map((vendor) => (
+                                    <SelectItem
+                                      key={vendor.id}
+                                      value={vendor.id}
+                                    >
+                                      {vendor.partnerName} ({vendor.partnerCode}
+                                      )
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {vendorsError && (
+                                <p className="text-xs text-destructive">
+                                  {vendorsError}
                                 </p>
                               )}
-                            {`${values.vendorName || values.ownerName || ''}`.trim() && (
-                              <p className="text-xs text-muted-foreground">
-                                Owner details and identity are sourced from the
-                                selected Business Partner and are not required
-                                again in this stage.
-                              </p>
-                            )}
-                          </>
-                        ) : values.isCurrentOwner === false ? (
-                          <Input
-                            value={`${values.ownerName || ''}`}
-                            placeholder="Enter the past owner's full name"
+                              {!vendorsLoading &&
+                                !vendorsError &&
+                                vendors.length === 0 && (
+                                  <p className="text-xs text-muted-foreground">
+                                    No active approved business partners are
+                                    available for current-owner classification.
+                                  </p>
+                                )}
+                              {`${values.vendorName || values.ownerName || ''}`.trim() && (
+                                <p className="text-xs text-muted-foreground">
+                                  Owner details and identity are sourced from
+                                  the selected Business Partner and are not
+                                  required again in this stage.
+                                </p>
+                              )}
+                            </>
+                          ) : values.isCurrentOwner === false ? (
+                            <Input
+                              value={`${values.ownerName || ''}`}
+                              placeholder="Enter the past owner's full name"
+                              disabled={!workspaceCanEdit}
+                              onChange={(event) =>
+                                setValue('ownerName', event.target.value)
+                              }
+                            />
+                          ) : (
+                            <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                              Select whether this is the current owner first.
+                            </p>
+                          )}
+                        </div>
+                      ) : stage.workspaceKind === 'ownership-classification' &&
+                        values.isCurrentOwner === true &&
+                        BUSINESS_PARTNER_CURRENT_OWNER_FIELDS.has(
+                          config.key
+                        ) ? (
+                        <div
+                          key={config.key}
+                          className={
+                            config.span === 2
+                              ? 'space-y-2 md:col-span-2'
+                              : 'space-y-2'
+                          }
+                        >
+                          <Label>{config.label}</Label>
+                          <div className="rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                            {config.key === 'ownershipEndDate'
+                              ? 'Not applicable for current owner'
+                              : 'Sourced from Business Partner record'}
+                          </div>
+                        </div>
+                      ) : stage.workspaceKind === 'ownership-classification' &&
+                        config.key === 'dateGapReason' ? (
+                        <div
+                          key={config.key}
+                          className="space-y-2 md:col-span-2"
+                        >
+                          <Label>
+                            Date Gap Reason{' '}
+                            <span className="text-destructive">*</span>
+                          </Label>
+                          <Textarea
+                            value={`${values.dateGapReason || ''}`}
                             disabled={!workspaceCanEdit}
                             onChange={(event) =>
-                              setValue('ownerName', event.target.value)
+                              setValue('dateGapReason', event.target.value)
                             }
+                            rows={4}
                           />
-                        ) : (
-                          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                            Select whether this is the current owner first.
+                          <p className="text-xs text-muted-foreground">
+                            Required because the current ownership starts after
+                            the most recent past ownership ended.
                           </p>
-                        )}
-                      </div>
-                    ) : stage.workspaceKind === 'ownership-classification' &&
-                      values.isCurrentOwner === true &&
-                      BUSINESS_PARTNER_CURRENT_OWNER_FIELDS.has(config.key) ? (
-                      <div
-                        key={config.key}
-                        className={
-                          config.span === 2
-                            ? 'space-y-2 md:col-span-2'
-                            : 'space-y-2'
-                        }
-                      >
-                        <Label>{config.label}</Label>
-                        <div className="rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">
-                          {config.key === 'ownershipEndDate'
-                            ? 'Not applicable for current owner'
-                            : 'Sourced from Business Partner record'}
                         </div>
-                      </div>
-                    ) : stage.workspaceKind === 'ownership-classification' &&
-                      config.key === 'dateGapReason' ? (
-                      <div key={config.key} className="space-y-2 md:col-span-2">
-                        <Label>
-                          Date Gap Reason{' '}
-                          <span className="text-destructive">*</span>
-                        </Label>
-                        <Textarea
-                          value={`${values.dateGapReason || ''}`}
-                          disabled={!workspaceCanEdit}
-                          onChange={(event) =>
-                            setValue('dateGapReason', event.target.value)
-                          }
-                          rows={4}
+                      ) : config.type === 'region' ||
+                        config.type === 'district' ? (
+                        <HrLocationControl
+                          key={config.key}
+                          config={config}
+                          locations={hrLocations}
+                          values={values}
+                          loading={hrLocationsLoading}
+                          error={hrLocationsError}
+                          disabled={Boolean(
+                            !workspaceCanEdit || config.readOnly
+                          )}
+                          onChange={onChange}
                         />
-                        <p className="text-xs text-muted-foreground">
-                          Required because the current ownership starts after
-                          the most recent past ownership ended.
-                        </p>
-                      </div>
-                    ) : config.type === 'region' ||
-                      config.type === 'district' ? (
-                      <HrLocationControl
-                        key={config.key}
-                        config={config}
-                        locations={hrLocations}
-                        values={values}
-                        loading={hrLocationsLoading}
-                        error={hrLocationsError}
-                        disabled={Boolean(!workspaceCanEdit || config.readOnly)}
-                        onChange={onChange}
-                      />
-                    ) : (
-                      <WorkspaceControl
-                        key={config.key}
-                        config={config}
-                        value={values[config.key]}
-                        disabled={!workspaceCanEdit || config.readOnly}
-                        onChange={(value) => {
-                          if (!workspaceCanEdit || config.readOnly) return;
-                          if (
-                            config.key === 'witnessSwornOath1' ||
-                            config.key === 'witnessSwornOath2'
-                          ) {
-                            const witnessNumber = config.key.endsWith('1')
-                              ? 1
-                              : 2;
-                            const otherWitnessNumber = witnessNumber === 1 ? 2 : 1;
-                            onChange((current) => ({
-                              ...current,
-                              [config.key]: value,
-                              ...(value === true
-                                ? {
-                                    [`witnessSwornOath${otherWitnessNumber}`]: false,
-                                    [`witnessOathSwornBefore${otherWitnessNumber}`]: '',
-                                    [`witnessOathSwornDate${otherWitnessNumber}`]: '',
-                                  }
-                                : {}),
-                            }));
-                            return;
-                          }
-                          if (config.key === 'isCurrentOwner') {
-                            const currentOwner = value === true;
-                            onChange((current) => ({
-                              ...current,
-                              isCurrentOwner: currentOwner,
-                              ownerName: currentOwner
-                                ? `${current.vendorName || ''}`
-                                : '',
-                              vendorId: currentOwner
-                                ? `${current.vendorId || ''}`
-                                : '',
-                              vendorName: currentOwner
-                                ? `${current.vendorName || ''}`
-                                : '',
-                              contactNumber: currentOwner
-                                ? `${current.contactNumber || ''}`
-                                : '',
-                              address: currentOwner
-                                ? `${current.address || ''}`
-                                : '',
-                              identificationType: currentOwner
-                                ? ''
-                                : `${current.identificationType || ''}`,
-                              identificationNumber: currentOwner
-                                ? ''
-                                : `${current.identificationNumber || ''}`,
-                              ownershipEndDate: currentOwner
-                                ? ''
-                                : `${current.ownershipEndDate || ''}`,
-                            }));
-                            return;
-                          }
-                          setValue(config.key, value);
-                        }}
-                      />
-                    )
-                  )}
+                      ) : (
+                        <WorkspaceControl
+                          key={config.key}
+                          config={config}
+                          value={values[config.key]}
+                          disabled={!workspaceCanEdit || config.readOnly}
+                          onChange={(value) => {
+                            if (!workspaceCanEdit || config.readOnly) return;
+                            if (
+                              config.key === 'witnessSwornOath1' ||
+                              config.key === 'witnessSwornOath2'
+                            ) {
+                              const witnessNumber = config.key.endsWith('1')
+                                ? 1
+                                : 2;
+                              const otherWitnessNumber =
+                                witnessNumber === 1 ? 2 : 1;
+                              onChange((current) => ({
+                                ...current,
+                                [config.key]: value,
+                                ...(value === true
+                                  ? {
+                                      [`witnessSwornOath${otherWitnessNumber}`]: false,
+                                      [`witnessOathSwornBefore${otherWitnessNumber}`]:
+                                        '',
+                                      [`witnessOathSwornDate${otherWitnessNumber}`]:
+                                        '',
+                                    }
+                                  : {}),
+                              }));
+                              return;
+                            }
+                            if (config.key === 'isCurrentOwner') {
+                              const currentOwner = value === true;
+                              onChange((current) => ({
+                                ...current,
+                                isCurrentOwner: currentOwner,
+                                ownerName: currentOwner
+                                  ? `${current.vendorName || ''}`
+                                  : '',
+                                vendorId: currentOwner
+                                  ? `${current.vendorId || ''}`
+                                  : '',
+                                vendorName: currentOwner
+                                  ? `${current.vendorName || ''}`
+                                  : '',
+                                contactNumber: currentOwner
+                                  ? `${current.contactNumber || ''}`
+                                  : '',
+                                address: currentOwner
+                                  ? `${current.address || ''}`
+                                  : '',
+                                identificationType: currentOwner
+                                  ? ''
+                                  : `${current.identificationType || ''}`,
+                                identificationNumber: currentOwner
+                                  ? ''
+                                  : `${current.identificationNumber || ''}`,
+                                ownershipEndDate: currentOwner
+                                  ? ''
+                                  : `${current.ownershipEndDate || ''}`,
+                              }));
+                              return;
+                            }
+                            setValue(config.key, value);
+                          }}
+                        />
+                      )
+                    )}
                 </div>
               </section>
             ))}
@@ -4304,7 +4956,8 @@ function HrLocationControl({
   const selectedRegionValue = `${values[regionKey] || ''}`;
   const matchesValue = (location: HrLocationLookup, value: string) =>
     location.id === value ||
-    location.name.localeCompare(value, undefined, { sensitivity: 'accent' }) === 0;
+    location.name.localeCompare(value, undefined, { sensitivity: 'accent' }) ===
+      0;
   const levelName = (location: HrLocationLookup) =>
     `${location.levelName || ''}`.trim().toLowerCase();
   const selectedRegion = locations.find((location) =>

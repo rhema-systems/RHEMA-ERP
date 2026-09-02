@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// Published profiles remain immutable; the runtime seeder creates an unapproved successor
 /// draft when a later catalogue extension is discovered on an immutable family.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue")]
 public partial class ReconcileCivilEngineeringConfigurationDecisionCatalogue : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

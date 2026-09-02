@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -52,6 +53,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         EnsureAuthenticatedTenant();
         var requisition = await Requisitions.GetQueryable(item => item.Id == requisitionId &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.Items)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
             ?? throw new ProcurementRequisitionSubmissionNotFoundException(
                 "PR_NOT_FOUND", "The purchase requisition was not found in the current tenant.");
@@ -117,68 +119,111 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         PurchaseRequisition requisition,
         CancellationToken cancellationToken)
     {
+        // APP exchange and governed exceptions are retained as traceable planning
+        // metadata. The approved business requirements do not make either one a
+        // prerequisite for sending a purchase requisition into its configured
+        // approval workflow.
         var app = await EvaluateAppAsync(requisition, cancellationToken);
         var exception = await EvaluateExceptionAsync(requisition, cancellationToken);
         var statusAllowsSubmission = string.Equals(requisition.Status, "Draft", StringComparison.OrdinalIgnoreCase);
+        var requiredActions = new List<string>();
+        if (!statusAllowsSubmission)
+            requiredActions.Add("Only a Draft purchase requisition can be submitted for approval.");
+        if (string.IsNullOrWhiteSpace(requisition.Department))
+            requiredActions.Add("Select or derive the requesting department.");
+        if (!requisition.RequiredDate.HasValue)
+            requiredActions.Add("Enter the required delivery date.");
+        if (string.IsNullOrWhiteSpace(requisition.Justification))
+            requiredActions.Add("Enter the business justification.");
+        if (!requisition.BudgetId.HasValue || requisition.BudgetId == Guid.Empty)
+            requiredActions.Add("Link an approved budget or budget line.");
+        if (!requisition.ProcurementCategory.HasValue)
+            requiredActions.Add("Select the procurement category.");
+        if (string.IsNullOrWhiteSpace(requisition.Currency))
+            requiredActions.Add("Select the requisition currency.");
+        if (requisition.TotalAmount <= 0)
+            requiredActions.Add("The requisition total must be greater than zero.");
 
-        if (app.Allowed)
+        var activeItems = requisition.Items
+            .Where(item => !item.IsDeleted &&
+                !string.Equals(item.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (activeItems.Count == 0)
+        {
+            requiredActions.Add("Add at least one requisition item.");
+        }
+        else
+        {
+            if (activeItems.Any(item => string.IsNullOrWhiteSpace(item.ItemDescription)))
+                requiredActions.Add("Every item must have a description.");
+            if (activeItems.Any(item => item.Quantity <= 0 || string.IsNullOrWhiteSpace(item.UnitOfMeasure)))
+                requiredActions.Add("Every item must have a positive quantity and unit of measure.");
+            if (activeItems.Any(item => item.EstimatedUnitPrice <= 0 || item.LineTotal <= 0))
+                requiredActions.Add("Every item must have a positive estimated unit cost and line total.");
+            if (!requisition.SpecificationTemplateId.HasValue &&
+                activeItems.Any(item => string.IsNullOrWhiteSpace(item.Specifications)))
+                requiredActions.Add("Add specifications to every item or select a requisition specification template.");
+        }
+
+        var isCompliant = requiredActions.Count == 0;
+        if (isCompliant && exception.Attempted && !exception.Allowed)
+        {
+            requiredActions.Add(exception.Action);
+            return new Evaluation(BuildReadiness(
+                requisition,
+                false,
+                false,
+                exception.Code,
+                exception.Message,
+                null,
+                app,
+                exception,
+                requiredActions.Distinct(StringComparer.Ordinal).ToList()), app, exception);
+        }
+
+        if (isCompliant && app.Allowed)
         {
             return new Evaluation(BuildReadiness(
                 requisition,
                 true,
                 statusAllowsSubmission,
                 "PR_APP_ACKNOWLEDGED",
-                $"Latest APP attempt {app.Submission!.SubmissionNumber}/A{app.Submission.AttemptNumber} is acknowledged for the linked plan item.",
+                $"The purchase requisition has the required business details. APP attempt {app.Submission!.SubmissionNumber}/A{app.Submission.AttemptNumber} is acknowledged and retained for GHANEPS traceability.",
                 "AcknowledgedAPP",
                 app,
                 exception,
                 []), app, exception);
         }
 
-        if (exception.Allowed)
+        if (isCompliant && exception.Allowed)
         {
             return new Evaluation(BuildReadiness(
                 requisition,
                 true,
                 statusAllowsSubmission,
                 "PR_APPROVED_EXCEPTION",
-                $"Approved exception {exception.Rule!.RuleCode} is backed by a completed Procurement Exception workflow for this requisition.",
+                $"The purchase requisition has the required business details and approved exception {exception.Rule!.RuleCode} is backed by its completed workflow.",
                 "ApprovedException",
                 app,
                 exception,
                 []), app, exception);
         }
 
-        // GHANEPS/APP exchange is retained for traceability, but the architecture does not make
-        // an acknowledgement a universal prerequisite for starting the configured PR workflow.
-        // An explicitly linked exception remains fail-closed because it is a claimed bypass and
-        // therefore must carry valid approval, workflow, and evidence lineage.
-        if (!exception.Attempted)
-        {
-            return new Evaluation(BuildReadiness(
-                requisition,
-                true,
-                statusAllowsSubmission,
-                "PR_SUBMISSION_READY",
-                app.Attempted
-                    ? $"The configured requisition approval workflow may start. APP exchange remains available for traceability: {app.Message}"
-                    : "The configured requisition approval workflow may start. APP exchange remains available for traceability and does not block submission.",
-                "ConfiguredApprovalWorkflow",
-                app,
-                exception,
-                []), app, exception);
-        }
-
-        var requiredActions = new List<string> { exception.Action };
-        var decisionCode = exception.Code;
-        var message = exception.Message;
+        var appNote = app.Allowed
+            ? $" APP attempt {app.Submission!.SubmissionNumber}/A{app.Submission.AttemptNumber} is acknowledged and retained for GHANEPS traceability."
+            : requisition.SourcePlanId.HasValue
+                ? " APP exchange status is retained for planning traceability and does not block this approval workflow."
+                : string.Empty;
+        var message = isCompliant
+            ? $"The purchase requisition has the required business details and is ready for its configured approval workflow.{appNote}"
+            : "Complete the listed purchase requisition details before submission.";
         return new Evaluation(BuildReadiness(
             requisition,
-            false,
-            false,
-            decisionCode,
+            isCompliant,
+            isCompliant && statusAllowsSubmission,
+            isCompliant ? "PR_SUBMISSION_READY" : "PR_REQUIRED_DETAILS_INCOMPLETE",
             message,
-            null,
+            isCompliant ? "ConfiguredApprovalWorkflow" : "BusinessRequirements",
             app,
             exception,
             requiredActions.Distinct(StringComparer.Ordinal).ToList()), app, exception);
@@ -188,22 +233,29 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         PurchaseRequisition requisition,
         CancellationToken cancellationToken)
     {
-        const string defaultAction = "Link the Draft to a non-cancelled item in an approved, published Active plan whose latest APP attempt is Acknowledged.";
-        if (!requisition.SourcePlanItemId.HasValue)
+        const string defaultAction = "Link every requisition line to a non-cancelled item in one approved, published Active plan.";
+        var sourcePlanItemIds = requisition.Items.Where(line => !line.IsDeleted &&
+                !string.Equals(line.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                line.SourcePlanItemId.HasValue)
+            .Select(line => line.SourcePlanItemId!.Value).Distinct().ToList();
+        if (sourcePlanItemIds.Count == 0 && requisition.SourcePlanItemId.HasValue)
+            sourcePlanItemIds.Add(requisition.SourcePlanItemId.Value);
+        if (sourcePlanItemIds.Count == 0)
             return AppPath.Missing("PR_PLAN_ITEM_REQUIRED", "No procurement-plan item is linked.", defaultAction);
 
-        var item = await PlanItems.GetQueryable(row => row.Id == requisition.SourcePlanItemId.Value &&
+        var items = await PlanItems.GetQueryable(row => sourcePlanItemIds.Contains(row.Id) &&
                 row.TenantId == _currentUser.TenantId && !row.IsDeleted)
-            .Include(row => row.ProcurementPlan).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-        if (item is null || item.ProcurementPlan.IsDeleted)
-            return AppPath.Invalid("PR_PLAN_ITEM_NOT_ELIGIBLE", "The linked plan item is not available in the current tenant.", defaultAction, item);
-        if (requisition.SourcePlanId != item.ProcurementPlanId)
-            return AppPath.Invalid("PR_PLAN_ITEM_MISMATCH", "The requisition plan snapshot does not match the linked plan item.", defaultAction, item);
-        if (string.Equals(item.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
-            return AppPath.Invalid("PR_PLAN_ITEM_CANCELLED", "The linked plan item is cancelled.", defaultAction, item);
-        if (!string.Equals(item.ProcurementPlan.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
-            !item.ProcurementPlan.PublishedDate.HasValue)
-            return AppPath.Invalid("PR_PLAN_NOT_PUBLISHED", "The linked plan version is not an approved, published Active plan.", defaultAction, item);
+            .Include(row => row.ProcurementPlan).AsNoTracking().ToListAsync(cancellationToken);
+        var item = items.FirstOrDefault();
+        if (items.Count != sourcePlanItemIds.Count || item is null || items.Any(row => row.ProcurementPlan.IsDeleted))
+            return AppPath.Invalid("PR_PLAN_ITEM_NOT_ELIGIBLE", "One or more linked plan items are not available in the current tenant.", defaultAction, item);
+        if (items.Any(row => requisition.SourcePlanId != row.ProcurementPlanId))
+            return AppPath.Invalid("PR_PLAN_ITEM_MISMATCH", "The requisition plan snapshot does not match every linked plan item.", defaultAction, item);
+        if (items.Any(row => string.Equals(row.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)))
+            return AppPath.Invalid("PR_PLAN_ITEM_CANCELLED", "A linked plan item is cancelled.", defaultAction, item);
+        if (items.Any(row => !string.Equals(row.ProcurementPlan.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
+            !row.ProcurementPlan.PublishedDate.HasValue))
+            return AppPath.Invalid("PR_PLAN_NOT_PUBLISHED", "Every linked plan item must belong to the same approved, published Active plan.", defaultAction, item);
 
         var latest = await AppSubmissions.GetQueryable(row => row.ProcurementPlanId == item.ProcurementPlanId &&
                 row.TenantId == _currentUser.TenantId && !row.IsDeleted)
@@ -319,7 +371,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
     {
         var allowed = evaluation.Readiness.CanSubmit;
         var evidence = BuildEvidence(evaluation);
-        var decisionKeys = new List<string>();
+        var decisionKeys = new List<string> { "PR-001", "PR-002", "PR-003" };
         if (evaluation.App.Attempted)
             decisionKeys.Add("DEC-009");
         if (evaluation.Exception.Attempted)
@@ -332,7 +384,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
             EventType = EventType,
             Action = allowed ? "SubmissionGateAllowed" : "SubmissionGateBlocked",
             Result = allowed ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Denied,
-            RuleCode = exceptionRule?.RuleCode ?? "TDC-0104",
+            RuleCode = exceptionRule?.RuleCode ?? "PR-SUBMISSION-REQUIREMENTS",
             RuleId = exceptionRule?.Id,
             RuleVersion = exceptionRule?.PolicySet.Version.ToString(),
             DecisionKeys = decisionKeys.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
@@ -383,7 +435,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         string correlationId,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = SubmitPermission,
@@ -396,10 +448,10 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
         throw new ProcurementRequisitionSubmissionAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -408,7 +460,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
             throw new ProcurementRequisitionSubmissionAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private static string NormalizeCorrelation(string correlationId) =>
         string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : Truncate(correlationId.Trim(), 100);
     private static string Truncate(string value, int length) => value.Length <= length ? value : value[..length];

@@ -15,7 +15,6 @@ import {
 import { toast } from 'sonner';
 
 import { AwardReadinessRegister } from './AwardReadinessRegister';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,6 +23,7 @@ import {
   awardReadinessSourceLabel,
   createAwardReadinessEvaluationRequest,
 } from '@/lib/procurement-award-readiness';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementAwardReadinessService as service } from '@/services/procurement-award-readiness.service';
 import type {
   ProcurementAwardReadinessDecision,
@@ -34,9 +34,6 @@ const errorStatus = (error: unknown) =>
   typeof error === 'object' && error !== null && 'status' in error
     ? Number((error as { status?: unknown }).status)
     : undefined;
-
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'The request could not be completed.';
 
 export function AwardReadinessWorkspace({
   sourceType,
@@ -98,7 +95,7 @@ export function AwardReadinessWorkspace({
           : 'Award remains blocked; the immutable decision and remediation were retained.'
       );
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: (error) => toast.error(getProcurementProblemMessage(error)),
   });
 
   const refresh = async () => {
@@ -156,7 +153,7 @@ export function AwardReadinessWorkspace({
             Award-readiness controls are unavailable
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-            {errorMessage(error)}
+            {getProcurementProblemMessage(error)}
           </p>
           <Button asChild variant="outline" className="mt-5">
             <Link href={backHref}>Return to {sourceLabel.toLowerCase()}</Link>
@@ -198,11 +195,7 @@ export function AwardReadinessWorkspace({
             )}
           </div>
           <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-            {decision?.sourceReference ?? sourceId} · server-derived
-            recommendation, evaluation and locked-score lineage, supplier
-            eligibility, verification and due diligence, exact authority,
-            workflow, evidence, actors, blocked remediation, and immutable
-            decisions.
+            Review the current checks before submitting or approving the award.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -241,19 +234,6 @@ export function AwardReadinessWorkspace({
         </div>
       </div>
 
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Authoritative shared-control boundary</AlertTitle>
-        <AlertDescription>
-          This workspace evaluates and explains readiness; it cannot toggle
-          readiness, approve a workflow, replace the recommendation, or create
-          evidence. Existing sourcing, committee, verification, supplier,
-          prequalification, authority, workflow, evidence, SOD, audit, and award
-          services remain authoritative, and the final award boundary rechecks
-          the current server decision.
-        </AlertDescription>
-      </Alert>
-
       <AwardReadinessRegister
         sourceType={sourceType}
         sourceId={sourceId}
@@ -262,7 +242,9 @@ export function AwardReadinessWorkspace({
         sodStatus={sodStatus.data}
         isSodStatusLoading={sodStatus.isLoading}
         sodStatusError={
-          sodStatus.isError ? errorMessage(sodStatus.error) : undefined
+          sodStatus.isError
+            ? getProcurementProblemMessage(sodStatus.error)
+            : undefined
         }
         canEvaluate={canEvaluate}
         isEvaluating={evaluate.isPending}

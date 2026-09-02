@@ -107,30 +107,60 @@ vi.mock('@tanstack/react-query', () => ({
         tags: ['boq-summary'],
       },
       {
-        id: '55555555-5555-5555-5555-555555555554',
-        name: 'Design Backlog',
+        id: '44444444-4444-4444-4444-444444444445',
+        name: 'Retention Register',
         description: 'Published report',
-        type: 'civil-engineering',
+        type: 'quantity-survey',
         status: 'published',
         createdBy: 'system',
-        createdAt: '2026-08-21T00:00:00Z',
+        createdAt: '2026-08-29T00:00:00Z',
         isScheduled: false,
         isFavorite: false,
-        tags: ['design-backlog'],
+        tags: ['retention-register'],
       },
       {
-        id: '55555555-5555-5555-5555-555555555556',
-        name: 'Completion and Handover Register',
+        id: '44444444-4444-4444-4444-444444444446',
+        name: 'Cost-to-Complete Report',
         description: 'Published report',
-        type: 'civil-engineering',
+        type: 'quantity-survey',
         status: 'published',
         createdBy: 'system',
-        createdAt: '2026-08-21T00:00:00Z',
+        createdAt: '2026-08-29T00:00:00Z',
         isScheduled: false,
         isFavorite: false,
-        tags: ['completion-handover'],
+        tags: ['cost-to-complete'],
+      },
+      {
+        id: '44444444-4444-4444-4444-444444444447',
+        name: 'Contract Balance Report',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['contract-balance'],
+      },
+      {
+        id: '44444444-4444-4444-4444-444444444448',
+        name: 'Quantity Survey Audit Trail',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['audit-trail'],
       },
       ...[
+        ['55555555-5555-5555-5555-555555555551', 'Design Backlog', 'design-backlog'],
+        ['55555555-5555-5555-5555-555555555552', 'Field Task Register', 'field-task-register'],
+        ['55555555-5555-5555-5555-555555555553', 'Supervision Controls', 'supervision-controls'],
+        ['55555555-5555-5555-5555-555555555554', 'Maintenance and Complaints', 'maintenance-complaints'],
+        ['55555555-5555-5555-5555-555555555555', 'Permitting Watch', 'permitting-watch'],
+        ['55555555-5555-5555-5555-555555555556', 'Completion and Handover Register', 'completion-handover'],
         ['55555555-5555-5555-5555-555555555561', 'Engineering Work Register', 'engineering-work-register'],
         ['55555555-5555-5555-5555-555555555562', 'Inspection Report', 'inspection-report'],
         ['55555555-5555-5555-5555-555555555563', 'Site Instruction Log', 'site-instruction-log'],
@@ -142,7 +172,7 @@ vi.mock('@tanstack/react-query', () => ({
       ].map(([id, name, code]) => ({
         id,
         name,
-        description: 'Published architecture report',
+        description: 'Published Civil Engineering report',
         type: 'civil-engineering',
         status: 'published',
         createdBy: 'system',
@@ -317,6 +347,13 @@ describe('StatutoryReportCataloguePage navigation', () => {
       'href',
       '/reports/quantity-survey',
     );
+    expect(within(navigator).getByRole('link', { name: /Retention Register/ })).toHaveAttribute(
+      'href',
+      '/reports/quantity-survey/retention-register',
+    );
+    expect(within(navigator).getByRole('link', { name: /Cost-to-Complete Report/ })).toBeInTheDocument();
+    expect(within(navigator).getByRole('link', { name: /Contract Balance Report/ })).toBeInTheDocument();
+    expect(within(navigator).getByRole('link', { name: /Quantity Survey Audit Trail/ })).toBeInTheDocument();
   });
 
   it('exposes Civil Engineering reports through the same scoped report shell', async () => {
@@ -341,7 +378,7 @@ describe('StatutoryReportCataloguePage navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Civil Engineering reports' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Architecture-required outputs' })).toBeInTheDocument();
     expect(civilEngineeringCatalogue).toHaveLength(14);
-    expect(civilEngineeringCatalogue.map((item) => item.code)).toEqual(
+    expect(civilEngineeringCatalogue.map(item => item.code)).toEqual(
       expect.arrayContaining([
         'engineering-work-register',
         'inspection-report',

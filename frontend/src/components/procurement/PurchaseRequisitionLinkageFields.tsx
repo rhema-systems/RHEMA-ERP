@@ -12,7 +12,7 @@ import type {
   PurchaseRequisitionType,
   SavePurchaseRequisitionLinkageRequest,
 } from '@/services/purchasingService';
-import { deriveRequisitionLinkageFromPlanItem } from '@/lib/procurement-requisition-linkage';
+import { applyPlanItemToRequisitionLinkage } from '@/lib/procurement-requisition-linkage';
 
 const NONE = '__none__';
 
@@ -22,6 +22,7 @@ interface Props {
   options?: PurchaseRequisitionLinkageOptionsDto;
   loading?: boolean;
   disabled?: boolean;
+  onPlanItemChange?: (option?: PurchaseRequisitionLinkageOptionDto) => void;
 }
 
 function optionLabel(option: PurchaseRequisitionLinkageOptionDto) {
@@ -29,7 +30,7 @@ function optionLabel(option: PurchaseRequisitionLinkageOptionDto) {
   return `${option.code} — ${option.name}${suffix ? ` (${suffix})` : ''}`;
 }
 
-export function PurchaseRequisitionLinkageFields({ value, onChange, options, loading, disabled }: Props) {
+export function PurchaseRequisitionLinkageFields({ value, onChange, options, loading, disabled, onPlanItemChange }: Props) {
   const setValue = <K extends keyof SavePurchaseRequisitionLinkageRequest>(
     key: K,
     next: SavePurchaseRequisitionLinkageRequest[K]
@@ -52,13 +53,14 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
     setValue('approvedExceptionRuleId', next);
   };
 
-  const selectedBudget = options?.budgets.find((item) => item.id === value.budgetId);
+  const selectedPlanItem = (options?.planItems || []).find((option) => option.id === value.sourcePlanItemId);
+
   const selectPlanItem = (next: string) => {
-    if (next === NONE) {
-      onChange({ ...value, sourcePlanItemId: undefined, budgetId: undefined });
-      return;
-    }
-    onChange(deriveRequisitionLinkageFromPlanItem(value, next, options));
+    const option = next === NONE
+      ? undefined
+      : (options?.planItems || []).find((item) => item.id === next);
+    onChange(applyPlanItemToRequisitionLinkage(value, option));
+    onPlanItemChange?.(option);
   };
 
   return (
@@ -69,7 +71,8 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
           Planning and Governance Linkage
         </CardTitle>
         <CardDescription>
-          Link the requisition to its approved planning source. The linked budget and category are derived automatically when available.
+          Select the approved plan item. Its department and procurement budget are inherited automatically;
+          only governed exception, project and specification references remain selectable.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -115,24 +118,25 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
 
           <div className="space-y-2">
             <Label>Procurement budget</Label>
-            {value.sourcePlanItemId ? (
-              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm" data-testid="derived-procurement-budget">
-                {selectedBudget
-                  ? `${optionLabel(selectedBudget)}${selectedBudget.currency ? ` · ${selectedBudget.currency}` : ''}`
-                  : 'The budget assigned to this plan item will be applied automatically when the draft is saved.'}
-              </div>
-            ) : (
-              <Select value={value.budgetId || NONE} onValueChange={(next) => select('budgetId', next)} disabled={disabled || loading}>
-                <SelectTrigger aria-label="Procurement budget"><SelectValue placeholder="No budget linked" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>No budget linked</SelectItem>
-                  {(options?.budgets || []).map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {optionLabel(option)}{option.currency ? ` · ${option.currency}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <Select
+              value={value.budgetId || NONE}
+              onValueChange={(next) => select('budgetId', next)}
+              disabled={disabled || loading || Boolean(selectedPlanItem)}
+            >
+              <SelectTrigger aria-label="Procurement budget"><SelectValue placeholder="No budget linked" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>No budget linked</SelectItem>
+                {(options?.budgets || []).map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {optionLabel(option)}{option.currency ? ` · ${option.currency}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedPlanItem && (
+              <p className="text-xs text-muted-foreground">
+                Inherited from {selectedPlanItem.code}{selectedPlanItem.budgetCode ? ` · ${selectedPlanItem.budgetCode}` : ''}
+              </p>
             )}
           </div>
 

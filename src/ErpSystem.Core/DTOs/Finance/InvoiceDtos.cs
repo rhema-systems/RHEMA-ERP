@@ -26,6 +26,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IsOpeningBalance { get; set; }
         public string CurrencyCode { get; set; } = "USD";
         public decimal ExchangeRate { get; set; } = 1.0m;
+        public Guid? ExchangeRateId { get; set; }
         public int PaymentTermsDays { get; set; } = 30; // AR-specific
         public Guid? PaymentTermId { get; set; }
         public decimal EarlyPaymentDiscountPercentage { get; set; }
@@ -35,6 +36,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? JournalEntryId { get; set; }
         public List<InvoiceLineItemDto> LineItems { get; set; } = new();
         public List<PaymentDto> Payments { get; set; } = new();
+        public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
     }

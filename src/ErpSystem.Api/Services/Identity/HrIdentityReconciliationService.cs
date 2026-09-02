@@ -490,6 +490,17 @@ public sealed class HrIdentityReconciliationService : IHrIdentityReconciliationS
         var state = await _db.HrIdentityReconciliationStates
             .SingleOrDefaultAsync(item => item.TenantId == run.TenantId && item.UserId == user.Id, cancellationToken);
 
+        if (state == null)
+        {
+            state = await _db.HrIdentityReconciliationStates
+                .SingleOrDefaultAsync(item => item.TenantId == run.TenantId && item.EmployeeId == employee.Id, cancellationToken);
+
+            if (state != null && state.UserId != user.Id)
+            {
+                state.UserId = user.Id;
+            }
+        }
+
         var previousDepartmentId = state?.DepartmentId;
         var previousManagerEmployeeId = state?.ManagerEmployeeId;
         var accessChanged = state == null || state.HrAccessEligible != eligible;
@@ -763,8 +774,60 @@ public sealed class HrIdentityReconciliationService : IHrIdentityReconciliationS
                 });
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsDuplicateHrIdentityStateException(exception))
+        {
+            _logger.LogWarning(
+                exception,
+                "Recovered from duplicate HR identity state insert for tenant {TenantId}, user {UserId}, employee {EmployeeId}",
+                run.TenantId,
+                user.Id,
+                employee.Id);
+
+            var stateEntry = _db.Entry(state);
+            if (stateEntry.State == EntityState.Added)
+            {
+                stateEntry.State = EntityState.Detached;
+            }
+
+            state = await _db.HrIdentityReconciliationStates
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(item => item.TenantId == run.TenantId && item.UserId == user.Id, cancellationToken)
+                ?? await _db.HrIdentityReconciliationStates
+                    .IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(item => item.TenantId == run.TenantId && item.EmployeeId == employee.Id, cancellationToken);
+
+            if (state == null)
+            {
+                throw;
+            }
+
+            if (state.UserId != user.Id)
+            {
+                state.UserId = user.Id;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
         return item;
+    }
+
+    private static bool IsDuplicateHrIdentityStateException(DbUpdateException exception)
+    {
+        for (var inner = exception.InnerException; inner != null; inner = inner.InnerException)
+        {
+            if (inner is Microsoft.Data.SqlClient.SqlException sqlException &&
+                (sqlException.Number == 2601 || sqlException.Number == 2627))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<ReassignmentOutcome> TryAutomaticallyReassignAsync(

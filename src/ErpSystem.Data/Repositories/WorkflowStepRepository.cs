@@ -23,7 +23,9 @@ public class WorkflowStepRepository : GenericRepository<WorkflowStep>, IWorkflow
             .Include(s => s.OutgoingTransitions)
             .Include(s => s.IncomingTransitions)
             .Where(s => s.WorkflowDefinitionId == workflowDefinitionId && !s.IsDeleted)
-            .OrderBy(s => s.StepOrder)
+            // StepOrder is a display-only alias. Order by the mapped column so relational
+            // providers can translate the route lookup used by workflow-start preflight.
+            .OrderBy(s => s.Order)
             .ToListAsync(cancellationToken);
     }
 

@@ -95,8 +95,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Check if auto-create inventory items is enabled
     /// </summary>
     [HttpGet("auto-create-inventory-items")]
-    [AllowAnonymous] // Allow all authenticated users to check this setting
-    [Authorize]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> ShouldAutoCreateInventoryItems()
     {
         try
@@ -115,8 +114,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Check if auto-create supplier items is enabled
     /// </summary>
     [HttpGet("auto-create-supplier-items")]
-    [AllowAnonymous] // Allow all authenticated users to check this setting
-    [Authorize]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> ShouldAutoCreateSupplierItems()
     {
         try
@@ -135,8 +133,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Check if non-inventory items are allowed
     /// </summary>
     [HttpGet("allow-non-inventory-items")]
-    [AllowAnonymous] // Allow all authenticated users to check this setting
-    [Authorize]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> AllowNonInventoryItems()
     {
         try

@@ -155,11 +155,13 @@ public sealed class CashBankPaymentSlipDocumentBuilder : IDocumentBuilder
             $"{transaction.TransactionNumber}-{CopyFileLabel(preparation)}.pdf");
         var pdf = ControlledTransactionDocumentPdf.Build(model, preparation);
         var hash = Convert.ToHexString(SHA256.HashData(pdf)).ToLowerInvariant();
-        await _issueService.RecordIssuedAsync(
+        await _issueService.RecordRetainedIssuedAsync(
             preparation,
             fileName,
             "application/pdf",
             hash,
+            pdf,
+            RetainUntil(preparation),
             preparation.CopyType == ControlledDocumentCopyTypes.Original
                 ? FinanceAuditEvents.CashBankPaymentSlipIssued
                 : FinanceAuditEvents.CashBankPaymentSlipReplacementIssued,
@@ -202,6 +204,11 @@ public sealed class CashBankPaymentSlipDocumentBuilder : IDocumentBuilder
         => preparation.CopyType == ControlledDocumentCopyTypes.Original
             ? "original"
             : $"replacement-{preparation.CopyNumber:00}";
+
+    // Cash instructions and receipts are accounting evidence. Retain the exact issued PDF bytes
+    // for seven years from issuance; later source-record changes must not recreate or rewrite them.
+    internal static DateTime RetainUntil(ControlledDocumentIssuePreparationDto preparation)
+        => preparation.IssuedAtUtc.AddYears(7);
 
     internal static string UserName(IReadOnlyDictionary<Guid, string> users, Guid? id)
         => id.HasValue && users.TryGetValue(id.Value, out var name) ? name : id?.ToString() ?? "-";
@@ -392,11 +399,13 @@ public sealed class CustomerReceiptDocumentBuilder : IDocumentBuilder
             $"{payment.PaymentNumber}-{CashBankPaymentSlipDocumentBuilder.CopyFileLabel(preparation)}.pdf");
         var pdf = ControlledTransactionDocumentPdf.Build(model, preparation);
         var hash = Convert.ToHexString(SHA256.HashData(pdf)).ToLowerInvariant();
-        await _issueService.RecordIssuedAsync(
+        await _issueService.RecordRetainedIssuedAsync(
             preparation,
             fileName,
             "application/pdf",
             hash,
+            pdf,
+            CashBankPaymentSlipDocumentBuilder.RetainUntil(preparation),
             preparation.CopyType == ControlledDocumentCopyTypes.Original
                 ? FinanceAuditEvents.CustomerReceiptIssued
                 : FinanceAuditEvents.CustomerReceiptReplacementIssued,

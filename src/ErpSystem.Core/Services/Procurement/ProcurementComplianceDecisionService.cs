@@ -434,8 +434,9 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
             .ToList();
         if (authorityMatches.Count == 0)
         {
-            hardStops.Add(Finding("AUTHORITY_NOT_CONFIGURED",
-                $"No effective approval authority covers {request.Amount:N2} {currency} for {request.Category}."));
+            warnings.Add(Finding("AUTHORITY_NOT_CONFIGURED",
+                $"No optional policy authority metadata covers {request.Amount:N2} {currency} for {request.Category}; the entity's configured approval workflow remains authoritative.",
+                ProcurementComplianceFindingSeverity.Warning));
         }
         else
         {

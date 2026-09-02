@@ -33,31 +33,15 @@ describe('procurement APP submission presentation controls', () => {
     ).toBe(true);
   });
 
-  it('validates immutable export package metadata', () => {
+  it('validates the server-generated export format', () => {
     const value = {
       procurementPlanId: 'plan-1',
-      exportFileName: 'app.xlsx',
-      exportFormat: 'XLSX',
-      exportTemplateVersion: 'PPA-v1',
-      exportChecksumSha256: 'A'.repeat(64),
+      exportFormat: 'CSV',
     };
     expect(validateProcurementAppExport(value)).toBeUndefined();
     expect(
-      validateProcurementAppExport({ ...value, exportChecksumSha256: 'bad' })
-    ).toContain('calculated automatically');
-  });
-
-  it('derives package metadata and SHA-256 instead of asking a user for technical values', async () => {
-    const file = Object.assign(new Blob(['TDC APP export']), {
-      name: 'TDC-APP-2026.xlsx',
-    });
-
-    await expect(readProcurementAppExportFile(file)).resolves.toEqual({
-      exportFileName: 'TDC-APP-2026.xlsx',
-      exportFormat: 'XLSX',
-      exportChecksumSha256:
-        'bf72df96f3b5c4aab148cbc9ea7fecc2bedc076b7c2caa78e18611a6488813de',
-    });
+      validateProcurementAppExport({ ...value, exportFormat: 'XLSX' })
+    ).toContain('CSV');
   });
 
   it('removes empty filters while retaining paging', () => {

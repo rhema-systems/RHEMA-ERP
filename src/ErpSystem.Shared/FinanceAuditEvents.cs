@@ -44,6 +44,9 @@ public static class FinanceAuditEvents
     public const string LegacyPostingPathBlocked = "Finance.LegacyPostingPath.Blocked";
     public const string MigrationOnlyPostingAttempted = "Finance.LegacyPostingPath.MigrationOnlyAttempted";
     public const string PostingEngineBypassRejected = "Finance.PostingEngine.BypassRejected";
+    public const string DimensionReadinessAssessed = "Finance.Dimensions.Certification.ReadinessAssessed";
+    public const string DimensionRoutePromoted = "Finance.Dimensions.Certification.RoutePromoted";
+    public const string DimensionRoutePromotionBlocked = "Finance.Dimensions.Certification.PromotionBlocked";
 
     public const string FinanceWorkflowSubmitted = "Finance.Workflow.Submitted";
     public const string FinanceWorkflowApproved = "Finance.Workflow.Approved";
@@ -186,6 +189,8 @@ public static class FinanceAuditEvents
     public const string BankDepositConfirmed = "Finance.BankDeposit.Confirmed";
 
     public const string AccountingPeriodOpened = "Finance.AccountingPeriod.Opened";
+    public const string AccountingPeriodPostingDatePolicyUpdated = "Finance.AccountingPeriod.PostingDatePolicyUpdated";
+    public const string PostingBlockedFutureDated = "Finance.Posting.BlockedFutureDated";
     public const string AccountingPeriodCloseRequested = "Finance.AccountingPeriod.CloseRequested";
     public const string AccountingPeriodCloseCycleEvaluated = "Finance.AccountingPeriod.CloseCycleEvaluated";
     public const string AccountingPeriodClosePrepared = "Finance.AccountingPeriod.ClosePrepared";
@@ -276,6 +281,8 @@ public static class FinanceAuditEvents
     public const string WithholdingCertificateReissued = "Finance.Tax.WithholdingCertificateReissued";
     public const string WithholdingCertificateCancelled = "Finance.Tax.WithholdingCertificateCancelled";
     public const string WithholdingCertificatePrinted = "Finance.Tax.WithholdingCertificatePrinted";
+    public const string WithholdingCertificatePdfIssued = "Finance.Tax.WithholdingCertificatePdfIssued";
+    public const string WithholdingCertificatePdfReplacementIssued = "Finance.Tax.WithholdingCertificatePdfReplacementIssued";
     public const string WhtCertificateRegisterExported = "Finance.Tax.WHTCertificateRegisterExported";
     public const string WhtRemittanceCreated = "Finance.Tax.WHTRemittanceCreated";
     public const string WhtRemittanceSubmitted = "Finance.Tax.WHTRemittanceSubmitted";

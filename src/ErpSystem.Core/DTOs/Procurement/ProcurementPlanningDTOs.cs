@@ -149,6 +149,12 @@ public class UpdateProcurementPlanDto
 
     public decimal TotalEstimatedBudget { get; set; }
 
+    /// <summary>
+    /// Approved procurement budget selected while a draft plan is being prepared.
+    /// An existing plan-level budget link is preserved when this value is omitted.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
+
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
 
@@ -824,6 +830,8 @@ public class ProcurementBudgetRevisionDto
     public decimal NewAmount { get; set; }
     public decimal ChangeAmount { get; set; }
     public string? Reason { get; set; }
+    public Guid? RequestedById { get; set; }
+    public string? RequestedByName { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public string Status { get; set; } = "Pending";
@@ -835,15 +843,17 @@ public class ProcurementBudgetRevisionDto
 /// </summary>
 public class CreateProcurementBudgetRevisionDto
 {
-    [Required]
     [MaxLength(30)]
-    public string RevisionType { get; set; } = "Increase";
+    public string? RevisionType { get; set; }
 
     [Required]
+    [Range(typeof(decimal), "0.01", "79228162514264337593543950335")]
     public decimal NewAmount { get; set; }
 
+    [Required]
+    [MinLength(3)]
     [MaxLength(2000)]
-    public string? Reason { get; set; }
+    public string Reason { get; set; } = string.Empty;
 }
 
 #endregion

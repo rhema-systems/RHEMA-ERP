@@ -32,6 +32,11 @@ public interface IProcurementPurchaseOrderSourceService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task AuthorizeDraftCancellationAsync(
+        PurchaseOrder purchaseOrder,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
     Task<ProcurementPurchaseOrderSourceResolution> EvaluateCurrentAsync(
         PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken = default);
@@ -50,6 +55,15 @@ public interface IProcurementPurchaseOrderSourceService
         decimal totalAmount,
         string? currencyCode,
         Guid purchaseOrderId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task EnsureBudgetAvailabilityForSubmissionAsync(
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken = default);
+
+    Task EnsureBudgetCommitmentForIssueAsync(
+        PurchaseOrder purchaseOrder,
         string correlationId,
         CancellationToken cancellationToken = default);
 

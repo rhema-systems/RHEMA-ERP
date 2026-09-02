@@ -34,6 +34,43 @@ public class DatabaseSeedingServiceTests
     }
 
     [Fact]
+    public void FinanceRoleSeeder_ShouldGrantChiefAccountantControlledReportExportPermission()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var chiefAccountantStart = source.IndexOf("[\"Chief Accountant\"] = new[]", StringComparison.Ordinal);
+        var managingDirectorStart = source.IndexOf("[\"Managing Director\"] = new[]", chiefAccountantStart, StringComparison.Ordinal);
+
+        chiefAccountantStart.Should().BeGreaterThan(-1);
+        managingDirectorStart.Should().BeGreaterThan(chiefAccountantStart);
+        source[chiefAccountantStart..managingDirectorStart]
+            .Should().Contain("\"Finance.Reports.Export\"",
+                "Chief Accountants must be able to distribute the controlled reports they review");
+    }
+
+    [Fact]
+    public void FinanceRoleSeeder_ShouldKeepDemoAuditorReadOnly()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var auditorStart = source.IndexOf("[\"Finance Auditor\"] = new[]", StringComparison.Ordinal);
+        var budgetOfficerStart = source.IndexOf("[\"Budget Officer\"] = new[]", auditorStart, StringComparison.Ordinal);
+
+        auditorStart.Should().BeGreaterThan(-1);
+        budgetOfficerStart.Should().BeGreaterThan(auditorStart);
+        var auditorPermissions = source[auditorStart..budgetOfficerStart];
+
+        auditorPermissions.Should().Contain("\"Finance.Read\"");
+        auditorPermissions.Should().Contain("\"Finance.Reports.Run\"");
+        auditorPermissions.Should().NotContain("\"Finance.Write\"");
+        auditorPermissions.Should().NotContain("\"Finance.Workflow.Approve\"");
+        auditorPermissions.Should().NotContain("\"Finance.JournalEntries.Post\"");
+        auditorPermissions.Should().NotContain("\"Finance.JournalEntries.Reverse\"");
+    }
+
+    [Fact]
     public async Task EnsureFinanceWorkflowsSeededAsync_ShouldPublishAndRepairPaymentRuntimeDefinitions()
     {
         await using var context = CreateContext();
@@ -235,6 +272,45 @@ public class DatabaseSeedingServiceTests
         await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
 
         (await context.ProjectCatalogEntries.CountAsync(entry => entry.TenantId == tenant.Id)).Should().Be(initialCount);
+    }
+
+    [Fact]
+    public async Task SeedDefaultTenantModulesAsync_ShouldEnableProjectsForQsAndCivilReports()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = "Default Test Tenant",
+            Code = "DEFAULT",
+            Status = TenantStatus.Active,
+            ContactEmail = "default@test.local",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        context.Tenants.Add(tenant);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+        var seedMethod = typeof(DatabaseSeedingService)
+            .GetMethod("SeedDefaultTenantModulesAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        seedMethod.Should().NotBeNull();
+        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
+
+        var projects = await context.TenantModules.SingleAsync(module =>
+            module.TenantId == tenant.Id && module.ModuleName == "Project Management");
+        projects.Status.Should().Be(ModuleStatus.Enabled);
+        projects.IsDeleted.Should().BeFalse();
+
+        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+        (await context.TenantModules.CountAsync(module =>
+            module.TenantId == tenant.Id && module.ModuleName == "Project Management")).Should().Be(1);
     }
 
     private static ApplicationDbContext CreateContext()

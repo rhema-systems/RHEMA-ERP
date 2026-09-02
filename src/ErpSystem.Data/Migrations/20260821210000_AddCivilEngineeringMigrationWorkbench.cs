@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations;
 
 /// <summary>CIV-0605 controlled Civil historical-data staging; it does not post into owner modules.</summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260821210000_AddCivilEngineeringMigrationWorkbench")]
 public partial class AddCivilEngineeringMigrationWorkbench : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

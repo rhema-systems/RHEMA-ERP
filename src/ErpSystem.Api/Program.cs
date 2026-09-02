@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Events;
@@ -64,6 +65,70 @@ if (args.Length > 0 && args[0] == "seed")
         await seedingService.SeedTestUsersAsync();
     }
 
+    return;
+}
+
+// Create the narrowly scoped, role-separated fixture used by the disposable Civil
+// Engineering browser acceptance harness. The seeder itself refuses non-test DB names.
+if (args.Length > 0 && args[0] == "seed-civil-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+    tempBuilder.Services.AddScoped<CivilEngineeringConfigurationProfileSeeder>();
+    tempBuilder.Services.AddScoped<CivilEngineeringAccessControlSeeder>();
+    tempBuilder.Services.AddScoped<ErpSystem.Api.Services.CivilEngineeringE2ETestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        await db.Database.EnsureCreatedAsync();
+        await StampCurrentModelMigrationsAsAppliedAsync(db, logger);
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.CivilEngineeringE2ETestSeeder>()
+            .SeedAsync();
+    }
+
+    Console.WriteLine("Civil Engineering disposable browser fixture seeded successfully.");
+    return;
+}
+
+// Create role-separated actors and prerequisite reference/source data used by the
+// disposable tender browser acceptance harness. Governed lifecycle transitions are
+// still performed by the real APIs so each browser transition remains verifiable.
+if (args.Length > 0 && args[0] == "seed-tender-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+    tempBuilder.Services.AddScoped<ErpSystem.Api.Services.TenderLifecycleE2ETestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.EnsureCreatedAsync();
+        await StampCurrentModelMigrationsAsAppliedAsync(
+            db,
+            scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+        await scope.ServiceProvider.GetRequiredService<ProcurementAccessControlSeeder>()
+            .SeedAsync();
+        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.TenderLifecycleE2ETestSeeder>()
+            .SeedAsync();
+    }
+
+    Console.WriteLine("Tender disposable browser prerequisite fixture seeded successfully.");
     return;
 }
 
@@ -127,7 +192,6 @@ if (args.Length > 0 && args[0] == "seed-db")
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
-    tempBuilder.Services.AddErpSystemDatabaseSeeders();
     tempBuilder.Services.AddDatabaseSeeding();
 
     var tempApp = tempBuilder.Build();
@@ -155,7 +219,10 @@ if (args.Length > 0 && args[0] == "seed-hr-all")
     var tempBuilder = CreateSeedBuilder(args);
 
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider, ErpSystem.Api.Services.CurrentUserService>();
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
 
     var tempApp = tempBuilder.Build();
 
@@ -293,7 +360,7 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -384,6 +451,14 @@ builder.Services.AddErpSystemSignalR();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
 builder.Services.AddDevelopmentServices(builder.Environment);
 
+// Disposable browser-assurance hosts exercise synchronous API workflows and should not
+// run unrelated schedulers against their short-lived database. Production keeps the
+// default enabled value; test launchers must opt out explicitly.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true))
+{
+    builder.Services.RemoveAll<IHostedService>();
+}
+
 // Add Quality Certificate Service
 builder.Services.AddScoped<ErpSystem.Api.Services.QualityCertificateService>();
 
@@ -399,6 +474,13 @@ builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRec
     provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceEvidenceReadinessService>(provider =>
     provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
+
+// Short-lived, disposable assurance hosts can explicitly opt out of unrelated
+// schedulers. Production behavior remains unchanged unless this setting is set.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true))
+{
+    builder.Services.RemoveAll<IHostedService>();
+}
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();
@@ -433,21 +515,6 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
-
-// A liveness probe verifies only that this process can answer. Keep it ahead of routing,
-// authentication, authorization, rate limiting, response caching and dependency health checks;
-// those controls are intentionally evaluated by /health/ready and /health instead.
-app.Use(async (context, next) =>
-{
-    if (HttpMethods.IsGet(context.Request.Method) &&
-        string.Equals(context.Request.Path.Value, "/health/live", StringComparison.OrdinalIgnoreCase))
-    {
-        await HealthCheckResponseWriter.WriteLivenessAsync(context);
-        return;
-    }
-
-    await next();
-});
 
 // Enable Swagger in all environments for testing
 app.UseSwagger();
@@ -582,6 +649,11 @@ app.MapHealthChecks("/health", new HealthCheckOptions
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
     ResponseWriter = HealthCheckResponseWriter.WriteAsync
 });
 app.MapHealthChecks("/health/shutdown", new HealthCheckOptions

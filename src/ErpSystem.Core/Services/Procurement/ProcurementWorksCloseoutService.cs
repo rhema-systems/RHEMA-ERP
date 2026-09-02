@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -39,6 +40,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
     private readonly IProcurementComplianceDecisionService _compliance;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly INotificationTopicPublisher _notifications;
     private readonly ILogger<ProcurementWorksCloseoutService> _logger;
     private readonly IQuantitySurveyConfigurationService? _quantitySurveyConfiguration;
@@ -52,6 +54,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         IProcurementComplianceDecisionService compliance,
         IWorkflowIntegrationService workflow,
         IProcurementControlEventService controlEvents,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         INotificationTopicPublisher notifications,
         ILogger<ProcurementWorksCloseoutService> logger,
         IQuantitySurveyConfigurationService? quantitySurveyConfiguration = null)
@@ -64,6 +67,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         _compliance = compliance;
         _workflow = workflow;
         _controlEvents = controlEvents;
+        _budgetCommitments = budgetCommitments;
         _notifications = notifications;
         _logger = logger;
         _quantitySurveyConfiguration = quantitySurveyConfiguration;
@@ -79,6 +83,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         _unitOfWork.Repository<ProjectSnagItem>();
     private IGenericRepository<ProjectCivilInspectionControl> CivilInspections =>
         _unitOfWork.Repository<ProjectCivilInspectionControl>();
+    private IGenericRepository<ProjectCivilDesignCase> CivilDesignCases =>
+        _unitOfWork.Repository<ProjectCivilDesignCase>();
     private IGenericRepository<ProjectFinalAccount> FinalAccounts =>
         _unitOfWork.Repository<ProjectFinalAccount>();
     private IGenericRepository<ProjectPaymentCertificate> PaymentCertificates =>
@@ -605,6 +611,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
 
             if (action.ActionType == ProcurementWorksCloseoutActionType.Termination)
             {
+                await _budgetCommitments.ReleaseUnusedContractAsync(
+                    contract.Id, correlation, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 contract.Status = "Terminated";
                 contract.TerminatedAt = action.EffectiveAtUtc ?? now;
                 contract.TerminationReason = action.Reason[..Math.Min(action.Reason.Length, 500)];
@@ -614,6 +623,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             }
             else if (action.ActionType == ProcurementWorksCloseoutActionType.Closeout)
             {
+                await _budgetCommitments.ReleaseUnusedContractAsync(
+                    contract.Id, correlation, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 contract.Status = "Completed";
                 contract.CompletedAt = action.EffectiveAtUtc ?? now;
                 StampContract(contract, now);
@@ -917,11 +929,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     "The linked final-completion item is complete.",
                     "WORKS_FINAL_COMPLETION_REQUIRED",
                     "Link a completed final-completion handover item.");
-                AddCondition(checks, state.PassedCivilInspections > 0,
-                    "civil-completion-inspection", "Passed Civil completion inspection",
-                    "WORKS_CIVIL_INSPECTION_PASSED",
-                    "A governed Civil completion inspection has passed.",
-                    "WORKS_CIVIL_INSPECTION_REQUIRED",
+                AddCivilCompletionInspectionCondition(checks, state,
                     "A passed governed Civil completion inspection is required before final takeover.");
                 AddCondition(checks, dlpEnded, "defects-liability-period",
                     "Defects-liability period", "WORKS_DLP_ENDED",
@@ -1217,11 +1225,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     "Required warranty release is approved or not applicable.",
                     "WORKS_WARRANTY_RELEASE_REQUIRED",
                     "Approve warranty release before closeout.");
-                AddCondition(checks, state.PassedCivilInspections > 0,
-                    "civil-completion-inspection", "Passed Civil completion inspection",
-                    "WORKS_CIVIL_INSPECTION_PASSED",
-                    "A governed Civil completion inspection has passed.",
-                    "WORKS_CIVIL_INSPECTION_REQUIRED",
+                AddCivilCompletionInspectionCondition(checks, state,
                     "A passed governed Civil completion inspection is required before contract closeout.");
                 AddNoOpenItems(checks, openDefects, openSnags, activeDispute);
                 break;
@@ -1297,14 +1301,23 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 item.TenantId == _currentUser.TenantId &&
                 item.ProjectId == project.Id && !item.IsDeleted)
             .AsNoTracking().ToListAsync(cancellationToken);
-        var passedCivilInspections = await CivilInspections.GetQueryable(item =>
+        var civilInspections = await CivilInspections.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProjectId == project.Id && !item.IsDeleted)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var hasCivilDesignCase = await CivilDesignCases.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.ProjectId == project.Id && !item.IsDeleted &&
-                (item.Stage == CivilEngineeringInspectionStages.Passed ||
-                 item.Stage == CivilEngineeringInspectionStages.Closed) &&
-                (item.Status == CivilEngineeringInspectionStatuses.Passed ||
-                 item.Status == CivilEngineeringInspectionStatuses.Closed))
-            .AsNoTracking().CountAsync(cancellationToken);
+                item.ConfigurationProfileId != Guid.Empty)
+            .AsNoTracking().AnyAsync(cancellationToken);
+        var passedCivilInspections = civilInspections.Count(item =>
+            (item.Stage == CivilEngineeringInspectionStages.Passed ||
+             item.Stage == CivilEngineeringInspectionStages.Closed) &&
+            (item.Status == CivilEngineeringInspectionStatuses.Passed ||
+             item.Status == CivilEngineeringInspectionStatuses.Closed));
+        var requiresCivilCompletionInspection = RequiresCivilCompletionInspection(
+            hasCivilDesignCase,
+            civilInspections.Any(item => item.ConfigurationProfileId != Guid.Empty));
         var certificates = await PaymentCertificates.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.ProjectId == project.Id && !item.IsDeleted &&
@@ -1357,6 +1370,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(item.Status, ProjectHandoverItemStatuses.Completed,
                     StringComparison.OrdinalIgnoreCase)),
+            requiresCivilCompletionInspection,
             passedCivilInspections,
             certified.Sum(item => item.RetentionHeldAmount),
             Math.Max(certificateReleased, controlledReleased),
@@ -1682,7 +1696,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         CancellationToken cancellationToken)
     {
         EnsureInternal();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         try
         {
             var result = await _access.EnforceCapabilityAsync(
@@ -1707,10 +1721,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             throw Authorization("An authenticated internal tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.Roles.Any(role =>
-            role.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
-            role.Equals("TenantAdmin", StringComparison.OrdinalIgnoreCase));
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private static void EnsureWorksAndStatus(
         Contract contract,
@@ -2062,6 +2074,27 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
     private static bool NearlyEqual(decimal? left, decimal right) =>
         left.HasValue && Math.Abs(left.Value - right) <= 0.01m;
 
+    internal static bool RequiresCivilCompletionInspection(
+        bool hasConfiguredCivilDesignCase,
+        bool hasConfiguredCivilInspection) =>
+        hasConfiguredCivilDesignCase || hasConfiguredCivilInspection;
+
+    private static void AddCivilCompletionInspectionCondition(
+        ICollection<ProcurementWorksCloseoutCheckDto> checks,
+        SourceState state,
+        string failureMessage)
+    {
+        if (!state.RequiresCivilCompletionInspection)
+            return;
+
+        AddCondition(checks, state.PassedCivilInspections > 0,
+            "civil-completion-inspection", "Passed Civil completion inspection",
+            "WORKS_CIVIL_INSPECTION_PASSED",
+            "A governed Civil completion inspection has passed.",
+            "WORKS_CIVIL_INSPECTION_REQUIRED",
+            failureMessage);
+    }
+
     private static bool FixedEquals(string? left, string? right)
     {
         if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
@@ -2395,6 +2428,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         ProjectClosure? ProjectClosure,
         int CompletedPracticalTakeovers,
         int CompletedFinalTakeovers,
+        bool RequiresCivilCompletionInspection,
         int PassedCivilInspections,
         decimal RetentionHeld,
         decimal RetentionReleased,

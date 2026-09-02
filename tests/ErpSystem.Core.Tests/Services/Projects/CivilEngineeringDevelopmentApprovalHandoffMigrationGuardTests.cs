@@ -10,7 +10,6 @@ public sealed class CivilEngineeringDevelopmentApprovalHandoffMigrationGuardTest
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
         sql.Should().Contain("TR_ProjectCivilDevelopmentApprovalFileHandoffs_Lineage")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalFileHandoffs_AppendOnly")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalHandoffEvidence_Lineage")
@@ -22,7 +21,7 @@ public sealed class CivilEngineeringDevelopmentApprovalHandoffMigrationGuardTest
             .And.Contain("CurrentVersion=version.VersionNumber")
             .And.Contain("ProjectCivilDevelopmentApprovalFiles approvalFile")
             .And.NotContain("ProjectCivilDevelopmentApprovalFiles file ON");
-        metadata.Should().Contain("20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs");
+        sql.Should().Contain("[Migration(\"20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs\")]");
     }
 
     private static string FindRoot()

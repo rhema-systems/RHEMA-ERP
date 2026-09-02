@@ -123,6 +123,50 @@ public sealed class DocumentsAndSequencesSecurityTests
 
     [Fact]
     [Trait("Category", "FinanceSecurity")]
+    public async Task JournalVoucherRender_ShouldUseTheJournalReadBoundary()
+    {
+        var journalEntryId = Guid.NewGuid();
+        var documents = new Mock<IDocumentOutputService>(MockBehavior.Strict);
+        var authorization = new Mock<IAuthorizationService>(MockBehavior.Strict);
+        authorization
+            .Setup(service => service.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                null,
+                FinancePermissions.ViewFinance))
+            .ReturnsAsync(AuthorizationResult.Success());
+        documents
+            .Setup(service => service.RenderAsync(
+                It.Is<DocumentRenderRequestDto>(request =>
+                    request.DocumentType == DocumentTypes.FinanceJournalVoucher &&
+                    request.EntityId == journalEntryId),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RenderedDocumentDto
+            {
+                Content = new byte[] { 1, 2, 3 },
+                ContentType = "application/pdf",
+                FileName = "journal-voucher.pdf",
+                DocumentType = DocumentTypes.FinanceJournalVoucher,
+                EntityId = journalEntryId,
+                Format = "pdf"
+            });
+
+        var controller = CreateDocumentsController(documents, authorization);
+
+        var result = await controller.RenderDocument(DocumentTypes.FinanceJournalVoucher, journalEntryId);
+
+        result.Should().BeOfType<FileContentResult>();
+        authorization.Verify(service => service.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            null,
+            FinancePermissions.ViewFinance), Times.Once);
+        authorization.Verify(service => service.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.IsAny<object?>(),
+            FinancePermissions.ExportFinanceReports), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "FinanceSecurity")]
     public async Task NonFinanceDocumentRender_ShouldNotRequireFinanceExportPermission()
     {
         var documents = new Mock<IDocumentOutputService>(MockBehavior.Strict);

@@ -24,3 +24,4 @@ public interface ICivilEngineeringConfigurationService
     Task DeleteDraftAsync(Guid id, CivilEngineeringLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CivilEngineeringRevisionDto>> GetHistoryAsync(Guid id, CancellationToken cancellationToken = default);
 }
+

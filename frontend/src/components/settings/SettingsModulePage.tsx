@@ -15,6 +15,7 @@ interface SettingsModulePageProps {
   sectionKey: string;
   moduleKey: string;
 }
+
 export function SettingsModulePage({ sectionKey, moduleKey }: SettingsModulePageProps) {
   const router = useRouter();
   const { currentTenant } = useTenant();

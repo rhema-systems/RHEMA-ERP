@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -9,6 +10,8 @@ namespace ErpSystem.Data.Migrations;
 /// create assets, post Finance entries, or replace Property/Maintenance history; it makes the
 /// cross-owner reconciliation retry-safe and tenant-safe.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260822003500_AddProjectAssetLinkFixedAssetReconciliation")]
 public partial class AddProjectAssetLinkFixedAssetReconciliation : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

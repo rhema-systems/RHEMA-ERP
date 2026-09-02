@@ -1090,6 +1090,7 @@ public class StockAdjustmentDto
     public string ReasonCode { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Reference { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
     public string Status { get; set; } = string.Empty;
     public decimal TotalAdjustmentValue { get; set; }
     public int ItemCount { get; set; }
@@ -1196,7 +1197,7 @@ public class CreateStockAdjustmentDto
     /// <summary>
     /// External reference number (e.g., Physical Count #123)
     /// </summary>
-    [MaxLength(100)]
+    [MaxLength(50)]
     public string? Reference { get; set; }
 
     public DateTime? AdjustmentDate { get; set; }
@@ -1249,6 +1250,89 @@ public class CreateStockAdjustmentItemDto
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Governed opening-stock schedule. Inventory owns the item, warehouse, location, quantity and
+/// unit-cost evidence; Finance owns validation of the selected accounting book and mapped accounts.
+/// </summary>
+public sealed class CreateOpeningStockAdjustmentDto
+{
+    [Required]
+    public Guid WarehouseId { get; set; }
+
+    [Required]
+    public DateTime OpeningDate { get; set; }
+
+    [Required, MaxLength(20)]
+    public string BookClassification { get; set; } = "IFRS";
+
+    [Required, MaxLength(50)]
+    public string SourceScheduleReference { get; set; } = string.Empty;
+
+    [Required, MaxLength(1000)]
+    public string Description { get; set; } = string.Empty;
+
+    [Required, MinLength(1)]
+    public List<CreateOpeningStockItemDto> Items { get; set; } = new();
+}
+
+public sealed class CreateOpeningStockItemDto
+{
+    [Required]
+    public Guid InventoryItemId { get; set; }
+
+    [Required]
+    public Guid LocationId { get; set; }
+
+    [Range(typeof(decimal), "0.0001", "79228162514264337593543950335")]
+    public decimal Quantity { get; set; }
+
+    [Range(typeof(decimal), "0.0001", "79228162514264337593543950335")]
+    public decimal UnitCost { get; set; }
+
+    [MaxLength(100)] public string? SerialNumber { get; set; }
+    [MaxLength(100)] public string? LotNumber { get; set; }
+    [MaxLength(100)] public string? BatchNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    [MaxLength(500)] public string? Reason { get; set; }
+    [MaxLength(1000)] public string? Notes { get; set; }
+}
+
+public sealed class OpeningStockOptionsDto
+{
+    public bool IsReady { get; set; }
+    public List<string> Blockers { get; set; } = new();
+    public DateTime RetrievedAtUtc { get; set; }
+    public List<OpeningStockWarehouseOptionDto> Warehouses { get; set; } = new();
+    public List<OpeningStockItemOptionDto> Items { get; set; } = new();
+}
+
+public sealed class OpeningStockWarehouseOptionDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public List<OpeningStockLocationOptionDto> Locations { get; set; } = new();
+}
+
+public sealed class OpeningStockLocationOptionDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
+public sealed class OpeningStockItemOptionDto
+{
+    public Guid Id { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string UnitOfMeasure { get; set; } = string.Empty;
+    public bool IsSerialTracked { get; set; }
+    public bool IsLotTracked { get; set; }
+    public bool IsBatchTracked { get; set; }
 }
 
 /// <summary>

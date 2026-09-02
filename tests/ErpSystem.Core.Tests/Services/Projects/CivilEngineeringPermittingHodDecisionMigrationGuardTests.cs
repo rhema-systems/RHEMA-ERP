@@ -10,7 +10,6 @@ public sealed class CivilEngineeringPermittingHodDecisionMigrationGuardTests
     {
         var root = FindRoot();
         var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821153000_AddCivilEngineeringPermittingHodDecisions.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_Lineage")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_AppendOnly")
@@ -21,7 +20,7 @@ public sealed class CivilEngineeringPermittingHodDecisionMigrationGuardTests
             .And.Contain("WorkflowOutcome='Rejected'")
             .And.Contain("ProjectCivilDevelopmentApprovalFiles approvalFile")
             .And.NotContain("ProjectCivilDevelopmentApprovalFiles file ON");
-        metadata.Should().Contain("20260821153000_AddCivilEngineeringPermittingHodDecisions");
+        sql.Should().Contain("[Migration(\"20260821153000_AddCivilEngineeringPermittingHodDecisions\")]");
     }
 
     private static string FindRoot()

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -57,8 +57,13 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
+import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
+import { useTenant } from '@/contexts/TenantContext';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const lineItemSchema = z.object({
+    sourceLineId: z.string().uuid(),
     lineItemType: z.enum(['Product', 'GLAccount']).default('Product'),
     productId: z.string().optional(),
     glAccountId: z.string().optional(),
@@ -75,6 +80,7 @@ const invoiceSchema = z.object({
     dueDate: z.date(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
+    exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
     paymentTermId: z.string().optional(),
@@ -93,12 +99,17 @@ export default function NewInvoicePage() {
     const preselectedCustomerId = searchParams.get('customerId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const { toast } = useToast();
+    const { currentTenantCode } = useTenant();
+    const exchangeRateRequestId = useRef(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
     const [customerComboOpen, setCustomerComboOpen] = useState(false);
     const [customerSearch, setCustomerSearch] = useState('');
     const [glAccountOpenIndex, setGlAccountOpenIndex] = useState<number | null>(null);
     const [glAccountSearch, setGlAccountSearch] = useState('');
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Fetch customers for the dropdown
     const { data: customersData, isLoading: customersLoading } = useQuery({
@@ -126,6 +137,12 @@ export default function NewInvoicePage() {
     const { data: paymentTerms = [], isLoading: paymentTermsLoading } = useQuery({
         queryKey: ['payment-terms', 'Customer'],
         queryFn: () => paymentTermService.getByApplicableTo('Customer'),
+    });
+
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings', currentTenantCode, 'ar-invoice-rate-policy'],
+        queryFn: () => financeService.getSettings(),
+        enabled: Boolean(currentTenantCode),
     });
 
     // Filter customers based on search
@@ -166,6 +183,7 @@ export default function NewInvoicePage() {
             dueDate: addDays(new Date(), 30),
             currencyCode: 'GHS',
             exchangeRate: 1.0,
+            exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
             paymentTermId: 'none',
@@ -173,7 +191,7 @@ export default function NewInvoicePage() {
             isOpeningBalance: defaultOpeningBalance,
             notes: '',
             lineItems: [
-                { lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }
+                { sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }
             ],
         },
     });
@@ -221,6 +239,69 @@ export default function NewInvoicePage() {
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
     const documentDiscount = Math.min(Number(form.watch('discountAmount')) || 0, subtotal);
+
+    const applyInvoiceExchangeRate = async (currencyCode: string) => {
+        const requestId = ++exchangeRateRequestId.current;
+        const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+        const isOpeningBalance = form.getValues('isOpeningBalance');
+
+        if (isOpeningBalance) {
+            // Clear the prior date/currency evidence before the async lookup so Save cannot race
+            // with a stale approved-rate identity while the new historical rate is loading.
+            form.setValue('exchangeRateId', undefined);
+            if (!financeSettings) {
+                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
+            }
+            let snapshot;
+            try {
+                snapshot = await loadApprovedInvoiceRate(
+                    {
+                        module: 'AR',
+                        transactionCurrency: currencyCode,
+                        functionalCurrency,
+                        invoiceDate: form.getValues('invoiceDate'),
+                        settings: financeSettings,
+                    },
+                    (code, query) => financeService.getCurrentExchangeRate(code, query)
+                );
+            } catch (error) {
+                if (requestId !== exchangeRateRequestId.current) return;
+                throw error;
+            }
+            if (requestId !== exchangeRateRequestId.current) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            form.setValue('exchangeRateSource', snapshot.source);
+            return;
+        }
+
+        form.setValue('exchangeRateId', undefined);
+        if (currencyCode === functionalCurrency) {
+            form.setValue('exchangeRate', 1);
+            form.setValue('exchangeRateSource', 'Daily');
+            return;
+        }
+
+        let rateObj;
+        try {
+            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+        } catch (error) {
+            if (requestId !== exchangeRateRequestId.current) return;
+            throw error;
+        }
+        if (requestId !== exchangeRateRequestId.current) return;
+        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
+        form.setValue('exchangeRateSource', 'Daily');
+    };
+
+    useEffect(() => {
+        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
+            console.error('Failed to resolve governed AR opening-invoice rate', error);
+            form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRateSource', 'Unavailable');
+        });
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
 
     const getTaxBreakdown = () => {
         if (watchIsOpeningBalance) {
@@ -339,24 +420,17 @@ export default function NewInvoicePage() {
 
             if (customer.currencyCode) {
                 form.setValue('currencyCode', customer.currencyCode);
-                if (customer.currencyCode === 'GHS') {
+                try {
+                    await applyInvoiceExchangeRate(customer.currencyCode);
+                } catch (err) {
+                    console.error("Failed to fetch exchange rate for customer currency", err);
+                    form.setValue('exchangeRateId', undefined);
                     form.setValue('exchangeRate', 1.0);
-                    form.setValue('exchangeRateSource', 'Daily');
-                } else {
-                    try {
-                        const rateObj = await financeService.getCurrentExchangeRate(customer.currencyCode);
-                        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                        form.setValue('exchangeRateSource', 'Daily');
-                    } catch (err) {
-                        console.error("Failed to fetch exchange rate for customer currency", err);
-                        form.setValue('exchangeRate', 1.0);
-                        form.setValue('exchangeRateSource', 'Custom');
-                    }
+                    form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
                 form.setValue('currencyCode', 'GHS');
-                form.setValue('exchangeRate', 1.0);
-                form.setValue('exchangeRateSource', 'Daily');
+                await applyInvoiceExchangeRate('GHS');
             }
         }
     };
@@ -373,16 +447,27 @@ export default function NewInvoicePage() {
         setIsSubmitting(true);
         try {
             const isOpeningBalance = data.isOpeningBalance;
+            const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    variant: 'destructive',
+                });
+                return;
+            }
             await arService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
+                exchangeRateId: isOpeningBalance ? data.exchangeRateId : undefined,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
                 isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
+                    id: item.sourceLineId,
                     lineItemType: item.lineItemType,
                     productId: item.productId,
                     glAccountId: item.glAccountId,
@@ -391,7 +476,21 @@ export default function NewInvoicePage() {
                     unitPrice: Number(item.unitPrice),
                     discountPercentage: Number(item.discountPercentage),
                     taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId)
-                }))
+                })),
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: data.lineItems.flatMap(item => {
+                        const accountId = !isOpeningBalance && item.lineItemType === 'GLAccount'
+                            ? item.glAccountId
+                            : undefined;
+                        return accountId ? [{
+                            sourceLineId: item.sourceLineId,
+                            accountId,
+                            dimensions: toFinancePostingDimensionValues(lineDimensionValues[item.sourceLineId] || {}),
+                        }] : [];
+                    }),
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
 
             toast({
@@ -604,19 +703,13 @@ export default function NewInvoicePage() {
                                         value={field.value} 
                                         onValueChange={async (val) => {
                                             field.onChange(val);
-                                            if (val === 'GHS') {
+                                            try {
+                                                await applyInvoiceExchangeRate(val);
+                                            } catch (err) {
+                                                console.error("Failed to fetch exchange rate for currency", err);
+                                                form.setValue('exchangeRateId', undefined);
                                                 form.setValue('exchangeRate', 1.0);
-                                                form.setValue('exchangeRateSource', 'Daily');
-                                            } else {
-                                                try {
-                                                    const rateObj = await financeService.getCurrentExchangeRate(val);
-                                                    form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                                                    form.setValue('exchangeRateSource', 'Daily');
-                                                } catch (err) {
-                                                    console.error("Failed to fetch exchange rate for currency", err);
-                                                    form.setValue('exchangeRate', 1.0);
-                                                    form.setValue('exchangeRateSource', 'Custom');
-                                                }
+                                                form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
                                     >
@@ -634,18 +727,25 @@ export default function NewInvoicePage() {
                             />
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="space-y-2">
                                 <Label className="text-amber-600 font-semibold">Exchange Rate to Base Currency</Label>
                                 <Input 
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
+                                    readOnly={watchIsOpeningBalance}
+                                    aria-readonly={watchIsOpeningBalance}
                                     {...form.register('exchangeRate', {
-                                        onChange: () => form.setValue('exchangeRateSource', 'Custom')
+                                        onChange: () => {
+                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
+                                        }
                                     })} 
                                 />
-                                <span className="text-[11px] text-muted-foreground block mt-1">1 {watchCurrencyCode} = {form.watch('exchangeRate')} GHS</span>
+                                <span className="text-[11px] text-muted-foreground block mt-1">
+                                    1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
+                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                </span>
                             </div>
                         )}
 
@@ -706,7 +806,7 @@ export default function NewInvoicePage() {
                             </span>
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 space-y-4">
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -718,7 +818,7 @@ export default function NewInvoicePage() {
                                             render={({ field }) => (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
                                                             <CalendarIcon className="mr-2 h-3 w-3" />
                                                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                                                         </Button>
@@ -736,18 +836,22 @@ export default function NewInvoicePage() {
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                    <SelectTrigger className="h-10 text-xs">
-                                                        <SelectValue placeholder="Select FX Source" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="Daily">Daily</SelectItem>
-                                                        <SelectItem value="Spot">Spot</SelectItem>
-                                                        <SelectItem value="Official">Official</SelectItem>
-                                                        <SelectItem value="Market">Market</SelectItem>
-                                                        <SelectItem value="Custom">Custom</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                watchIsOpeningBalance ? (
+                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
+                                                ) : (
+                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
+                                                        <SelectTrigger className="h-10 text-xs">
+                                                            <SelectValue placeholder="Select FX Source" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Daily">Daily</SelectItem>
+                                                            <SelectItem value="Spot">Spot</SelectItem>
+                                                            <SelectItem value="Official">Official</SelectItem>
+                                                            <SelectItem value="Market">Market</SelectItem>
+                                                            <SelectItem value="Custom">Custom</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )
                                             )}
                                         />
                                     </div>
@@ -766,11 +870,47 @@ export default function NewInvoicePage() {
                     </CardContent>
                 </Card>
 
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Finance coding dimensions</CardTitle>
+                        <CardDescription>
+                            Defaults are convenient; each revenue line remains authoritative.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <SourceDocumentDimensionPanel
+                            context={{
+                                sourceModule: 'AR',
+                                sourceDocumentType: 'CustomerInvoice',
+                                postingAction: 'Post',
+                                sourceRoute: 'finance.ar.customer-invoices.manual',
+                                contractVersion: '1.0',
+                            }}
+                            effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
+                            lines={watchLineItems.map((item) => ({
+                                id: item.sourceLineId,
+                                accountId: !watchIsOpeningBalance && item.lineItemType === 'GLAccount'
+                                    ? item.glAccountId
+                                    : undefined,
+                                accountLabel: item.description || undefined,
+                            }))}
+                            defaultValues={defaultDimensionValues}
+                            lineValues={lineDimensionValues}
+                            onDefaultValuesChange={(values) => {
+                                setDefaultDimensionValues(values);
+                                setApplyDefaultToAll(false);
+                            }}
+                            onLineValuesChange={setLineDimensionValues}
+                            onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        />
+                    </CardContent>
+                </Card>
+
                 {/* Line Items Card */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
                             <Plus className="mr-2 h-4 w-4" /> Add Item
                         </Button>
                     </CardHeader>
