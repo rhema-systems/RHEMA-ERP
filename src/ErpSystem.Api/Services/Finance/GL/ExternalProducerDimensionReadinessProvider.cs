@@ -69,6 +69,31 @@ public sealed class ExternalProducerDimensionReadinessProvider : IFinanceDimensi
                 blockers.Add(Blocker(group.Key, "SOURCE_LINE_EVIDENCE_NOT_FROZEN",
                     $"Source line {line.SourceLineId} has not frozen canonical dimension evidence."));
             }
+
+            if (header is null) continue;
+            if (!header.SourceDocumentDate.HasValue
+                || !header.ExpectedSourceLineCount.HasValue
+                || string.IsNullOrWhiteSpace(header.SourceLineManifestHash))
+            {
+                blockers.Add(Blocker(group.Key, "SOURCE_CONTEXT_EVIDENCE_MISSING",
+                    "The adapted source document lacks its trusted date or complete economic-line manifest."));
+                continue;
+            }
+            if (header.ExpectedSourceLineCount.Value != lines.Length)
+                blockers.Add(Blocker(group.Key, "SOURCE_LINE_COUNT_MISMATCH",
+                    $"Expected {header.ExpectedSourceLineCount.Value} source lines but found {lines.Length}."));
+            if (lines.Any(item => !item.ResolvedAccountId.HasValue))
+            {
+                blockers.Add(Blocker(group.Key, "SOURCE_ACCOUNT_CONTEXT_MISSING",
+                    "One or more adapted source lines lack a trusted server-resolved account."));
+                continue;
+            }
+
+            var manifest = FinanceSourceLineManifest.Compute(lines.Select(item =>
+                (item.SourceLineId!.Value, item.ResolvedAccountId!.Value)));
+            if (!string.Equals(manifest, header.SourceLineManifestHash, StringComparison.Ordinal))
+                blockers.Add(Blocker(group.Key, "SOURCE_LINE_MANIFEST_MISMATCH",
+                    "The adapted source-line identities or resolved accounts no longer match the trusted manifest."));
         }
 
         var watermarkTicks = assignments.Count == 0

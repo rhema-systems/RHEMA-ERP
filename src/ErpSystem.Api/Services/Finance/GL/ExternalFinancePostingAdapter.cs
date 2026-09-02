@@ -112,6 +112,9 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
             throw new ArgumentException("Approval timestamp must be a valid UTC timestamp.");
         if (!Sha256.IsMatch(envelope.SourceEvidenceHash ?? string.Empty))
             throw new ArgumentException("Source evidence hash must be a SHA-256 hexadecimal value.");
+        var expectedEvidenceHash = FinanceExternalPostingEvidence.Compute(envelope);
+        if (!string.Equals(expectedEvidenceHash, envelope.SourceEvidenceHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("External Finance source evidence does not match the approved payload hash.");
         if (envelope.PostingDate == default) throw new ArgumentException("Posting date is required.");
         var currency = Required(envelope.FunctionalCurrencyCode, "Functional currency", 3).ToUpperInvariant();
         if (currency.Length != 3 || !currency.All(char.IsLetter))
@@ -134,6 +137,9 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
             if (!lineIds.Add(line.SourceDocumentLineId.Value))
                 throw new ArgumentException("External source-line ids must be unique per economic posting line.");
             if (line.AccountId == Guid.Empty) throw new ArgumentException("Every external posting line requires an account.");
+            if (line.FinanceDimensionSetId.HasValue || line.Dimensions is { Count: > 0 })
+                throw new ArgumentException(
+                    "External posting lines cannot select stored dimension sets or bypass the source-dimension contract.");
             accounts.Add(line.AccountId);
             if (line.DebitAmount < 0m || line.CreditAmount < 0m || (line.DebitAmount > 0m) == (line.CreditAmount > 0m))
                 throw new ArgumentException("Each external posting line must contain exactly one positive debit or credit.");

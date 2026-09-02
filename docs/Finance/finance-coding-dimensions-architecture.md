@@ -210,7 +210,10 @@ supplier-return milestones. Sales credit notes retain their existing route 30.
 
 `IExternalFinancePostingAdapter` accepts only independently approved server-to-server evidence. It
 validates the authenticated tenant, registered contract, source-document and unique source-line
-identities, accounts, balanced positive amounts, currency/rate evidence and SHA-256 source evidence.
+identities, accounts, balanced positive amounts and currency/rate evidence. Its canonical SHA-256
+evidence binds those approved facts and submitted dimension codes, independent of collection order;
+a well-formed but mismatched hash is rejected. Stored set IDs and posting-line dimension bypasses
+are not accepted from external producers.
 Finance then resolves account rules, canonical dimension sets and immutable line snapshots and posts
 with a server-derived producer context and idempotency scope. External callers cannot select a manual
 Finance route or stored dimension-set ID.
@@ -219,7 +222,9 @@ All external routes deploy as `CaptureOptional`. Their provisional readiness pro
 scoped and intentionally retain a `PRODUCER_ADOPTION_CENSUS_REQUIRED` blocker: assignment-only
 discovery cannot prove that every external source document used the adapter. Promotion remains
 fail-closed until the owning module adopts its specific contract and supplies authoritative census
-and consumer tests. No producer-module implementation was changed by this Finance expansion.
+and consumer tests. Captured documents additionally require a trusted document date, source-line
+count, server-resolved account per line and matching line-manifest hash. No producer-module
+implementation was changed by this Finance expansion.
 
 ### Finance Fixed Assets expansion (routes 46-60)
 

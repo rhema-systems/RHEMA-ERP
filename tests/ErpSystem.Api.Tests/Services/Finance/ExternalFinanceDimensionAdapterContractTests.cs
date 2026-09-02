@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
@@ -59,6 +60,18 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
             .Should().NotBe(first);
     }
 
+    [Fact]
+    public void Source_evidence_hash_is_order_independent_but_binds_economic_facts()
+    {
+        var envelope = ValidEnvelope(Guid.NewGuid());
+        var expected = FinanceExternalPostingEvidence.Compute(envelope);
+        envelope.Lines = envelope.Lines.Reverse().ToArray();
+
+        FinanceExternalPostingEvidence.Compute(envelope).Should().Be(expected);
+        envelope.Lines[0].CreditAmount = 101m;
+        FinanceExternalPostingEvidence.Compute(envelope).Should().NotBe(expected);
+    }
+
     [Theory]
     [InlineData(FinanceExternalProducerContractId.QuantitySurveyPaymentCertificate, FinanceModuleLockCatalog.QuantitySurvey)]
     [InlineData(FinanceExternalProducerContractId.EstateGroundRentCharge, FinanceModuleLockCatalog.Estate)]
@@ -87,6 +100,36 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
 
         result.Blockers.Should().ContainSingle(blocker => blocker.Code == "PRODUCER_ADOPTION_CENSUS_REQUIRED");
         result.DataVersionWatermark.Should().StartWith("external-adapter:1.0:");
+    }
+
+    [Fact]
+    public async Task External_readiness_rejects_tampered_source_line_manifest()
+    {
+        var tenant = Guid.NewGuid();
+        var document = Guid.NewGuid();
+        var line = Guid.NewGuid();
+        var account = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"external-readiness-manifest-{Guid.NewGuid():N}").Options);
+        var context = FinanceExternalProducerContractCatalog.GetRequired(
+            FinanceExternalProducerContractId.EstateGroundRentCharge);
+        var route = context.Definition;
+        db.FinanceSourceDimensionAssignments.AddRange(
+            Assignment(tenant, route, document, null),
+            Assignment(tenant, route, document, line));
+        var header = db.FinanceSourceDimensionAssignments.Local.Single(item => !item.SourceLineId.HasValue);
+        header.SourceDocumentDate = DateTime.UtcNow.Date;
+        header.ExpectedSourceLineCount = 1;
+        header.SourceLineManifestHash = FinanceSourceLineManifest.Compute([(line, Guid.NewGuid())]);
+        var sourceLine = db.FinanceSourceDimensionAssignments.Local.Single(item => item.SourceLineId.HasValue);
+        sourceLine.ResolvedAccountId = account;
+        sourceLine.EvidenceFrozenAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        var result = await new ExternalProducerDimensionReadinessProvider(db, route.Id)
+            .EvaluateAsync(tenant, route);
+
+        result.Blockers.Should().Contain(blocker => blocker.Code == "SOURCE_LINE_MANIFEST_MISMATCH");
     }
 
     [Fact]
@@ -121,6 +164,7 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
         var adapter = new ExternalFinancePostingAdapter(db, currentUser.Object, dimensions.Object, posting.Object);
         var envelope = ValidEnvelope(tenant);
         envelope.Lines[1].CreditAmount = 99m;
+        envelope.SourceEvidenceHash = FinanceExternalPostingEvidence.Compute(envelope);
 
         var action = () => adapter.PostAsync(envelope);
 
@@ -129,7 +173,27 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
         posting.VerifyNoOtherCalls();
     }
 
-    private static FinanceExternalPostingEnvelopeDto ValidEnvelope(Guid tenant) => new()
+    [Fact]
+    public async Task Adapter_rejects_a_well_formed_but_mismatched_source_evidence_hash()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"external-adapter-evidence-{Guid.NewGuid():N}").Options);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(value => value.TenantId).Returns(tenant);
+        var adapter = new ExternalFinancePostingAdapter(
+            db, currentUser.Object,
+            new Mock<IFinanceSourceDimensionService>(MockBehavior.Strict).Object,
+            new Mock<IFinancePostingEngine>(MockBehavior.Strict).Object);
+        var envelope = ValidEnvelope(tenant);
+        envelope.SourceEvidenceHash = new string('A', 64);
+
+        var action = () => adapter.PostAsync(envelope);
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*approved payload hash*");
+    }
+
+    private static FinanceExternalPostingEnvelopeDto ValidEnvelope(Guid tenant) => WithEvidence(new()
     {
         ContractId = FinanceExternalProducerContractId.InventoryDisposalProceeds,
         TenantId = tenant,
@@ -143,7 +207,6 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
         ApprovedByUserId = Guid.NewGuid(),
         ApprovedAtUtc = DateTime.UtcNow,
         ApprovalReference = "WF-001",
-        SourceEvidenceHash = new string('A', 64),
         Lines =
         [
             new FinancePostingLineDto
@@ -155,5 +218,29 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
                 SourceDocumentLineId = Guid.NewGuid(), AccountId = Guid.NewGuid(), CreditAmount = 100m
             }
         ]
+    });
+
+    private static FinanceExternalPostingEnvelopeDto WithEvidence(FinanceExternalPostingEnvelopeDto envelope)
+    {
+        envelope.SourceEvidenceHash = FinanceExternalPostingEvidence.Compute(envelope);
+        return envelope;
+    }
+
+    private static FinanceSourceDimensionAssignment Assignment(
+        Guid tenant,
+        FinanceDimensionRouteDefinition route,
+        Guid document,
+        Guid? line) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tenant,
+        RouteId = route.Id,
+        ProducerModule = route.ProducerModule,
+        SourceRoute = route.SourceRoute,
+        SourceDocumentType = route.DocumentType,
+        ContractVersion = route.ContractVersion,
+        SourceDocumentId = document,
+        SourceLineId = line,
+        CreatedAt = DateTime.UtcNow
     };
 }
