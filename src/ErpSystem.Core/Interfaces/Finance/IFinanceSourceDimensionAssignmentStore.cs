@@ -19,6 +19,17 @@ public interface IFinanceSourceDimensionAssignmentStore
         Guid sourceDocumentId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Persists server-resolved document date, economic accounts and the complete line manifest.
+    /// This context is certification evidence and is never accepted from a browser DTO.
+    /// </summary>
+    Task RegisterDocumentContextAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        DateTime documentDate,
+        IReadOnlyList<FinanceSourceDocumentLineContext> authoritativeLines,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<FinanceSourceDimensionAssignmentDto>> GetDocumentAssignmentsAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,

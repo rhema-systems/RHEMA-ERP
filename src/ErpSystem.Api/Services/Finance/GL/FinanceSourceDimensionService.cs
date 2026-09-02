@@ -341,7 +341,8 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
         if (string.IsNullOrWhiteSpace(reason)) throw new InvalidOperationException("A dimension-change reason is required.");
         var route = producer?.Definition ?? throw new ArgumentNullException(nameof(producer));
         var certification = await CertificationStateAsync(producer, cancellationToken);
-        await _store.RegisterDocumentAsync(producer, sourceDocumentId, cancellationToken);
+        await _store.RegisterDocumentContextAsync(
+            producer, sourceDocumentId, documentDate, authoritativeLines, cancellationToken);
         var before = await LoadAssignmentsAsync(producer, sourceDocumentId, cancellationToken);
         var reopenedFrozenEvidence = await ReopenFrozenEvidenceForDraftAsync(
             producer, sourceDocumentId, before,

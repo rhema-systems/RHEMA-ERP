@@ -176,7 +176,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
     }
 
     [Fact]
-    public async Task CapitalProjectReadinessIsTenantScopedAndRequiresFrozenStableLines()
+    public async Task CapitalProjectReadinessIsTenantScopedAndRequiresTrustedStableLineContext()
     {
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -184,6 +184,12 @@ public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
         await using var db = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase($"finance-fixed-asset-readiness-{Guid.NewGuid():N}").Options);
+        var account = new Account
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountCode = "1500", AccountNumber = "1500",
+            AccountName = "Fixed asset", AccountType = AccountType.Asset, Status = AccountStatus.Active
+        };
+        db.Accounts.Add(account);
         db.CapitalProjects.AddRange(
             new CapitalProject
             {
@@ -208,15 +214,91 @@ public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
             && item.DocumentId == projectId
             && item.DocumentReference == "CIP-READY-001");
 
-        var frozenLine = Assignment(route, tenantId, projectId,
-            FinanceSourceLineIdentity.Create(projectId, "SETTLEMENT-ASSET", Guid.NewGuid()));
-        frozenLine.EvidenceFrozenAt = DateTime.UtcNow;
+        var lineId = FinanceSourceLineIdentity.Create(projectId, "SETTLEMENT-ASSET", Guid.NewGuid());
+        var capturedLine = Assignment(route, tenantId, projectId, lineId);
+        capturedLine.ResolvedAccountId = account.Id;
+        var header = Assignment(route, tenantId, projectId, null);
+        header.SourceDocumentDate = new DateTime(2026, 9, 1);
+        header.ExpectedSourceLineCount = 1;
+        header.SourceLineManifestHash = FinanceSourceLineManifest.Compute([(lineId, account.Id)]);
         db.FinanceSourceDimensionAssignments.AddRange(
-            Assignment(route, tenantId, projectId, null),
-            frozenLine);
+            header,
+            capturedLine);
         await db.SaveChangesAsync();
 
         (await provider.EvaluateAsync(tenantId, route)).Blockers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FixedAssetReadinessDetectsManifestAndFixedRuleDrift()
+    {
+        var tenantId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var lineId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var definitionId = Guid.NewGuid();
+        var expectedValueId = Guid.NewGuid();
+        var capturedValueId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"finance-fixed-asset-rule-drift-{Guid.NewGuid():N}").Options);
+        var route = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice);
+        db.Accounts.Add(new Account
+        {
+            Id = accountId, TenantId = tenantId, AccountCode = "4100", AccountNumber = "4100",
+            AccountName = "Disposal proceeds", AccountType = AccountType.Revenue, Status = AccountStatus.Active
+        });
+        var definition = new FinanceDimensionDefinition
+        {
+            Id = definitionId, TenantId = tenantId, Code = "DEPT", Name = "Department", IsActive = true
+        };
+        var expected = new FinanceDimensionValue
+        {
+            Id = expectedValueId, TenantId = tenantId, FinanceDimensionDefinitionId = definitionId,
+            Code = "FIN", Name = "Finance", IsActive = true, EffectiveDate = new DateTime(2026, 1, 1)
+        };
+        var captured = new FinanceDimensionValue
+        {
+            Id = capturedValueId, TenantId = tenantId, FinanceDimensionDefinitionId = definitionId,
+            Code = "OPS", Name = "Operations", IsActive = true, EffectiveDate = new DateTime(2026, 1, 1)
+        };
+        var set = new FinanceDimensionSet
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CombinationHash = new string('a', 64), DisplayValue = "DEPT=OPS",
+            Items = [new FinanceDimensionSetItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                FinanceDimensionDefinitionId = definitionId, FinanceDimensionValueId = capturedValueId,
+                DimensionCodeSnapshot = "DEPT", DimensionNameSnapshot = "Department",
+                DimensionValueCodeSnapshot = "OPS", DimensionValueNameSnapshot = "Operations"
+            }]
+        };
+        db.FinanceDimensionDefinitions.Add(definition);
+        db.FinanceDimensionValues.AddRange(expected, captured);
+        db.FinanceDimensionSets.Add(set);
+        db.FinanceDimensionAccountRules.Add(new FinanceDimensionAccountRule
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountId = accountId,
+            FinanceDimensionDefinitionId = definitionId, RuleType = "Fixed",
+            DefaultDimensionValueId = expectedValueId, IsActive = true,
+            EffectiveDate = new DateTime(2026, 1, 1), RouteId = route.Id,
+            RuleVersion = 1
+        });
+        var header = Assignment(route, tenantId, documentId, null);
+        header.SourceDocumentDate = new DateTime(2026, 9, 1);
+        header.ExpectedSourceLineCount = 2;
+        header.SourceLineManifestHash = FinanceSourceLineManifest.Compute([(lineId, accountId)]);
+        var line = Assignment(route, tenantId, documentId, lineId);
+        line.ResolvedAccountId = accountId;
+        line.FinanceDimensionSetId = set.Id;
+        db.FinanceSourceDimensionAssignments.AddRange(header, line);
+        await db.SaveChangesAsync();
+
+        var result = await new FinanceFixedAssetDimensionReadinessProvider(db, route.Id)
+            .EvaluateAsync(tenantId, route);
+
+        result.Blockers.Should().Contain(item => item.Code == "FIXED_ASSET_SOURCE_LINE_COUNT_MISMATCH");
+        result.Blockers.Should().Contain(item => item.Code == "FIXED_RULE_DRIFT" && item.FixedRuleDrift);
     }
 
     private static FinanceSourceDimensionAssignment Assignment(

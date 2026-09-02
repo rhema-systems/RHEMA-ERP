@@ -124,7 +124,7 @@ public sealed class FixedAssetDimensionService : IFixedAssetDimensionService
         if (originals.Count != reversalLines.Count)
             throw new InvalidOperationException("The fixed-asset reversal plan no longer matches the original journal lines.");
 
-        await _assignments.RegisterDocumentAsync(producer, reversalDocumentId, cancellationToken);
+        var bindings = new List<(FinancePostingLineDto Reversal, AccountTransaction Original)>();
         for (var index = 0; index < reversalLines.Count; index++)
         {
             var reversal = reversalLines[index];
@@ -143,12 +143,25 @@ public sealed class FixedAssetDimensionService : IFixedAssetDimensionService
                     $"HISTORICAL-REVERSAL-{original.LineNumber}",
                     original.Id);
             reversal.SourceDocumentLineId = sourceLineId;
+            bindings.Add((reversal, original));
+        }
+
+        await _assignments.RegisterDocumentContextAsync(
+            producer,
+            reversalDocumentId,
+            originals.Min(item => item.TransactionDate),
+            bindings.Select(item => new FinanceSourceDocumentLineContext(
+                item.Reversal.SourceDocumentLineId!.Value,
+                item.Reversal.AccountId)).ToArray(),
+            cancellationToken);
+        foreach (var binding in bindings)
+        {
             await _assignments.FreezeLineAsync(
                 producer,
                 reversalDocumentId,
-                sourceLineId,
-                original.FinanceDimensionSetId,
-                original.FinanceDimensionSnapshotId,
+                binding.Reversal.SourceDocumentLineId!.Value,
+                binding.Original.FinanceDimensionSetId,
+                binding.Original.FinanceDimensionSnapshotId,
                 cancellationToken);
         }
     }

@@ -3088,6 +3088,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId });
+            entity.HasIndex(e => new { e.TenantId, e.ResolvedAccountId });
             entity.HasIndex(e => e.FinanceDimensionSnapshotId).IsUnique()
                 .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL AND [IsDeleted] = 0");
             entity.Property(e => e.RowVersion).IsRowVersion();
@@ -3096,6 +3097,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany()
                 .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany()
+                .HasForeignKey(e => e.ResolvedAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
