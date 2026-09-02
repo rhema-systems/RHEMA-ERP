@@ -852,6 +852,8 @@ export interface FinanceSettings {
     unrealizedFxGainAccountId?: string;
     unrealizedFxLossAccountId?: string;
     realizedGainLossAccountId?: string;
+    realizedFxGainAccountId?: string;
+    realizedFxLossAccountId?: string;
     suspenseAccountId?: string;
     controlAccountArId?: string;
     controlAccountApId?: string;
@@ -895,7 +897,11 @@ export interface UpdateFinanceSettingsDto {
     accountSeparator?: string;
     retainedEarningsAccountId?: string;
     unrealizedGainLossAccountId?: string;
+    unrealizedFxGainAccountId?: string;
+    unrealizedFxLossAccountId?: string;
     realizedGainLossAccountId?: string;
+    realizedFxGainAccountId?: string;
+    realizedFxLossAccountId?: string;
     suspenseAccountId?: string;
     controlAccountArId?: string;
     controlAccountApId?: string;
@@ -2314,6 +2320,7 @@ export interface RevaluationRequestDto {
     unrealizedGainLossAccountId: string;
     previewOnly: boolean;
     notes?: string;
+    expectedPreviewFingerprint?: string;
 }
 
 export interface RevaluationResultDto {
@@ -2332,6 +2339,7 @@ export interface CurrencyRevaluationPreviewDto {
     totalLossAmount: number;
     netGainLossAmount: number;
     exposureCount: number;
+    previewFingerprint: string;
     lines: CurrencyRevaluationPreviewLineDto[];
 }
 
@@ -2349,6 +2357,28 @@ export interface CurrencyRevaluationPreviewLineDto {
     revaluedFunctionalAmount: number;
     gainLossAmount: number;
     gainLossType: string;
+    revaluationFrequency: string;
+    rateType: string;
+    quoteSide: ExchangeRateQuoteSide;
+}
+
+export interface FxRevaluationBatchSummaryDto {
+    id: string;
+    batchNumber: string;
+    revaluationDate: string;
+    status: string;
+    functionalCurrencyCode: string;
+    currencies: string[];
+    exposureCount: number;
+    totalGainAmount: number;
+    totalLossAmount: number;
+    netGainLossAmount: number;
+    journalEntryId?: string;
+    journalEntryNumber?: string;
+    reversalJournalEntryId?: string;
+    reversalJournalEntryNumber?: string;
+    postedAt?: string;
+    reversedAt?: string;
 }
 
 export interface RevaluationDetailDto {

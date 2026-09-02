@@ -8,6 +8,8 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ErpSystem.Api.Services.Finance.MultiCurrency;
 
@@ -83,6 +85,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             RevaluationType = request.RevaluationType,
             CurrencyCode = request.CurrencyCode,
             UnrealizedGainLossAccountId = request.UnrealizedGainLossAccountId,
+            ExpectedPreviewFingerprint = null,
             PreviewOnly = true
         };
         var batch = await RunUnrealizedRevaluationAsync(previewRequest, cancellationToken);
@@ -102,6 +105,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             TotalLossAmount = batch.TotalLossAmount,
             NetGainLossAmount = batch.NetGainLossAmount,
             ExposureCount = batch.Lines.Count,
+            PreviewFingerprint = BuildPreviewFingerprint(batch),
             Lines = batch.Lines
                 .OrderBy(line => line.SourceModule)
                 .ThenBy(line => line.AccountId)
@@ -125,7 +129,10 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                         ClosingExchangeRate = line.ClosingExchangeRate,
                         RevaluedFunctionalAmount = line.RevaluedFunctionalAmount,
                         GainLossAmount = line.GainLossAmount,
-                        GainLossType = line.GainLossType
+                        GainLossType = line.GainLossType,
+                        RevaluationFrequency = line.Notes?.Split('|').ElementAtOrDefault(1)?.Trim() ?? string.Empty,
+                        RateType = line.ClosingExchangeRateRecord?.RateType.ToString() ?? string.Empty,
+                        QuoteSide = line.ClosingExchangeRateRecord?.QuoteSide.ToString() ?? string.Empty
                     };
                 })
                 .ToList()
@@ -166,6 +173,58 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             .Where(j => j != null)
             .Cast<JournalEntry>()
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<FxRevaluationBatchSummaryDto>> GetRevaluationBatchesAsync(
+        DateTime startDate,
+        DateTime endDate,
+        string? currencyCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (endDate.Date < startDate.Date)
+        {
+            throw new ArgumentException("History end date cannot be before the start date.");
+        }
+
+        var tenantId = TenantId;
+        var normalizedCurrency = NormalizeOptionalCurrency(currencyCode);
+        var batches = await _context.FxRevaluationBatches
+            .AsNoTracking()
+            .Where(batch => batch.TenantId == tenantId
+                && !batch.IsDeleted
+                && batch.RevaluationDate.Date >= startDate.Date
+                && batch.RevaluationDate.Date <= endDate.Date)
+            .Include(batch => batch.Lines)
+            .Include(batch => batch.JournalEntry)
+            .Include(batch => batch.ReversalJournalEntry)
+            .OrderByDescending(batch => batch.RevaluationDate)
+            .ThenByDescending(batch => batch.PostedAt)
+            .ToListAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(normalizedCurrency))
+        {
+            batches = batches.Where(batch => batch.Lines.Any(line => line.TransactionCurrency == normalizedCurrency)).ToList();
+        }
+
+        return batches.Select(batch => new FxRevaluationBatchSummaryDto
+        {
+            Id = batch.Id,
+            BatchNumber = batch.BatchNumber,
+            RevaluationDate = batch.RevaluationDate,
+            Status = batch.Status,
+            FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
+            Currencies = batch.Lines.Select(line => line.TransactionCurrency).Distinct().OrderBy(code => code).ToList(),
+            ExposureCount = batch.Lines.Count,
+            TotalGainAmount = batch.TotalGainAmount,
+            TotalLossAmount = batch.TotalLossAmount,
+            NetGainLossAmount = batch.NetGainLossAmount,
+            JournalEntryId = batch.JournalEntryId,
+            JournalEntryNumber = batch.JournalEntry?.JournalEntryNumber,
+            ReversalJournalEntryId = batch.ReversalJournalEntryId,
+            ReversalJournalEntryNumber = batch.ReversalJournalEntry?.JournalEntryNumber,
+            PostedAt = batch.PostedAt,
+            ReversedAt = batch.ReversedAt
+        }).ToList();
     }
 
     public async Task<IReadOnlyList<FxRealizedSettlement>> PostRealizedFxForApPaymentAsync(
@@ -390,6 +449,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             functionalCurrency,
             request.CurrencyCode,
             revaluationDate,
+            request.RevaluationType,
             settings,
             cancellationToken);
 
@@ -416,8 +476,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 functionalCurrency,
                 exposure.TransactionCurrency,
                 revaluationDate,
-                request.RevaluationType,
-                settings.ClosingQuoteSide,
+                exposure.RateType,
+                exposure.QuoteSide,
                 cancellationToken);
 
             var revaluedFunctionalAmount = RoundMoney(exposure.ForeignCurrencyBalance * closingRate.Rate);
@@ -450,13 +510,24 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 GainLossAmount = gainLossAmount,
                 GainLossType = gainLossType,
                 GainLossAccountId = gainLossAccountId,
-                Notes = $"Closing rate {closingRate.Rate} effective {closingRate.EffectiveDate:yyyy-MM-dd}",
+                ClosingExchangeRateRecord = closingRate,
+                Notes = $"Closing rate {closingRate.Rate} effective {closingRate.EffectiveDate:yyyy-MM-dd} | {exposure.Frequency}",
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUserService.UserName
             });
         }
 
         UpdateBatchTotals(batch);
+
+        var previewFingerprint = BuildPreviewFingerprint(batch);
+        if (!request.PreviewOnly
+            && !string.IsNullOrWhiteSpace(request.ExpectedPreviewFingerprint)
+            && !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(previewFingerprint),
+                Encoding.UTF8.GetBytes(request.ExpectedPreviewFingerprint.Trim().ToLowerInvariant())))
+        {
+            throw new InvalidOperationException("Revaluation exposures or closing rates changed after preview. Run preview again before posting.");
+        }
 
         if (request.PreviewOnly)
         {
@@ -511,6 +582,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 line.JournalEntryId = postingResult.JournalEntryId;
                 line.PostingEventId = postingResult.PostingEventId;
             }
+
+            await UpdateCurrencyLinkRevaluationStateAsync(batch, cancellationToken);
 
             await MarkClosingRatesUsedAsync(batch, postingResult.PostingEventId, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
@@ -650,6 +723,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         batch.Status = "Reversed";
         batch.UpdatedAt = DateTime.UtcNow;
         batch.UpdatedBy = _currentUserService.UserName;
+        await RefreshCurrencyLinkRevaluationStateAfterReversalAsync(batch, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         await RecordFxAuditAsync(
@@ -672,6 +746,49 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             cancellationToken: cancellationToken);
 
         return batch;
+    }
+
+    private async Task RefreshCurrencyLinkRevaluationStateAfterReversalAsync(
+        FxRevaluationBatch reversedBatch,
+        CancellationToken cancellationToken)
+    {
+        var keys = reversedBatch.Lines.Select(line => new { line.AccountId, Currency = line.TransactionCurrency }).Distinct().ToList();
+        var accountIds = keys.Select(key => key.AccountId).Distinct().ToArray();
+        var currencies = keys.Select(key => key.Currency).Distinct().ToArray();
+        var links = await _context.AccountCurrencyLinks
+            .Where(link => link.TenantId == reversedBatch.TenantId
+                && accountIds.Contains(link.AccountId)
+                && currencies.Contains(link.LinkedCurrencyCode)
+                && !link.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        var priorLines = await _context.FxRevaluationLines
+            .AsNoTracking()
+            .Include(line => line.Batch)
+            .Where(line => line.TenantId == reversedBatch.TenantId
+                && accountIds.Contains(line.AccountId)
+                && currencies.Contains(line.TransactionCurrency)
+                && line.FxRevaluationBatchId != reversedBatch.Id
+                && line.Batch.Status == PostedStatus
+                && !line.Batch.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        foreach (var link in links)
+        {
+            var matching = priorLines
+                .Where(line => line.AccountId == link.AccountId && line.TransactionCurrency == link.LinkedCurrencyCode)
+                .OrderByDescending(line => line.Batch.RevaluationDate)
+                .ThenByDescending(line => line.Batch.PostedAt)
+                .ToList();
+            var latest = matching.FirstOrDefault();
+            link.LastRevaluationDate = latest?.Batch.RevaluationDate;
+            link.CurrentExchangeRate = latest?.ClosingExchangeRate ?? 0m;
+            link.RateEffectiveDate = latest?.Batch.RevaluationDate;
+            link.LastRevaluationAdjustment = latest?.GainLossAmount ?? 0m;
+            link.CumulativeRevaluationAdjustment = matching.Sum(line => line.GainLossAmount);
+            link.UpdatedAt = DateTime.UtcNow;
+            link.UpdatedBy = _currentUserService.UserName;
+        }
     }
 
     private async Task<FxRealizedSettlement?> PostApAllocationRealizedFxAsync(
@@ -1274,20 +1391,11 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         string functionalCurrency,
         string? currencyFilter,
         DateTime revaluationDate,
+        string revaluationType,
         FinanceSettings settings,
         CancellationToken cancellationToken)
     {
         var normalizedCurrencyFilter = NormalizeOptionalCurrency(currencyFilter);
-        var accountMap = new Dictionary<Guid, ExposureAccount>();
-        if (settings.ControlAccountArId.HasValue)
-        {
-            accountMap[settings.ControlAccountArId.Value] = new ExposureAccount("AR", MonetaryExposureKind.Asset);
-        }
-
-        if (settings.ControlAccountApId.HasValue)
-        {
-            accountMap[settings.ControlAccountApId.Value] = new ExposureAccount("AP", MonetaryExposureKind.Liability);
-        }
 
         var foreignBankAccounts = await _context.BankAccounts
             .AsNoTracking()
@@ -1298,17 +1406,72 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 && b.Currency != functionalCurrency)
             .ToListAsync(cancellationToken);
 
-        foreach (var bankAccount in foreignBankAccounts)
+        var bankByAccount = foreignBankAccounts
+            .GroupBy(bank => bank.GLAccountId!.Value)
+            .ToDictionary(group => group.Key, group => group.First());
+        var links = await _context.AccountCurrencyLinks
+            .AsNoTracking()
+            .Include(link => link.Account)
+            .Where(link => link.TenantId == tenantId
+                && !link.IsDeleted
+                && link.IsActive
+                && link.RevaluationRequired
+                && link.RevaluationFrequency != RevaluationFrequency.None
+                && link.EffectiveDate.Date <= revaluationDate.Date
+                && (link.EffectiveEndDate == null || link.EffectiveEndDate.Value.Date >= revaluationDate.Date)
+                && !link.Account.IsDeleted
+                && link.Account.Status == AccountStatus.Active
+                && (link.Account.AccountType == AccountType.Asset || link.Account.AccountType == AccountType.Liability))
+            .ToListAsync(cancellationToken);
+
+        var policyMap = new Dictionary<(Guid AccountId, string Currency), ExposurePolicy>();
+        foreach (var link in links.Where(link => IsFrequencyEligible(link.RevaluationFrequency, revaluationType)))
         {
-            accountMap[bankAccount.GLAccountId!.Value] = new ExposureAccount("BankCash", MonetaryExposureKind.Asset, "BankAccount", bankAccount.Id);
+            var currency = NormalizeCurrency(link.LinkedCurrencyCode, "Currency");
+            if (IsFunctionalCurrency(currency, functionalCurrency) ||
+                (!string.IsNullOrWhiteSpace(normalizedCurrencyFilter) && currency != normalizedCurrencyFilter))
+            {
+                continue;
+            }
+
+            var sourceModule = settings.ControlAccountArId == link.AccountId
+                ? "AR"
+                : settings.ControlAccountApId == link.AccountId
+                    ? "AP"
+                    : bankByAccount.ContainsKey(link.AccountId) ? "BankCash" : "GL";
+            var bank = bankByAccount.GetValueOrDefault(link.AccountId);
+            policyMap[(link.AccountId, currency)] = new ExposurePolicy(
+                sourceModule,
+                link.Account.AccountType == AccountType.Liability ? MonetaryExposureKind.Liability : MonetaryExposureKind.Asset,
+                ResolveRevaluationRateType(link.RevaluationRateType),
+                link.RevaluationQuoteSide,
+                link.RevaluationFrequency,
+                bank == null ? null : "BankAccount",
+                bank?.Id);
         }
 
-        if (!accountMap.Any())
+        // Foreign bank accounts are inherently monetary. Preserve their implicit
+        // primary-currency policy even though primary currencies are not stored as links.
+        foreach (var bank in foreignBankAccounts)
+        {
+            var currency = NormalizeCurrency(bank.Currency, "Currency");
+            if (!string.IsNullOrWhiteSpace(normalizedCurrencyFilter) && currency != normalizedCurrencyFilter)
+            {
+                continue;
+            }
+            policyMap.TryAdd(
+                (bank.GLAccountId!.Value, currency),
+                new ExposurePolicy("BankCash", MonetaryExposureKind.Asset,
+                    ResolveRevaluationRateType(revaluationType), settings.ClosingQuoteSide,
+                    RevaluationFrequency.Monthly, "BankAccount", bank.Id));
+        }
+
+        if (policyMap.Count == 0)
         {
             return new List<PostedExposure>();
         }
 
-        var accountIds = accountMap.Keys.ToList();
+        var accountIds = policyMap.Keys.Select(key => key.AccountId).Distinct().ToList();
         var transactions = await _context.AccountTransactions
             .AsNoTracking()
             .Where(t => t.TenantId == tenantId
@@ -1339,7 +1502,10 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         var exposures = new List<PostedExposure>();
         foreach (var group in transactions.GroupBy(t => new { t.AccountId, Currency = NormalizeCurrency(t.TransactionCurrency, functionalCurrency) }))
         {
-            var exposureAccount = accountMap[group.Key.AccountId];
+            if (!policyMap.TryGetValue((group.Key.AccountId, group.Key.Currency), out var exposureAccount))
+            {
+                continue;
+            }
             var foreignBalance = exposureAccount.Kind == MonetaryExposureKind.Liability
                 ? group.Sum(t => t.TransactionCreditAmount.GetValueOrDefault() - t.TransactionDebitAmount.GetValueOrDefault())
                 : group.Sum(t => t.TransactionDebitAmount.GetValueOrDefault() - t.TransactionCreditAmount.GetValueOrDefault());
@@ -1353,20 +1519,27 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             carryingFunctional = RoundMoney(carryingFunctional + priorAdjustment);
             foreignBalance = RoundMoney(foreignBalance);
 
-            if (foreignBalance <= 0m)
+            if (foreignBalance == 0m)
             {
                 continue;
             }
+
+            var effectiveKind = foreignBalance < 0m
+                ? exposureAccount.Kind == MonetaryExposureKind.Asset ? MonetaryExposureKind.Liability : MonetaryExposureKind.Asset
+                : exposureAccount.Kind;
 
             exposures.Add(new PostedExposure(
                 group.Key.AccountId,
                 exposureAccount.SourceModule,
                 exposureAccount.SourceDocumentType,
                 exposureAccount.SourceDocumentId,
-                exposureAccount.Kind,
+                effectiveKind,
                 group.Key.Currency,
                 foreignBalance,
-                carryingFunctional));
+                carryingFunctional,
+                exposureAccount.RateType,
+                exposureAccount.QuoteSide,
+                exposureAccount.Frequency));
         }
 
         return exposures;
@@ -1377,11 +1550,10 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         string functionalCurrency,
         string transactionCurrency,
         DateTime revaluationDate,
-        string revaluationType,
+        ExchangeRateType rateType,
         ExchangeRateQuoteSide closingQuoteSide,
         CancellationToken cancellationToken)
     {
-        var rateType = ResolveRevaluationRateType(revaluationType);
         var rate = await _context.ExchangeRates
             .Where(r => r.TenantId == tenantId
                 && !r.IsDeleted
@@ -1695,6 +1867,44 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         }
     }
 
+    private async Task UpdateCurrencyLinkRevaluationStateAsync(
+        FxRevaluationBatch batch,
+        CancellationToken cancellationToken)
+    {
+        var accountIds = batch.Lines.Select(line => line.AccountId).Distinct().ToArray();
+        var currencies = batch.Lines.Select(line => line.TransactionCurrency).Distinct().ToArray();
+        var links = await _context.AccountCurrencyLinks
+            .Where(link => link.TenantId == batch.TenantId
+                && accountIds.Contains(link.AccountId)
+                && currencies.Contains(link.LinkedCurrencyCode)
+                && !link.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        foreach (var link in links)
+        {
+            var line = batch.Lines.FirstOrDefault(candidate =>
+                candidate.AccountId == link.AccountId
+                && candidate.TransactionCurrency == link.LinkedCurrencyCode);
+            if (line == null)
+            {
+                continue;
+            }
+
+            var economicAdjustment = line.GainLossType == "Gain"
+                ? Math.Abs(line.GainLossAmount)
+                : -Math.Abs(line.GainLossAmount);
+            link.ForeignCurrencyBalance = line.ForeignCurrencyBalance;
+            link.BaseCurrencyEquivalent = line.RevaluedFunctionalAmount;
+            link.CurrentExchangeRate = line.ClosingExchangeRate;
+            link.RateEffectiveDate = batch.RevaluationDate;
+            link.LastRevaluationDate = batch.RevaluationDate;
+            link.LastRevaluationAdjustment = economicAdjustment;
+            link.CumulativeRevaluationAdjustment = RoundMoney(link.CumulativeRevaluationAdjustment + economicAdjustment);
+            link.UpdatedAt = DateTime.UtcNow;
+            link.UpdatedBy = _currentUserService.UserName;
+        }
+    }
+
     private async Task RecordFxAuditAsync(
         string eventType,
         Guid tenantId,
@@ -1741,6 +1951,30 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         batch.NetGainLossAmount = RoundMoney(batch.TotalGainAmount - batch.TotalLossAmount);
     }
 
+    private static string BuildPreviewFingerprint(FxRevaluationBatch batch)
+    {
+        var evidence = new StringBuilder()
+            .Append(batch.TenantId.ToString("N")).Append('|')
+            .Append(batch.RevaluationDate.ToString("yyyyMMdd")).Append('|')
+            .Append(batch.Scope).Append('|')
+            .Append(batch.FunctionalCurrencyCode);
+        foreach (var line in batch.Lines
+                     .OrderBy(line => line.AccountId)
+                     .ThenBy(line => line.TransactionCurrency))
+        {
+            evidence.Append('|').Append(line.AccountId.ToString("N"))
+                .Append(':').Append(line.TransactionCurrency)
+                .Append(':').Append(line.ForeignCurrencyBalance)
+                .Append(':').Append(line.CarryingFunctionalAmount)
+                .Append(':').Append(line.ClosingExchangeRateId.ToString("N"))
+                .Append(':').Append(line.ClosingExchangeRate)
+                .Append(':').Append(line.GainLossAmount);
+        }
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence.ToString())))
+            .ToLowerInvariant();
+    }
+
     private static string ResolveUnrealizedGainLossType(MonetaryExposureKind kind, decimal gainLossAmount)
     {
         if (kind == MonetaryExposureKind.Asset)
@@ -1764,6 +1998,27 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         }
 
         return ExchangeRateType.MonthEnd;
+    }
+
+    private static bool IsFrequencyEligible(RevaluationFrequency frequency, string? revaluationType)
+    {
+        if (frequency == RevaluationFrequency.None)
+        {
+            return false;
+        }
+        if (revaluationType?.Contains("Ad", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+        if (revaluationType?.Contains("Year", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return frequency is RevaluationFrequency.Monthly or RevaluationFrequency.Quarterly or RevaluationFrequency.Annually;
+        }
+        if (revaluationType?.Contains("Quarter", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return frequency is RevaluationFrequency.Monthly or RevaluationFrequency.Quarterly;
+        }
+        return frequency == RevaluationFrequency.Monthly;
     }
 
     private static string ResolveRevaluationScope(RevaluationRequestDto request)
@@ -1890,9 +2145,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         decimal SettlementRate,
         Guid? SettlementRateId);
 
-    private sealed record ExposureAccount(
+    private sealed record ExposurePolicy(
         string SourceModule,
         MonetaryExposureKind Kind,
+        ExchangeRateType RateType,
+        ExchangeRateQuoteSide QuoteSide,
+        RevaluationFrequency Frequency,
         string? SourceDocumentType = null,
         Guid? SourceDocumentId = null);
 
@@ -1904,7 +2162,10 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         MonetaryExposureKind Kind,
         string TransactionCurrency,
         decimal ForeignCurrencyBalance,
-        decimal CarryingFunctionalAmount);
+        decimal CarryingFunctionalAmount,
+        ExchangeRateType RateType,
+        ExchangeRateQuoteSide QuoteSide,
+        RevaluationFrequency Frequency);
 
     private enum MonetaryExposureKind
     {

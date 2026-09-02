@@ -625,6 +625,11 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var duplicate = await fixture.Service.ReverseRevaluationBatchAsync(first.Id, new DateTime(2026, 8, 1), "Auto reversal", CancellationToken.None);
         duplicate.ReversalPostingEventId.Should().Be(reversed.ReversalPostingEventId);
         (await fixture.Db.FinancePostingEvents.CountAsync(e => e.SourceModule == "FX" && e.PostingAction == "ReverseUnrealizedRevaluation")).Should().Be(1);
+        var linkState = await fixture.Db.AccountCurrencyLinks.AsNoTracking().SingleAsync(link => link.AccountId == fixture.ArControl.Id);
+        linkState.LastRevaluationDate.Should().BeNull();
+        linkState.CumulativeRevaluationAdjustment.Should().Be(0m);
+        var history = await fixture.Service.GetRevaluationBatchesAsync(new DateTime(2026, 1, 1), new DateTime(2026, 12, 31));
+        history.Should().ContainSingle(item => item.Id == first.Id && item.Status == "Reversed" && item.ReversalJournalEntryId.HasValue);
         fixture.Audit.Events.Should().Contain(e => e.EventType == FinanceAuditEvents.UnrealizedRevaluationReversed);
     }
 
@@ -689,14 +694,16 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     public async Task RevaluationUsesRequestedQuarterEndRateType()
     {
         await using var fixture = await FxFixture.CreateAsync();
-        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
-        fixture.SeedExchangeRate(12m, new DateTime(2026, 9, 30), ExchangeRateType.MonthEnd);
-        fixture.SeedExchangeRate(13m, new DateTime(2026, 9, 30), ExchangeRateType.QuarterEnd);
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m, postingDate: new DateTime(2026, 6, 1));
+        var arPolicy = await fixture.Db.AccountCurrencyLinks.SingleAsync(link => link.AccountId == fixture.ArControl.Id);
+        arPolicy.RevaluationRateType = "Quarter-End";
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 6, 30), ExchangeRateType.MonthEnd);
+        fixture.SeedExchangeRate(13m, new DateTime(2026, 6, 30), ExchangeRateType.QuarterEnd);
         await fixture.Db.SaveChangesAsync();
 
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
-            RevaluationDate = new DateTime(2026, 9, 30),
+            RevaluationDate = new DateTime(2026, 6, 30),
             RevaluationType = "Quarter-End"
         });
 
@@ -710,7 +717,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     {
         await using var fixture = await FxFixture.CreateAsync();
         await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
-        fixture.Settings.ClosingQuoteSide = ExchangeRateQuoteSide.Buying;
+        var arPolicy = await fixture.Db.AccountCurrencyLinks.SingleAsync(link => link.AccountId == fixture.ArControl.Id);
+        arPolicy.RevaluationQuoteSide = ExchangeRateQuoteSide.Buying;
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd, ExchangeRateQuoteSide.Mid);
         var buying = fixture.SeedExchangeRate(13m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd, ExchangeRateQuoteSide.Buying);
         await fixture.Db.SaveChangesAsync();
@@ -723,6 +731,83 @@ public sealed class FxRealizedUnrealizedRevaluationTests
 
         batch.Lines.Should().OnlyContain(line => line.ClosingExchangeRateId == buying.Id);
         batch.Lines.Should().OnlyContain(line => line.ClosingExchangeRate == 13m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task MarkedGeneralLedgerMonetaryAccountIsRevaluedAndUnmarkedAccountIsExcluded()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        var marked = await fixture.PostGeneralFxExposureAsync("1150", AccountType.Asset, revaluationRequired: true, 10m, 100m);
+        var unmarked = await fixture.PostGeneralFxExposureAsync("1160", AccountType.Asset, revaluationRequired: false, 10m, 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+
+        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End"
+        });
+
+        batch.Lines.Should().ContainSingle(line => line.AccountId == marked.Id && line.SourceModule == "GL" && line.GainLossAmount == 200m);
+        batch.Lines.Should().NotContain(line => line.AccountId == unmarked.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task PostingRejectsWhenPreviewEvidenceHasChanged()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
+        var closingRate = fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+        var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End"
+        });
+
+        closingRate.Rate = 13m;
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+            {
+                RevaluationDate = new DateTime(2026, 7, 31),
+                RevaluationType = "Month-End",
+                ExpectedPreviewFingerprint = preview.PreviewFingerprint
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*changed after preview*");
+        (await fixture.Db.FxRevaluationBatches.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task RevaluationFrequencyControlsWhichRunIncludesTheAccount()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m, postingDate: new DateTime(2026, 6, 1));
+        var policy = await fixture.Db.AccountCurrencyLinks.SingleAsync(link => link.AccountId == fixture.ArControl.Id);
+        policy.RevaluationFrequency = RevaluationFrequency.Quarterly;
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 6, 30), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+
+        var monthEnd = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 6, 30),
+            RevaluationType = "Month-End"
+        });
+        var quarterEnd = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 6, 30),
+            RevaluationType = "Quarter-End"
+        });
+
+        monthEnd.Lines.Should().BeEmpty();
+        quarterEnd.Lines.Should().ContainSingle(line => line.AccountId == fixture.ArControl.Id && line.RevaluationFrequency == "Quarterly");
     }
 
     [Fact]
@@ -1409,6 +1494,46 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 creditAccountId: Revenue.Id,
                 foreignAmount: foreignAmount,
                 rate: rate));
+        }
+
+        public async Task<Account> PostGeneralFxExposureAsync(
+            string accountNumber,
+            AccountType accountType,
+            bool revaluationRequired,
+            decimal rate,
+            decimal foreignAmount)
+        {
+            var account = SeedAccount(Db, TenantId, accountNumber, accountType, true);
+            Db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                AccountId = account.Id,
+                LinkedCurrencyCode = "USD",
+                IsActive = true,
+                EffectiveDate = new DateTime(2026, 1, 1),
+                RevaluationRequired = revaluationRequired,
+                RevaluationFrequency = RevaluationFrequency.Monthly,
+                TransactionRateType = "Daily",
+                RevaluationRateType = "Month-End",
+                RevaluationQuoteSide = ExchangeRateQuoteSide.Mid,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Tests"
+            });
+            SeedExchangeRate(rate, new DateTime(2026, 7, 1));
+            await Db.SaveChangesAsync();
+
+            await _postingEngine.PostAsync(CreateForeignPostingRequest(
+                "GL",
+                "ManualJournal",
+                Guid.NewGuid(),
+                $"{accountNumber}-FX-BAL",
+                new DateTime(2026, 7, 1),
+                debitAccountId: accountType == AccountType.Asset ? account.Id : Expense.Id,
+                creditAccountId: accountType == AccountType.Liability ? account.Id : Revenue.Id,
+                foreignAmount: foreignAmount,
+                rate: rate));
+            return account;
         }
 
         private FinancePostingRequestDto CreateForeignPostingRequest(

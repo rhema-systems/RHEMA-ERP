@@ -7,13 +7,14 @@ import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { financeService } from '@/services/finance.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { Currency, CurrencyRevaluationPreviewDto, FinanceSettings, JournalEntry } from '@/types/finance';
+import type { Currency, CurrencyRevaluationPreviewDto, FinanceSettings, FxRevaluationBatchSummaryDto, JournalEntry } from '@/types/finance';
 
 const emptyGuid = '00000000-0000-0000-0000-000000000000';
 
@@ -30,6 +31,10 @@ export default function CurrencyRevaluationPage() {
     const [currencies, setCurrencies] = useState<Currency[]>([]);
     const [preview, setPreview] = useState<CurrencyRevaluationPreviewDto | null>(null);
     const [postedJournal, setPostedJournal] = useState<JournalEntry | null>(null);
+    const [history, setHistory] = useState<FxRevaluationBatchSummaryDto[]>([]);
+    const [reversingBatch, setReversingBatch] = useState<FxRevaluationBatchSummaryDto | null>(null);
+    const [reversalDate, setReversalDate] = useState(new Date().toISOString().slice(0, 10));
+    const [reversalReason, setReversalReason] = useState('');
     const [parameters, setParameters] = useState({
         revaluationDate: new Date().toISOString().slice(0, 10),
         currencyCode: 'all',
@@ -68,6 +73,15 @@ export default function CurrencyRevaluationPage() {
         && settings?.unrealizedFxLossAccountId,
     );
 
+    const loadHistory = async () => {
+        const year = new Date().getFullYear();
+        setHistory(await financeService.getRevaluationHistory(`${year}-01-01`, `${year}-12-31`));
+    };
+
+    useEffect(() => {
+        void loadHistory().catch(error => console.warn('Revaluation history could not be loaded', error));
+    }, []);
+
     const handlePreview = async () => {
         try {
             setBusy(true);
@@ -88,8 +102,13 @@ export default function CurrencyRevaluationPage() {
     const handlePost = async () => {
         try {
             setBusy(true);
-            const journal = await financeService.runRevaluation({ ...request, previewOnly: false });
+            const journal = await financeService.runRevaluation({
+                ...request,
+                previewOnly: false,
+                expectedPreviewFingerprint: preview?.previewFingerprint,
+            });
             setPostedJournal(journal);
+            await loadHistory();
             setStep(3);
             toast({ title: 'FX revaluation posted', description: journal.journalEntryNumber });
         } catch (error) {
@@ -98,6 +117,22 @@ export default function CurrencyRevaluationPage() {
                 description: messageFrom(error, 'The posting engine rejected the revaluation.'),
                 variant: 'destructive',
             });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const handleReverse = async () => {
+        if (!reversingBatch || reversalReason.trim().length < 5) return;
+        try {
+            setBusy(true);
+            await financeService.reverseRevaluation(reversingBatch.id, reversalDate, reversalReason.trim());
+            await loadHistory();
+            setReversingBatch(null);
+            setReversalReason('');
+            toast({ title: 'Revaluation reversed', description: `${reversingBatch.batchNumber} now has a linked reversal journal.` });
+        } catch (error) {
+            toast({ title: 'Reversal failed', description: messageFrom(error, 'The reversal posting was rejected.'), variant: 'destructive' });
         } finally {
             setBusy(false);
         }
@@ -143,7 +178,7 @@ export default function CurrencyRevaluationPage() {
             {step === 1 ? <Card className="mx-auto max-w-4xl">
                 <CardHeader>
                     <CardTitle>Revaluation parameters</CardTitle>
-                    <CardDescription>The preview reads current posted AR, AP and foreign-bank exposures. It does not create accounting entries.</CardDescription>
+                    <CardDescription>The preview reads posted monetary account/currency exposures selected by policy. It does not create accounting entries.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
                     {!loadingSetup && !configurationReady ? <Alert variant="destructive">
@@ -192,10 +227,11 @@ export default function CurrencyRevaluationPage() {
                     <CardContent className="space-y-5">
                         {preview.lines.length === 0 ? <Alert><CheckCircle className="h-4 w-4" /><AlertTitle>No adjustment required</AlertTitle><AlertDescription>No eligible posted foreign-currency exposure produced a gain or loss at the selected closing rate.</AlertDescription></Alert> :
                             <div className="overflow-x-auto rounded-md border"><table className="w-full text-sm">
-                                <thead className="bg-muted/50"><tr><th className="p-3 text-left">Account</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Currency</th><th className="p-3 text-right">Foreign balance</th><th className="p-3 text-right">Carrying value</th><th className="p-3 text-right">Previous rate</th><th className="p-3 text-right">Closing rate</th><th className="p-3 text-right">Revalued value</th><th className="p-3 text-right">Adjustment</th></tr></thead>
+                                <thead className="bg-muted/50"><tr><th className="p-3 text-left">Account</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Currency</th><th className="p-3 text-left">Policy</th><th className="p-3 text-right">Foreign balance</th><th className="p-3 text-right">Carrying value</th><th className="p-3 text-right">Previous rate</th><th className="p-3 text-right">Closing rate</th><th className="p-3 text-right">Revalued value</th><th className="p-3 text-right">Adjustment</th></tr></thead>
                                 <tbody>{preview.lines.map(line => <tr key={`${line.accountId}-${line.transactionCurrency}-${line.sourceModule}`} className="border-t">
                                     <td className="p-3"><div className="font-mono font-semibold">{line.accountNumber}</div><div className="text-xs text-muted-foreground">{line.accountName}</div></td>
                                     <td className="p-3"><Badge variant="outline">{line.sourceModule}</Badge></td><td className="p-3 font-medium">{line.transactionCurrency}</td>
+                                    <td className="p-3"><div className="whitespace-nowrap">{line.revaluationFrequency}</div><div className="text-xs text-muted-foreground whitespace-nowrap">{line.rateType} / {line.quoteSide}</div></td>
                                     <td className="p-3 text-right font-mono">{line.foreignCurrencyBalance.toLocaleString()}</td><td className="p-3 text-right font-mono">{line.carryingFunctionalAmount.toLocaleString()}</td>
                                     <td className="p-3 text-right font-mono">{line.previousRate.toFixed(6)}</td><td className="p-3 text-right font-mono">{line.closingExchangeRate.toFixed(6)}</td><td className="p-3 text-right font-mono">{line.revaluedFunctionalAmount.toLocaleString()}</td>
                                     <td className="p-3 text-right"><span className={line.gainLossType === 'Gain' ? 'font-semibold text-green-600' : 'font-semibold text-red-600'}>{formatMoney(Math.abs(line.gainLossAmount), line.functionalCurrencyCode)}</span><Badge variant="outline" className="ml-2">{line.gainLossType}</Badge></td>
@@ -212,6 +248,40 @@ export default function CurrencyRevaluationPage() {
                 <div className="grid grid-cols-2 gap-3 rounded-md border p-4 text-left"><div><div className="text-xs text-muted-foreground">Posting status</div><div className="font-semibold">{postedJournal.postingStatus}</div></div><div><div className="text-xs text-muted-foreground">Journal total</div><div className="font-semibold">{formatMoney(postedJournal.totalDebitAmount)}</div></div></div>
                 <div className="flex justify-center gap-3 pt-2"><Button variant="outline" onClick={reset}><RotateCcw className="mr-2 h-4 w-4" />Start another</Button><Button asChild><a href={`/finance/journal-entries/${postedJournal.id}`}>View journal entry</a></Button></div>
             </CardContent></Card> : null}
+
+            <Card>
+                <CardHeader><CardTitle>Revaluation history</CardTitle><CardDescription>Posted batches for the current calendar year, including their journals and reversals.</CardDescription></CardHeader>
+                <CardContent>
+                    {history.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No revaluation batches found this year.</p> :
+                        <div className="overflow-x-auto rounded-md border"><table className="w-full text-sm">
+                            <thead className="bg-muted/50"><tr><th className="p-3 text-left">Batch</th><th className="p-3 text-left">Date</th><th className="p-3 text-left">Currencies</th><th className="p-3 text-right">Exposures</th><th className="p-3 text-right">Net gain/(loss)</th><th className="p-3 text-left">Status</th><th className="p-3 text-right">Actions</th></tr></thead>
+                            <tbody>{history.map(batch => <tr key={batch.id} className="border-t">
+                                <td className="p-3 font-mono font-semibold">{batch.batchNumber}</td>
+                                <td className="p-3">{new Date(batch.revaluationDate).toLocaleDateString()}</td>
+                                <td className="p-3">{batch.currencies.join(', ')}</td>
+                                <td className="p-3 text-right">{batch.exposureCount}</td>
+                                <td className="p-3 text-right font-mono">{formatMoney(batch.netGainLossAmount, batch.functionalCurrencyCode)}</td>
+                                <td className="p-3"><Badge variant={batch.status === 'Reversed' ? 'secondary' : 'default'}>{batch.status}</Badge></td>
+                                <td className="p-3"><div className="flex justify-end gap-2">
+                                    {batch.journalEntryId ? <Button size="sm" variant="outline" asChild><a href={`/finance/journal-entries/${batch.journalEntryId}`}>{batch.journalEntryNumber || 'Journal'}</a></Button> : null}
+                                    {batch.reversalJournalEntryId ? <Button size="sm" variant="outline" asChild><a href={`/finance/journal-entries/${batch.reversalJournalEntryId}`}>Reversal</a></Button> : null}
+                                    {batch.status === 'Posted' ? <Button size="sm" variant="destructive" onClick={() => setReversingBatch(batch)}>Reverse</Button> : null}
+                                </div></td>
+                            </tr>)}</tbody>
+                        </table></div>}
+                </CardContent>
+            </Card>
+
+            <Dialog open={Boolean(reversingBatch)} onOpenChange={open => { if (!open) setReversingBatch(null); }}>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Reverse {reversingBatch?.batchNumber}</DialogTitle><DialogDescription>A balanced reversal journal will be posted through the Finance posting engine. The original journal remains in the audit trail.</DialogDescription></DialogHeader>
+                    <div className="space-y-4 py-3">
+                        <div className="space-y-2"><Label htmlFor="reversal-date">Reversal date</Label><Input id="reversal-date" type="date" value={reversalDate} onChange={event => setReversalDate(event.target.value)} /></div>
+                        <div className="space-y-2"><Label htmlFor="reversal-reason">Reason</Label><Input id="reversal-reason" value={reversalReason} onChange={event => setReversalReason(event.target.value)} placeholder="Why is this revaluation being reversed?" /></div>
+                    </div>
+                    <DialogFooter><Button variant="outline" onClick={() => setReversingBatch(null)}>Cancel</Button><Button variant="destructive" onClick={handleReverse} disabled={busy || !reversalDate || reversalReason.trim().length < 5}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Post reversal</Button></DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

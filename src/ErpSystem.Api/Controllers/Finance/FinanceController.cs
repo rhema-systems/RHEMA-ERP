@@ -224,6 +224,42 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        [HttpGet("revaluation/history")]
+        public async Task<IActionResult> GetRevaluationHistory(
+            [FromQuery] DateTime startDate,
+            [FromQuery] DateTime endDate,
+            [FromQuery] string? currencyCode = null)
+        {
+            try
+            {
+                return Ok(await _revaluationService.GetRevaluationBatchesAsync(startDate, endDate, currencyCode));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("revaluation/{batchId:guid}/reverse")]
+        public async Task<IActionResult> ReverseRevaluation(Guid batchId, [FromBody] ReverseFxRevaluationRequestDto request)
+        {
+            try
+            {
+                var batch = await _revaluationService.ReverseRevaluationBatchAsync(batchId, request.ReversalDate, request.Reason);
+                return Ok(new
+                {
+                    batch.Id,
+                    batch.Status,
+                    batch.ReversalJournalEntryId,
+                    batch.ReversedAt
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         /// <summary>
         /// Generates a Balance Sheet (Statement of Financial Position) as of the specified date.
         /// </summary>

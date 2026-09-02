@@ -43,5 +43,17 @@ namespace ErpSystem.Core.Interfaces.Finance
             DateTime endDate,
             string? currencyCode = null,
             CancellationToken cancellationToken = default);
+
+        Task<System.Collections.Generic.IReadOnlyList<FxRevaluationBatchSummaryDto>> GetRevaluationBatchesAsync(
+            DateTime startDate,
+            DateTime endDate,
+            string? currencyCode = null,
+            CancellationToken cancellationToken = default);
+
+        Task<FxRevaluationBatch> ReverseRevaluationBatchAsync(
+            Guid batchId,
+            DateTime reversalDate,
+            string reason,
+            CancellationToken cancellationToken = default);
     }
 }

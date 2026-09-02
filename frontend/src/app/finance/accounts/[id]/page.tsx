@@ -38,9 +38,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         linkedCurrencyCode: '',
         revaluationRequired: true,
         revaluationFrequency: 'Monthly',
-        transactionRateType: 'Spot',
+        transactionRateType: 'Daily',
         transactionQuoteSide: 'Mid',
-        revaluationRateType: 'MonthEnd',
+        revaluationRateType: 'Month-End',
         revaluationQuoteSide: 'Mid',
         notes: '',
     });
@@ -142,9 +142,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                 linkedCurrencyCode: '',
                 revaluationRequired: true,
                 revaluationFrequency: 'Monthly',
-                transactionRateType: 'Spot',
+                transactionRateType: 'Daily',
                 transactionQuoteSide: 'Mid',
-                revaluationRateType: 'MonthEnd',
+                revaluationRateType: 'Month-End',
                 revaluationQuoteSide: 'Mid',
                 notes: '',
             });
@@ -386,9 +386,12 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                         }
                                                     />
                                                     <Label htmlFor="revaluationRequired" className="cursor-pointer">
-                                                        Revaluation required
+                                                        Monetary item — include in closing revaluation
                                                     </Label>
                                                 </div>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Enable for cash, receivables, payables, loans and other balances settled in a fixed amount of this currency. Leave off for non-monetary items such as historical-cost inventory, fixed assets and prepayments.
+                                                </p>
 
                                                 {newLink.revaluationRequired && (
                                                     <div className="space-y-2">
@@ -404,6 +407,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 <SelectItem value="Monthly">Monthly</SelectItem>
                                                                 <SelectItem value="Quarterly">Quarterly</SelectItem>
                                                                 <SelectItem value="Annually">Annually</SelectItem>
+                                                                <SelectItem value="AdHoc">Ad hoc</SelectItem>
                                                             </SelectContent>
                                                         </Select>
                                                     </div>
@@ -435,9 +439,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 <SelectValue />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="MonthEnd">Month End</SelectItem>
-                                                                <SelectItem value="QuarterEnd">Quarter End</SelectItem>
-                                                                <SelectItem value="YearEnd">Year End</SelectItem>
+                                                                <SelectItem value="Month-End">Month End</SelectItem>
+                                                                <SelectItem value="Quarter-End">Quarter End</SelectItem>
+                                                                <SelectItem value="Year-End">Year End</SelectItem>
                                                             </SelectContent>
                                                         </Select>
                                                     </div>
@@ -528,6 +532,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                     <RefreshCcw className="h-3 w-3 mr-1" />
                                                                     {link.revaluationFrequency}
                                                                 </Badge>
+                                                            )}
+                                                            {!link.revaluationRequired && (
+                                                                <Badge variant="secondary">Non-monetary / excluded</Badge>
                                                             )}
                                                         </div>
                                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2">
@@ -627,6 +634,33 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                             </DialogHeader>
                             {policyForm && (
                                 <div className="space-y-4 py-4">
+                                    <div className="rounded-md border p-4 space-y-3">
+                                        <div className="flex items-start space-x-3">
+                                            <Checkbox
+                                                id="editRevaluationRequired"
+                                                checked={policyForm.revaluationRequired}
+                                                onCheckedChange={(checked) => setPolicyForm({ ...policyForm, revaluationRequired: checked as boolean })}
+                                            />
+                                            <div className="space-y-1">
+                                                <Label htmlFor="editRevaluationRequired" className="cursor-pointer">Monetary item — include in closing revaluation</Label>
+                                                <p className="text-xs text-muted-foreground">The posting engine enforces this setting for this GL account and currency. Unmarked links remain available for foreign-currency posting but are excluded from revaluation.</p>
+                                            </div>
+                                        </div>
+                                        {policyForm.revaluationRequired && (
+                                            <div className="space-y-2">
+                                                <Label>Revaluation Frequency</Label>
+                                                <Select value={policyForm.revaluationFrequency} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationFrequency: value })}>
+                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="Monthly">Monthly</SelectItem>
+                                                        <SelectItem value="Quarterly">Quarterly</SelectItem>
+                                                        <SelectItem value="Annually">Annually</SelectItem>
+                                                        <SelectItem value="AdHoc">Ad hoc</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+                                    </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                             <Label>Transaction Rate Type</Label>
@@ -654,9 +688,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                             <Select value={policyForm.revaluationRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationRateType: value })}>
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="MonthEnd">Month End</SelectItem>
-                                                    <SelectItem value="QuarterEnd">Quarter End</SelectItem>
-                                                    <SelectItem value="YearEnd">Year End</SelectItem>
+                                                    <SelectItem value="Month-End">Month End</SelectItem>
+                                                    <SelectItem value="Quarter-End">Quarter End</SelectItem>
+                                                    <SelectItem value="Year-End">Year End</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>

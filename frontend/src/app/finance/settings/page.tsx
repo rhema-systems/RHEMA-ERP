@@ -100,7 +100,11 @@ export default function FinanceSettingsPage() {
         baseCurrency: 'GHS',
         retainedEarningsAccountId: undefined,
         unrealizedGainLossAccountId: undefined,
+        unrealizedFxGainAccountId: undefined,
+        unrealizedFxLossAccountId: undefined,
         realizedGainLossAccountId: undefined,
+        realizedFxGainAccountId: undefined,
+        realizedFxLossAccountId: undefined,
         suspenseAccountId: undefined,
         controlAccountArId: undefined,
         controlAccountApId: undefined,
@@ -156,7 +160,11 @@ export default function FinanceSettingsPage() {
                 baseCurrency: data.baseCurrency,
                 retainedEarningsAccountId: data.retainedEarningsAccountId,
                 unrealizedGainLossAccountId: data.unrealizedGainLossAccountId,
+                unrealizedFxGainAccountId: data.unrealizedFxGainAccountId,
+                unrealizedFxLossAccountId: data.unrealizedFxLossAccountId,
                 realizedGainLossAccountId: data.realizedGainLossAccountId,
+                realizedFxGainAccountId: data.realizedFxGainAccountId,
+                realizedFxLossAccountId: data.realizedFxLossAccountId,
                 suspenseAccountId: data.suspenseAccountId,
                 controlAccountArId: data.controlAccountArId,
                 controlAccountApId: data.controlAccountApId,
@@ -684,34 +692,40 @@ export default function FinanceSettingsPage() {
                         </p>
                     </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="unrealizedGainLoss">Unrealized Gain/Loss Account</Label>
-                        <AccountPicker
-                            id="unrealizedGainLoss"
-                            value={formData.unrealizedGainLossAccountId}
-                            placeholder="Search revenue/expense accounts..."
-                            disabled={settings?.transactionsExist}
-                            accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
-                            onChange={(value) => setFormData({ ...formData, unrealizedGainLossAccountId: value })}
-                        />
-                        <p className="text-sm text-muted-foreground">
-                            Used for currency revaluation entries
-                        </p>
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label htmlFor="realizedGainLoss">Realized Gain/Loss Account</Label>
-                        <AccountPicker
-                            id="realizedGainLoss"
-                            value={formData.realizedGainLossAccountId}
-                            placeholder="Search revenue/expense accounts..."
-                            disabled={settings?.transactionsExist}
-                            accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
-                            onChange={(value) => setFormData({ ...formData, realizedGainLossAccountId: value })}
-                        />
-                        <p className="text-sm text-muted-foreground">
-                            Used for settled foreign currency transactions
-                        </p>
+                    <div className="space-y-4 rounded-lg border p-4">
+                        <div>
+                            <h3 className="font-semibold">Foreign Exchange Gain/Loss Accounts</h3>
+                            <p className="text-sm text-muted-foreground">Separate gain and loss mappings are enforced by revaluation and settlement posting. These mappings remain configurable after transactions exist and every change is audited.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="unrealizedFxGain">Unrealized FX Gain</Label>
+                                <AccountPicker id="unrealizedFxGain" value={formData.unrealizedFxGainAccountId} placeholder="Search revenue accounts..." accounts={accounts.filter(a => a.accountType === 'Revenue')} onChange={(value) => setFormData({ ...formData, unrealizedFxGainAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Credit side of favorable closing revaluation movements.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="unrealizedFxLoss">Unrealized FX Loss</Label>
+                                <AccountPicker id="unrealizedFxLoss" value={formData.unrealizedFxLossAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(a => a.accountType === 'Expense')} onChange={(value) => setFormData({ ...formData, unrealizedFxLossAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Debit side of adverse closing revaluation movements.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="realizedFxGain">Realized FX Gain</Label>
+                                <AccountPicker id="realizedFxGain" value={formData.realizedFxGainAccountId} placeholder="Search revenue accounts..." accounts={accounts.filter(a => a.accountType === 'Revenue')} onChange={(value) => setFormData({ ...formData, realizedFxGainAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Used when invoices, receipts, payments and other FX items settle favorably.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="realizedFxLoss">Realized FX Loss</Label>
+                                <AccountPicker id="realizedFxLoss" value={formData.realizedFxLossAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(a => a.accountType === 'Expense')} onChange={(value) => setFormData({ ...formData, realizedFxLossAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Used when invoices, receipts, payments and other FX items settle adversely.</p>
+                            </div>
+                        </div>
+                        {(formData.unrealizedGainLossAccountId || formData.realizedGainLossAccountId) && (
+                            <Alert>
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertTitle>Legacy combined mappings retained</AlertTitle>
+                                <AlertDescription>The old combined gain/loss mappings remain stored for compatibility. New controlled postings use the separate mappings above.</AlertDescription>
+                            </Alert>
+                        )}
                     </div>
 
                     <div className="space-y-2">

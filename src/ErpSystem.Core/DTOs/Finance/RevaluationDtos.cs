@@ -18,6 +18,13 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid UnrealizedGainLossAccountId { get; set; }
 
         public bool PreviewOnly { get; set; } = false;
+
+        /// <summary>
+        /// Optional fingerprint returned by preview. When supplied for posting, the
+        /// service rejects any change in exposure balances or closing-rate evidence.
+        /// </summary>
+        [MaxLength(64)]
+        public string? ExpectedPreviewFingerprint { get; set; }
     }
     public class CurrencyRevaluationResultDto
     {
@@ -37,6 +44,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TotalLossAmount { get; set; }
         public decimal NetGainLossAmount { get; set; }
         public int ExposureCount { get; set; }
+        public string PreviewFingerprint { get; set; } = string.Empty;
         public List<CurrencyRevaluationPreviewLineDto> Lines { get; set; } = new();
     }
 
@@ -55,5 +63,39 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal RevaluedFunctionalAmount { get; set; }
         public decimal GainLossAmount { get; set; }
         public string GainLossType { get; set; } = string.Empty;
+        public string RevaluationFrequency { get; set; } = string.Empty;
+        public string RateType { get; set; } = string.Empty;
+        public string QuoteSide { get; set; } = string.Empty;
+    }
+
+    public sealed class FxRevaluationBatchSummaryDto
+    {
+        public Guid Id { get; set; }
+        public string BatchNumber { get; set; } = string.Empty;
+        public DateTime RevaluationDate { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string FunctionalCurrencyCode { get; set; } = string.Empty;
+        public List<string> Currencies { get; set; } = new();
+        public int ExposureCount { get; set; }
+        public decimal TotalGainAmount { get; set; }
+        public decimal TotalLossAmount { get; set; }
+        public decimal NetGainLossAmount { get; set; }
+        public Guid? JournalEntryId { get; set; }
+        public string? JournalEntryNumber { get; set; }
+        public Guid? ReversalJournalEntryId { get; set; }
+        public string? ReversalJournalEntryNumber { get; set; }
+        public DateTime? PostedAt { get; set; }
+        public DateTime? ReversedAt { get; set; }
+    }
+
+    public sealed class ReverseFxRevaluationRequestDto
+    {
+        [Required]
+        public DateTime ReversalDate { get; set; }
+
+        [Required]
+        [MinLength(5)]
+        [MaxLength(500)]
+        public string Reason { get; set; } = string.Empty;
     }
 }

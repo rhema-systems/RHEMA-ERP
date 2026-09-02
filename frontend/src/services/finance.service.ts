@@ -39,6 +39,7 @@ import type {
   PaginatedResponse,
   TrendAnalysisDto,
   CurrencyRevaluationPreviewDto,
+  FxRevaluationBatchSummaryDto,
 } from '@/types/finance';
 
 /**
@@ -69,6 +70,8 @@ export interface FinanceSettings {
   unrealizedFxGainAccountId?: string;
   unrealizedFxLossAccountId?: string;
   realizedGainLossAccountId?: string;
+  realizedFxGainAccountId?: string;
+  realizedFxLossAccountId?: string;
   suspenseAccountId?: string;
   discountAllowedAccountId?: string;
   discountReceivedAccountId?: string;
@@ -381,6 +384,7 @@ export interface RevaluationRequestDto {
   unrealizedGainLossAccountId: string;
   previewOnly: boolean;
   notes?: string;
+  expectedPreviewFingerprint?: string;
 }
 
 export interface RevaluationResultDto {
@@ -1045,6 +1049,16 @@ class FinanceService {
       ...request,
       previewOnly: true,
     });
+  }
+
+  async getRevaluationHistory(startDate: string, endDate: string, currencyCode?: string): Promise<FxRevaluationBatchSummaryDto[]> {
+    const params = new URLSearchParams({ startDate, endDate });
+    if (currencyCode) params.set('currencyCode', currencyCode);
+    return apiService.get<FxRevaluationBatchSummaryDto[]>(`${this.baseUrl}/revaluation/history?${params.toString()}`);
+  }
+
+  async reverseRevaluation(batchId: string, reversalDate: string, reason: string): Promise<{ id: string; status: string; reversalJournalEntryId?: string; reversedAt?: string }> {
+    return apiService.post(`${this.baseUrl}/revaluation/${batchId}/reverse`, { reversalDate, reason });
   }
 
   // ==========================================
