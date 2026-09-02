@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -81,8 +82,8 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
 
         FinancePostingRequestDto? captured = null;
         var engine = new Mock<IFinancePostingEngine>();
-        engine.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => captured = request)
+        engine.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestDto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(new FinancePostingResultDto
             {
                 PostingEventId = Guid.NewGuid(),
@@ -92,7 +93,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
                 FunctionalCurrencyCode = "GHS"
             });
 
-        await new InventoryAdjustmentFinancePostingService(context, engine.Object).PostAsync(adjustment);
+        await new InventoryAdjustmentFinancePostingService(context, engine.Object, Dimensions().Object).PostAsync(adjustment);
 
         captured.Should().NotBeNull();
         captured!.PostingAction.Should().Be("PostOpeningStock");
@@ -113,7 +114,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
             value.SourceReferenceNumber == adjustment.AdjustmentNumber);
         captured.Lines.Should().NotContain(value =>
             value.TransactionTag == "INV-ADJ-EXPENSE" || value.TransactionTag == "INV-ADJ-RECOVERY");
-        engine.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()),
+        engine.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -165,7 +166,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
         };
         var engine = new Mock<IFinancePostingEngine>(MockBehavior.Strict);
 
-        var action = () => new InventoryAdjustmentFinancePostingService(context, engine.Object)
+        var action = () => new InventoryAdjustmentFinancePostingService(context, engine.Object, Dimensions().Object)
             .PostAsync(adjustment);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
@@ -192,7 +193,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
             .Options);
         var engine = new Mock<IFinancePostingEngine>(MockBehavior.Strict);
 
-        var action = () => new InventoryAdjustmentFinancePostingService(context, engine.Object)
+        var action = () => new InventoryAdjustmentFinancePostingService(context, engine.Object, Dimensions().Object)
             .PostAsync(adjustment);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
@@ -251,8 +252,8 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
 
         FinancePostingRequestDto? captured = null;
         var engine = new Mock<IFinancePostingEngine>();
-        engine.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => captured = request)
+        engine.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestDto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(new FinancePostingResultDto
             {
                 PostingEventId = postingEventId,
@@ -262,7 +263,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
                 FunctionalCurrencyCode = "GHS"
             });
 
-        var result = await new InventoryAdjustmentFinancePostingService(context, engine.Object)
+        var result = await new InventoryAdjustmentFinancePostingService(context, engine.Object, Dimensions().Object)
             .PostAsync(adjustment);
 
         result.PostingEventId.Should().Be(postingEventId);
@@ -276,5 +277,24 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
         captured.Lines.Sum(value => value.CreditAmount).Should().Be(20m);
         captured.Lines.Should().ContainSingle(value => value.AccountId == expenseAccountId && value.DebitAmount == 20m);
         captured.Lines.Should().ContainSingle(value => value.AccountId == inventoryAccountId && value.CreditAmount == 20m);
+    }
+
+    private static Mock<IFinanceSourceDimensionService> Dimensions()
+    {
+        var dimensions = new Mock<IFinanceSourceDimensionService>();
+        dimensions.Setup(value => value.SynchronizeDraftAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(), It.IsAny<FinanceSourceDocumentDimensionInputDto?>(),
+                It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+        dimensions.Setup(value => value.ValidateAndFreezeAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+        dimensions.Setup(value => value.ResolvePostingDimensionsAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FinancePostingDimensionValueDto>());
+        return dimensions;
     }
 }

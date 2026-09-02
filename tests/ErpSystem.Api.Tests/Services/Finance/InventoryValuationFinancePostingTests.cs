@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -47,11 +48,11 @@ public sealed class InventoryValuationFinancePostingTests
         await db.SaveChangesAsync();
         FinancePostingRequestDto? captured = null;
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => captured = request)
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestDto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(Result());
 
-        await new InventoryReceiptFinancePostingService(db, posting.Object)
+        await new InventoryReceiptFinancePostingService(db, posting.Object, Dimensions().Object)
             .PostAcceptedReceiptAsync(receipt.Id);
 
         captured.Should().NotBeNull();
@@ -90,11 +91,11 @@ public sealed class InventoryValuationFinancePostingTests
         await db.SaveChangesAsync();
         FinancePostingRequestDto? captured = null;
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => captured = request)
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestDto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(Result());
 
-        await new InventoryLandedCostFinancePostingService(db, posting.Object).PostLandedCostAsync(landed.Id);
+        await new InventoryLandedCostFinancePostingService(db, posting.Object, Dimensions().Object).PostLandedCostAsync(landed.Id);
 
         captured!.SourceDocumentType.Should().Be("InventoryLandedCost");
         captured.Lines.Sum(value => value.DebitAmount).Should().Be(50m);
@@ -120,6 +121,25 @@ public sealed class InventoryValuationFinancePostingTests
         PostingEventId = Guid.NewGuid(), JournalEntryId = Guid.NewGuid(), JournalEntryNumber = "JE-TEST",
         PostingStatus = "Posted", FunctionalCurrencyCode = "GHS"
     };
+
+    private static Mock<IFinanceSourceDimensionService> Dimensions()
+    {
+        var dimensions = new Mock<IFinanceSourceDimensionService>();
+        dimensions.Setup(value => value.SynchronizeDraftAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(), It.IsAny<FinanceSourceDocumentDimensionInputDto?>(),
+                It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+        dimensions.Setup(value => value.ValidateAndFreezeAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+        dimensions.Setup(value => value.ResolvePostingDimensionsAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FinancePostingDimensionValueDto>());
+        return dimensions;
+    }
 
     private static ApplicationDbContext Context()
     {

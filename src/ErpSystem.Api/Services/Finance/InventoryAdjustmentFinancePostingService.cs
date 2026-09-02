@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
@@ -13,11 +14,16 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
 {
     private readonly ApplicationDbContext _db;
     private readonly IFinancePostingEngine _posting;
+    private readonly IFinanceSourceDimensionService _dimensions;
 
-    public InventoryAdjustmentFinancePostingService(ApplicationDbContext db, IFinancePostingEngine posting)
+    public InventoryAdjustmentFinancePostingService(
+        ApplicationDbContext db,
+        IFinancePostingEngine posting,
+        IFinanceSourceDimensionService dimensions)
     {
         _db = db;
         _posting = posting;
+        _dimensions = dimensions;
     }
 
     public async Task<InventoryAdjustmentFinancePostingResult> PostAsync(StockAdjustment adjustment, CancellationToken cancellationToken = default)
@@ -56,30 +62,32 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
                 if (item.AdjustmentQuantity <= 0 || item.UnitCost <= 0 || item.AdjustmentValue <= 0)
                     throw new InvalidOperationException("Opening stock can post only positive quantity and unit-cost evidence.");
                 lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
-                    "INV-OPEN-CONTROL", adjustment.AdjustmentDate));
+                    "INV-OPEN-CONTROL", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "opening-control")));
                 lines.Add(Line(migrationClearing!.Value, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
-                    "INV-OPEN-MIGRATION", adjustment.AdjustmentDate));
+                    "INV-OPEN-MIGRATION", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "opening-migration")));
             }
             else if (item.AdjustmentQuantity < 0)
             {
                 var expenseAccount = expense
                     ?? throw new InvalidOperationException("Write-off Expense Account is not configured in Finance Settings.");
                 lines.Add(Line(expenseAccount, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
-                    "INV-ADJ-EXPENSE", adjustment.AdjustmentDate));
+                    "INV-ADJ-EXPENSE", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "writeoff-expense")));
                 lines.Add(Line(inventory, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
-                    "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
+                    "INV-ADJ-CONTROL", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "inventory-control")));
             }
             else
             {
                 var recoveryAccount = recovery
                     ?? throw new InvalidOperationException("Write-off Recovery Account is not configured in Finance Settings.");
                 lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
-                    "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
+                    "INV-ADJ-CONTROL", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "inventory-control")));
                 lines.Add(Line(recoveryAccount, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
-                    "INV-ADJ-RECOVERY", adjustment.AdjustmentDate));
+                    "INV-ADJ-RECOVERY", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "recovery-income")));
             }
         }
         if (lines.Count == 0) throw new InvalidOperationException("The stock adjustment has no non-zero value to post to Finance.");
+        var producer = Producer();
+        await ApplyDimensionsAsync(producer, adjustment.Id, adjustment.AdjustmentDate, lines, cancellationToken);
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
@@ -98,7 +106,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"StockAdjustment:{adjustment.TenantId:N}:{adjustment.Id:N}:Post",
             Lines = lines
-        }, cancellationToken);
+        }, producer, cancellationToken);
         return new(result.PostingEventId, result.JournalEntryId);
     }
 
@@ -131,14 +139,15 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             FunctionalCurrencyCode = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant(),
             IdempotencyKey = $"StockAdjustment:{adjustment.TenantId:N}:{adjustment.Id:N}:Reverse",
             Lines = plan.ReversalLines
-        }, cancellationToken);
+        }, Producer(), cancellationToken);
         return new(result.PostingEventId, result.JournalEntryId);
     }
 
     private static FinancePostingLineDto Line(Guid accountId, string description, decimal debit, decimal credit,
-        string currency, int lineNumber, string reference, string tag, DateTime exchangeRateDate) => new()
+        string currency, int lineNumber, string reference, string tag, DateTime exchangeRateDate, Guid sourceLineId) => new()
     {
         AccountId = accountId,
+        SourceDocumentLineId = sourceLineId,
         Description = description,
         DebitAmount = debit,
         CreditAmount = credit,
@@ -152,4 +161,41 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         LineNumber = lineNumber,
         TransactionTag = tag
     };
+
+    private async Task ApplyDimensionsAsync(
+        FinancePostingProducerContext producer,
+        Guid documentId,
+        DateTime documentDate,
+        IReadOnlyList<FinancePostingLineDto> lines,
+        CancellationToken cancellationToken)
+    {
+        var contexts = lines.Select(line => new FinanceSourceDocumentLineContext(
+            line.SourceDocumentLineId!.Value, line.AccountId)).ToArray();
+        if (!await HasCompleteFrozenEvidenceAsync(producer, documentId, contexts, cancellationToken))
+            await _dimensions.SynchronizeDraftAsync(producer, documentId, documentDate, contexts, null, false, null,
+                "Inventory stock-adjustment Finance adapter capture", cancellationToken);
+        await _dimensions.ValidateAndFreezeAsync(producer, documentId, documentDate, contexts, false, cancellationToken);
+        foreach (var line in lines)
+            line.Dimensions = await _dimensions.ResolvePostingDimensionsAsync(
+                producer, documentId, line.SourceDocumentLineId!.Value, line.AccountId, documentDate, cancellationToken);
+    }
+
+    private async Task<bool> HasCompleteFrozenEvidenceAsync(
+        FinancePostingProducerContext producer, Guid documentId,
+        IReadOnlyList<FinanceSourceDocumentLineContext> lines, CancellationToken cancellationToken)
+    {
+        var expected = lines.Select(line => line.SourceLineId).ToHashSet();
+        var frozen = await _db.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item => item.RouteId == producer.RouteId && item.SourceDocumentId == documentId
+                && item.SourceLineId.HasValue && item.EvidenceFrozenAt.HasValue && !item.IsDeleted)
+            .Select(item => item.SourceLineId!.Value).ToListAsync(cancellationToken);
+        return frozen.ToHashSet().SetEquals(expected);
+    }
+
+    private static Guid SourceLine(Guid documentId, Guid itemId, string kind) =>
+        FinanceExternalDimensionIdentity.SourceLine(
+            FinanceExternalProducerContractId.InventoryStockAdjustment, documentId, kind, itemId);
+
+    private static FinancePostingProducerContext Producer() =>
+        FinanceExternalProducerContractCatalog.GetRequired(FinanceExternalProducerContractId.InventoryStockAdjustment);
 }
