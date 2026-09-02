@@ -76,7 +76,13 @@ public sealed class RecurringJournalAutomaticReversalTests
                 TransactionCurrency = "USD", TransactionCreditAmount = 100m, ForeignCurrencyAmount = 100m,
                 ExchangeRateId = exchangeRateId, ExchangeRate = 15m, ExchangeRateSource = "BOG", ExchangeRateDate = new DateTime(2026, 8, 31),
                 FinanceDimensionSetId = dimensionSetId, SegmentString = "HQ-OPS", LineNumber = 1 },
-            new() { AccountId = Guid.NewGuid(), DebitAmount = 1500m, CreditAmount = 0m, LineNumber = 2 }
+            new() { AccountId = Guid.NewGuid(), DebitAmount = 500m, CreditAmount = 0m, LineNumber = 2 },
+            new() { AccountId = Guid.NewGuid(), DebitAmount = 625m, CreditAmount = 0m, LineNumber = 3 },
+            new() { AccountId = Guid.NewGuid(), DebitAmount = 375m, CreditAmount = 0m,
+                TransactionCurrency = "USD", TransactionDebitAmount = 25m, ForeignCurrencyAmount = 25m,
+                ExchangeRateId = exchangeRateId, ExchangeRate = 15m, ExchangeRateSource = "BOG",
+                ExchangeRateDate = new DateTime(2026, 8, 31), FinanceDimensionSetId = dimensionSetId,
+                SegmentString = "HQ-OPS", SourceDocumentLineId = Guid.NewGuid(), LineNumber = 4 }
         ]);
         var processor = CreateProcessor(db, posting);
 
@@ -93,6 +99,8 @@ public sealed class RecurringJournalAutomaticReversalTests
         posting.LastRequest.Lines[0].DebitAmount.Should().Be(0m);
         posting.LastRequest.Lines[0].CreditAmount.Should().Be(1500m);
         posting.LastRequest.Lines[0].TransactionCreditAmount.Should().Be(100m);
+        posting.LastRequest.Lines.Should().HaveCount(4,
+            "the authorised automatic reversal must retain every immutable generated line");
         posting.LastRequest.IdempotencyKey.Should().Be($"RecurringJournal:{fixture.TenantId:N}:{fixture.OccurrenceId:N}:AutoReverse");
         var occurrence = await db.RecurringJournalOccurrences.SingleAsync();
         occurrence.Status.Should().Be(RecurringJournalOccurrenceStatus.Posted);

@@ -114,11 +114,12 @@ public sealed class RecurringJournalService : IRecurringJournalService
         };
 
         ApplyDefinition(template, request);
-        ReplaceLines(template, request.Lines, now, userId, template.CreatedBy);
+        RecurringJournalLineDefinitionEditor.Apply(template, request.Lines, now, userId, template.CreatedBy,
+            allowExistingLineIds: false);
         _db.RecurringJournalTemplates.Add(template);
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateCreated, template.Id, null,
-            new { template.TemplateNumber, template.Name, template.Frequency, lineCount = template.Lines.Count }, null,
+            new { template.TemplateNumber, template.Name, template.Frequency, lineCount = template.Lines.Count(line => !line.IsDeleted) }, null,
             cancellationToken);
         return await RequireMappedAsync(template.Id, cancellationToken);
     }
@@ -136,7 +137,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
 
         SetRowVersion(template, request.RowVersion);
         await ValidateDefinitionAsync(request, TenantId, cancellationToken);
-        var before = new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count };
+        var before = new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count(line => !line.IsDeleted) };
         var now = DateTime.UtcNow;
         var userId = CurrentUserId();
         ApplyDefinition(template, request);
@@ -153,12 +154,12 @@ public sealed class RecurringJournalService : IRecurringJournalService
         template.UpdatedAt = now;
         template.UpdatedBy = _currentUser.UserName;
         template.LastModifiedById = userId;
-        _db.RecurringJournalTemplateLines.RemoveRange(template.Lines);
-        template.Lines = [];
-        ReplaceLines(template, request.Lines, now, userId, template.UpdatedBy);
+        var lineEdit = RecurringJournalLineDefinitionEditor.Apply(template, request.Lines, now, userId, template.UpdatedBy,
+            allowExistingLineIds: true);
+        _db.RecurringJournalTemplateLines.AddRange(lineEdit.AddedLines);
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateUpdated, template.Id, before,
-            new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count }, null,
+            new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count(line => !line.IsDeleted) }, null,
             cancellationToken);
         return await RequireMappedAsync(template.Id, cancellationToken);
     }
@@ -452,6 +453,9 @@ public sealed class RecurringJournalService : IRecurringJournalService
             throw new InvalidOperationException("Maximum occurrences must be positive when supplied.");
         if (request.Lines.Count < 2)
             throw new InvalidOperationException("A recurring journal requires at least two balanced lines.");
+        if (request.Lines.Where(line => line.Id.HasValue).Select(line => line.Id!.Value).Distinct().Count() !=
+            request.Lines.Count(line => line.Id.HasValue))
+            throw new InvalidOperationException("Recurring-journal line identities must be unique.");
         if (request.Lines.Any(line => line.AccountId == Guid.Empty || line.FixedAmount <= 0))
             throw new InvalidOperationException("Every recurring-journal line requires an account and a positive fixed amount.");
 
@@ -568,10 +572,10 @@ public sealed class RecurringJournalService : IRecurringJournalService
             LastFailure = template.LastFailure,
             ExceptionCount = includeOccurrences ? template.Occurrences.Count(item => !item.IsDeleted &&
                 item.Status is RecurringJournalOccurrenceStatus.Failed or RecurringJournalOccurrenceStatus.SubmissionFailed) : 0,
-            TotalDebit = RoundMoney(template.Lines.Where(line => line.IsDebit).Sum(line => line.FixedAmount)),
-            TotalCredit = RoundMoney(template.Lines.Where(line => !line.IsDebit).Sum(line => line.FixedAmount)),
+            TotalDebit = RoundMoney(template.Lines.Where(line => !line.IsDeleted && line.IsDebit).Sum(line => line.FixedAmount)),
+            TotalCredit = RoundMoney(template.Lines.Where(line => !line.IsDeleted && !line.IsDebit).Sum(line => line.FixedAmount)),
             RowVersion = Convert.ToBase64String(template.RowVersion),
-            Lines = template.Lines.OrderBy(line => line.LineNumber).Select(line => new RecurringJournalTemplateLineDto
+            Lines = template.Lines.Where(line => !line.IsDeleted).OrderBy(line => line.LineNumber).Select(line => new RecurringJournalTemplateLineDto
             {
                 Id = line.Id, LineNumber = line.LineNumber, AccountId = line.AccountId,
                 AccountCode = accounts.GetValueOrDefault(line.AccountId)?.AccountCode ?? string.Empty,
@@ -625,23 +629,6 @@ public sealed class RecurringJournalService : IRecurringJournalService
         template.AutoReverse = request.AutoReverse;
         template.ReversalRule = request.AutoReverse ? request.ReversalRule : RecurringJournalReversalRule.None;
         template.ReversalDayOffset = request.AutoReverse ? request.ReversalDayOffset : null;
-    }
-
-    private static void ReplaceLines(RecurringJournalTemplate template, IReadOnlyList<RecurringJournalTemplateLineInputDto> lines,
-        DateTime now, Guid? userId, string? userName)
-    {
-        var number = 1;
-        foreach (var input in lines)
-        {
-            template.Lines.Add(new RecurringJournalTemplateLine
-            {
-                Id = Guid.NewGuid(), TenantId = template.TenantId, TemplateId = template.Id, LineNumber = number++,
-                AccountId = input.AccountId, IsDebit = input.IsDebit, FixedAmount = RoundMoney(input.FixedAmount),
-                Description = NormalizeOptional(input.Description, 500),
-                DimensionValuesJson = string.IsNullOrWhiteSpace(input.DimensionValuesJson) ? "{}" : input.DimensionValuesJson.Trim(),
-                CreatedAt = now, CreatedBy = userName, CreatedById = userId
-            });
-        }
     }
 
     private async Task<string> ResolveFunctionalCurrencyAsync(Guid tenantId, CancellationToken cancellationToken)
@@ -948,7 +935,7 @@ internal sealed record RecurringJournalSnapshot(
     public static RecurringJournalSnapshot From(RecurringJournalTemplate template) => new(
         template.TemplateNumber, template.Name, template.BookClassification, template.CurrencyCode,
         template.ReferencePattern, template.Frequency, template.AutoReverse, template.ReversalRule,
-        template.ReversalDayOffset, template.Lines.OrderBy(line => line.LineNumber).Select(line =>
+        template.ReversalDayOffset, template.Lines.Where(line => !line.IsDeleted).OrderBy(line => line.LineNumber).Select(line =>
             new RecurringJournalSnapshotLine(line.Id, line.LineNumber, line.AccountId, line.IsDebit, line.FixedAmount,
                 line.Description, line.DimensionValuesJson)).ToList());
 }

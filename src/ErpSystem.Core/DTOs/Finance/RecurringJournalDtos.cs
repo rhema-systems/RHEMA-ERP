@@ -4,6 +4,11 @@ namespace ErpSystem.Core.DTOs.Finance;
 
 public sealed class RecurringJournalTemplateLineInputDto
 {
+    /// <summary>
+    /// Existing line identity supplied only when editing a Draft or Rejected
+    /// template. New lines omit it and receive a server-generated identity.
+    /// </summary>
+    public Guid? Id { get; set; }
     public Guid AccountId { get; set; }
     public bool IsDebit { get; set; }
     public decimal FixedAmount { get; set; }

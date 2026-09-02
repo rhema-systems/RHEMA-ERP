@@ -156,6 +156,46 @@ public sealed class FinancePostingEngineTests
 
     [Fact]
     [Trait("Category", "PostingEngine")]
+    [Trait("Category", "RecurringJournal")]
+    public async Task PostAsync_ShouldPostEveryBalancedRecurringJournalLineWithStableSourceIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var expenseA = SeedAccount(db, tenantId, "6101", AccountType.Expense);
+        var expenseB = SeedAccount(db, tenantId, "6102", AccountType.Expense);
+        var accrualA = SeedAccount(db, tenantId, "2101", AccountType.Liability);
+        var accrualB = SeedAccount(db, tenantId, "2102", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var sourceLineIds = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
+        var request = CreateRequest(tenantId, expenseA.Id, accrualA.Id);
+        request.SourceModule = "GL";
+        request.SourceDocumentType = "RecurringJournalOccurrence";
+        request.PostingAction = "PostRecurringJournalOccurrence";
+        request.Lines =
+        [
+            new() { AccountId = expenseA.Id, SourceDocumentLineId = sourceLineIds[0], DebitAmount = 600m, LineNumber = 1 },
+            new() { AccountId = expenseB.Id, SourceDocumentLineId = sourceLineIds[1], DebitAmount = 400m, LineNumber = 2 },
+            new() { AccountId = accrualA.Id, SourceDocumentLineId = sourceLineIds[2], CreditAmount = 750m, LineNumber = 3 },
+            new() { AccountId = accrualB.Id, SourceDocumentLineId = sourceLineIds[3], CreditAmount = 250m, LineNumber = 4 }
+        ];
+
+        var result = await CreateService(db, tenantId).PostAsync(request);
+
+        result.PostingStatus.Should().Be("Posted");
+        result.TotalDebitAmount.Should().Be(1000m);
+        result.TotalCreditAmount.Should().Be(1000m);
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Should().HaveCount(4);
+        journal.Transactions.OrderBy(line => line.LineNumber).Select(line => line.SourceDocumentLineId)
+            .Should().Equal(sourceLineIds.Cast<Guid?>());
+        journal.BookClassification.Should().Be("IFRS");
+    }
+
+    [Fact]
+    [Trait("Category", "PostingEngine")]
     [Trait("Category", "FiscalPeriod")]
     public async Task PostAsync_ShouldRejectFutureDatedPosting_WhenPeriodPolicyIsDisabled()
     {
