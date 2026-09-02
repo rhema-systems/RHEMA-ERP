@@ -68,6 +68,54 @@ public sealed class ApPaymentPostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PartialCashAllocationPlusResidualAdvance_ShouldRemainUnsupported()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.TotalAmount = 100m,
+            allocationAmount: 60m);
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task NonCashSettlementComponents_ShouldNotReplaceAllocatedPaymentCash()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.TotalAmount = 100m,
+            allocationAmount: 60m);
+        fixture.Allocation.DiscountAmount = 40m;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-CrossCurrencyDeductions")]
     [Trait("Category", "AccountsPayable")]
     public async Task CrossCurrencyApPayment_ShouldPostLineScopedDiscountAndWhtAtFrozenFunctionalValues()
