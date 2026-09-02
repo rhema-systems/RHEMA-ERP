@@ -14,6 +14,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { FixedAssetDepreciationReversalPanel } from '@/components/finance/FixedAssetDepreciationReversalPanel';
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import type { FiscalPeriod } from '@/types/finance';
 import type { AssetDepreciationSchedule, FixedAsset } from '@/types/fixed-assets';
 
@@ -29,6 +31,7 @@ export default function DepreciationPage() {
   const [productionUnits, setProductionUnits] = useState('');
   const [productionEvidenceReference, setProductionEvidenceReference] = useState('');
   const [productionEvidenceNotes, setProductionEvidenceNotes] = useState('');
+  const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
 
   const selectedAssetData = useMemo(
     () => assets.find((asset) => asset.id === selectedAsset),
@@ -135,6 +138,11 @@ export default function DepreciationPage() {
         fiscalPeriodId: selectedPeriod,
         fixedAssetId: selectedAsset === 'all' ? undefined : selectedAsset,
         postToGl,
+        financeDimensions: {
+          defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+          lines: [],
+          applyDefaultToEligibleLines: true,
+        },
         productionUsageEntries: selectedAssetData?.depreciationMethod === 'UnitsOfProduction'
           ? [{
               fixedAssetId: selectedAssetData.id,
@@ -269,6 +277,14 @@ export default function DepreciationPage() {
               </div>
             </>
           )}
+        </CardContent>
+        <CardContent>
+          <SourceDocumentDimensionDefaultsPanel
+            effectiveDate={periods.find(period => period.id === selectedPeriod)?.endDate?.slice(0, 10) || new Date().toISOString().slice(0, 10)}
+            values={defaultDimensionValues}
+            onChange={setDefaultDimensionValues}
+            disabled={isRunning}
+          />
         </CardContent>
         <CardContent>
           <Button onClick={handleRun} disabled={isRunning}>

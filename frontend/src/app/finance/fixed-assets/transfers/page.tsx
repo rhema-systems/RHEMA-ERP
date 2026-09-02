@@ -19,6 +19,8 @@ import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.ser
 import { maintenanceDataService, Employee } from '@/services/maintenanceDataService';
 import { AssetTransfer, AssetTransferStatus, AssetTransferType, RequestAssetTransferDto, FixedAsset, FixedAssetCategory } from '@/types/fixed-assets';
 import { useToast } from "@/components/ui/use-toast";
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 export default function AssetTransfersPage() {
     const [transfers, setTransfers] = useState<AssetTransfer[]>([]);
@@ -31,6 +33,7 @@ export default function AssetTransfersPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assetComboOpen, setAssetComboOpen] = useState(false);
     const { toast } = useToast();
+    const [dimensionDefaults, setDimensionDefaults] = useState<Record<string, string>>({});
 
     // Form state
     const [formData, setFormData] = useState<Partial<RequestAssetTransferDto>>({
@@ -102,7 +105,14 @@ export default function AssetTransfersPage() {
 
         try {
             setIsSubmitting(true);
-            await fixedAssetsDataService.requestTransfer(formData as RequestAssetTransferDto);
+            await fixedAssetsDataService.requestTransfer({
+                ...formData,
+                financeDimensions: isGlReclassification ? {
+                    defaultDimensions: toFinancePostingDimensionValues(dimensionDefaults),
+                    lines: [],
+                    applyDefaultToEligibleLines: true,
+                } : undefined,
+            } as RequestAssetTransferDto);
             toast({
                 title: "Success",
                 description: "Asset transfer request submitted successfully.",
@@ -113,6 +123,7 @@ export default function AssetTransfersPage() {
                 transferDate: new Date().toISOString().split('T')[0],
                 bookClassification: 'IFRS',
             });
+            setDimensionDefaults({});
             loadData();
         } catch (error) {
             console.error('Failed to submit transfer request:', error);
@@ -380,6 +391,14 @@ export default function AssetTransfersPage() {
                                     onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
                                 />
                             </div>
+                            {isGlReclassification && (
+                                <SourceDocumentDimensionDefaultsPanel
+                                    effectiveDate={formData.accountingDate || formData.transferDate || new Date().toISOString().slice(0, 10)}
+                                    values={dimensionDefaults}
+                                    onChange={setDimensionDefaults}
+                                    disabled={isSubmitting}
+                                />
+                            )}
                             <DialogFooter>
                                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                                 <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>

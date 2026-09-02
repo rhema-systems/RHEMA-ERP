@@ -39,6 +39,53 @@ export interface SourceDocumentDimensionPanelProps {
   disabled?: boolean;
 }
 
+export interface SourceDocumentDimensionDefaultsPanelProps {
+  effectiveDate: string;
+  values: Record<string, string>;
+  onChange: (values: Record<string, string>) => void;
+  disabled?: boolean;
+}
+
+/**
+ * Capture surface for server-derived economic lines whose stable IDs/accounts are not available
+ * until the Finance action builds its posting proposal. The server applies this clearable default
+ * only to eligible lines, resolves Fixed values, and remains authoritative for every line.
+ */
+export function SourceDocumentDimensionDefaultsPanel({
+  effectiveDate,
+  values,
+  onChange,
+  disabled = false,
+}: SourceDocumentDimensionDefaultsPanelProps) {
+  const { data: definitions = [], isLoading } = useQuery({
+    queryKey: ['finance-dimensions', 'source-document-defaults'],
+    queryFn: () => financeDataService.getFinanceDimensions(),
+  });
+
+  if (isLoading)
+    return <div className="rounded-lg border p-4 text-sm text-muted-foreground">Loading Finance coding dimensions…</div>;
+  if (definitions.length === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded-lg border p-4">
+      <TransactionDimensionDefaults
+        definitions={definitions}
+        effectiveDate={effectiveDate}
+        values={values}
+        onChange={onChange}
+        onApplyToAll={() => undefined}
+        showApplyToAll={false}
+        disabled={disabled}
+      />
+      <p className="flex items-start gap-2 text-xs text-muted-foreground">
+        <LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        Finance applies this default to eligible economic lines. Fixed values are resolved and locked
+        by the server; prohibited values are never copied. Each resulting line remains authoritative.
+      </p>
+    </div>
+  );
+}
+
 export function SourceDocumentDimensionPanel({
   context,
   effectiveDate,

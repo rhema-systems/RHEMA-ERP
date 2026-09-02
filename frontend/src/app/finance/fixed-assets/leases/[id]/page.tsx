@@ -9,7 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { leaseAccountingService, type LeaseContractDetail, type LeaseStatus } from '@/services/finance/leaseAccountingService';
-import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { SourceDocumentDimensionDefaultsPanel, SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues, toFinanceSourceDimensionFormState } from '@/lib/finance/source-document-dimensions';
 
 export default function LeaseDetailPage() {
   const params = useParams();
@@ -18,6 +19,8 @@ export default function LeaseDetailPage() {
 
   const [lease, setLease] = useState<LeaseContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recognitionDefaults, setRecognitionDefaults] = useState<Record<string, string>>({});
+  const [periodDefaults, setPeriodDefaults] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const load = async () => {
@@ -25,6 +28,7 @@ export default function LeaseDetailPage() {
         setLoading(true);
         const data = await leaseAccountingService.getById(id);
         setLease(data);
+        setRecognitionDefaults(toFinanceSourceDimensionFormState(data.recognitionFinanceDimensions).defaultValues);
       } catch (error) {
         console.error('Failed to load lease:', error);
       } finally {
@@ -42,7 +46,11 @@ export default function LeaseDetailPage() {
   const handleActivate = async () => {
     if (!confirm('Activate this lease? This will create the ROU fixed asset and post recognition GL journal.')) return;
     try {
-      await leaseAccountingService.activate(id);
+      await leaseAccountingService.activate(id, {
+        defaultDimensions: toFinancePostingDimensionValues(recognitionDefaults),
+        lines: [],
+        applyDefaultToEligibleLines: true,
+      });
       await refresh();
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : 'Activation failed');
@@ -52,7 +60,11 @@ export default function LeaseDetailPage() {
   const handlePostPeriod = async (lineId: string, periodNumber: number) => {
     if (!confirm(`Post journal for period ${periodNumber}?`)) return;
     try {
-      await leaseAccountingService.postPeriodJournal(id, lineId);
+      await leaseAccountingService.postPeriodJournal(id, lineId, {
+        defaultDimensions: toFinancePostingDimensionValues(periodDefaults),
+        lines: [],
+        applyDefaultToEligibleLines: true,
+      });
       await refresh();
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : 'Failed to post period');
@@ -143,6 +155,22 @@ export default function LeaseDetailPage() {
       </Card>
 
       <SourceDocumentDimensionEvidence evidence={lease.recognitionFinanceDimensions} />
+
+      {lease.status === 'Draft' && (
+        <SourceDocumentDimensionDefaultsPanel
+          effectiveDate={lease.startDate.slice(0, 10)}
+          values={recognitionDefaults}
+          onChange={setRecognitionDefaults}
+        />
+      )}
+
+      {lease.status === 'Active' && lease.scheduleLines.some(line => !line.isPosted) && (
+        <SourceDocumentDimensionDefaultsPanel
+          effectiveDate={(lease.scheduleLines.find(line => !line.isPosted)?.periodDate || lease.startDate).slice(0, 10)}
+          values={periodDefaults}
+          onChange={setPeriodDefaults}
+        />
+      )}
 
       {/* Amortization Schedule */}
       <Card>

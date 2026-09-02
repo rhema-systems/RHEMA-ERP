@@ -19,6 +19,8 @@ import type {
   SubmitFixedAssetCapitalizationDto,
 } from '@/types/fixed-assets';
 import type { Account } from '@/types/finance';
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues, toFinanceSourceDimensionFormState } from '@/lib/finance/source-document-dimensions';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const toDate = (value?: string) => value ? value.slice(0, 10) : '';
@@ -54,6 +56,9 @@ export function FixedAssetCapitalizationApprovalPanel({ asset, category, onChang
     exchangeRateId: asset.exchangeRateId,
     exchangeRateDate: toDate(asset.exchangeRateDate),
   });
+  const [dimensionDefaults, setDimensionDefaults] = useState<Record<string, string>>(
+    () => toFinanceSourceDimensionFormState(asset.financeDimensions).defaultValues
+  );
 
   useEffect(() => {
     let active = true;
@@ -109,6 +114,11 @@ export function FixedAssetCapitalizationApprovalPanel({ asset, category, onChang
         reason: form.reason.trim(),
         comments: form.comments?.trim() || undefined,
         exchangeRateDate: form.exchangeRateDate || undefined,
+        financeDimensions: {
+          defaultDimensions: toFinancePostingDimensionValues(dimensionDefaults),
+          lines: [],
+          applyDefaultToEligibleLines: true,
+        },
       });
       toast({
         title: 'Capitalization submitted',
@@ -225,6 +235,12 @@ export function FixedAssetCapitalizationApprovalPanel({ asset, category, onChang
                   placeholder="Point the checker to supporting documents or evidence." />
               </div>
             </div>
+            <SourceDocumentDimensionDefaultsPanel
+              effectiveDate={form.capitalizationDate || today()}
+              values={dimensionDefaults}
+              onChange={setDimensionDefaults}
+              disabled={!!busy}
+            />
             <div className="flex items-center justify-between gap-3 rounded-md border bg-white p-3">
               <p className="text-sm text-muted-foreground">Save any asset edits before submitting; submission reads the persisted register evidence.</p>
               <Button onClick={submit} disabled={!!busy}>

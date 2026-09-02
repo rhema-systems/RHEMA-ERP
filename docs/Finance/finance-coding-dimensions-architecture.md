@@ -242,10 +242,20 @@ original line's frozen set/snapshot instead of resolving current defaults. Dispo
 receipt orchestration uses dedicated typed producer contexts; the receipt allocation inherits the
 exact disposal-sale invoice-line combinations and cannot impersonate a manual AR route.
 
-Each route has a tenant-scoped readiness provider. Promotion remains blocked by in-flight legacy
-documents, missing stable source lines, unfrozen evidence, unavailable canonical sets or missing
-immutable snapshots. Procurement-origin capitalization and every other external producer remain
-outside these Finance-owned routes and require the separate additive adapter track.
+Each route has a tenant-scoped readiness provider. The generic assignment store persists the trusted
+document accounting date, resolved economic account for every line, expected line count and a
+deterministic line/account manifest hash. Promotion replays current effective account rules and is
+blocked by in-flight legacy documents, incomplete or changed line manifests, unresolved accounts,
+ambiguous rules, Fixed-value drift, prohibited assignments, missing Required values, unavailable
+canonical sets, unfrozen submitted evidence or missing immutable snapshots. Legacy assignments that
+lack trusted context must be reopened and saved through their Finance route; a dimension-set ID alone
+is not certification evidence.
+
+Fixed Asset action screens capture a clearable document default before the server constructs their
+derived economic lines. The server applies it only to eligible lines and remains authoritative for
+each resulting line; Fixed values are resolved automatically and reversal screens continue to inherit
+the original frozen evidence. Procurement-origin capitalization and every other external producer
+remain outside these Finance-owned routes and require the separate additive adapter track.
 
 ## Acceptance criteria
 
