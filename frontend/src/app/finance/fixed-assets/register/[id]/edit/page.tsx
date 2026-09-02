@@ -16,8 +16,8 @@ import { FixedAssetCapitalizationReversalPanel } from '@/components/finance/Fixe
 import { FixedAssetCapitalizationApprovalPanel } from '@/components/finance/FixedAssetCapitalizationApprovalPanel';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
+import { DepreciationConventionField } from '@/components/finance/fixed-assets/DepreciationConventionField';
 import type {
-  DepreciationConvention,
   DepreciationMethod,
   FixedAsset,
   FixedAssetCategory,
@@ -437,24 +437,12 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               </p>
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="convention">Depreciation Convention</Label>
-            <Select
-              value={formData.depreciationConvention}
-              onValueChange={(value) => setFormData({ ...formData, depreciationConvention: value as DepreciationConvention })}
-              disabled={accountingLocked}
-            >
-              <SelectTrigger id="convention">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="FullMonth">Full Month</SelectItem>
-                <SelectItem value="MidMonth">Mid Month</SelectItem>
-                <SelectItem value="HalfYear">Half Year</SelectItem>
-                <SelectItem value="ActualDays">Actual Days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <DepreciationConventionField
+            value={formData.depreciationConvention}
+            method={formData.depreciationMethod}
+            disabled={accountingLocked}
+            onChange={(depreciationConvention) => setFormData({ ...formData, depreciationConvention })}
+          />
           <div className="space-y-2">
             <Label htmlFor="usefulLife">Useful Life (Months)</Label>
             <Input

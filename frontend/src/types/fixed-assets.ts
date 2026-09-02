@@ -317,6 +317,16 @@ export interface AssetDepreciationSchedule {
   cumulativeProductionUnitsAfter: number;
   productionEvidenceReference?: string;
   productionEvidenceNotes?: string;
+  placedInServiceDateSnapshot?: string;
+  depreciationConventionSnapshot: DepreciationConvention;
+  conventionFactor: number;
+  conventionBasis: string;
+  conventionEligibleFromDate?: string;
+  conventionEligibleToDate?: string;
+  fiscalPeriodStartDateSnapshot?: string;
+  fiscalPeriodEndDateSnapshot?: string;
+  fiscalYearStartDateSnapshot?: string;
+  fiscalYearEndDateSnapshot?: string;
   accumulatedDepreciation: number;
   netBookValue: number;
   isPosted: boolean;

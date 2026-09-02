@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
-import type { CreateFixedAssetDto, DepreciationConvention, DepreciationMethod, FixedAssetCategory, FixedAssetLocationOption } from '@/types/fixed-assets';
+import { DepreciationConventionField } from '@/components/finance/fixed-assets/DepreciationConventionField';
+import type { CreateFixedAssetDto, DepreciationMethod, FixedAssetCategory, FixedAssetLocationOption } from '@/types/fixed-assets';
 
 export default function NewFixedAssetPage() {
   const { toast } = useToast();
@@ -271,23 +272,11 @@ export default function NewFixedAssetPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="convention">Depreciation Convention</Label>
-            <Select
-              value={formData.depreciationConvention}
-              onValueChange={(value) => setFormData({ ...formData, depreciationConvention: value as DepreciationConvention })}
-            >
-              <SelectTrigger id="convention">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="FullMonth">Full Month</SelectItem>
-                <SelectItem value="MidMonth">Mid Month</SelectItem>
-                <SelectItem value="HalfYear">Half Year</SelectItem>
-                <SelectItem value="ActualDays">Actual Days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <DepreciationConventionField
+            value={formData.depreciationConvention}
+            method={formData.depreciationMethod}
+            onChange={(depreciationConvention) => setFormData({ ...formData, depreciationConvention })}
+          />
           {(formData.depreciationMethod === 'DecliningBalance' ||
             formData.depreciationMethod === 'DoubleDecliningBalance') && (
             <div className="space-y-2">

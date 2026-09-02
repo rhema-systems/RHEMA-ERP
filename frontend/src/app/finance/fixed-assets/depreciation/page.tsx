@@ -205,7 +205,7 @@ export default function DepreciationPage() {
             <Calculator className="h-8 w-8" />
             Run Depreciation
           </h1>
-          <p className="text-muted-foreground">Generate depreciation schedules and post to GL.</p>
+          <p className="text-muted-foreground">Generate convention-aware schedules and post them through the governed Finance engine.</p>
         </div>
         <Link href="/finance/fixed-assets/register">
           <Button variant="outline">Back to Register</Button>
@@ -361,6 +361,7 @@ export default function DepreciationPage() {
               <TableRow>
                 <TableHead>Asset</TableHead>
                 <TableHead>Method</TableHead>
+                <TableHead>Convention evidence</TableHead>
                 <TableHead className="text-right">Usage</TableHead>
                 <TableHead className="text-right">Depreciation</TableHead>
                 <TableHead className="text-right">Accumulated</TableHead>
@@ -371,7 +372,7 @@ export default function DepreciationPage() {
             <TableBody>
               {results.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     No depreciation results yet.
                   </TableCell>
                 </TableRow>
@@ -380,6 +381,12 @@ export default function DepreciationPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-mono">{row.fixedAssetId}</TableCell>
                     <TableCell>{row.depreciationMethodSnapshot}</TableCell>
+                    <TableCell>
+                      <div>{row.depreciationMethodSnapshot === 'UnitsOfProduction' ? 'Usage-based' : row.depreciationConventionSnapshot}</div>
+                      <div className="text-xs text-muted-foreground" title={row.conventionBasis}>
+                        Factor {row.conventionFactor.toFixed(8).replace(/0+$/, '').replace(/\.$/, '')} · {row.conventionBasis}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
                       {row.depreciationMethodSnapshot === 'UnitsOfProduction'
                         ? row.periodProductionUnits.toFixed(4)
