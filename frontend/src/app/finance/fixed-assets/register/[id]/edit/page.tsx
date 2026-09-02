@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { FixedAssetCapitalizationReversalPanel } from '@/components/finance/FixedAssetCapitalizationReversalPanel';
 import { FixedAssetCapitalizationApprovalPanel } from '@/components/finance/FixedAssetCapitalizationApprovalPanel';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import type {
   DepreciationConvention,
   DepreciationMethod,
@@ -464,6 +465,10 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           </div>
         </CardContent>
       </Card>
+
+      {asset && (
+        <SourceDocumentDimensionEvidence evidence={asset.financeDimensions} />
+      )}
 
       {asset && (
         <FixedAssetCapitalizationApprovalPanel

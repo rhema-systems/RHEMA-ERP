@@ -1,3 +1,5 @@
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+
 export type DepreciationMethod =
   | 'StraightLine'
   | 'DecliningBalance'
@@ -108,6 +110,7 @@ export interface FixedAsset {
   postingEventId?: string;
   capitalizedAt?: string;
   capitalizationApprovalSnapshot?: FixedAssetCapitalizationApprovalSnapshot;
+  financeDimensions?: FinanceSourceDocumentDimension;
   capitalizationApprovalSnapshotHash?: string;
   capitalizationApprovalWorkflowInstanceId?: string;
   capitalizationApprovalSubmittedByUserId?: string;
@@ -286,6 +289,7 @@ export interface RunDepreciationDto {
   postingDate?: string;
   bookClassification?: string;
   productionUsageEntries?: FixedAssetProductionUsage[];
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface FixedAssetProductionUsage {
@@ -463,6 +467,7 @@ export interface AssetTransfer {
   journalEntryId?: string;
   postingEventId?: string;
   createdAt: string;
+  financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface RequestAssetTransferDto {
@@ -480,6 +485,7 @@ export interface RequestAssetTransferDto {
   reason?: string;
   transferCost?: number;
   idempotencyKey?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ApproveAssetTransferDto {
@@ -563,6 +569,7 @@ export interface AssetDisposal {
   saleTaxGroupId?: string;
   saleTaxTreatment: AssetDisposalSaleTaxTreatment;
   settlementPaymentTermId?: string;
+  financeDimensions?: FinanceSourceDocumentDimension;
   settlementPaymentMethodId?: string;
   settlementBankAccountId?: string;
   settlementLiquidityAccountId?: string;
@@ -610,6 +617,7 @@ export interface RequestAssetDisposalDto {
   finalDepreciationProductionUnits?: number;
   finalDepreciationEvidenceReference?: string;
   finalDepreciationEvidenceNotes?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ApproveAssetDisposalDto {
@@ -706,6 +714,7 @@ export interface CreateAssetValuationDto {
   valuationReportReference?: string;
   reason?: string;
   notes?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface CreateBulkAssetValuationDto {
@@ -718,6 +727,7 @@ export interface CreateBulkAssetValuationDto {
   valuationReportReference?: string;
   reason?: string;
   notes?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface AssetValuation {
@@ -750,6 +760,7 @@ export interface AssetValuation {
   journalEntryId?: string;
   postedDate?: string;
   createdAt: string;
+  financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface RequestAssetValuationCorrectionDto {

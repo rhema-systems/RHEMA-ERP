@@ -516,7 +516,22 @@ export type FinanceDimensionRouteId =
     | 'FinanceCashBankTransfer'
     | 'FinanceBankDeposit'
     | 'FinanceReturnedCheque'
-    | 'FinanceBankReconciliationAdjustment';
+    | 'FinanceBankReconciliationAdjustment'
+    | 'FinanceFixedAssetCapitalization'
+    | 'FinanceFixedAssetCapitalizationReversal'
+    | 'FinanceFixedAssetDepreciation'
+    | 'FinanceFixedAssetDepreciationReversal'
+    | 'FinanceFixedAssetRevaluation'
+    | 'FinanceFixedAssetImpairment'
+    | 'FinanceFixedAssetImpairmentReversal'
+    | 'FinanceFixedAssetValuationCorrection'
+    | 'FinanceFixedAssetDisposal'
+    | 'FinanceFixedAssetDisposalSaleInvoice'
+    | 'FinanceFixedAssetDisposalSaleReceipt'
+    | 'FinanceFixedAssetReclassification'
+    | 'FinanceCapitalProjectSettlement'
+    | 'FinanceLeaseRecognition'
+    | 'FinanceLeasePeriodPosting';
 
 export type FinanceDimensionCertificationState = 'LegacyReadOnly' | 'CaptureOptional' | 'Enforced';
 

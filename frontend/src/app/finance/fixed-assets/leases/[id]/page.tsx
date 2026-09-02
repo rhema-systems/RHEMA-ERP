@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { leaseAccountingService, type LeaseContractDetail, type LeaseStatus } from '@/services/finance/leaseAccountingService';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function LeaseDetailPage() {
   const params = useParams();
@@ -141,6 +142,8 @@ export default function LeaseDetailPage() {
         </CardContent>
       </Card>
 
+      <SourceDocumentDimensionEvidence evidence={lease.recognitionFinanceDimensions} />
+
       {/* Amortization Schedule */}
       <Card>
         <CardHeader>
@@ -192,6 +195,23 @@ export default function LeaseDetailPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {lease.scheduleLines.some(line => line.financeDimensions?.lines.length) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Lease period dimension evidence</CardTitle>
+            <CardDescription>Frozen evidence remains tied to each immutable schedule line.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {lease.scheduleLines.filter(line => line.financeDimensions?.lines.length).map(line => (
+              <div key={line.id} className="space-y-2">
+                <p className="text-sm font-medium">Period {line.periodNumber}</p>
+                <SourceDocumentDimensionEvidence evidence={line.financeDimensions} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

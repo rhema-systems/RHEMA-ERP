@@ -221,6 +221,32 @@ discovery cannot prove that every external source document used the adapter. Pro
 fail-closed until the owning module adopts its specific contract and supplies authoritative census
 and consumer tests. No producer-module implementation was changed by this Finance expansion.
 
+### Finance Fixed Assets expansion (routes 46-60)
+
+Finance-owned Fixed Assets posting paths use separate compiled `CaptureOptional` routes for direct
+capitalization and reversal, depreciation and reversal, revaluation, impairment, impairment
+reversal, valuation correction, disposal, disposal-sale AR invoice, disposal-sale immediate
+receipt, GL reclassification, capital-project settlement, lease recognition and lease-period
+posting. Route identity is not inferred from the underlying posting service.
+
+Every economic component has a deterministic source-line identity. Depreciation keys include the
+asset, book and schedule lineage; disposal cost, accumulated depreciation, impairment, proceeds,
+gain/loss and equity-transfer components remain distinct. Capital-project rounding residuals are
+assigned to the final ordered settlement rule. Lease recognition and each schedule-period component
+resolve account rules independently.
+
+Direct Finance source values and defaults persist through the generic source-assignment store.
+Fixed values remain server-resolved and read-only. Submitted evidence is frozen per source line and
+copied to the exact posting line. Capitalization, depreciation and valuation reversals register the
+original line's frozen set/snapshot instead of resolving current defaults. Disposal-sale invoice and
+receipt orchestration uses dedicated typed producer contexts; the receipt allocation inherits the
+exact disposal-sale invoice-line combinations and cannot impersonate a manual AR route.
+
+Each route has a tenant-scoped readiness provider. Promotion remains blocked by in-flight legacy
+documents, missing stable source lines, unfrozen evidence, unavailable canonical sets or missing
+immutable snapshots. Procurement-origin capitalization and every other external producer remain
+outside these Finance-owned routes and require the separate additive adapter track.
+
 ## Acceptance criteria
 
 - Two postings to the same GL account can carry different dimension sets.

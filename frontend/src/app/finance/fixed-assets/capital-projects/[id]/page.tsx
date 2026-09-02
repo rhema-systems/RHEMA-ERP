@@ -15,6 +15,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { capitalProjectService, type CapitalProjectDetail, type ProjectStatus, type AddProjectCostDto, type AddSettlementRuleDto } from '@/services/finance/capitalProjectService';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function CapitalProjectDetailPage() {
   const params = useParams();
@@ -198,6 +199,8 @@ export default function CapitalProjectDetailPage() {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Accumulated Cost</CardTitle></CardHeader><CardContent className="text-xl font-semibold">{formatMoney(project.totalAccumulatedCost)}</CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Capitalized</CardTitle></CardHeader><CardContent className="text-xl font-semibold">{formatMoney(project.capitalizedAmount)}</CardContent></Card>
       </div>
+
+      <SourceDocumentDimensionEvidence evidence={project.financeDimensions} />
 
       {/* Cost Lines */}
       <Card>
