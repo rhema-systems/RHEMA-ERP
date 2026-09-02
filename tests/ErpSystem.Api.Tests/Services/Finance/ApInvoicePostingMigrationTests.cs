@@ -173,6 +173,39 @@ public sealed class ApInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task InvoiceTradeDiscount_ShouldPostWithoutDiscountReceivedAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            var line = invoice.LineItems.Single();
+            line.DiscountPercentage = 10m;
+            line.DiscountAmount = 10m;
+            invoice.SubTotal = 90m;
+            invoice.DiscountAmount = 10m;
+            invoice.TotalAmount = 90m;
+            invoice.BaseCurrencyAmount = 90m;
+        });
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.DiscountReceivedAccountId = null;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(item => item.AccountId == fixture.ApAccount.Id)
+            .CreditAmount.Should().Be(90m);
+        journal.Transactions.Single(item => item.AccountId == fixture.ExpenseAccount.Id)
+            .DebitAmount.Should().Be(90m);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-APBudget")]
     [Trait("Category", "AccountsPayable")]
     public async Task DirectBudgetControlledExpense_ShouldReserveBeforeApprovalWorkflowStarts()
