@@ -12,7 +12,19 @@ import os, re, json, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 OUT = os.path.join(HERE, "out")
-LEDGER = os.path.join(ROOT, "docs", "HR-CLOSURE-LEDGER.md")
+# ⚠ 2026-09-01: this script NO LONGER writes docs/HR-CLOSURE-LEDGER.md.
+#
+# That file began as this script's output and has since been hand-curated by many sessions —
+# the C2 build checklists, the expanded D-entries, section E2's classification pass and the
+# contract-column reservation among them. Regenerating over it deleted **697 lines**, including
+# the "⛔ THREE RESERVED BY DECISION, DO NOT DROP" note that is the only thing standing between
+# a future session and dropping three live columns.
+#
+# So the curated ledger is now the artefact of record, and this script writes a COMPANION that
+# carries the fresh machine-derived numbers. Diff the two and merge deliberately; never copy the
+# companion over the ledger.
+CURATED = os.path.join(ROOT, "docs", "HR-CLOSURE-LEDGER.md")
+LEDGER = os.path.join(ROOT, "scripts", "hr-coverage", "out", "HR-CLOSURE-LEDGER.generated.md")
 
 routes = json.load(open(os.path.join(OUT, "hr_routes.json")))
 unwired = json.load(open(os.path.join(OUT, "unwired.json")))
@@ -914,56 +926,120 @@ for _f, _v, _r, _k in [
 
 # Curated items that no static instrument can see — the demo-feedback backlog and the scheduler.
 DEMO_FEEDBACK = [
-    ("Employee Master", "Disability tick and description sit on EmployeeDependent, not Employee", "BUILD", "Wrong entity, not merely absent"),
-    ("Employee Master", "Probation dates stay editable after confirmation", "BUILD", "No confirmed-state guard on contract update"),
-    ("Employee Master", "Manager picker ignores ReportsToPosition", "BUILD", "Field exists and is populated; picker does not use it"),
-    ("Employee Master", "Gender 'Other' has no description field", "BUILD", ""),
-    ("Employee Master", "Hometown absent from the employee record", "BUILD", ""),
-    ("Employee Master", "Guarantor has no guaranteed amount and no photograph", "BUILD", ""),
-    ("Employee Master", "Referees cannot carry a reference letter", "BUILD", ""),
-    ("Employee Master", "Expatriate: no issue dates, no resident permit, no family members", "BUILD", "FamilyAccompanying is a bare bool"),
-    ("Employee Master", "IdentificationType has no expiry notification lead days", "BUILD", "Per-type setting"),
-    ("Employee Master", "Certification bodies are free text, not a lookup", "BUILD", "EmployeeSkill.CertifyingBody"),
-    ("Employee Master", "No mandatory documents against a position", "BUILD", ""),
-    ("Employee Master", "No employee document attachments", "BUILD", "Controlled upload gate already exists"),
-    ("Employee Master", "Qualification level is not a dimension", "BUILD", "QualificationType is a category, not an academic level"),
-    ("Employee Master", "Staff number auto/manual is behaviour, not configuration", "BUILD", "No mode flag, no prefix/format"),
-    ("Employee Master", "Exit interview questions are fixed fields", "BUILD", "Not a configurable question set; no attachments"),
-    ("Employee Master", "No appointment letter templates", "BUILD", "Only email templates exist"),
-    ("Employee Master", "No labour-law checklist", "BUILD", ""),
-    ("Employee Master", "No mass application of benefits to dependents", "BUILD", ""),
-    ("Employee Master", "Workflow step checklists unused by any HR process", "DECIDE", "Candidates: onboarding, separation clearance, probation"),
-    ("Leave", "Compassionate leave cannot be set off against annual leave", "DECIDE", "No offset/advance concept anywhere; needs a design call"),
-    ("Leave", "Adjustment form does not show the employee's balance", "BUILD", ""),
-    ("Leave", "Reliever clashes are not visible on the plan", "BUILD", ""),
-    ("Leave", "Free-text field still labelled 'Reason', not 'Remarks'", "BUILD", "Cosmetic"),
-    ("Leave", "Leave request numbering still uses a max+1 scan", "BUILD", "Move to NumberSequence as Training already did"),
-    ("Succession", "Criteria candidate search has no screen", "BUILD", "successionSearchService.searchCandidates has no caller"),
-    ("Succession", "Candidate age and service-years-left not displayed", "BUILD", "API returns both"),
-    ("Training", "Bulk nomination has no UI", "BUILD",
-     "⚠ Re-verified 2026-08-31 and the row was UNDERSTATED, not wrong. `setBulkResult` is declared "
-     "at NomineesPanel.tsx:63 and has no call site anywhere in the frontend, and there is no "
-     "`bulkNominate` client method at all — but `bulkResult` IS rendered at lines 158-166, listing "
-     "the created count and every skipped row. So the RESULT DISPLAY for a bulk nomination was "
-     "built and the action never was: the panel is waiting for a batch that nothing can start."),
-    ("Training", "Bulk completion has no UI and no client method", "DONE",
-     "⚠ **The row was false on both halves, re-verified 2026-08-31.** `BulkCompletionPanel.tsx` "
-     "exists, calls `trainingCompletionService.bulkRecord` at line 89, and is mounted on the "
-     "schedule detail screen at `schedules/[id]/page.tsx:364` with a readOnly guard for cancelled "
-     "schedules. The endpoint is `TrainingCompletionsController.BulkRecordCompletion`."),
-    ("Training", "Nominee availability check never shown", "DONE",
-     "⚠ **The row was false, re-verified 2026-08-31.** A 'Check availability' control is wired at "
-     "NomineesPanel.tsx:314 onto `checkAvailability` (lines 93-97), which calls "
-     "`trainingNominationService.checkAvailability` and renders the conflicts. Closure lane 2 built "
-     "it and this row was never updated — the generator already carried a DONE for the controller "
-     "while this row and the endpoint disposition beside it both still said BUILD."),
-    ("Training", "No 'Training Activities' grouped screen", "BUILD", ""),
-    ("Training", "Mentoring still inside the Training menu", "BUILD", "Wants its own nav section"),
-    ("Training", "Certificate does not gate completion", "BUILD", "Per-program flag"),
-    ("Training", "Menu order differs from TDC's suggestion", "DECIDE", "Setup/operations split may be deliberate"),
-    ("Recruitment", "Menu still reads 'Manpower Budgets'", "BUILD", "Rename to Manpower Recruitment Budget"),
-    ("Appraisal", "Check-in link to company objectives", "DECIDE", "Confirm with TDC that it matches intent"),
-    ("Platform", "Scheduled HR sweeps: two failed nightly, two were never hosted", "DONE 2026-08-31", "⚠ This row read \"No AddHostedService registration for HR\", which had been false for weeks — six HR engines were hosted. What was true was worse and invisible: see D-38. Retirement and contract-expiry alerts (FR-HR-093) now run on a timer. Leave year-end is deliberately NOT scheduled: carry-over and forfeiture move balances rather than raise reminders, so automating them is a policy decision for TDC."),
+    ('Employee Master', 'Disability tick and description sit on EmployeeDependent, not Employee',
+     'DONE 2026-09-01',
+     'Lane 3a. `HasDisability`/`DisabilityDescription` now sit on **both** `Employee` (`HREntities.cs:89`) and `EmployeeDependent` (`:1117`) — duplicated by decision, not moved: a disabled dependant is a separate fact from a disabled employee.'),
+    ('Employee Master', 'Probation dates stay editable after confirmation',
+     'DONE 2026-09-01',
+     'Lane 3d, 35 assertions ×2. `EmployeeService.RequireUnconfirmedProbationAsync` (`:1525`, called at `:1566`), keyed off `Employee.ConfirmationDate` — the field the probation service actually writes. Only the two probation fields are gated.'),
+    ('Employee Master', 'Manager picker ignores ReportsToPosition',
+     'DONE 2026-09-01',
+     'Lane 3d. `EmployeeForm.tsx:285-289` offers the holders of the position this one reports to, and keeps the free search — a manager is not always the post-holder. A vacant supervising post says so in words.'),
+    ('Employee Master', "Gender 'Other' has no description field",
+     'DONE 2026-09-01',
+     'Lane 3a. `GenderDescription` on the employee DTOs and on `EmployeeGuarantor`.'),
+    ('Employee Master', 'Hometown absent from the employee record',
+     'DONE 2026-09-01',
+     'Lane 3a. `Employee.Hometown` (`HREntities.cs:75`) and all three DTOs. ⚠ Nullable-means-not-supplied: sending `hometown: null` leaves the old value, the house convention.'),
+    ('Employee Master', 'Guarantor has no guaranteed amount and no photograph',
+     'DONE 2026-09-01',
+     "Lane 3a. `AmountGuaranteed` + `AmountGuaranteedCurrencyCode` (validated against Finance's currency master) and the photograph through the controlled upload gate. The position carries the requirement; guarantors **sum** against it."),
+    ('Employee Master', 'Referees cannot carry a reference letter',
+     'DONE 2026-09-01',
+     'Lane 3a. `EmployeeReferee.Letter{FileUploadRecordId,DocumentRecordId,DocumentVersionId,FileName,MimeType,FileSizeBytes}` — the controlled upload gate, not a path string.'),
+    ('Employee Master', 'Expatriate: no issue dates, no resident permit, no family members',
+     'DONE 2026-09-01',
+     'Lane 3a. `WorkPermitIssueDate` and the permit dates on the expatriate record, plus a real `ExpatriateFamilyMember` entity with its own resident-permit number and dates. `FamilyAccompanying` now says who.'),
+    ('Employee Master', 'IdentificationType has no expiry notification lead days',
+     'DONE 2026-09-01',
+     'Lane 3b. `IdentificationType.ExpiryNotificationLeadDays`, with the expiry sweep and its screen.'),
+    ('Employee Master', 'Certification bodies are free text, not a lookup',
+     'DONE 2026-09-01',
+     'Lane 3b, 40 assertions ×2. `CertifyingBodyId` on the skill DTOs with an admin catalogue behind it; the free-text column is **kept alongside**, not replaced, because existing rows hold text nobody has mapped. ⚠ The column had existed with an FK and no DTO — settable and readable nowhere.'),
+    ('Employee Master', 'No mandatory documents against a position',
+     'DONE 2026-09-01',
+     'Lane 3c, 47 assertions ×2. `PositionDocumentRequirement` (`EmployeeDocuments.cs:153`) with a requirements panel on the position edit screen.'),
+    ('Employee Master', 'No employee document attachments',
+     'DONE 2026-09-01',
+     'Lane 3c, 47 assertions ×2. `EmployeeDocumentType` and `EmployeeDocument` (`EmployeeDocuments.cs:22`, `:74`) on the controlled upload gate.'),
+    ('Employee Master', 'Qualification level is not a dimension',
+     'DONE 2026-09-01',
+     'Lane 3b, 40 assertions ×2. `QualificationLevelId` on the qualification DTOs with an admin ladder behind it. ⚠ The level lives on the `Qualification` MASTER, not on `EmployeeQualification`. Same unreachable-column shape as the certifying body.'),
+    ('Employee Master', 'Staff number auto/manual is behaviour, not configuration',
+     'DONE 2026-09-01',
+     'Lane 3b, 49 assertions ×2. `StaffNumberFormat` per employment type, issued through `INumberSequenceService`, with a settings screen, a counter panel and the import door that advances the counter past loaded numbers.'),
+    ('Employee Master', 'Exit interview questions are fixed fields',
+     'BUILD',
+     'Not a configurable question set; no attachments. ⚠ **Re-verified 2026-09-01: still true** — no `ExitInterviewQuestion` entity anywhere. Needs schema.'),
+    ('Employee Master', 'No appointment letter templates',
+     'BUILD',
+     '⚠ **Re-verified 2026-09-01: still true, and the reason is sharper than "only email templates exist".** There is no `LetterTemplate` entity anywhere in the solution. Letters ARE produced — `HrLetterRequest` issues three kinds (employment confirmation, introduction, service certificate) and `IOfferLetterService` generates an offer letter — but every one of those templates is **built into code**, so HR cannot author or vary an appointment letter. Lane 3a-ii\'s seal renders into those same built-in templates. Needs a template store before it needs a screen.'),
+    ('Employee Master', 'No labour-law checklist',
+     'BUILD',
+     "⚠ **Re-verified 2026-09-01: still true** — nothing matching `labour`/`labor` law anywhere. **This is the one lane-3 row that genuinely needs TDC first**: the checklist's content is a legal question, not a design one."),
+    ('Employee Master', 'No mass application of benefits to dependents',
+     'BUILD',
+     '⚠ **Re-verified 2026-09-01: still true.** This is a **bulk operation**, which is the excluded `docs/HR/` programme. Build the single-record path here and record the bulk need there rather than inventing a second bulk pattern.'),
+    ('Employee Master', 'Workflow step checklists unused by any HR process',
+     'DECIDE',
+     'Candidates: onboarding, separation clearance, probation'),
+    ('Leave', 'Compassionate leave cannot be set off against annual leave',
+     'DECIDE',
+     'No offset/advance concept anywhere; needs a design call'),
+    ('Leave', "Adjustment form does not show the employee's balance",
+     'DONE 2026-09-01',
+     'Balance preview inside the form from `GET employee/{id}/balances`, with the after-adjustment figure. ⚠ Found D-40 while building it.'),
+    ('Leave', 'Reliever clashes are not visible on the plan',
+     'DONE 2026-09-01',
+     '`relieverClashes` on every plan read from three sources (own plan, own live request, reliever on another plan) + `GET hr/leave-plans/reliever-clashes` for the form. Advisory. Second reliever now editable on the desk (it was nulled on every edit).'),
+    ('Leave', "Free-text field still labelled 'Reason', not 'Remarks'",
+     'DONE 2026-09-01',
+     'Adjustment form, column and search placeholder.'),
+    ('Leave', 'Leave request numbering still uses a max+1 scan',
+     'DONE 2026-09-01',
+     '`INumberSequenceService` (`LEAVE-REQ`), seeded past the highest number on record including deleted rows; asserted create → soft-delete → create.'),
+    ('Succession', 'Criteria candidate search has no screen',
+     'DONE 2026-09-01',
+     "`CandidateSearchPanel`: standalone (Find Candidates) and inside a plan's Candidates tab locked to the post; a result pre-fills the nominate form. 33 assertions on the payloads first."),
+    ('Succession', 'Candidate age and service-years-left not displayed',
+     'DONE 2026-09-01',
+     "Two columns on the plan's candidate table."),
+    ('Training', 'Bulk nomination has no UI',
+     'DONE 2026-09-01',
+     '"Nominate several" dialog on the schedule\'s Nominees tab; the client method `bulkCreate` DID exist (the 2026-08-31 note below was wrong on that half). Seats are taken at approval, not nomination — the dialog says so. ⚠ Earlier note: Re-verified 2026-08-31 and the row was UNDERSTATED, not wrong. `setBulkResult` is declared at NomineesPanel.tsx:63 and has no call site anywhere in the frontend, and there is no `bulkNominate` client method at all — but `bulkResult` IS rendered at lines 158-166, listing the created count and every skipped row. So the RESULT DISPLAY for a bulk nomination was built and the action never was: the panel is waiting for a batch that nothing can start.'),
+    ('Training', 'Bulk completion has no UI and no client method',
+     'DONE',
+     '⚠ **The row was false on both halves, re-verified 2026-08-31.** `BulkCompletionPanel.tsx` exists, calls `trainingCompletionService.bulkRecord` at line 89, and is mounted on the schedule detail screen at `schedules/[id]/page.tsx:364` with a readOnly guard for cancelled schedules. The endpoint is `TrainingCompletionsController.BulkRecordCompletion`.'),
+    ('Training', 'Nominee availability check never shown',
+     'DONE',
+     "⚠ **The row was false, re-verified 2026-08-31.** A 'Check availability' control is wired at NomineesPanel.tsx:314 onto `checkAvailability` (lines 93-97), which calls `trainingNominationService.checkAvailability` and renders the conflicts. Closure lane 2 built it and this row was never updated — the generator already carried a DONE for the controller while this row and the endpoint disposition beside it both still said BUILD."),
+    ('Training', "No 'Training Activities' grouped screen",
+     'DONE 2026-09-01',
+     'Interpreted as the desk twin of My Training (`/hr/training/activities`) — see section A. Assumption to confirm with TDC.'),
+    ('Training', 'Mentoring still inside the Training menu',
+     'DONE 2026-09-01',
+     'Own top-level nav section (pairs + programmes); routes unchanged.'),
+    ('Training', 'Certificate does not gate completion',
+     'DONE 2026-09-01',
+     'Verification of a PASSED completion of a `ProvidesCertificate` programme is refused (422) until an active certificate exists — see section A. Assumption to confirm with TDC.'),
+    ('Training', "Menu order differs from TDC's suggestion",
+     'DECIDE',
+     'Setup/operations split may be deliberate'),
+    ('Recruitment', "Menu still reads 'Manpower Budgets'",
+     'DONE 2026-09-01',
+     '"Manpower Recruitment Budgets" — sidebar, HR landing, list and new-page titles.'),
+    ('Appraisal', 'Check-in link to company objectives',
+     'DECIDE',
+     'Confirm with TDC that it matches intent'),
+    ('Employee Master', 'Dependants carry no student-status flag',
+     'BUILD',
+     '⚠ Found by lane 5a, 2026-09-01. `CreateEmployeeDependentDto.IsStudentDependent` exists on the DTO and **nowhere else** — no column, no mapper, no service — so it is a field a caller may send that vanishes. It matters: student status is how `MedicalInsurancePlan.MaxChildAge` dependant eligibility actually works, so cover for an adult child in full-time education cannot be represented today. Needs a column before it needs a form.'),
+    ('Medical', 'Recorded BMI is caller-supplied beside the height and weight it should come from',
+     'BUILD',
+     '⚠ Found by lane 5a, 2026-09-01. The exam form collects `heightCm` and `weightKg`; `BMIRecorded` is a third, independent number that nothing computes or checks. Compute it on save rather than adding an input — a stored BMI that disagrees with the two measurements beside it is a defect waiting.'),
+    ('Platform', 'Scheduled HR sweeps: two failed nightly, two were never hosted',
+     'DONE 2026-08-31',
+     '⚠ This row read "No AddHostedService registration for HR", which had been false for weeks — six HR engines were hosted. What was true was worse and invisible: see D-38. Retirement and contract-expiry alerts (FR-HR-093) now run on a timer. Leave year-end is deliberately NOT scheduled: carry-over and forfeiture move balances rather than raise reminders, so automating them is a policy decision for TDC.'),
 ]
 
 # Controllers we have committed to building. For these the ledger enumerates EVERY write
@@ -1703,6 +1779,32 @@ BLOCKERS = [
      "being built now. Before any /me surface offers 'accept this invitation', it needs a "
      "self-or-permission check against the participant's own employee id.",
      "Blocks a future self-service calendar only"),
+    ("D-40", "Two Employee-FK actor columns were fed the login's user id by the screens", "DONE 2026-09-01",
+     "Found by lane 4's harness, 2026-09-01, while building the adjustment form's balance "
+     "preview. `LeaveAdjustment.PerformedBy` and `LeavePlan.PlannedBy` are **required foreign "
+     "keys to `Employees`**. The adjustments screen, the leave-plans screen and the self-service "
+     "planner all sent `user.id` in the payload — a login id, never an employee id — and the "
+     "services stored what they were sent (`AddAdjustmentAsync` verbatim; the standalone create "
+     "fell back to `GetCurrentUserId()`, also a user id, when the payload was empty). Every "
+     "adjustment and every plan raised from a screen had therefore failed on the constraint: the "
+     "old build returned **500** to both creates in the harness, and `LeaveAdjustments` was "
+     "empty.\n\n"
+     "  \u26a0 A third writer had the same column: `LeaveYearEndService.ProcessForfeitureAsync` "
+     "posted `PerformedBy = Guid.Empty // system-posted`. No employee has the empty id, so the "
+     "forfeiture endpoint had never once succeeded — and its only harness evidence was a 403 "
+     "check, so the insert had never run.\n\n"
+     "  \u26a0 Why nothing static saw it: the write compiled, the payload validated, the DTO had "
+     "a `Guid` where a `Guid` was expected. Only the database said no, and only a write that "
+     "actually executed could ask it. Same family as the discipline lesson (the token's id "
+     "reaching the service is not the actor being stored) — here the actor never reached the "
+     "service at all.\n\n"
+     "  Fixed: both columns stamped from `ICurrentUserService.EmployeeId` on every write path "
+     "(create, balance-nested create, forfeiture; an edit keeps the original planner); "
+     "`PerformedBy`/`PlannedBy` removed from the create DTOs; an unlinked account is refused "
+     "with \"requires your user account to be linked to an employee record\" (400) rather than "
+     "500. Screens no longer send either. Harness: "
+     "`dev-harness/hr-finish-lane4/run-lane4-leave.mjs`, 54 assertions \u00d72.",
+     "Cleared. Lane 4."),
 ]
 
 
@@ -1723,9 +1825,16 @@ w = lines.append
 
 w("# HR Closure Programme — master ledger")
 w("")
-w("> Generated by `scripts/hr-coverage/04_build_ledger.py`. Re-run the four scripts in order to")
-w("> refresh the machine-derived sections. Dispositions live in the generator, not in this file —")
-w("> edit `DISPOSITIONS` / `DEMO_FEEDBACK` there so a regeneration never loses a decision.")
+w("> ⚠ **This file is hand-curated. It is no longer overwritten by its generator.**")
+w("> `scripts/hr-coverage/04_build_ledger.py` writes a companion to")
+w("> `scripts/hr-coverage/out/HR-CLOSURE-LEDGER.generated.md`; diff the two and merge the fresh")
+w("> machine numbers by hand. Re-running the three instruments first is what refreshes them.")
+w(">")
+w("> Corrected 2026-09-01: the banner used to say \"dispositions live in the generator, not in")
+w("> this file\". That stopped being true a long time ago — every session since has edited this")
+w("> file instead, and a regeneration would now delete ~700 lines of curated content, including")
+w("> the reserved-contract-columns decision. Keep `DISPOSITIONS` / `DEMO_FEEDBACK` in the")
+w("> generator in step with this file where you can, so the companion stays a useful diff.")
 w("")
 w("**Disposition key** — `BUILD` real gap · `DONE` built and verified · `INTENTIONAL` correct")
 w("as-is, never report again · `FALSE` instrument artefact · `DECIDE` needs a call · `REVIEW` not")
@@ -1803,7 +1912,11 @@ w("| 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 a
 w("| 2026-08-29 | **The dominant real gap is the missing edit.** Assets, medical clinical records, medical expense claims and their items, travel policy rules, travel groups, and the four movement sub-types all wire create and (mostly) delete, and not the correction. A record raised wrongly can be destroyed but not fixed — which is the worse of the two on anything a person is charged, paid or moved by. |")
 w("| 2026-08-29 | **Two wired approval queues can never have anything in them.** `CreateExceptionAsync` (travel policy exceptions) and `CreateAlertNotificationAsync` (travel compliance alerts) each have exactly one caller — their own endpoint — and no screen calls either, while the pending-queue read and the decide/acknowledge action on both are wired. Nothing raises the thing the queue exists to work through. |")
 w("| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so the employee surface has to be built. ⚠ The reason given here — that HR's `pending-appeals` queue was unfillable — was wrong, and corrected on 2026-08-30: that queue lists demotions awaiting an answer, so it was always full and nothing could leave it. The conclusion stands; the reasoning did not. |")
-w("| 2026-08-29 | **Manpower budgets can be created and approved but not edited or deleted.** `PUT`/`DELETE api/JobAnalysis/budgets/{}` and `PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller — surfaced when the whole JobAnalysis controller was enumerated, and outside that slice's scope (its disposition named the twelve job-description child collections). Area 18, unscheduled. |")
+w("| 2026-08-29 | **Manpower budgets can be created and approved but not edited or deleted.** `PUT`/`DELETE api/JobAnalysis/budgets/{}` and `PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller — surfaced when the whole JobAnalysis controller was enumerated, and outside that slice's scope (its disposition named the twelve job-description child collections). Area 18, unscheduled. **⚠ STALE — struck 2026-09-01 (lane 4):** all four were wired in 2efd553c (`updateBudget`, `deleteBudget`, `updateBudgetLine`, `deleteBudgetLine` on the budget detail page) and this ledger's own C2 checklist had already ticked them. Two dispositions on one endpoint disagreeing, again. |")
+w('| 2026-09-01 | **Lane 4, "Training Activities grouped screen" — interpreted as the DESK twin of My Training:** one employee\'s nominations, requests, completions, certificates and mandatory compliance on one screen (`/hr/training/activities`). The five pre-port feedback documents section F cites are not on disk, so this is an assumption to confirm with TDC; every read it makes is a per-employee endpoint that already existed. |')
+w('| 2026-09-01 | **Lane 4, "Certificate does not gate completion — per-program flag" — interpreted as:** a PASSED completion of a programme flagged `ProvidesCertificate` (the per-programme flag, which nothing had read) cannot be VERIFIED until an active certificate exists for the nomination. Failed completions and programmes without a certificate are not held; a revoked certificate does not count. Assumption to confirm with TDC. |')
+w('| 2026-09-01 | **Seats are taken at approval, not at nomination — on the bulk path as on the single one.** `EnforceScheduleCapacityAsync` runs on the approve paths only. The bulk-nomination dialog must not invent a stricter rule; a full schedule refuses the approval and the overflow goes to the waitlist. |')
+w('| 2026-09-01 | **Leave request numbers come from `INumberSequenceService`** (`LEAVE-REQ`, year-bucketed, format `LV{year}{seq:D6}` preserved), seeded once per tenant-year from the highest number on record **including deleted rows**. The max+1 scan is gone. |')
 w("")
 
 w("## B. Blockers — must clear before the dependent build starts")
@@ -1996,6 +2109,12 @@ w("")
 
 os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
 open(LEDGER, "w", encoding="utf-8").write("\n".join(lines))
+print()
+print("  !! This is the COMPANION, not the ledger. The curated ledger was NOT touched:")
+print("      curated  : %s" % CURATED)
+print("      companion: %s" % LEDGER)
+print("    Diff them and merge by hand. Copying the companion over the ledger deletes ~700")
+print("    lines of curated content, including the reserved-columns decision.")
 print("wrote %s (%d lines)" % (LEDGER, len(lines)))
 print("  confirmed unreachable: %d across %d controllers" % (len(HIGH), len(by_file)))
 print("  hand-review queue:     %d across %d controllers" % (sum(counts.values()), len(counts)))
