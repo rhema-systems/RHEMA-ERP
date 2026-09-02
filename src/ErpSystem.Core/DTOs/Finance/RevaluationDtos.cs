@@ -48,6 +48,21 @@ namespace ErpSystem.Core.DTOs.Finance
         public List<CurrencyRevaluationPreviewLineDto> Lines { get; set; } = new();
     }
 
+    /// <summary>
+    /// Stable response returned after a revaluation journal has posted. This deliberately
+    /// excludes EF navigation properties so a successful posting cannot be reported as a
+    /// client-side JSON failure while serializing the journal entity graph.
+    /// </summary>
+    public sealed class CurrencyRevaluationPostingResultDto
+    {
+        public Guid Id { get; set; }
+        public string JournalEntryNumber { get; set; } = string.Empty;
+        public string PostingStatus { get; set; } = string.Empty;
+        public decimal TotalDebitAmount { get; set; }
+        public decimal TotalCreditAmount { get; set; }
+        public DateTime? PostingDate { get; set; }
+    }
+
     public sealed class CurrencyRevaluationPreviewLineDto
     {
         public Guid AccountId { get; set; }

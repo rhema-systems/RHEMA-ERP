@@ -201,7 +201,15 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var journalEntry = await _revaluationService.RunCurrencyRevaluationAsync(requestDto);
-                return Ok(journalEntry);
+                return Ok(new CurrencyRevaluationPostingResultDto
+                {
+                    Id = journalEntry.Id,
+                    JournalEntryNumber = journalEntry.JournalEntryNumber,
+                    PostingStatus = journalEntry.PostingStatus,
+                    TotalDebitAmount = journalEntry.TotalDebitAmount,
+                    TotalCreditAmount = journalEntry.TotalCreditAmount,
+                    PostingDate = journalEntry.PostingDate
+                });
             }
             catch (Exception ex)
             {

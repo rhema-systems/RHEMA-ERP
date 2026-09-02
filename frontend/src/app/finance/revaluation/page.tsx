@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { financeService } from '@/services/finance.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { Currency, CurrencyRevaluationPreviewDto, FinanceSettings, FxRevaluationBatchSummaryDto, JournalEntry } from '@/types/finance';
+import type { Currency, CurrencyRevaluationPostingResultDto, CurrencyRevaluationPreviewDto, FinanceSettings, FxRevaluationBatchSummaryDto } from '@/types/finance';
 
 const emptyGuid = '00000000-0000-0000-0000-000000000000';
 
@@ -30,7 +30,7 @@ export default function CurrencyRevaluationPage() {
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [currencies, setCurrencies] = useState<Currency[]>([]);
     const [preview, setPreview] = useState<CurrencyRevaluationPreviewDto | null>(null);
-    const [postedJournal, setPostedJournal] = useState<JournalEntry | null>(null);
+    const [postedJournal, setPostedJournal] = useState<CurrencyRevaluationPostingResultDto | null>(null);
     const [history, setHistory] = useState<FxRevaluationBatchSummaryDto[]>([]);
     const [reversingBatch, setReversingBatch] = useState<FxRevaluationBatchSummaryDto | null>(null);
     const [reversalDate, setReversalDate] = useState(new Date().toISOString().slice(0, 10));

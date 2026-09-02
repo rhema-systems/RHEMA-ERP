@@ -2361,6 +2361,15 @@ export interface CurrencyRevaluationPreviewDto {
     lines: CurrencyRevaluationPreviewLineDto[];
 }
 
+export interface CurrencyRevaluationPostingResultDto {
+    id: string;
+    journalEntryNumber: string;
+    postingStatus: string;
+    totalDebitAmount: number;
+    totalCreditAmount: number;
+    postingDate?: string;
+}
+
 export interface CurrencyRevaluationPreviewLineDto {
     accountId: string;
     accountNumber: string;

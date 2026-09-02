@@ -39,6 +39,7 @@ import type {
   PaginatedResponse,
   TrendAnalysisDto,
   CurrencyRevaluationPreviewDto,
+  CurrencyRevaluationPostingResultDto,
   FxRevaluationBatchSummaryDto,
 } from '@/types/finance';
 
@@ -1037,8 +1038,8 @@ class FinanceService {
   /**
    * Run currency revaluation
    */
-  async runRevaluation(request: RevaluationRequestDto): Promise<JournalEntry> {
-    return apiService.post<JournalEntry>(`${this.baseUrl}/revaluation`, request);
+  async runRevaluation(request: RevaluationRequestDto): Promise<CurrencyRevaluationPostingResultDto> {
+    return apiService.post<CurrencyRevaluationPostingResultDto>(`${this.baseUrl}/revaluation`, request);
   }
 
   /**
