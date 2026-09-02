@@ -243,6 +243,7 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutExecutionServiceTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
+    <Compile Include="Services\Finance\RecurringJournalAutomaticReversalTests.cs" />
     <Compile Include="Services\Finance\FinanceReportAutomationTests.cs" />
     <!-- Keep FR-AR-009 in the default Finance regression suite. This project disables
          implicit compile items, so omitting the explicit entry would silently build the

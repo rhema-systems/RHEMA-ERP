@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, CalendarClock, FileText, Loader2, Pause, Play, ShieldCheck, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { ArrowLeft, CalendarClock, FileText, Loader2, Pause, Play, RotateCcw, ShieldCheck, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import {
   recurringJournalDataService,
   type RecurringJournalTemplate,
@@ -20,6 +21,8 @@ const label = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2');
 export default function RecurringJournalDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canRetryReversal = hasPermission('Finance.JournalEntries.Post');
   const [item, setItem] = useState<RecurringJournalTemplate>();
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string>();
@@ -35,7 +38,7 @@ export default function RecurringJournalDetailPage() {
   useEffect(() => { void load(); }, [load]);
 
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
-    if (reason.trim().length < 10 && key !== 'post') {
+    if (reason.trim().length < 10 && key !== 'post' && !key.startsWith('retry-')) {
       toast({ title: 'Add a meaningful decision reason', description: 'At least 10 characters are required for the Finance audit trail.', variant: 'destructive' });
       return;
     }
@@ -75,23 +78,25 @@ export default function RecurringJournalDetailPage() {
 
     <div className="grid gap-6 lg:grid-cols-3">
       <Card className="lg:col-span-2"><CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" />Generated occurrences</CardTitle></CardHeader><CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full text-sm">
-        <thead className="border-y bg-muted/40"><tr><th className="p-3 text-left">Scheduled / effective</th><th>Status</th><th>Journal</th><th className="text-right">Action</th></tr></thead>
+        <thead className="border-y bg-muted/40"><tr><th className="p-3 text-left">Scheduled / effective</th><th>Status</th><th>Journals</th><th>Automatic reversal</th><th className="text-right">Action</th></tr></thead>
         <tbody>
-          {item.occurrences.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">No due occurrence has been generated.</td></tr>}
+          {item.occurrences.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No due occurrence has been generated.</td></tr>}
           {item.occurrences.map(occurrence => <tr className="border-b" key={occurrence.id}>
             <td className="p-4"><div>{occurrence.scheduledDate}</div><div className="text-xs text-muted-foreground">Effective {occurrence.effectiveDate}{occurrence.adjustmentExplanation ? ` · ${occurrence.adjustmentExplanation}` : ''}</div></td>
             <td className="text-center"><Badge variant={occurrence.status === 'Posted' ? 'default' : 'outline'}>{label(occurrence.status)}</Badge>{occurrence.errorMessage && <div className="mt-1 max-w-xs text-xs text-destructive">{occurrence.errorMessage}</div>}</td>
-            <td className="text-center">{occurrence.journalEntryId ? <Link className="text-blue-700 hover:underline" href={`/finance/journal-entries/${occurrence.journalEntryId}`}>View journal</Link> : '—'}</td>
+            <td className="p-3 text-center"><div>{occurrence.journalEntryId ? <Link className="text-blue-700 hover:underline" href={`/finance/journal-entries/${occurrence.journalEntryId}`}>Original journal</Link> : '—'}</div>{occurrence.postedAt && <div className="text-xs text-muted-foreground">Posted {new Date(occurrence.postedAt).toLocaleString()}</div>}{occurrence.reversalJournalEntryId && <div><Link className="text-blue-700 hover:underline" href={`/finance/journal-entries/${occurrence.reversalJournalEntryId}`}>Reversal journal</Link></div>}</td>
+            <td className="p-3 text-center">{occurrence.reversalDueDate ? <div className="space-y-1"><div>Due {occurrence.reversalDueDate}</div><Badge variant={occurrence.reversalStatus === 'Posted' ? 'default' : occurrence.reversalStatus === 'Failed' ? 'destructive' : 'outline'}>{label(occurrence.reversalStatus)}</Badge>{occurrence.reversedAt && <div className="text-xs text-muted-foreground">Reversed {new Date(occurrence.reversedAt).toLocaleString()}</div>}{occurrence.reversalAttemptCount > 0 && <div className="text-xs text-muted-foreground">Attempts {occurrence.reversalAttemptCount}{occurrence.reversalLastAttemptAt ? ` · ${new Date(occurrence.reversalLastAttemptAt).toLocaleString()}` : ''}</div>}{occurrence.reversalError && <div className="max-w-xs text-xs text-destructive">{occurrence.reversalError}</div>}</div> : 'Not configured'}</td>
             <td className="p-3 text-right"><div className="flex justify-end gap-2">
-              {occurrence.status === 'PendingApproval' && <><Button size="sm" onClick={() => run(`approve-${occurrence.id}`, () => recurringJournalDataService.approveOccurrence(occurrence.id, reason), 'Occurrence approved')} disabled={!!working}>Approve</Button><Button size="sm" variant="destructive" onClick={() => run(`reject-${occurrence.id}`, () => recurringJournalDataService.rejectOccurrence(occurrence.id, reason), 'Occurrence rejected')} disabled={!!working}>Reject</Button></>}
+              {occurrence.status === 'PendingApproval' && <><Button size="sm" onClick={() => run(`approve-${occurrence.id}`, () => recurringJournalDataService.approveOccurrence(occurrence.id, reason), occurrence.reversalDueDate ? 'Occurrence and exact automatic reversal authorized' : 'Occurrence approved')} disabled={!!working}>{occurrence.reversalDueDate ? 'Approve + authorize reversal' : 'Approve'}</Button><Button size="sm" variant="destructive" onClick={() => run(`reject-${occurrence.id}`, () => recurringJournalDataService.rejectOccurrence(occurrence.id, reason), 'Occurrence rejected')} disabled={!!working}>Reject</Button></>}
               {(occurrence.status === 'Approved' || occurrence.status === 'SubmissionFailed') && <Button size="sm" onClick={() => run('post', () => recurringJournalDataService.postOccurrence(occurrence.id), 'Occurrence posted')} disabled={!!working}>Post to GL</Button>}
+              {canRetryReversal && occurrence.status === 'Posted' && occurrence.reversalStatus === 'Failed' && <Button size="sm" variant="outline" onClick={() => run(`retry-${occurrence.id}`, () => recurringJournalDataService.retryReversal(occurrence.id), 'Automatic reversal retry processed')} disabled={!!working}><RotateCcw className="mr-1 h-4 w-4" />Retry reversal</Button>}
             </div></td>
           </tr>)}
         </tbody>
       </table></div></CardContent></Card>
 
       <div className="space-y-4">
-        <Card><CardHeader><CardTitle className="flex items-center gap-2"><CalendarClock className="h-5 w-5" />Standing instruction</CardTitle></CardHeader><CardContent className="space-y-3 text-sm"><p><b>Frequency:</b> {label(item.frequency)}</p><p><b>Business day:</b> {label(item.businessDayConvention)}</p><p><b>Effective from:</b> {item.effectiveFrom}</p><p><b>Auto reversal:</b> {item.autoReverse ? label(item.reversalRule) : 'No'}</p><p><b>Reference:</b> {item.referencePattern ?? 'System default'}</p></CardContent></Card>
+        <Card><CardHeader><CardTitle className="flex items-center gap-2"><CalendarClock className="h-5 w-5" />Standing instruction</CardTitle></CardHeader><CardContent className="space-y-3 text-sm"><p><b>Frequency:</b> {label(item.frequency)}</p><p><b>Business day:</b> {label(item.businessDayConvention)}</p><p><b>Effective from:</b> {item.effectiveFrom}</p><p><b>Automatic reversal:</b> {item.autoReverse ? label(item.reversalRule) : 'No'}</p>{item.autoReverse && <p className="text-xs text-muted-foreground">Occurrence approval authorizes the exact reversing journal to post automatically on its scheduled date. Any changed value requires the ordinary controlled correction workflow.</p>}<p><b>Reference:</b> {item.referencePattern ?? 'System default'}</p></CardContent></Card>
         <Card><CardHeader><CardTitle>Journal lines</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">{item.lines.map(line => <div key={line.id} className="rounded border p-3"><p className="font-medium">{line.accountCode} · {line.accountName}</p><p>{line.isDebit ? 'Debit' : 'Credit'} {formatMoney(line.fixedAmount)}</p></div>)}</CardContent></Card>
       </div>
     </div>

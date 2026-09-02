@@ -8,6 +8,7 @@ export type RecurringJournalOccurrenceStatus =
 export type RecurrenceFrequency = 'Daily' | 'Weekly' | 'SemiMonthly' | 'Monthly' | 'Quarterly' | 'Annually' | 'Custom';
 export type BusinessDayConvention = 'NoAdjustment' | 'NextBusinessDay' | 'PreviousBusinessDay';
 export type RecurringJournalReversalRule = 'None' | 'NextCalendarDay' | 'FirstDayOfNextFiscalPeriod' | 'DayOffset';
+export type RecurringJournalReversalStatus = 'NotApplicable' | 'PendingAuthorization' | 'Scheduled' | 'Processing' | 'Failed' | 'Posted';
 
 export interface RecurringJournalLineInput {
   accountId: string;
@@ -56,6 +57,14 @@ export interface RecurringJournalOccurrence {
   journalEntryId?: string;
   reversalJournalEntryId?: string;
   reversalDueDate?: string;
+  reversalStatus: RecurringJournalReversalStatus;
+  reversalAuthorizedAt?: string;
+  reversalAuthorizedByUserId?: string;
+  reversalAttemptCount: number;
+  reversalLastAttemptAt?: string;
+  reversalError?: string;
+  reversalPostingEventId?: string;
+  reversalProcessedBy?: string;
   attemptCount: number;
   generatedAt?: string;
   reviewedAt?: string;
@@ -93,6 +102,13 @@ export interface RecurringJournalGenerationResult {
   failedCount: number;
 }
 
+export interface RecurringJournalReversalProcessingResult {
+  candidateCount: number;
+  postedCount: number;
+  existingCount: number;
+  failedCount: number;
+}
+
 class RecurringJournalDataService {
   // Keep route literals visible to the repository's frontend/backend contract
   // test; hiding the base path in a property would make route drift invisible.
@@ -126,6 +142,8 @@ class RecurringJournalDataService {
     apiService.post<RecurringJournalOccurrence>(`/finance/recurring-journals/occurrences/${id}/reject`, { comment });
   postOccurrence = (id: string) =>
     apiService.post<RecurringJournalOccurrence>(`/finance/recurring-journals/occurrences/${id}/post`, {});
+  retryReversal = (id: string) =>
+    apiService.post<RecurringJournalReversalProcessingResult>(`/finance/recurring-journals/occurrences/${id}/retry-reversal`, {});
 
   private decide(id: string, action: string, comment: string) {
     return apiService.post<RecurringJournalTemplate>(`/finance/recurring-journals/${id}/${action}`, { comment });

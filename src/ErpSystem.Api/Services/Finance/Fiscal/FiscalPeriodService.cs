@@ -3244,7 +3244,24 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 .ThenBy(item => item.TemplateNumber)
                 .ToListAsync(cancellationToken);
 
-            var exceptionCount = occurrenceExceptions.Count + overdueTemplates.Count;
+            // Once the occurrence has posted, a later template pause, completion,
+            // cancellation or version change cannot suppress its authorised reversal.
+            var reversalExceptions = await _unitOfWork.Repository<RecurringJournalOccurrence>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    item.Status == RecurringJournalOccurrenceStatus.Posted &&
+                    item.JournalEntryId.HasValue && item.ReversalDueDate.HasValue &&
+                    item.ReversalDueDate.Value <= periodEnd && item.ReversalAuthorizedAt.HasValue &&
+                    !item.ReversalJournalEntryId.HasValue && !item.ReversedAt.HasValue &&
+                    !item.WaivedAt.HasValue &&
+                    (item.ReversalStatus == RecurringJournalReversalStatus.Scheduled ||
+                     item.ReversalStatus == RecurringJournalReversalStatus.Processing ||
+                     item.ReversalStatus == RecurringJournalReversalStatus.Failed))
+                .Include(item => item.Template)
+                .OrderBy(item => item.ReversalDueDate)
+                .ThenBy(item => item.Template.TemplateNumber)
+                .ToListAsync(cancellationToken);
+
+            var exceptionCount = occurrenceExceptions.Count + overdueTemplates.Count + reversalExceptions.Count;
             if (exceptionCount == 0)
             {
                 return new CloseCheckResult(
@@ -3253,10 +3270,10 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     "General Ledger",
                     FinanceCloseCheckSeverities.Mandatory,
                     FinanceCloseCheckStatuses.Passed,
-                    "No unresolved recurring-journal generation exceptions or overdue schedule cursors exist at period end.",
+                    "No unresolved recurring-journal generation, schedule, or due automatic-reversal exceptions exist at period end.",
                     0,
                     null,
-                    new { OccurrenceExceptions = 0, OverdueTemplates = 0 });
+                    new { OccurrenceExceptions = 0, OverdueTemplates = 0, ReversalExceptions = 0 });
             }
 
             return new CloseCheckResult(
@@ -3265,7 +3282,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 "General Ledger",
                 FinanceCloseCheckSeverities.Mandatory,
                 FinanceCloseCheckStatuses.Failed,
-                $"{occurrenceExceptions.Count} recurring-journal occurrence exception(s) and {overdueTemplates.Count} overdue active template schedule(s) require resolution before close.",
+                $"{occurrenceExceptions.Count} recurring-journal occurrence exception(s), {overdueTemplates.Count} overdue active template schedule(s), and {reversalExceptions.Count} due automatic reversal(s) require resolution before close.",
                 exceptionCount,
                 null,
                 new
@@ -3287,6 +3304,20 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                         item.ErrorMessage,
                         item.JournalEntryId,
                         item.WorkflowInstanceId
+                    }).ToList(),
+                    Reversals = reversalExceptions.Select(item => new
+                    {
+                        item.Id,
+                        item.TemplateId,
+                        item.Template.TemplateNumber,
+                        TemplateName = item.Template.Name,
+                        item.ReversalDueDate,
+                        Status = item.ReversalStatus.ToString(),
+                        item.ReversalAttemptCount,
+                        item.ReversalLastAttemptAt,
+                        item.ReversalError,
+                        item.JournalEntryId,
+                        item.ReversalJournalEntryId
                     }).ToList(),
                     OverdueTemplates = overdueTemplates.Select(item => new
                     {
