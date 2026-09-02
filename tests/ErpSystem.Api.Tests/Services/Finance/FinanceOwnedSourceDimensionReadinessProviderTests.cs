@@ -1,6 +1,8 @@
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Finance.FixedAssets;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance.Integration;
@@ -171,6 +173,50 @@ public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
         var adaptedHeader = await provider.EvaluateAsync(tenantId, route);
         adaptedHeader.Blockers.Should().ContainSingle(blocker =>
             blocker.Code == "SOURCE_LINE_NOT_ADAPTED" && blocker.DocumentId == invoiceId);
+    }
+
+    [Fact]
+    public async Task CapitalProjectReadinessIsTenantScopedAndRequiresFrozenStableLines()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"finance-fixed-asset-readiness-{Guid.NewGuid():N}").Options);
+        db.CapitalProjects.AddRange(
+            new CapitalProject
+            {
+                Id = projectId, TenantId = tenantId, ProjectCode = "CIP-READY-001", Name = "Ready project",
+                StartDate = new DateTime(2026, 9, 1), TotalBudgetAmount = 100m,
+                TotalAccumulatedCost = 100m, Status = ProjectStatus.InProgress, RowVersion = [1]
+            },
+            new CapitalProject
+            {
+                Id = Guid.NewGuid(), TenantId = otherTenantId, ProjectCode = "CIP-OTHER", Name = "Other tenant",
+                StartDate = new DateTime(2026, 9, 1), TotalBudgetAmount = 50m,
+                TotalAccumulatedCost = 50m, Status = ProjectStatus.InProgress, RowVersion = [1]
+            });
+        await db.SaveChangesAsync();
+
+        var route = FinanceDimensionRouteCatalog.GetRequired(
+            FinanceDimensionRouteId.FinanceCapitalProjectSettlement);
+        var provider = new FinanceFixedAssetDimensionReadinessProvider(db, route.Id);
+        var legacy = await provider.EvaluateAsync(tenantId, route);
+        legacy.Blockers.Should().ContainSingle(item =>
+            item.Code == "UNCERTIFIED_FIXED_ASSET_DOCUMENT"
+            && item.DocumentId == projectId
+            && item.DocumentReference == "CIP-READY-001");
+
+        var frozenLine = Assignment(route, tenantId, projectId,
+            FinanceSourceLineIdentity.Create(projectId, "SETTLEMENT-ASSET", Guid.NewGuid()));
+        frozenLine.EvidenceFrozenAt = DateTime.UtcNow;
+        db.FinanceSourceDimensionAssignments.AddRange(
+            Assignment(route, tenantId, projectId, null),
+            frozenLine);
+        await db.SaveChangesAsync();
+
+        (await provider.EvaluateAsync(tenantId, route)).Blockers.Should().BeEmpty();
     }
 
     private static FinanceSourceDimensionAssignment Assignment(

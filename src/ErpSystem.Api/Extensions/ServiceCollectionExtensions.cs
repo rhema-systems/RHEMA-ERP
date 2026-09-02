@@ -825,6 +825,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSettlementDimensionService, ErpSystem.Api.Services.Finance.GL.FinanceSettlementDimensionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePaymentDimensionAdapter, ErpSystem.Api.Services.Finance.GL.FinancePaymentDimensionAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IExternalFinancePostingAdapter, ErpSystem.Api.Services.Finance.GL.ExternalFinancePostingAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetDimensionService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetDimensionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
                 new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
                     provider.GetRequiredService<ApplicationDbContext>(),
@@ -853,6 +854,30 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     .GetRequired(externalRoute).RouteId;
                 services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
                     new ErpSystem.Api.Services.Finance.GL.ExternalProducerDimensionReadinessProvider(
+                        provider.GetRequiredService<ApplicationDbContext>(), routeId));
+            }
+            foreach (var fixedAssetRouteId in new[]
+            {
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetCapitalization,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetCapitalizationReversal,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetDepreciation,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetDepreciationReversal,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetRevaluation,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetImpairment,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetImpairmentReversal,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetValuationCorrection,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetDisposal,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceFixedAssetReclassification,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceCapitalProjectSettlement,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceLeaseRecognition,
+                ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceLeasePeriodPosting
+            })
+            {
+                var routeId = fixedAssetRouteId;
+                services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                    new ErpSystem.Api.Services.Finance.FixedAssets.FinanceFixedAssetDimensionReadinessProvider(
                         provider.GetRequiredService<ApplicationDbContext>(), routeId));
             }
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
