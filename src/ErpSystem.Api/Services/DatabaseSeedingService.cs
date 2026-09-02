@@ -353,8 +353,100 @@ namespace ErpSystem.Web.Services
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring HR workflows are seeded...");
+            await EnsureHrWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
+        }
+
+        /// <summary>
+        /// Baseline approval definitions for every HR entity type that submits to the workflow engine.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why this exists.</b> Until 2026-09-02 <c>seed-workflows</c> installed 65
+        /// definitions — finance, estate, projects, procurement — and <b>not one for HR</b>. Every HR
+        /// area had been closed green because each dev-harness suite publishes its own definition
+        /// before it runs; on a database built from the seeders alone, submitting a requisition, a
+        /// travel request, a movement, a disciplinary decision or a resignation answered
+        /// <i>"No active workflow definition found for entity type"</i>. Found on the first demo
+        /// rehearsal, which is the only run that had ever used the seeded database as a user would.</para>
+        ///
+        /// <para><b>Shape.</b> The same Draft → PendingApproval → Approved ladder the other modules use,
+        /// via <see cref="EnsureWorkflowDefinitionSeededAsync"/>, with ROLE-based approvers. Roles are
+        /// what the engine can route on today (conditional routing does not route — cross-module
+        /// defect #3), so "the line manager approves" is expressed as "anyone in the Manager role
+        /// approves", and the record-level checks in each service (direct-report, self-approval) do
+        /// the narrowing. The Managing Director sits on separations (FR-HR-092), requisitions and
+        /// proposals; HR on everything staff raise; TenantAdmin as the operational backstop.</para>
+        ///
+        /// <para>Entity codes are the catalogue's <c>UPPER_SNAKE</c> codes; the matcher normalises,
+        /// so <c>STAFF_REQUISITION</c> and the <c>StaffRequisition</c> the service asks for are one
+        /// key. Class names are deliberately not passed: the catalogue seed owns them, and a wrong
+        /// <c>typeof</c> here would be a second source of truth for a fact it does not need.</para>
+        ///
+        /// <para>Idempotent and additive, like its siblings: an existing definition is kept and only
+        /// re-activated or re-pointed; a tenant that has authored its own definition for a type is
+        /// not overwritten. Payroll runs are excluded — payroll is another owner's module.</para>
+        /// </remarks>
+        private async Task EnsureHrWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+
+                var staffRaised = new[] { Constants.Roles.Manager, Constants.Roles.Hr, Constants.Roles.TenantAdmin };
+                var hrControlled = new[] { Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.TenantAdmin };
+                var executive = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin, Constants.Roles.Hr };
+                var mdOnly = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin };
+
+                var specs = new (string Code, string Name, string Definition, string Description, string[] Roles)[]
+                {
+                    ("LEAVE_REQUEST", "Leave Request", "Leave Approval", "Leave request: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    ("LEAVE_PLAN", "Leave Plan", "Leave Plan Approval", "Annual leave plan: Draft -> PendingApproval -> Approved.", staffRaised),
+                    ("LEAVE_ENCASHMENT", "Leave Encashment", "Leave Encashment Approval", "Encashment of unused leave: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("STAFF_OVERTIME_REQUEST", "Staff Overtime Request", "Overtime Approval", "Pre-approval of overtime: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
+                    ("REMOTE_WORK_REQUEST", "Remote Work Request", "Remote Work Approval", "Remote-working request: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
+                    ("STAFF_ATTENDANCE_REGULARIZATION", "Staff Attendance Regularization", "Attendance Regularisation Approval", "Missed-punch and attendance corrections: Draft -> PendingApproval -> Approved.", staffRaised),
+                    ("STAFF_TRAVEL_REQUEST", "Staff Travel Request", "Staff Travel Approval", "Official travel: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    ("TRAINING_NOMINATION", "Training Nomination", "Training Nomination Approval", "Nomination for a training schedule: Draft -> PendingApproval (supervisor, then HR) -> Approved.", staffRaised),
+                    ("CONSULTANT_TIMESHEET", "Consultant Timesheet", "Consultant Timesheet Approval", "Consultant timesheet: Draft -> PendingApproval -> Approved, before it is sent to the client.", staffRaised),
+                    ("HR_ASSET_REQUISITION", "HR Asset Requisition", "Asset Requisition Approval", "Request for a company asset: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    ("HR_ASSET_TRANSFER", "HR Asset Transfer", "Asset Transfer Approval", "Transfer of a held asset between staff: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("HR_ASSET_SURCHARGE", "HR Asset Surcharge", "Asset Surcharge Approval", "Recovery of loss or damage from salary: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("STAFF_REQUISITION", "Staff Requisition", "Staff Requisition Approval", "Request to fill or create an established post: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("JOB_OFFER", "Job Offer", "Job Offer Approval", "Offer of appointment: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("MANPOWER_BUDGET", "Manpower Budget", "Manpower Budget Approval", "Annual manpower and recruitment budget: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("STAFF_MOVEMENT", "Staff Movement", "Staff Movement Approval", "Promotion, transfer, secondment or demotion: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("PROBATION_PERIOD", "Probation Period", "Probation Confirmation", "Confirmation at the end of probation: Draft -> PendingApproval (confirming authority) -> Approved.", hrControlled),
+                    ("PERFORMANCE_IMPROVEMENT_PLAN", "Performance Improvement Plan", "PIP Approval", "Performance improvement plan: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("SALARY_REVIEW_PROPOSAL", "Salary Review Proposal", "Salary Review Approval", "Post-appraisal salary proposal: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("EMPLOYMENT_ACTION_PROPOSAL", "Employment Action Proposal", "Employment Action Approval", "Post-appraisal employment action: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("SUCCESSION_PLAN", "Succession Plan", "Succession Plan Approval", "Succession plan for a critical post: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("STAFF_DISCIPLINARY_ACTION", "Staff Disciplinary Action", "Disciplinary Decision Confirmation", "Confirmation of a proposed disciplinary decision: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("EMPLOYEE_SEPARATION", "Employee Separation", "Separation Approval", "Resignation, retirement or termination: Draft -> PendingApproval (Managing Director, FR-HR-092) -> Approved.", mdOnly),
+                    ("JOB_DESCRIPTION", "Job Description", "Job Description Approval", "Authoring or revising a job description: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("APPRAISAL_TEMPLATE", "Appraisal Template", "Appraisal Template Approval", "Appraisal template publication: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                };
+
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in specs)
+                    {
+                        await EnsureWorkflowDefinitionSeededAsync(
+                            tenant.Id,
+                            entityCode: spec.Code,
+                            entityName: spec.Name,
+                            entityClassName: null,
+                            definitionName: spec.Definition,
+                            description: spec.Description,
+                            approvalRoleNames: spec.Roles);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed HR workflows");
+            }
         }
 
         private async Task EnsureFinancePermissionAssignmentsAsync()
