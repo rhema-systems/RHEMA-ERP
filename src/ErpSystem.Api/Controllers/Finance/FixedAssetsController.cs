@@ -54,6 +54,15 @@ public class FixedAssetsController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Returns active, tenant-scoped HR/Payroll organization locations through a Finance-owned
+    /// read-only contract for fixed-asset forms.
+    /// </summary>
+    [HttpGet("location-options")]
+    public async Task<ActionResult<IReadOnlyList<FixedAssetLocationOptionDto>>> GetLocationOptions(
+        CancellationToken cancellationToken)
+        => Ok(await _fixedAssetService.GetLocationOptionsAsync(cancellationToken));
+
     [HttpGet("{id}")]
     public async Task<ActionResult<FixedAssetDto>> GetById(Guid id)
     {

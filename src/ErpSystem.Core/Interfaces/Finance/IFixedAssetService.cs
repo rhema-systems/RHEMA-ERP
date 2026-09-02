@@ -6,6 +6,7 @@ public interface IFixedAssetService
 {
     Task<FixedAssetDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<FixedAssetDto>> GetAllAsync();
+    Task<IReadOnlyList<FixedAssetLocationOptionDto>> GetLocationOptionsAsync(CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CreateAsync(CreateFixedAssetDto dto);
     Task<FixedAssetDto> UpdateAsync(Guid id, UpdateFixedAssetDto dto);
     Task DeleteAsync(Guid id);

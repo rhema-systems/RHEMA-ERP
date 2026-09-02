@@ -143,6 +143,22 @@ public class FixedAssetDto
 }
 
 /// <summary>
+/// Tenant-scoped organization-location option exposed through Finance. The underlying location
+/// hierarchy remains owned and configured by HR/Payroll.
+/// </summary>
+public sealed class FixedAssetLocationOptionDto
+{
+    public Guid Id { get; set; }
+    public Guid LocationLevelId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? LevelName { get; set; }
+    public Guid? ParentLocationId { get; set; }
+    public bool IsLeaf { get; set; }
+}
+
+/// <summary>
 /// Authoritative Fixed Assets registration request produced by a governed stores issue.
 /// Finance has already posted the balanced inventory-to-asset journal identified below;
 /// this contract records the physical asset/custody side without creating a second journal.

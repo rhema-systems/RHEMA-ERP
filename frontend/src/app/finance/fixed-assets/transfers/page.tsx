@@ -21,11 +21,14 @@ import { AssetTransfer, AssetTransferStatus, AssetTransferType, RequestAssetTran
 import { useToast } from "@/components/ui/use-toast";
 import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
+import type { FixedAssetLocationOption } from '@/types/fixed-assets';
 
 export default function AssetTransfersPage() {
     const [transfers, setTransfers] = useState<AssetTransfer[]>([]);
     const [assets, setAssets] = useState<FixedAsset[]>([]);
     const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
+    const [locationOptions, setLocationOptions] = useState<FixedAssetLocationOption[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -73,6 +76,12 @@ export default function AssetTransfersPage() {
             setCategories(categoriesData || []);
         } catch (error) {
             console.error('Failed to load fixed asset categories:', error);
+        }
+        try {
+            const locationsData = await fixedAssetsDataService.getLocationOptions();
+            setLocationOptions(locationsData || []);
+        } catch (error) {
+            console.error('Failed to load organization locations:', error);
         }
         try {
             const employeesData = await maintenanceDataService.getEmployees();
@@ -362,7 +371,13 @@ export default function AssetTransfersPage() {
                                     <>
                                         <div className="space-y-2">
                                             <Label htmlFor="toLocation">Destination Location <span className="text-red-500">*</span></Label>
-                                            <Input id="toLocation" placeholder="Building, Floor, Room..." value={formData.toLocation || ''} onChange={(e) => setFormData({ ...formData, toLocation: e.target.value })} />
+                                            <AssetLocationCombobox
+                                                id="toLocation"
+                                                options={locationOptions}
+                                                value={locationOptions.find(option => option.displayName === formData.toLocation)?.id}
+                                                allowClear={false}
+                                                onValueChange={(location) => setFormData({ ...formData, toLocation: location?.displayName || '' })}
+                                            />
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="custodian">New Custodian</Label>

@@ -6,6 +6,7 @@ import { apiService } from '@/services/api.service';
 import { documentOutputService } from '@/services/document-output.service';
 import type {
   FixedAsset,
+  FixedAssetLocationOption,
   FixedAssetCategory,
   CreateFixedAssetDto,
   UpdateFixedAssetDto,
@@ -174,6 +175,10 @@ class FixedAssetsDataService {
 
   async getPeriodSchedule(fiscalPeriodId: string): Promise<AssetDepreciationSchedule[]> {
     return apiService.get<AssetDepreciationSchedule[]>(`/finance/fixed-assets/depreciation/period/${fiscalPeriodId}`);
+  }
+
+  async getLocationOptions(): Promise<FixedAssetLocationOption[]> {
+    return apiService.get<FixedAssetLocationOption[]>('/finance/fixed-assets/location-options');
   }
 
   async getDepreciationRuns(fiscalPeriodId?: string): Promise<FixedAssetDepreciationRun[]> {

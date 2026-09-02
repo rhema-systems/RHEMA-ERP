@@ -331,6 +331,17 @@ export interface AssetDepreciationSchedule {
   depreciationReversalId?: string;
 }
 
+export interface FixedAssetLocationOption {
+  id: string;
+  locationLevelId: string;
+  code: string;
+  name: string;
+  displayName: string;
+  levelName?: string;
+  parentLocationId?: string;
+  isLeaf: boolean;
+}
+
 export interface FixedAssetDepreciationRun {
   id: string;
   fiscalPeriodId: string;

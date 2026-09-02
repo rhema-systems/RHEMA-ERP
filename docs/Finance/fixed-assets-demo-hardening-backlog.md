@@ -15,6 +15,11 @@ This document records the gaps discovered during the Finance Fixed Assets review
 
 ## Deferred accounting and lifecycle gaps
 
+- The HR/Payroll-backed location selector is restored through a tenant-scoped Finance read adapter,
+  but this integration base does not contain the stable `LocationId` migration authored in checkpoint
+  `8ab059db`. The demo-safe correction stores the selected hierarchy display name in the existing
+  snapshot field. Restore the foreign key and legacy-data reconciliation as a separately approved
+  migration unit; do not apply that checkpoint wholesale because it contains unrelated changes.
 - Capital-project settlement posts Fixed Asset/AUC but leaves generated register assets as drafts without capitalization journal lineage. Manual project cost lines are tracking-only even though settlement credits AUC.
 - Lease activation posts ROU asset/liability but leaves the generated ROU register asset as an uncapitalized draft. Lease modification, remeasurement, termination, impairment, and controlled reversal remain incomplete.
 - Procurement accepted-supply capitalization has backend Finance adapter endpoints but no complete browser journey.

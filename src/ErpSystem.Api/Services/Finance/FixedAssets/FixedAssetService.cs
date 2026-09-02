@@ -66,6 +66,10 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
     private string UserName => _currentUser.UserName ?? "system";
     private Guid CurrentUserGuid => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
+    public Task<IReadOnlyList<FixedAssetLocationOptionDto>> GetLocationOptionsAsync(
+        CancellationToken cancellationToken = default)
+        => FixedAssetLocationMaster.GetOptionsAsync(_context, TenantId, cancellationToken);
+
     private async Task<bool> AssetCodeExistsAsync(string assetCode, Guid? excludingAssetId = null)
     {
         var normalizedCode = assetCode.ToUpperInvariant();

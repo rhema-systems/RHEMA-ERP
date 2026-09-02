@@ -15,11 +15,13 @@ import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.ser
 import { FixedAssetCapitalizationReversalPanel } from '@/components/finance/FixedAssetCapitalizationReversalPanel';
 import { FixedAssetCapitalizationApprovalPanel } from '@/components/finance/FixedAssetCapitalizationApprovalPanel';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
 import type {
   DepreciationConvention,
   DepreciationMethod,
   FixedAsset,
   FixedAssetCategory,
+  FixedAssetLocationOption,
   FixedAssetStatus,
   UpdateFixedAssetDto,
 } from '@/types/fixed-assets';
@@ -31,6 +33,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const { toast } = useToast();
   const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
+  const [locationOptions, setLocationOptions] = useState<FixedAssetLocationOption[]>([]);
   const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [formData, setFormData] = useState<UpdateFixedAssetDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,12 +43,14 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
     const loadData = async () => {
       try {
         setLoading(true);
-        const [asset, categoryData] = await Promise.all([
+        const [asset, categoryData, locationData] = await Promise.all([
           fixedAssetsDataService.getAssetById(id),
           fixedAssetsDataService.getCategories(),
+          fixedAssetsDataService.getLocationOptions(),
         ]);
 
         setCategories(categoryData);
+        setLocationOptions(locationData);
         setAsset(asset);
         setFormData({
           assetCode: asset.assetCode,
@@ -262,11 +267,18 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           </div>
           <div className="space-y-2">
             <Label htmlFor="location">Location</Label>
-            <Input
+            <AssetLocationCombobox
               id="location"
-              value={formData.location || ''}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              options={locationOptions}
+              value={locationOptions.find(option => option.displayName === formData.location)?.id}
+              placeholder={formData.location ? `Legacy: ${formData.location}` : undefined}
+              onValueChange={(location) => setFormData({ ...formData, location: location?.displayName })}
             />
+            {formData.location && !locationOptions.some(option => option.displayName === formData.location) && (
+              <p className="text-xs text-amber-700">
+                This legacy value is not linked to an active HR/Payroll location. Select a configured location to reconcile it.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="serialNumber">Serial Number</Label>
