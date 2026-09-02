@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Book 0 — Demo-Day Operations</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --ink:#1a1a1a; --muted:#5b5b5b; --line:#c9c9c9; --band:#0f3d3e; --band-ink:#ffffff; --say:#fff8e6; --say-line:#e0b84a; --aside:#eef3f8; --aside-line:#6b8fb5; --warn:#fdecec; --warn-line:#c94a4a; --ok:#eaf6ee; --ok-line:#3d8b55; }
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  html { font-size: 12.5pt; }
+  body { margin:0; color:var(--ink); background:#fff; font-family: Georgia, "Times New Roman", serif; line-height:1.45; }
+  .wrap { max-width: 178mm; margin: 0 auto; padding: 0 6mm; }
+  h1,h2,h3,h4 { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color:var(--band); line-height:1.2; }
+  h1 { font-size: 26pt; margin: 0 0 4pt; }
+  h2 { font-size: 17pt; margin: 22pt 0 8pt; padding-bottom:4pt; border-bottom: 2px solid var(--band); page-break-after: avoid; }
+  h3 { font-size: 13.5pt; margin: 16pt 0 6pt; page-break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  .cover { border: 3px solid var(--band); padding: 18pt 20pt; margin: 12pt 0 18pt; page-break-after: always; }
+  .cover .kicker { font-family:"Segoe UI",Arial,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-size:9.5pt; margin-bottom:6pt; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin-top: 2pt; }
+  .cover table { margin-top: 14pt; }
+  table { border-collapse: collapse; width:100%; margin: 6pt 0 12pt; font-size: 11pt; page-break-inside: auto; }
+  th, td { border: 1px solid var(--line); padding: 5pt 7pt; vertical-align: top; text-align:left; }
+  th { background:#f2f2f2; font-family:"Segoe UI",Arial,sans-serif; font-weight:600; }
+  tr { page-break-inside: avoid; }
+  code, kbd { font-family: Consolas, "Courier New", monospace; font-size: 10.5pt; background:#f4f4f4; padding: 1px 4px; border-radius:3px; }
+  pre { font-family: Consolas, "Courier New", monospace; font-size: 10pt; background:#f4f4f4; border:1px solid var(--line); padding: 8pt 10pt; overflow-x:auto; white-space:pre-wrap; page-break-inside: avoid; }
+  .steps { width:100%; }
+  .steps td:first-child { width: 22px; text-align:center; font-size: 14pt; }
+  .steps td:nth-child(2) { width: 34%; }
+  .box { border-left: 5px solid; padding: 7pt 10pt; margin: 8pt 0 10pt; page-break-inside: avoid; }
+  .say { background:var(--say); border-color:var(--say-line); }
+  .say::before { content:"SAY"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#8a6b12; display:block; margin-bottom:2pt; }
+  .aside { background:var(--aside); border-color:var(--aside-line); font-size: 11pt; }
+  .aside::before { content:"TECHNICAL ASIDE — skip for a non-technical room"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#3b5f85; display:block; margin-bottom:2pt; }
+  .warn { background:var(--warn); border-color:var(--warn-line); }
+  .warn::before { content:"DO NOT"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#8b2b2b; display:block; margin-bottom:2pt; }
+  .ok { background:var(--ok); border-color:var(--ok-line); }
+  .ok::before { content:"EXPECT"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#2c6b3f; display:block; margin-bottom:2pt; }
+  .chk { display:inline-block; width:13px; height:13px; border:1.5px solid #333; border-radius:2px; vertical-align:-2px; margin-right:6px; }
+  .pb { page-break-before: always; }
+  .small { font-size: 10.5pt; color: var(--muted); }
+  .persona { font-family: Consolas, monospace; font-weight: bold; }
+  footer { margin-top: 24pt; padding-top: 8pt; border-top: 1px solid var(--line); font-size: 9.5pt; color: var(--muted); }
+  @media print { .wrap { max-width:none; padding:0; } a { color: inherit; text-decoration: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="cover">
+  <div class="kicker">RHEMA ERP · Human Resources and SHE modules · Stakeholder demonstration</div>
+  <h1>Book 0 — Demo-Day Operations</h1>
+  <div class="sub">How to bring the system up, who to sign in as, how to check you are on the right database, and what to do when something goes wrong. Read this before the demo; keep it open during it.</div>
+  <table>
+    <tr><th style="width:32%">Series</th><td>Book 0 · Operations (this book) · Book 1 · Core HR · Book 2 · Operations HR · Book 3 · Development &amp; Governance · Book 4 · Safety, Health &amp; Environment · Cheat sheet</td></tr>
+    <tr><th>Environment</th><td>Demo database <code>ErpSystemDB_UAT</code> on the presenter's machine; API on port 5000; web app on port 3000.</td></tr>
+    <tr><th>Prepared</th><td>2 September 2026, against the seeded demonstration dataset (103 staff on the TDC establishment).</td></tr>
+  </table>
+</div>
+
+<h2>0. The one-minute version</h2>
+<table class="steps">
+  <tr><td><span class="chk"></span></td><td>The evening before</td><td>Rebuild the demo database (§2). Run the scenarios (§2, step 4). Read the counts. Do a five-minute dry run of Book 1 §1.</td></tr>
+  <tr><td><span class="chk"></span></td><td>30 minutes before</td><td>Start the API (§3.1), the document scanner (§3.2), the web app (§3.3), open a browser per persona (§4), run the database check (§3.4).</td></tr>
+  <tr><td><span class="chk"></span></td><td>During</td><td>Follow the books in order. Every step says what to click, what you will see, and what to say. Technical asides are boxed; skip them when the room is not technical.</td></tr>
+  <tr><td><span class="chk"></span></td><td>If something breaks</td><td>Go straight to §6. Every symptom you are likely to meet has a fix that takes under two minutes.</td></tr>
+</table>
+
+<h2>1. The cast — who you sign in as</h2>
+<p>The demonstration is performed as <b>real people in the organisation</b>, not as an administrator. Every login below is linked to an employee record on the TDC establishment, holds the roles that person would hold, and sees only what that person would see. Switching between them <i>is</i> the demonstration of the permission model.</p>
+<p><b>Every password is the same:</b> <code>Demo123!</code></p>
+<table>
+  <tr><th style="width:17%">Login</th><th style="width:27%">Who</th><th style="width:20%">Roles</th><th>Use them for</th></tr>
+  <tr><td class="persona">hr.head</td><td>Akpene Amoah · TDC/00009<br><span class="small">Head of HR &amp; Administration</span></td><td>HR · Manager · Employee</td><td><b>Your main login.</b> Every HR register and configuration screen. Also a line manager (three direct reports) and an employee, so her own self-service works.</td></tr>
+  <tr><td class="persona">she.officer</td><td>Josephine Appiah · TDC/00071<br><span class="small">HSE Supervisor, SHE Section</span></td><td>HR · Employee</td><td>The whole Safety, Health &amp; Environment module (Book 4).</td></tr>
+  <tr><td class="persona">head.dev</td><td>Kwasi Danquah · TDC/00006<br><span class="small">Head of Development</span></td><td>Manager · Employee</td><td>A working line manager: the approvals queue, team appraisals, direct reports, nominations. The person who approves what <span class="persona">staff</span> raises.</td></tr>
+  <tr><td class="persona">staff</td><td>Efua Seidu · TDC/00017<br><span class="small">Project Coordinator, reports to head.dev</span></td><td>Employee</td><td>The ordinary employee. Self-service: leave, clock-in, claims, goals, payslips, the job board, a grievance.</td></tr>
+  <tr><td class="persona">new.hire</td><td>Kojo Ansah · TDC/00063<br><span class="small">Supervising Architect, joined 15 July</span></td><td>Employee</td><td>Probation, onboarding and orientation from the new starter's side.</td></tr>
+  <tr><td class="persona">gm.ops</td><td>Kojo Fiadzo · TDC/00003<br><span class="small">General Manager, Operations</span></td><td>Manager · Employee</td><td>Directorate-level approver above Development, Estates and Development Control. Approves requisitions and travel.</td></tr>
+  <tr><td class="persona">md.tdc</td><td>Nana Nyaho · TDC/00001<br><span class="small">Managing Director</span></td><td>Managing Director · Manager · Employee</td><td>Signs separations; top of every approval chain; the executive view. Has a resignation waiting for signature.</td></tr>
+  <tr><td class="persona">auditor</td><td>Yakubu Aryee · TDC/00004<br><span class="small">Chief Internal Auditor</span></td><td>Internal Audit · Employee</td><td>Reviews separation settlements. Reports to the Board, not to management — the organogram shows this.</td></tr>
+  <tr><td class="persona">admin</td><td>System administrator</td><td>SuperAdmin</td><td><b>Configuration only</b> (Administration menu). Password <code>Admin123!</code>. Do not demo self-service as admin — an administrator is not an employee and the portal will say so.</td></tr>
+</table>
+<div class="box aside">Roles map to permission families (<code>HR.Leave.Read</code>, <code>HR.She.Write</code> …) seeded per role, and every HR endpoint checks a policy, not a role name. On top of that, record-level rules narrow further: a manager can only act on their <i>own</i> direct reports, nobody can approve their own request, the Managing Director's signature on a separation is read off the record rather than granted as a permission.</div>
+
+<h2 class="pb">2. The evening before — build the demo database</h2>
+<p>This produces the same database every time: the same 103 people with the same staff numbers, the same open requests, the same items in every approval queue. If a rehearsal leaves junk behind, rebuild and it is gone. Takes about five minutes.</p>
+<table class="steps">
+  <tr><td>1</td><td>Stop anything running</td><td>Close any window running the API or the web app (<kbd>Ctrl+C</kbd> in each).</td></tr>
+  <tr><td>2</td><td>Rebuild</td><td>In PowerShell, at the repository root:<pre>powershell -File .\scripts\New-UatDatabase.ps1</pre>Type <code>ErpSystemDB_UAT</code> when it asks. Wait for the counts.</td></tr>
+  <tr><td>3</td><td>Read the counts</td><td>You should see these lines. <b>Any zero under "demo dataset" means a seeder failed</b> — scroll up for the line reading <code>FAILED:</code>.<pre>Employees             = 127
+Leave types           = 9
+Public holidays       = 26
+Units with a head     = 38
+Demo staff (TDC/...)  = 103
+Demo logins (linked)  = 8
+HR workflow defs      = 16   (of 25 seeded; the count line checks a subset)</pre></td></tr>
+  <tr><td>4</td><td>Start the API, then load the transactions</td><td><pre>powershell -File .\scripts\Start-ErpApi.ps1 -Database Uat</pre>Wait for <code>Listening : http://localhost:5000</code>. In a second window:<pre>cd "D:\Rhema\TDC ERPS\dev-harness\hr-demo-smoke"
+node scenarios.mjs</pre>Ends with <code>SCENARIOS: 21 ok, 0 failed</code>. This raises the leave requests, travel, requisitions, cases and everything else that sits in the approval queues — through the real API, as the real personas.</td></tr>
+  <tr><td>5</td><td>Start the scanner and prove an upload</td><td><pre>powershell -File .\scripts\Start-DemoVirusScanner.ps1</pre>Then in the app, attach any PDF to a draft policy (Book 3 §10). If it saves, every other upload in the module will too — they all go through the same gate.</td></tr>
+  <tr><td>5b</td><td>Prove the logins</td><td><pre>node personas.mjs</pre>Eight lines, each <code>login OK | profile 200</code>.</td></tr>
+  <tr><td>6</td><td>Optional — prove every screen opens</td><td><pre>node smoke.mjs --user hr.head</pre>Ten minutes. The last line must read <code>0 crash</code>. This is the check that catches a screen that has started failing since the last rehearsal.</td></tr>
+</table>
+<div class="box warn">Never run anything from <code>dev-harness\hr-*\</code> (the test suites) against the demo database. They create fixtures named <i>Actor…</i> and <i>Lane4 Leave 194151</i>. Only <code>hr-demo-smoke\</code> is safe. If a suite has touched it, rebuild (step 2).</div>
+
+<h2>3. Demo day — bringing it up</h2>
+<h3>3.1 The API</h3>
+<pre>cd "D:\Rhema\TDC ERPS\RHEMA-ERP"
+powershell -File .\scripts\Start-ErpApi.ps1 -Database Uat</pre>
+<div class="box ok">Three lines: <code>Database : ErpSystemDB_UAT</code> · <code>Environment : Staging</code> · <code>Listening : http://localhost:5000</code>. Leave this window open and minimised. Staging is correct — in Development, every refusal shows a stack trace instead of the message.</div>
+<h3>3.2 The document scanner (needed for every file upload)</h3>
+<pre>cd "D:\Rhema\TDC ERPS\RHEMA-ERP"
+powershell -File .\scripts\Start-DemoVirusScanner.ps1</pre>
+<div class="box ok"><code>Ready. HR document uploads will now be accepted.</code> If something is already answering it says so and leaves it alone.</div>
+<p>Without this, <b>every document upload in the HR module is refused</b> — measured, not assumed: the upload returns
+<code>FILE_VIRUS_SCAN_INCOMPLETE — "Upload rejected because a clean virus-scan result was not obtained."</code>
+That affects all 29 HR upload categories: employee documents, policy documents, medical claims, offer letters,
+separation files, SHE controlled documents, evidence on a disciplinary case — every one. A clean malware scan is
+mandatory in the product and a tenant cannot switch it off, which is the right design and the reason this step exists.</p>
+<div class="box warn">This stub is <b>not a virus scanner</b> — it reports every file as clean. It is for a demo laptop and nothing else. <b>Never say on stage that files are being scanned.</b> If asked, see §5.</div>
+
+<h3>3.3 The web app</h3>
+<pre>cd "D:\Rhema\TDC ERPS\RHEMA-ERP\frontend"
+npm run dev</pre>
+<div class="box ok">Ready on <code>http://localhost:3000</code> in about fifteen seconds. First open of each screen compiles it (one to three seconds) — <b>pre-open the screens for the first two books before the audience arrives</b> so nobody watches a spinner.</div>
+<h3>3.4 The check that stops you demoing the wrong data</h3>
+<p>Run this once the API is up. It signs in and counts employees.</p>
+<pre>Invoke-RestMethod -Method Post -Uri 'http://localhost:5000/api/auth/login' -ContentType 'application/json' `
+  -Body '{"username":"admin","password":"Admin123!"}' |
+  ForEach-Object { Invoke-RestMethod -Method Post -Uri 'http://localhost:5000/api/hr/Employees/paged?page=1&amp;pageSize=1' `
+    -ContentType 'application/json' -Body '{}' -Headers @{ Authorization = "Bearer $($_.token)" } } |
+  Select-Object -ExpandProperty totalCount</pre>
+<table><tr><th style="width:20%">Result</th><th>Meaning</th></tr>
+<tr><td><b>127</b></td><td>Demo database. Proceed.</td></tr>
+<tr><td>~1,750</td><td>Development database — full of test robots. Stop the API and restart it with <code>-Database Uat</code>.</td></tr></table>
+
+<h2 class="pb">4. Browsers — one window per persona</h2>
+<p>Signing out and in again on stage is slow and error-prone. Instead, open <b>one browser window per persona</b> before the demo and switch windows.</p>
+<table class="steps">
+  <tr><td>1</td><td>Main window</td><td>Normal Chrome/Edge window → <code>http://localhost:3000/login</code> → <span class="persona">hr.head</span>.</td></tr>
+  <tr><td>2</td><td>Manager window</td><td>New <b>InPrivate / Incognito</b> window → <span class="persona">head.dev</span>. (A private window has its own session, so both stay signed in.)</td></tr>
+  <tr><td>3</td><td>Employee window</td><td>A second browser (Edge if the first was Chrome, or a different Chrome profile) → <span class="persona">staff</span>.</td></tr>
+  <tr><td>4</td><td>As needed</td><td><span class="persona">she.officer</span>, <span class="persona">md.tdc</span>, <span class="persona">new.hire</span>, <span class="persona">gm.ops</span>, <span class="persona">auditor</span> — open when their book says so; each in a fresh private window or profile.</td></tr>
+</table>
+<div class="box aside">Sessions are JSON Web Tokens carrying the user, the tenant and the linked employee. Two private windows are two independent sessions; a normal window and a private window of the same browser are also independent. Tokens expire — if a window that has sat idle for over an hour answers "Unauthorized", sign in again in that window.</div>
+
+<h2>5. Rules of the road</h2>
+<div class="box warn">
+<b>Never click on stage:</b> Leave → <b>Year-End</b> (carry-over and forfeiture rewrite every balance) · any <b>Delete</b> · Administration → any <b>Reminder Engine → Run now</b> · <b>Sign out</b> in a shared window · the <b>Payroll</b> menu (another team's module; not part of this demonstration).
+</div>
+<table>
+  <tr><th style="width:30%">If someone asks…</th><th>Say</th></tr>
+  <tr><td>"Are these real people?"</td><td>"No. The <i>organisation</i> is TDC's real structure — every unit and every established post is from the organogram. The <i>people</i> are synthetic, generated to fill it, so nothing personal is on screen. Real staff records load from the employee file through the import you will see in Book 1."</td></tr>
+  <tr><td>"Are these real salaries / leave rules?"</td><td>"Placeholder figures on the real grade structure. The leave entitlements follow the Labour Act floors; TDC's own policy replaces them through the screens in Book 2 §1 — nothing is hard-coded."</td></tr>
+  <tr><td>"What about payroll?"</td><td>"Payroll is a separate module by a separate team. HR reads from it — you will see grades and pay components — and hands it attendance, deductions and claims. It is not part of today's walk-through."</td></tr>
+  <tr><td>"Are files virus-scanned?"</td><td>"Yes — and it is not optional. Every one of these upload types requires a clean scan result before the file is stored, and a tenant administrator cannot turn that off. On this laptop the scanner is stubbed so we can show you the flow; a real deployment points the same gate at a ClamAV daemon." <b>Do not claim files are being scanned here.</b></td></tr>
+  <tr><td>"Can I try?"</td><td>Yes, in the <span class="persona">staff</span> window. Raising a leave request or clocking in is safe and quick. Steer away from Administration.</td></tr>
+</table>
+
+<h2 class="pb">6. When something goes wrong</h2>
+<table>
+  <tr><th style="width:30%">Symptom</th><th style="width:30%">Cause</th><th>Fix (under two minutes)</th></tr>
+  <tr><td>Page says "Network error" or spins for ever</td><td>The API window closed or crashed</td><td>Re-run §3.1. Refresh the page. Sessions survive an API restart.</td></tr>
+  <tr><td>"Unauthorized" after a screen that was working</td><td>Token expired (idle over an hour)</td><td>Sign in again in that window only.</td></tr>
+  <tr><td>A list that should have rows is empty</td><td>Wrong database, or the scenarios were not run after a rebuild</td><td>§3.4. If it says 127, run <code>node scenarios.mjs</code> (§2 step 4) — it is safe to re-run; it completes what is missing.</td></tr>
+  <tr><td>"No active workflow definition found for entity type …"</td><td>Database rebuilt with an old build</td><td>Rebuild (§2) with the current build. The HR workflow definitions are seeded by <code>seed-workflows</code>.</td></tr>
+  <tr><td>"Workflow entity type … is not configured"</td><td>The entity-type catalogue was not seeded</td><td>Run <code>node scenarios.mjs</code> — its first action seeds the catalogue — or, as admin in any window, open Workflow → Entity Types → Seed defaults.</td></tr>
+  <tr><td>"Your user account is not linked to an employee record"</td><td>You are in the <span class="persona">admin</span> window</td><td>Switch to the persona window the book names. This message is correct behaviour.</td></tr>
+  <tr><td>"You are not the direct manager of this employee"</td><td>Wrong manager window</td><td>Approvals for <span class="persona">staff</span> and <span class="persona">new.hire</span> are <span class="persona">head.dev</span>'s. Requisitions and travel above him are <span class="persona">gm.ops</span>'s.</td></tr>
+  <tr><td>A refusal appears as a red stack trace</td><td>API started in Development</td><td>Restart with §3.1 exactly (Staging is the default).</td></tr>
+  <tr><td>Port 5000 already in use</td><td>An API is still running</td><td><pre>Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" |
+ Where-Object { $_.CommandLine -like '*ErpSystem.Api*' } |
+ ForEach-Object { Stop-Process -Id $_.ProcessId -Force }</pre>then §3.1.</td></tr>
+  <tr><td>An upload is refused: <code>FILE_VIRUS_SCAN_INCOMPLETE</code></td><td>The document scanner is not running (a reboot loses it)</td><td>Run §3.2, then retry the upload. Nothing else needs restarting.</td></tr>
+  <tr><td>Screen shows old data after a rebuild</td><td>Browser cache</td><td>Hard refresh (<kbd>Ctrl+Shift+R</kbd>) or sign out and in.</td></tr>
+  <tr><td>Everything is wrong and there are ten minutes</td><td>—</td><td>Rebuild (§2 steps 2–4) — five minutes — then re-open the persona windows. The dataset is deterministic: every number and name in the books will still be right.</td></tr>
+</table>
+
+<h2>7. Map of the books</h2>
+<table>
+  <tr><th style="width:24%">Book</th><th>Covers</th><th style="width:16%">Main login</th></tr>
+  <tr><td>1 · Core HR</td><td>Employees and the master record · Organisation and organogram · Job architecture and descriptions · Manpower budgets · Recruitment end to end · Orientation and onboarding · Probation and confirmation</td><td>hr.head</td></tr>
+  <tr><td>2 · Operations HR</td><td>Leave (with balances, approvals, plans, year-end) · Attendance and time · Travel · Company assets · Medical and health · Benefits and emoluments · Company schedule · Consulting</td><td>hr.head, staff, head.dev</td></tr>
+  <tr><td>3 · Development &amp; Governance</td><td>Performance (cycles, goals, appraisals, PIP, calibration) · Training and mentoring · Competencies · Succession · Awards · Staff movements · Discipline · Employee relations · Separations · Policies and announcements · The self-service portal</td><td>hr.head, head.dev, staff, md.tdc</td></tr>
+  <tr><td>4 · SHE</td><td>Dashboard · Incidents · Hazards and risk assessments · Inspections · Permits to work · PPE · Equipment · Emergency · Training · Contractors · Occupational health and return to work · Environmental (permits, monitoring, reviews, monthly reports) · Committees · Regulatory · Audits · Stop-work · Documents · Corrective actions · Performance</td><td>she.officer</td></tr>
+  <tr><td>Cheat sheet</td><td>One page: logins, start commands, the database check, the six things never to click.</td><td>—</td></tr>
+</table>
+
+<footer>Book 0 — Demo-Day Operations · RHEMA ERP HR &amp; SHE demonstration · Prepared 2 September 2026 · Environment: ErpSystemDB_UAT, API :5000, web :3000</footer>
+</div>
+</body>
+</html>

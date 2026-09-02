@@ -222,6 +222,65 @@ if (args.Length > 0 && args[0] == "seed-hr-org-authority")
     return;
 }
 
+// Loads a demonstrable HR/SHE dataset: a workforce staffing the establishment, the leave vocabulary
+// and holiday calendar, and the nine area seeders that were ported and then deferred.
+//
+// ⚠ FOR DEMONSTRATION DATABASES ONLY, and separate from 'seed-hr-all' for that reason. That command
+// seeds facts — the real organogram, the real positions. Everything this one writes is invented, and
+// putting fabricated employees behind the trustworthy command would leave no way to build a clean
+// database for anything but a demo.
+//
+// Prerequisites: 'rebuild-db', 'seed', then 'seed-hr-all' — this populates an establishment, it does
+// not create one.
+if (args.Length > 0 && args[0] == "seed-hr-demo")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    // Identity is needed for the persona logins (password hashing, role membership) — the same
+    // registration the plain 'seed' command uses to create the admin user.
+    tempBuilder.Services.AddErpSystemIdentity();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        // The seed host builds a reduced service graph, so the email-event catalogues may not be
+        // registered. GetServices returns an empty sequence rather than throwing, and the
+        // orchestrator treats "no catalogues" as nothing to seed rather than as a failure.
+        var emailCatalogs = scope.ServiceProvider
+            .GetServices<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog>();
+
+        var orchestrator = new ErpSystem.Data.Seeders.HrDemoSeedOrchestrator(
+            context, loggerFactory, emailCatalogs);
+
+        if (!await orchestrator.SeedAsync())
+        {
+            Console.WriteLine("❌ HR demo seeding could not start — see the log above.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        // The logins come AFTER the data: each persona is resolved to a seeded employee by position
+        // title, so the workforce has to exist first.
+        var personaSeeder = new ErpSystem.Api.Services.TdcDemoPersonaSeeder(
+            context,
+            scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<ErpSystem.Core.Entities.ApplicationUser>>(),
+            scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<ErpSystem.Core.Entities.ApplicationRole>>(),
+            loggerFactory.CreateLogger<ErpSystem.Api.Services.TdcDemoPersonaSeeder>());
+
+        await personaSeeder.SeedAsync();
+    }
+
+    Console.WriteLine("✅ HR demo data seeded. Check the log for any step reported as FAILED.");
+    return;
+}
+
 // Check for workflow-only seeding command.
 if (args.Length > 0 && args[0] == "seed-workflows")
 {
@@ -338,7 +397,9 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, " +
+        "seed-db, seed-workflows, seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, " +
+        "seed-hr-demo, rebuild-db, repair-finance-po-schema.");
     return;
 }
 

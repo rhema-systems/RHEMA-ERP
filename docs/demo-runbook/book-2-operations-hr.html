@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Book 2 — Operations HR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --ink:#1a1a1a; --muted:#5b5b5b; --line:#c9c9c9; --band:#0f3d3e; --say:#fff8e6; --say-line:#e0b84a; --aside:#eef3f8; --aside-line:#6b8fb5; --warn:#fdecec; --warn-line:#c94a4a; --ok:#eaf6ee; --ok-line:#3d8b55; }
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  html { font-size: 12.5pt; }
+  body { margin:0; color:var(--ink); background:#fff; font-family: Georgia, "Times New Roman", serif; line-height:1.45; }
+  .wrap { max-width: 178mm; margin: 0 auto; padding: 0 6mm; }
+  h1,h2,h3,h4 { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color:var(--band); line-height:1.2; }
+  h1 { font-size: 26pt; margin: 0 0 4pt; }
+  h2 { font-size: 17pt; margin: 22pt 0 8pt; padding-bottom:4pt; border-bottom: 2px solid var(--band); page-break-after: avoid; }
+  h3 { font-size: 13.5pt; margin: 16pt 0 6pt; page-break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  .cover { border: 3px solid var(--band); padding: 18pt 20pt; margin: 12pt 0 18pt; page-break-after: always; }
+  .cover .kicker { font-family:"Segoe UI",Arial,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-size:9.5pt; margin-bottom:6pt; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin-top: 2pt; }
+  table { border-collapse: collapse; width:100%; margin: 6pt 0 12pt; font-size: 11pt; }
+  th, td { border: 1px solid var(--line); padding: 5pt 7pt; vertical-align: top; text-align:left; }
+  th { background:#f2f2f2; font-family:"Segoe UI",Arial,sans-serif; font-weight:600; }
+  tr { page-break-inside: avoid; }
+  code, kbd { font-family: Consolas, "Courier New", monospace; font-size: 10.5pt; background:#f4f4f4; padding: 1px 4px; border-radius:3px; }
+  .steps td:first-child { width: 22px; text-align:center; }
+  .steps td:nth-child(2) { width: 30%; }
+  .box { border-left: 5px solid; padding: 7pt 10pt; margin: 8pt 0 10pt; page-break-inside: avoid; }
+  .say { background:var(--say); border-color:var(--say-line); }
+  .say::before { content:"SAY"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#8a6b12; display:block; margin-bottom:2pt; }
+  .aside { background:var(--aside); border-color:var(--aside-line); font-size: 11pt; }
+  .aside::before { content:"TECHNICAL ASIDE — skip for a non-technical room"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#3b5f85; display:block; margin-bottom:2pt; }
+  .warn { background:var(--warn); border-color:var(--warn-line); }
+  .warn::before { content:"CAREFUL"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#8b2b2b; display:block; margin-bottom:2pt; }
+  .ok { background:var(--ok); border-color:var(--ok-line); }
+  .ok::before { content:"YOU WILL SEE"; font-family:"Segoe UI",Arial,sans-serif; font-size:8.5pt; letter-spacing:.12em; color:#2c6b3f; display:block; margin-bottom:2pt; }
+  .who { display:inline-block; font-family:"Segoe UI",Arial,sans-serif; font-size:9.5pt; font-weight:700; letter-spacing:.06em; background:var(--band); color:#fff; padding:2px 8px; border-radius:10px; margin: 0 0 6pt; }
+  .path { font-family:"Segoe UI",Arial,sans-serif; font-size:11pt; color:var(--band); }
+  .path b { color:#000; }
+  .pb { page-break-before: always; }
+  footer { margin-top: 24pt; padding-top: 8pt; border-top: 1px solid var(--line); font-size: 9.5pt; color: var(--muted); }
+  @media print { .wrap { max-width:none; padding:0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="cover">
+  <div class="kicker">RHEMA ERP · Human Resources and SHE modules · Stakeholder demonstration</div>
+  <h1>Book 2 — Operations HR</h1>
+  <div class="sub">The daily transactions: leave, attendance and time, travel, company assets, medical and health, benefits and emoluments, the company schedule, and consulting. Roughly 50 minutes performed in full.</div>
+  <table>
+    <tr><th style="width:32%">Sections</th><td>1 Leave · 2 Attendance &amp; time · 3 Staff travel · 4 Company assets · 5 Medical &amp; health · 6 Benefits &amp; emoluments · 7 Company schedule · 8 Consulting</td></tr>
+    <tr><th>Logins used</th><td><b>staff</b> raises · <b>head.dev</b> approves · <b>hr.head</b> administers · <b>gm.ops</b> approves travel · <b>new.hire</b> for one refusal</td></tr>
+    <tr><th>The shape of every section</th><td>Raise as the employee → approve as the manager → see it land as HR. Say this out loud once at the start; the room will then recognise it each time.</td></tr>
+  </table>
+</div>
+
+<h2>1. Leave</h2>
+<div class="box say">"Leave is the transaction everybody in the room has raised, approved or chased. Watch three people: Efua raises it, her Head of Development decides it, HR sees the balance move — and nobody types a status."</div>
+
+<h3>1.1 The employee raises a request</h3>
+<div class="who">staff</div>
+<p class="path"><b>Time, Leave &amp; Pay → My Leave</b> · <code>/me/leave</code></p>
+<div class="box ok">Balances at the top: Annual 21 days (with days taken and remaining), Sick 12, Casual 6. Below, her requests: <b>LV2026000001</b> annual leave next week, <b>Approved</b>; <b>LV2026000002</b> annual leave from 23 September, <b>Pending</b>.</div>
+<table class="steps">
+  <tr><td>1</td><td>New request</td><td><code>/me/leave/new</code>. Choose <b>Casual Leave</b>, one day next month, reason "Passport renewal". Notice the working-day count excludes the weekend and the public holiday calendar (Book 2 §1.5).</td></tr>
+  <tr><td>2</td><td>Reliever</td><td>Pick a colleague as reliever. Say: "A reliever must be an active employee, cannot be on leave the same days, and is told. The system checks all three."</td></tr>
+  <tr><td>3</td><td>Submit</td><td>The request appears as <b>Pending</b> with a number. Point out she cannot approve it herself — there is no button.</td></tr>
+  <tr><td>4</td><td>Planner</td><td><code>/me/leave/planner</code>: her December plan, ten days, with a reliever. Say: "Plans are declared before the year; HR sees clashes across a unit before anyone is refused."</td></tr>
+</table>
+
+<h3>1.2 The manager decides</h3>
+<div class="who">head.dev</div>
+<p class="path"><b>Human Resources → Leave Management → Approvals</b> · <code>/hr/leave/approvals</code></p>
+<div class="box ok">His queue: Efua's two pending requests and the casual leave just raised. Each row: who, type, dates, days, reliever, balance after.</div>
+<table class="steps">
+  <tr><td>1</td><td>Approve</td><td>Open the casual leave, <b>Approve</b> with a comment. Status → Approved.</td></tr>
+  <tr><td>2</td><td>Reject one</td><td>Open LV2026000002 (23 September), <b>Reject</b> with "Clashes with the year-end valuation; please re-apply for November". Say: "A rejection reason is mandatory and the employee sees it verbatim."</td></tr>
+  <tr><td>3</td><td>The employee sees it</td><td>Back in <span class="who">staff</span>, refresh <code>/me/leave</code>: one Approved, one Rejected with the reason, and the annual balance unchanged by the rejection.</td></tr>
+</table>
+<div class="box aside">Approval is a workflow step on the engine; the approver is whoever the definition names (line manager or HR) <i>and</i> who passes the record's own rule — the request's employee's manager, never the employee. The balance is decremented by the approval, not by the request, so a rejected request never touches it.</div>
+
+<h3>1.3 HR's registers</h3>
+<div class="who">hr.head</div>
+<table class="steps">
+  <tr><td>1</td><td>Requests</td><td><code>/hr/leave/requests</code>: twelve requests across the Corporation, filterable by unit, type, status, dates.</td></tr>
+  <tr><td>2</td><td>Balances</td><td><code>/hr/leave/balances</code>: every employee's balance per type for the year, with entitlement, taken, pending, remaining, carried over.</td></tr>
+  <tr><td>3</td><td>Adjustments</td><td><code>/hr/leave/adjustments</code>: the opening entitlements were loaded here (303 rows). Add one live: pick an employee, Annual, +2 days, reason "Recalled from leave — days restored". Say: "Every manual movement of a balance is a signed adjustment with a reason code; nobody edits a balance."</td></tr>
+  <tr><td>4</td><td>Encashments</td><td><code>/hr/leave/encashments</code>: converting unused leave to pay at a rate derived from emoluments, approved and then handed to payroll.</td></tr>
+  <tr><td>5</td><td>Compliance</td><td><code>/hr/leave/compliance</code>: who has not taken their mandatory annual leave — the "use it or lose it" rule per leave type.</td></tr>
+  <tr><td>6</td><td>Year-end</td><td><code>/hr/leave/year-end</code>. <b>Show, do not click.</b> Carry-over up to the type's maximum, then forfeiture, run once at year end with a preview of every balance it will change.</td></tr>
+</table>
+
+<h3>1.4 Leave types and policy</h3>
+<p class="path"><b>Administration → HR → Leave Types</b> · <code>/administration/hr/leave-types</code></p>
+<div class="box ok">Nine types: Annual, Sick, Maternity, Paternity, Compassionate, Casual, Study, Leave of Absence (unpaid), Occupational Injury. Open <b>Annual</b>: 21 days, 14 days' notice, reliever required, weekends and holidays not counted, carry-over 5 days expiring after 3 months, mandatory, accessible after 12 months' service, encashable.</div>
+<div class="box say">"Every rule you saw enforced is a setting on this screen — nothing is in code. The Labour Act's floors are the starting point; TDC's own policy replaces them here."</div>
+
+<h3>1.5 The holiday calendar</h3>
+<p class="path"><b>Administration → HR → Attendance &amp; Time → Holiday Calendars</b> · <code>/administration/hr/attendance/holiday-calendars</code></p>
+<div class="box ok">"Ghana Statutory Holidays": 26 entries for this year and next — New Year, Constitution Day, Independence Day, Good Friday, Easter Monday, May Day, the two Eids (marked as estimates), Founders' Day, Kwame Nkrumah Memorial Day, Farmers' Day, Christmas, Boxing Day — each with its substitute Monday where it falls at a weekend.</div>
+
+<h2 class="pb">2. Attendance and time</h2>
+<div class="who">staff</div>
+<p class="path"><b>Time, Leave &amp; Pay → My Attendance</b> · <code>/me/attendance</code></p>
+<table class="steps">
+  <tr><td>1</td><td>Clock in</td><td>She clocked in this morning (the dataset does it). Click <b>Clock out</b>. The day's row shows in and out times and hours worked. Say: "Clock-in is the token — she cannot clock in for anybody else, and a device or geofence can be required."</td></tr>
+  <tr><td>2</td><td>Overtime</td><td>Her two overtime requests: one <b>Approved</b> (drawings for the board pack, 3 hours), one <b>Pending</b> (Saturday site inspection). Raise a third if the room wants to see it.</td></tr>
+  <tr><td>3</td><td>Remote work</td><td>A pending remote-working request for two days at Sakumono, equipment confirmed.</td></tr>
+</table>
+<div class="who">head.dev</div>
+<table class="steps">
+  <tr><td>4</td><td>Approve overtime</td><td><code>/hr/attendance/overtime</code>: approve the Saturday request. Say: "Overtime is approved before it is worked and confirmed after; only confirmed hours reach payroll."</td></tr>
+</table>
+<div class="who">hr.head</div>
+<table class="steps">
+  <tr><td>5</td><td>Daily attendance</td><td><code>/hr/attendance/daily</code>: today's rows — five people clocked in, late arrivals flagged against the 08:00 schedule, exceptions to resolve.</td></tr>
+  <tr><td>6</td><td>Punch logs</td><td><code>/hr/attendance/logs</code>: raw punches from the portal, devices and imports, processed into daily rows.</td></tr>
+  <tr><td>7</td><td>Regularisations</td><td><code>/hr/attendance/regularizations</code>: an employee's request to correct a missed punch, approved by the manager.</td></tr>
+  <tr><td>8</td><td>Monthly summaries and exports</td><td><code>/hr/attendance/summaries</code> then <code>/hr/attendance/payroll-exports</code>: the month is finalised and locked before the export to payroll.</td></tr>
+  <tr><td>9</td><td>Work schedules and shifts</td><td><code>/administration/hr/attendance/work-schedules</code>: "TDC Standard Office Hours" 08:00–17:00, 40 hours; the Day Shift; 40 staff assigned. Also shift rotations, devices, geofence zones, alert rules, overtime policies, pay periods.</td></tr>
+</table>
+<div class="box aside">Punch → log → daily attendance → monthly summary → payroll export is a pipeline with a lock at the summary; nothing after the lock can change what was exported. Biometric devices sync into the same log table, so a device is just another source of punches.</div>
+
+<h2 class="pb">3. Staff travel</h2>
+<div class="who">hr.head</div>
+<p class="path"><b>Human Resources → Staff Travel → Register</b> · <code>/hr/travel</code> · <b>Dashboard</b> · <code>/hr/travel/dashboard</code></p>
+<div class="box ok">Four requests: <b>TR-2026-00001 Kumasi</b> (Head of Development, GhIE conference) — Approved; <b>TR-2026-00004 Sebrepor</b> (site handover) — Approved, with an expense claim; <b>TR-2026-00002 Lagos</b> (GM Operations, study tour, international) — Submitted; <b>TR-2026-00003 London</b> (HR summit, visa required) — Submitted.</div>
+<table class="steps">
+  <tr><td>1</td><td>Open TR-2026-00002 Lagos</td><td>International, risk level, estimated cost GHS 38,000, dates, purpose, the policy that applies, itinerary and bookings tabs (flights, hotels, ground transport), comments.</td></tr>
+  <tr><td>2</td><td>Approve it</td><td>Switch to <span class="who">md.tdc</span> (the GM's own request goes above him). Open it, <b>Approve</b> with an approved budget. Say: "The approver is resolved from the token against the definition — the screen cannot nominate one."</td></tr>
+  <tr><td>3</td><td>Claims</td><td>Back as <span class="who">hr.head</span>: <code>/hr/travel/claims</code>: the Sebrepor claim — lines, receipts, currency, the per-diem rate applied.</td></tr>
+  <tr><td>4</td><td>Compliance</td><td>Visa requirements (<code>/hr/travel/visa-requirements</code>), travel documents and their expiry, health requirements, destination alerts and the risk-assessment acknowledgement a traveller must sign.</td></tr>
+  <tr><td>5</td><td>Group travel</td><td><code>/hr/travel/groups</code>: one request covering several travellers.</td></tr>
+  <tr><td>6</td><td>Policy</td><td><code>/administration/hr/travel/policies</code>: class of travel by grade, per-diem rates by destination, approval thresholds; exceptions are requested and approved. (The reminder engine beside it is Administration-tier — open it in the <span class="who">admin</span> window.)</td></tr>
+  <tr><td>7</td><td>The traveller's side</td><td><span class="who">staff</span>: <b>Time, Leave &amp; Pay → My Travel</b> · <code>/me/travel</code>: her Sebrepor trip, its claim, and any alerts she has to acknowledge.</td></tr>
+</table>
+<div class="box aside">Per-diem rates and exchange rates come from Finance's currency tables; a claim converts at the published rate and records which rate it used. Advances, settlements and unpaid approved claims are the Finance hand-off — registered for the GL posting sweep, not posted from HR.</div>
+
+<h2>4. Company assets</h2>
+<div class="who">hr.head</div>
+<p class="path"><b>Human Resources → Company Assets → Register</b> · <code>/hr/assets/register</code></p>
+<div class="box ok">Ten assets: four laptops (one a CAD workstation), two handsets, two pool vehicles (Toyota Hilux GT 4412-21, Nissan Navara GT 2210-22), a Leica total station and a Trimble GNSS receiver. Eight are assigned.</div>
+<table class="steps">
+  <tr><td>1</td><td>Assignments</td><td><code>/hr/assets/assignments</code>: who holds what, since when, expected return, terms accepted. Efua Seidu holds laptop TDC/AST/2026/0001; the Hilux is with the Driver, the Navara with the Transport Supervisor.</td></tr>
+  <tr><td>2</td><td>Requisitions</td><td><code>/hr/assets/requisitions</code>: staff request an asset type; the manager approves; stores issue. Raise one as <span class="who">staff</span> from <code>/me/assets</code> if the room wants to see it.</td></tr>
+  <tr><td>3</td><td>Transfers, returns, surcharges</td><td>Transfer between holders (approved), return on separation, and a surcharge when an item is lost or damaged — the surcharge feeds payroll deductions (<code>/hr/assets/payroll</code>).</td></tr>
+  <tr><td>4</td><td>Maintenance, insurance, reminders</td><td>Service intervals, insurance policies and their expiry, and the reminder sweep for returns due, services due and cover lapsing.</td></tr>
+  <tr><td>5</td><td>Register report</td><td><code>/hr/assets/report</code>: the full register by type, status and holder.</td></tr>
+</table>
+<div class="box aside">HR's asset register is for items <i>held by people</i>; Finance's fixed-asset register is for capitalised assets. A fixed asset can be brought into the HR register (<code>/hr/assets/register/from-fixed-asset</code>) so that one item is never two records.</div>
+
+<h2 class="pb">5. Medical and health</h2>
+<div class="who">hr.head</div>
+<p class="path"><b>Human Resources → Medical &amp; Health → Dashboard</b> · <code>/hr/medical/dashboard</code></p>
+<div class="box ok">Claims by status and month, insurance utilisation, upcoming appointments, facilities and physicians.</div>
+<table class="steps">
+  <tr><td>1</td><td>Facilities and physicians</td><td><code>/hr/medical/facilities</code>: four healthcare facilities with services and NHIS acceptance; <code>/hr/medical/physicians</code>: accredited physicians and their verification.</td></tr>
+  <tr><td>2</td><td>Insurance</td><td><code>/hr/medical/insurance</code>: providers, plans, employee policies with dependants, premiums, provider documents.</td></tr>
+  <tr><td>3</td><td>Claims</td><td><code>/hr/medical/claims</code>: expense claims through create → approve → pay, with pre-authorisation where the scheme requires it. Open a paid one and show the approval trail.</td></tr>
+  <tr><td>4</td><td>NHIS</td><td><code>/hr/medical/nhis</code>: NHIS claims with their documents.</td></tr>
+  <tr><td>5</td><td>Clinical</td><td><code>/hr/medical/clinical</code>: referrals and appointments; <code>/hr/medical/health</code>: health profiles, conditions, allergies, medical examinations.</td></tr>
+  <tr><td>6</td><td>The employee's side</td><td><span class="who">staff</span>: <b>Health &amp; Safety → My Medical</b> · <code>/me/medical</code>: her claims and appointments, and where her cover and health profile appear once HR issues a policy and the clinic records a profile (she has neither yet — say so; it is the honest state of a new file). Say: "She files her own claim; HR does not file for her."</td></tr>
+</table>
+<div class="box aside">Attaching a receipt to a medical claim, or any other file in this book, goes through the controlled upload gate, where a clean malware scan is mandatory. A refusal reading <code>FILE_VIRUS_SCAN_INCOMPLETE</code> means the document scanner is not running — Book 0 §3.2.
+<br><br>Occupational health — surveillance, first aid, wellness, return to work — is owned by SHE (Book 4 §10) and bridges to these records by reference. Both are gated by the medical permission family so a SHE officer sees what a nurse would, not what HR would.</div>
+
+<h2>6. Benefits and emoluments</h2>
+<div class="who">hr.head</div>
+<table class="steps">
+  <tr><td>1</td><td>Emoluments</td><td><code>/hr/emoluments</code>: six pay components (basic, and allowances such as housing, transport, responsibility) with tax treatment, pension applicability and effective dating; position emoluments attach them to positions by grade.</td></tr>
+  <tr><td>2</td><td>Benefit policies</td><td><code>/administration/hr/compensation/benefit-policies</code>: ten policies — Medical Cover (Standard), Life Insurance (Basic), Transport and Housing Allowances, Education Support, Technology Stipend, and the benefits-in-kind (company vehicle with fuel and driver, furnished accommodation, responsibility allowance, tax-exempt medical reimbursement) with the GRA valuation rates.</td></tr>
+  <tr><td>3</td><td>Enrolments</td><td><code>/hr/benefits</code>: 45 enrolments — medical cover for confirmed staff, life cover for M1–M3, company vehicles for the Managing Director and the two General Managers.</td></tr>
+  <tr><td>4</td><td>The refusal</td><td>Try to enrol <span class="who">new.hire</span> Kojo Ansah on Medical Cover (Standard). Refused: <i>"probation rule"</i>. Say: "The policy is post-confirmation; the system knows he is on probation. When his confirmation is recorded in Book 1 §7, this enrolment goes through."</td></tr>
+</table>
+<div class="box aside">Payroll owns the pay-component master; HR keeps pension, tax treatment, gross-pay effect and effective dating alongside it. Salary grades are payroll's, mirrored into HR read-only. This is why there is no HR grade editor. Placement on a grade and notch is only possible for staff who are <b>on payroll</b> (Book 1 §1): the four off-payroll people cannot be placed, and an emolument summary for them reads a basic pay of zero — nothing from payroll, by design.</div>
+
+<h2 class="pb">7. Company schedule</h2>
+<div class="who">hr.head</div>
+<p class="path"><b>Human Resources → Company Schedule</b> · <code>/hr/company-schedule</code></p>
+<table class="steps">
+  <tr><td>1</td><td>Events</td><td><code>/hr/company-schedule/events</code>: the Board's Q3 meeting (management only), the Annual Staff Durbar (all staff, all day), the Head Office fire drill.</td></tr>
+  <tr><td>2</td><td>Rooms and bookings</td><td><code>/hr/company-schedule/bookings</code>: Boardroom, Conference Room A, Huddle Room 1; the Management Committee booked the Boardroom; Development booked Conference Room A for a design review. Book one live — a clash is refused.</td></tr>
+  <tr><td>3</td><td>Closures and milestones</td><td>Administration → HR → Company Schedule: the year-end stocktake closure (29–30 December, all stations, paid, not a working day) and the 74th Anniversary milestone; fiscal year 2026.</td></tr>
+</table>
+<div class="box aside">Closures feed leave day-counting and attendance the same way public holidays do; a site-specific closure applies only to that location's staff.</div>
+
+<h2>8. Consulting</h2>
+<div class="who">hr.head</div>
+<p class="path"><b>Human Resources → Consulting</b> · <code>/hr/consulting</code></p>
+<div class="box say">"TDC's professional staff are sometimes engaged by other bodies. Consulting tracks the client, the engagement and the hours, and produces the invoice — with the client confirming the hours from outside the ERP."</div>
+<table class="steps">
+  <tr><td>1</td><td>Clients</td><td><code>/hr/consulting/clients</code>: Ghana Ports and Harbours Authority, Ashaiman Municipal Assembly. Each can be given a portal account.</td></tr>
+  <tr><td>2</td><td>Engagements</td><td><code>/hr/consulting/engagements</code>: "Port hinterland land-use study" — the Supervising Town Planner, GHS 420/hour, monthly billing, PO number, contract value.</td></tr>
+  <tr><td>3</td><td>Timesheets</td><td><code>/hr/consulting/timesheets</code>: one week, three entries, 16.5 hours. Submit → sent to client → confirmed on the client portal (<code>/external-portal/client-timesheets</code>, a separate login) → invoiced.</td></tr>
+  <tr><td>4</td><td>Invoices</td><td><code>/hr/consulting/invoices</code>: generated from confirmed timesheets at the engagement rate.</td></tr>
+</table>
+
+<footer>Book 2 — Operations HR · RHEMA ERP HR &amp; SHE demonstration · Prepared 2 September 2026 · Records cited are those in the seeded demonstration database</footer>
+</div>
+</body>
+</html>
