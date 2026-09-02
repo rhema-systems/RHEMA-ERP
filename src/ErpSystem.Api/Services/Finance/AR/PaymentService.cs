@@ -80,7 +80,21 @@ namespace ErpSystem.Api.Services.Finance.AR
         private string UserName => _currentUser.UserName ?? "system";
         private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
-        public async Task<CustomerPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<CustomerPaymentDto?> GetByIdAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            GetByIdCoreAsync(id, CustomerPaymentProducer(), cancellationToken);
+
+        public Task<CustomerPaymentDto?> GetByIdAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            GetByIdCoreAsync(id, EnsureCustomerPaymentRoute(producer), cancellationToken);
+
+        private async Task<CustomerPaymentDto?> GetByIdCoreAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken)
         {
             var permittedBankAccountIds = await _financeAccessScopeService
                 .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
@@ -113,14 +127,14 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             var result = MapToDto(payment, customer);
             if (!payment.IsCreditNote && _sourceDimensions is not null
-                && await HasCustomerPaymentDimensionProvenanceAsync(payment.Id, cancellationToken))
+                && await HasCustomerPaymentDimensionProvenanceAsync(payment.Id, producer, cancellationToken))
                 result.FinanceDimensions = await _sourceDimensions.GetAsync(
-                    CustomerPaymentProducer(), payment.Id, payment.PaymentDate,
-                    await BuildCustomerPaymentDimensionLineContextsAsync(payment, cancellationToken),
+                    producer, payment.Id, payment.PaymentDate,
+                    await BuildCustomerPaymentDimensionLineContextsAsync(payment, producer, cancellationToken),
                     cancellationToken);
             if (!payment.IsCreditNote && _paymentDimensions is not null)
                 result.SettlementDimensions = await _paymentDimensions.GetCustomerPaymentAsync(
-                    payment.Id, cancellationToken);
+                    payment.Id, producer, cancellationToken);
             if (_controlledDocumentIssueService != null && !payment.IsCreditNote)
             {
                 // Receipt issue state is read from the common append-only output register. The
@@ -370,17 +384,24 @@ namespace ErpSystem.Api.Services.Finance.AR
         public Task<CustomerPaymentDto> CreateAsync(
             PaymentCreateDto dto,
             CancellationToken cancellationToken = default) =>
-            CreateAsync(dto, cancellationToken, executionStrategyScope: false);
+            CreateAsync(dto, CustomerPaymentProducer(), cancellationToken, executionStrategyScope: false);
+
+        public Task<CustomerPaymentDto> CreateAsync(
+            PaymentCreateDto dto,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            CreateAsync(dto, EnsureCustomerPaymentRoute(producer), cancellationToken, executionStrategyScope: false);
 
         private async Task<CustomerPaymentDto> CreateAsync(
             PaymentCreateDto dto,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken,
             bool executionStrategyScope)
         {
             if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
                 return await _unitOfWork.ExecuteInStrategyAsync(
-                    () => CreateAsync(dto, cancellationToken, executionStrategyScope: true),
+                    () => CreateAsync(dto, producer, cancellationToken, executionStrategyScope: true),
                     cancellationToken);
             }
 
@@ -566,10 +587,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
 
                 await SynchronizeCustomerPaymentSourceDimensionsAsync(
-                    payment, dto.FinanceDimensions, cancellationToken);
+                    payment, dto.FinanceDimensions, producer, cancellationToken);
                 if (_paymentDimensions is not null)
-                    await _paymentDimensions.SynchronizeCustomerPaymentAsync(payment.Id, cancellationToken);
-                await ValidateAndFreezeCustomerPaymentDimensionsAsync(payment, cancellationToken);
+                    await _paymentDimensions.SynchronizeCustomerPaymentAsync(payment.Id, producer, cancellationToken);
+                await ValidateAndFreezeCustomerPaymentDimensionsAsync(payment, producer, cancellationToken);
 
                 if (dto.IsCreditNote)
                 {
@@ -581,8 +602,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                         throw new InvalidOperationException("Central finance posting engine is not configured for AR receipt posting.");
 
                     payment = await LoadPaymentForPostingAsync(payment.Id, cancellationToken);
-                    var postingOutcome = await PostArReceiptCoreAsync(payment, cancellationToken);
-                    await FinalizeArReceiptPostingAsync(postingOutcome, cancellationToken);
+                    var postingOutcome = await PostArReceiptCoreAsync(payment, producer, cancellationToken);
+                    await FinalizeArReceiptPostingAsync(postingOutcome, producer, cancellationToken);
                 }
 
                 // UnitOfWork.CommitAsync owns rollback/disposal if the commit itself fails.
@@ -593,7 +614,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 _logger.LogInformation("Created payment {PaymentNumber} for customer {CustomerId}, Amount: {Amount}",
                     payment.PaymentNumber, customer.Id, dto.TotalAmount);
 
-                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment, customer);
+                return await GetByIdAsync(payment.Id, producer, cancellationToken) ?? MapToDto(payment, customer);
             }
             catch (Exception ex)
             {
@@ -739,7 +760,21 @@ namespace ErpSystem.Api.Services.Finance.AR
             return MapToDto(payment);
         }
 
-        public async Task<CustomerPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<CustomerPaymentDto> PostAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            PostCoreAsync(id, CustomerPaymentProducer(), cancellationToken);
+
+        public Task<CustomerPaymentDto> PostAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken = default) =>
+            PostCoreAsync(id, EnsureCustomerPaymentRoute(producer), cancellationToken);
+
+        private async Task<CustomerPaymentDto> PostCoreAsync(
+            Guid id,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken)
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AR receipt posting.");
@@ -760,14 +795,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                     payment.BankAccountId,
                     FinanceAccessLevel.Operate,
                     cancellationToken);
-                var postingOutcome = await PostArReceiptCoreAsync(payment, cancellationToken);
-                await FinalizeArReceiptPostingAsync(postingOutcome, cancellationToken);
+                var postingOutcome = await PostArReceiptCoreAsync(payment, producer, cancellationToken);
+                await FinalizeArReceiptPostingAsync(postingOutcome, producer, cancellationToken);
 
                 // UnitOfWork.CommitAsync owns rollback/disposal if the commit itself fails.
                 transactionStarted = false;
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+                return await GetByIdAsync(payment.Id, producer, cancellationToken) ?? MapToDto(payment);
             }
             catch (Exception ex)
             {
@@ -1232,16 +1267,17 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task<ArReceiptPostingOutcome> PostArReceiptCoreAsync(
             CustomerPayment payment,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AR receipt posting.");
 
-            await ValidateAndFreezeCustomerPaymentDimensionsAsync(payment, cancellationToken);
+            await ValidateAndFreezeCustomerPaymentDimensionsAsync(payment, producer, cancellationToken);
             var wasAlreadyLinked = payment.JournalEntryId.HasValue;
-            var postingRequest = await BuildArReceiptPostingRequestAsync(payment, cancellationToken);
+            var postingRequest = await BuildArReceiptPostingRequestAsync(payment, producer, cancellationToken);
             var postingResult = await _financePostingEngine.PostAsync(
-                postingRequest, CustomerPaymentProducer(), cancellationToken);
+                postingRequest, producer, cancellationToken);
 
             if (payment.JournalEntryId.HasValue && payment.JournalEntryId.Value != postingResult.JournalEntryId)
                 throw new InvalidOperationException("Customer payment is linked to a different journal entry than the posting engine result.");
@@ -1261,6 +1297,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task FinalizeArReceiptPostingAsync(
             ArReceiptPostingOutcome outcome,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
         {
             var payment = outcome.Payment;
@@ -1306,7 +1343,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             // Realized FX is part of settlement accounting, so it participates in the same
             // transaction as the receipt and allocation instead of becoming a later partial commit.
-            await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
+            await PostRealizedFxIfRequiredAsync(payment, producer, cancellationToken);
 
             var customer = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken)
                 ?? throw new InvalidOperationException("Customer was not found while finalizing the AR receipt.");
@@ -2773,6 +2810,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task<FinancePostingRequestDto> BuildArReceiptPostingRequestAsync(
             CustomerPayment payment,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
         {
             var tenantId = TenantId;
@@ -2977,10 +3015,10 @@ namespace ErpSystem.Api.Services.Finance.AR
             var sourceLineDimensions = _sourceDimensions is null
                 ? new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>()
                 : await _sourceDimensions.GetPostingDimensionsAsync(
-                    CustomerPaymentProducer(), payment.Id, cancellationToken);
+                    producer, payment.Id, cancellationToken);
             var settlementDimensions = _paymentDimensions is null
                 ? Array.Empty<FinanceSettlementDimensionComponentDto>()
-                : (await _paymentDimensions.GetCustomerPaymentAsync(payment.Id, cancellationToken)).ToArray();
+                : (await _paymentDimensions.GetCustomerPaymentAsync(payment.Id, producer, cancellationToken)).ToArray();
             var postingLines = new List<FinancePostingLineDto>();
             var lineNumber = 1;
 
@@ -2995,8 +3033,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 payment.PaymentDate,
                 payment.PaymentNumber,
                 lineNumber++,
-                    receiptDebitTag,
-                    payment.ExchangeRateId));
+                     receiptDebitTag,
+                     payment.ExchangeRateId,
+                     sourceDocumentLineId: producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+                         ? FinanceSourceLineIdentity.Create(payment.Id, "RECEIPT-DESTINATION", payment.Id)
+                         : null,
+                     dimensions: producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+                         ? sourceLineDimensions.GetValueOrDefault(
+                             FinanceSourceLineIdentity.Create(payment.Id, "RECEIPT-DESTINATION", payment.Id))
+                             ?? Array.Empty<FinancePostingDimensionValueDto>()
+                         : Array.Empty<FinancePostingDimensionValueDto>()));
 
             if (withholdingTaxAmount > 0m)
             {
@@ -3030,7 +3076,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                             functionalDebitOverride: component.FunctionalAmount,
                             sourceDocumentLineId: component.OriginatingSourceLineId,
                             dimensions: await ResolveCustomerSettlementPostingDimensionsAsync(
-                                component, withholdingAccountId, payment.PaymentDate, cancellationToken)));
+                                component, withholdingAccountId, payment.PaymentDate, producer, cancellationToken)));
                 }
             }
 
@@ -3066,7 +3112,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                             functionalDebitOverride: component.FunctionalAmount,
                             sourceDocumentLineId: component.OriginatingSourceLineId,
                             dimensions: await ResolveCustomerSettlementPostingDimensionsAsync(
-                                component, vatWithholdingAccountId, payment.PaymentDate, cancellationToken)));
+                                component, vatWithholdingAccountId, payment.PaymentDate, producer, cancellationToken)));
                 }
             }
 
@@ -3101,7 +3147,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                             functionalDebitOverride: component.FunctionalAmount,
                             sourceDocumentLineId: component.OriginatingSourceLineId,
                             dimensions: await ResolveCustomerSettlementPostingDimensionsAsync(
-                                component, discountAccountId, payment.PaymentDate, cancellationToken)));
+                                component, discountAccountId, payment.PaymentDate, producer, cancellationToken)));
                 }
             }
 
@@ -3130,6 +3176,40 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 foreach (var allocation in activeAllocations)
                 {
+                    if (producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt)
+                    {
+                        var principalEvidence = RequireCustomerSettlementComponentEvidence(
+                            settlementDimensions,
+                            allocation.Id,
+                            FinanceSettlementComponentType.Principal,
+                            allocation.PaymentCurrencyAmount,
+                            allocation.PaymentFunctionalAmount,
+                            allocation.InvoiceId,
+                            allocation.PaymentCurrencyCode,
+                            allocation.PaymentExchangeRateId,
+                            allocation.PaymentExchangeRate);
+                        foreach (var component in principalEvidence)
+                        {
+                            postingLines.Add(BuildPostingLine(
+                                creditAccountId,
+                                $"AR settlement {payment.PaymentNumber} / {allocation.Invoice.InvoiceNumber}",
+                                debitTransactionAmount: 0m,
+                                creditTransactionAmount: component.TransactionAmount,
+                                component.TransactionCurrencyCode,
+                                functionalCurrency,
+                                component.ExchangeRate,
+                                payment.PaymentDate,
+                                payment.PaymentNumber,
+                                lineNumber++,
+                                "AR-Control",
+                                component.ExchangeRateId,
+                                functionalCreditOverride: component.FunctionalAmount,
+                                sourceDocumentLineId: component.OriginatingSourceLineId,
+                                dimensions: await ResolveCustomerSettlementPostingDimensionsAsync(
+                                    component, creditAccountId, payment.PaymentDate, producer, cancellationToken)));
+                        }
+                        continue;
+                    }
                     var invoiceGrossAmount = RoundMoney(
                         allocation.AllocatedAmount + allocation.DiscountAmount +
                         allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount);
@@ -3165,8 +3245,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             return new FinancePostingRequestDto
             {
-                SourceModule = "AR",
-                SourceDocumentType = "CustomerPayment",
+                SourceModule = producer.Definition.PostingSourceModule,
+                OriginModuleCode = producer.Definition.ProducerModule,
+                SourceDocumentType = producer.Definition.DocumentType,
                 SourceDocumentId = payment.Id,
                 SourceDocumentTenantId = payment.TenantId,
                 PostingAction = "Post",
@@ -3178,7 +3259,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 JournalType = "AR Receipt",
                 BookClassification = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
-                IdempotencyKey = $"AR:CustomerPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
+                IdempotencyKey = $"{producer.Definition.SourceRoute}:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
                 Lines = postingLines
             };
@@ -3186,6 +3267,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task PostRealizedFxIfRequiredAsync(
             CustomerPayment payment,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
         {
             if (payment.IsCreditNote)
@@ -3214,7 +3296,15 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new InvalidOperationException("FX accounting service is not configured for AR realized FX settlement posting.");
             }
 
-            await _fxAccountingService.PostRealizedFxForArReceiptAsync(payment.Id, cancellationToken);
+            if (producer.Definition.Id == FinanceDimensionRouteId.FinanceArCustomerPayment)
+            {
+                await _fxAccountingService.PostRealizedFxForArReceiptAsync(payment.Id, cancellationToken);
+            }
+            else
+            {
+                await _fxAccountingService.PostRealizedFxForArReceiptAsync(
+                    payment.Id, producer, cancellationToken);
+            }
         }
 
         /// <summary>
@@ -3490,6 +3580,14 @@ namespace ErpSystem.Api.Services.Finance.AR
         private async Task<IReadOnlyList<FinanceSourceDocumentLineContext>>
             BuildCustomerPaymentDimensionLineContextsAsync(
                 CustomerPayment payment,
+                CancellationToken cancellationToken) =>
+            await BuildCustomerPaymentDimensionLineContextsAsync(
+                payment, CustomerPaymentProducer(), cancellationToken);
+
+        private async Task<IReadOnlyList<FinanceSourceDocumentLineContext>>
+            BuildCustomerPaymentDimensionLineContextsAsync(
+                CustomerPayment payment,
+                FinancePostingProducerContext producer,
                 CancellationToken cancellationToken)
         {
             var allocationRows = await _unitOfWork.Repository<PaymentAllocation>()
@@ -3497,8 +3595,37 @@ namespace ErpSystem.Api.Services.Finance.AR
                     && item.CustomerPaymentId == payment.Id && !item.IsDeleted)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
-            if (GetEffectivePaymentDimensionAllocations(allocationRows).Count > 0)
+            if (GetEffectivePaymentDimensionAllocations(allocationRows).Count > 0
+                && producer.RouteId != FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt)
                 return Array.Empty<FinanceSourceDocumentLineContext>();
+
+            if (producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt)
+            {
+                Guid destinationAccountId;
+                if (payment.LiquidityAccountId.HasValue)
+                {
+                    destinationAccountId = await _unitOfWork.Repository<LiquidityAccount>()
+                        .GetQueryable(item => item.TenantId == TenantId
+                            && item.Id == payment.LiquidityAccountId.Value && !item.IsDeleted)
+                        .Select(item => item.GLAccountId)
+                        .SingleAsync(cancellationToken);
+                }
+                else
+                {
+                    destinationAccountId = await _unitOfWork.Repository<BankAccount>()
+                        .GetQueryable(item => item.TenantId == TenantId
+                            && item.Id == payment.BankAccountId && !item.IsDeleted
+                            && item.GLAccountId.HasValue)
+                        .Select(item => item.GLAccountId!.Value)
+                        .SingleAsync(cancellationToken);
+                }
+                return new[]
+                {
+                    new FinanceSourceDocumentLineContext(
+                        FinanceSourceLineIdentity.Create(payment.Id, "RECEIPT-DESTINATION", payment.Id),
+                        destinationAccountId)
+                };
+            }
 
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var advanceAccountId = settings.CustomerAdvanceAccountId
@@ -3510,12 +3637,20 @@ namespace ErpSystem.Api.Services.Finance.AR
         private async Task<FinanceSourceDocumentDimensionDto?> SynchronizeCustomerPaymentSourceDimensionsAsync(
             CustomerPayment payment,
             FinanceSourceDocumentDimensionInputDto? input,
+            CancellationToken cancellationToken) =>
+            await SynchronizeCustomerPaymentSourceDimensionsAsync(
+                payment, input, CustomerPaymentProducer(), cancellationToken);
+
+        private async Task<FinanceSourceDocumentDimensionDto?> SynchronizeCustomerPaymentSourceDimensionsAsync(
+            CustomerPayment payment,
+            FinanceSourceDocumentDimensionInputDto? input,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
         {
             if (_sourceDimensions is null || payment.IsCreditNote)
                 return null;
 
-            var lines = await BuildCustomerPaymentDimensionLineContextsAsync(payment, cancellationToken);
+            var lines = await BuildCustomerPaymentDimensionLineContextsAsync(payment, producer, cancellationToken);
             FinanceSourceDocumentDimensionInputDto? trustedInput = input;
             if (input is not null)
             {
@@ -3544,7 +3679,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             return await _sourceDimensions.SynchronizeDraftAsync(
-                CustomerPaymentProducer(), payment.Id, payment.PaymentDate, lines, trustedInput,
+                producer, payment.Id, payment.PaymentDate, lines, trustedInput,
                 inheritDefaultForUnassignedLines: true,
                 budgetReservationSourceDocumentType: null,
                 reason: "Customer-payment Finance dimensions synchronized from the draft source.",
@@ -3553,18 +3688,25 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task ValidateAndFreezeCustomerPaymentDimensionsAsync(
             CustomerPayment payment,
+            CancellationToken cancellationToken) =>
+            await ValidateAndFreezeCustomerPaymentDimensionsAsync(
+                payment, CustomerPaymentProducer(), cancellationToken);
+
+        private async Task ValidateAndFreezeCustomerPaymentDimensionsAsync(
+            CustomerPayment payment,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
         {
             if (payment.IsCreditNote)
                 return;
             if (_sourceDimensions is not null)
             {
-                if (!await HasCustomerPaymentDimensionProvenanceAsync(payment.Id, cancellationToken))
+                if (!await HasCustomerPaymentDimensionProvenanceAsync(payment.Id, producer, cancellationToken))
                     await SynchronizeCustomerPaymentSourceDimensionsAsync(
-                        payment, input: null, cancellationToken);
+                        payment, input: null, producer, cancellationToken);
                 var result = await _sourceDimensions.ValidateAndFreezeAsync(
-                    CustomerPaymentProducer(), payment.Id, payment.PaymentDate,
-                    await BuildCustomerPaymentDimensionLineContextsAsync(payment, cancellationToken),
+                    producer, payment.Id, payment.PaymentDate,
+                    await BuildCustomerPaymentDimensionLineContextsAsync(payment, producer, cancellationToken),
                     requireCurrentBudgetEvidence: false,
                     cancellationToken);
                 if (result.ReadinessWarnings.Any(message =>
@@ -3582,28 +3724,45 @@ namespace ErpSystem.Api.Services.Finance.AR
                     .AnyAsync(cancellationToken);
                 var hasEvidence = await _unitOfWork.Repository<FinanceSettlementDimensionComponent>()
                     .GetQueryable(item => item.TenantId == TenantId
-                        && item.RouteId == FinanceDimensionRouteId.FinanceArCustomerPayment
+                        && item.RouteId == producer.RouteId
                         && item.SourceDocumentId == payment.Id && !item.IsDeleted)
                     .AsNoTracking()
                     .AnyAsync(cancellationToken);
                 if (hasAllocations && !hasEvidence)
-                    await _paymentDimensions.SynchronizeCustomerPaymentAsync(payment.Id, cancellationToken);
-                await _paymentDimensions.ValidateAndFreezeCustomerPaymentAsync(payment.Id, cancellationToken);
+                    await _paymentDimensions.SynchronizeCustomerPaymentAsync(payment.Id, producer, cancellationToken);
+                await _paymentDimensions.ValidateAndFreezeCustomerPaymentAsync(payment.Id, producer, cancellationToken);
             }
         }
 
         private Task<bool> HasCustomerPaymentDimensionProvenanceAsync(
             Guid paymentId,
             CancellationToken cancellationToken) =>
+            HasCustomerPaymentDimensionProvenanceAsync(
+                paymentId, CustomerPaymentProducer(), cancellationToken);
+
+        private Task<bool> HasCustomerPaymentDimensionProvenanceAsync(
+            Guid paymentId,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken) =>
             _unitOfWork.Repository<FinanceSourceDimensionAssignment>()
                 .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted
-                    && item.RouteId == FinanceDimensionRouteId.FinanceArCustomerPayment
+                    && item.RouteId == producer.RouteId
                     && item.SourceDocumentId == paymentId && !item.SourceLineId.HasValue)
                 .AsNoTracking()
                 .AnyAsync(cancellationToken);
 
         private static FinancePostingProducerContext CustomerPaymentProducer() =>
             new(FinanceDimensionRouteId.FinanceArCustomerPayment);
+
+        private static FinancePostingProducerContext EnsureCustomerPaymentRoute(
+            FinancePostingProducerContext producer)
+        {
+            ArgumentNullException.ThrowIfNull(producer);
+            if (producer.RouteId is not (FinanceDimensionRouteId.FinanceArCustomerPayment
+                or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt))
+                throw new InvalidOperationException("The trusted producer context is not a supported Finance customer-payment route.");
+            return producer;
+        }
 
         private static IReadOnlyList<PaymentAllocation> GetEffectivePaymentDimensionAllocations(
             IEnumerable<PaymentAllocation> allocations)
@@ -3705,6 +3864,19 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Array.Empty<FinancePostingDimensionValueDto>())
                 : _paymentDimensions.ResolveCustomerPostingDimensionsAsync(
                     evidence.Id, postingAccountId, postingDate, cancellationToken);
+
+        private Task<IReadOnlyList<FinancePostingDimensionValueDto>>
+            ResolveCustomerSettlementPostingDimensionsAsync(
+                FinanceSettlementDimensionComponentDto evidence,
+                Guid postingAccountId,
+                DateTime postingDate,
+                FinancePostingProducerContext producer,
+                CancellationToken cancellationToken) =>
+            _paymentDimensions is null
+                ? Task.FromResult<IReadOnlyList<FinancePostingDimensionValueDto>>(
+                    Array.Empty<FinancePostingDimensionValueDto>())
+                : _paymentDimensions.ResolveCustomerPostingDimensionsAsync(
+                    evidence.Id, postingAccountId, postingDate, producer, cancellationToken);
 
         private static FinancePostingLineDto BuildPostingLine(
             Guid accountId,

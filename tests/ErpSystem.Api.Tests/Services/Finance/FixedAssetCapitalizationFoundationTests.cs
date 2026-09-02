@@ -825,7 +825,8 @@ public sealed class FixedAssetCapitalizationFoundationTests
         // AP void uses the current accounting date for the linked reversal. Seed that period as
         // well as the invoice's July period so the test proves shared-journal behavior rather than
         // being stopped earlier by the independent period-control safeguard.
-        SeedOpenPeriod(db, tenantId, startDate: new DateTime(2026, 8, 1));
+        var currentAccountingMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        SeedOpenPeriod(db, tenantId, startDate: currentAccountingMonth);
         await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId, fixedAssetServiceRequired: true);
         await services.VendorInvoices.PostAsync(fixture.Invoice.Id);

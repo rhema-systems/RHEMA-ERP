@@ -1,6 +1,8 @@
 using System.Data;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -159,10 +161,19 @@ public partial class AssetValuationService
                         valuation.AccountingDate, correction.Reason, correction.RequestedReversalDate, cancellationToken);
                     var plan = await _financePostingEngine!.GetReversalPlanAsync(
                         correction.OriginalPostingEventId, policy.Reason, policy.ReversalDate, cancellationToken);
+                    var reversalLines = plan.ReversalLines.ToList();
+                    if (_fixedAssetDimensions is not null)
+                        await _fixedAssetDimensions.RegisterHistoricalReversalAsync(
+                            ValuationCorrectionProducer,
+                            correction.Id,
+                            plan.OriginalJournalEntryId,
+                            reversalLines,
+                            cancellationToken);
                     var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
                     {
-                        SourceModule = SourceModule,
-                        SourceDocumentType = "FixedAssetValuationCorrection",
+                        SourceModule = ValuationCorrectionProducer.Definition.PostingSourceModule,
+                        OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                        SourceDocumentType = ValuationCorrectionProducer.Definition.DocumentType,
                         SourceDocumentId = correction.Id,
                         SourceDocumentTenantId = correction.TenantId,
                         PostingAction = "Reverse",
@@ -177,8 +188,8 @@ public partial class AssetValuationService
                         ReversalType = "FA Valuation",
                         IdempotencyKey = $"FA:ValuationCorrection:{correction.TenantId:N}:{correction.Id:N}",
                         ReturnExistingOnDuplicate = true,
-                        Lines = plan.ReversalLines
-                    }, cancellationToken);
+                        Lines = reversalLines
+                    }, ValuationCorrectionProducer, cancellationToken);
 
                     // The posting engine may detach tracked entities while resolving an idempotency
                     // race. Reload before applying book state so journal and subledger evidence are atomic.

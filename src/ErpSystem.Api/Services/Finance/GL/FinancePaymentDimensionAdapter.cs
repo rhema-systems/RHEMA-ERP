@@ -49,8 +49,16 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
 
     public async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> SynchronizeCustomerPaymentAsync(
         Guid customerPaymentId,
+        CancellationToken cancellationToken = default) =>
+        await SynchronizeCustomerPaymentAsync(
+            customerPaymentId, Producer(FinanceDimensionRouteId.FinanceArCustomerPayment), cancellationToken);
+
+    public async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> SynchronizeCustomerPaymentAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken = default)
     {
+        EnsureCustomerPaymentRoute(producer);
         var payment = await _db.Set<CustomerPayment>()
             .Include(item => item.Allocations).ThenInclude(item => item.Invoice)
                 .ThenInclude(item => item.LineItems)
@@ -59,9 +67,9 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
                 cancellationToken)
             ?? throw new KeyNotFoundException("Customer payment was not found for this tenant.");
         var allocations = EffectiveCustomerAllocations(payment.Allocations);
-        var inputs = await BuildCustomerInputsAsync(payment, allocations, cancellationToken);
+        var inputs = await BuildCustomerInputsAsync(payment, allocations, producer, cancellationToken);
         return await _settlements.SynchronizeDraftAsync(
-            Producer(FinanceDimensionRouteId.FinanceArCustomerPayment), payment.Id, inputs, cancellationToken);
+            producer, payment.Id, inputs, cancellationToken);
     }
 
     public async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> ValidateAndFreezeVendorPaymentAsync(
@@ -78,11 +86,19 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
 
     public async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> ValidateAndFreezeCustomerPaymentAsync(
         Guid customerPaymentId,
+        CancellationToken cancellationToken = default) =>
+        await ValidateAndFreezeCustomerPaymentAsync(
+            customerPaymentId, Producer(FinanceDimensionRouteId.FinanceArCustomerPayment), cancellationToken);
+
+    public async Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> ValidateAndFreezeCustomerPaymentAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken = default)
     {
+        EnsureCustomerPaymentRoute(producer);
         var allocationIds = await EffectiveCustomerAllocationIdsAsync(customerPaymentId, cancellationToken);
         return await _settlements.ValidateAndFreezeAsync(
-            Producer(FinanceDimensionRouteId.FinanceArCustomerPayment),
+            producer,
             customerPaymentId,
             allocationIds,
             cancellationToken);
@@ -97,8 +113,19 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
     public Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> GetCustomerPaymentAsync(
         Guid customerPaymentId,
         CancellationToken cancellationToken = default) =>
+        GetCustomerPaymentAsync(
+            customerPaymentId, Producer(FinanceDimensionRouteId.FinanceArCustomerPayment), cancellationToken);
+
+    public Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> GetCustomerPaymentAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureCustomerPaymentRoute(producer);
+        return
         _settlements.GetAsync(
-            Producer(FinanceDimensionRouteId.FinanceArCustomerPayment), customerPaymentId, cancellationToken);
+            producer, customerPaymentId, cancellationToken);
+    }
 
     public Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolveVendorPostingDimensionsAsync(
         Guid componentEvidenceId,
@@ -117,12 +144,34 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
         Guid postingAccountId,
         DateTime postingDate,
         CancellationToken cancellationToken = default) =>
+        ResolveCustomerPostingDimensionsAsync(
+            componentEvidenceId, postingAccountId, postingDate,
+            Producer(FinanceDimensionRouteId.FinanceArCustomerPayment), cancellationToken);
+
+    public Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolveCustomerPostingDimensionsAsync(
+        Guid componentEvidenceId,
+        Guid postingAccountId,
+        DateTime postingDate,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureCustomerPaymentRoute(producer);
+        return
         _settlements.ResolvePostingDimensionsAsync(
-            Producer(FinanceDimensionRouteId.FinanceArCustomerPayment),
+            producer,
             componentEvidenceId,
             postingAccountId,
             postingDate,
             cancellationToken);
+    }
+
+    private static void EnsureCustomerPaymentRoute(FinancePostingProducerContext producer)
+    {
+        ArgumentNullException.ThrowIfNull(producer);
+        if (producer.RouteId is not (FinanceDimensionRouteId.FinanceArCustomerPayment
+            or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt))
+            throw new InvalidOperationException("The trusted producer context is not a supported Finance customer-payment route.");
+    }
 
     private async Task<IReadOnlyList<FinanceSettlementAllocationInput>> BuildVendorInputsAsync(
         VendorPayment payment,
@@ -180,11 +229,15 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
     private async Task<IReadOnlyList<FinanceSettlementAllocationInput>> BuildCustomerInputsAsync(
         CustomerPayment payment,
         IReadOnlyList<PaymentAllocation> allocations,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken)
     {
         var invoiceIds = allocations.Select(item => item.InvoiceId).Distinct().ToArray();
+        var invoiceRouteId = producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+            ? FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice
+            : FinanceDimensionRouteId.FinanceArCustomerInvoice;
         var assignments = await LoadSourceAssignmentsAsync(
-            FinanceDimensionRouteId.FinanceArCustomerInvoice, invoiceIds, cancellationToken);
+            invoiceRouteId, invoiceIds, cancellationToken);
         return allocations.Select(allocation =>
         {
             var invoice = allocation.Invoice;

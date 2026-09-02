@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
@@ -15,6 +16,10 @@ public interface IFinancePaymentDimensionAdapter
     Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> SynchronizeCustomerPaymentAsync(
         Guid customerPaymentId,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> SynchronizeCustomerPaymentAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> ValidateAndFreezeVendorPaymentAsync(
         Guid vendorPaymentId,
@@ -23,6 +28,10 @@ public interface IFinancePaymentDimensionAdapter
     Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> ValidateAndFreezeCustomerPaymentAsync(
         Guid customerPaymentId,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> ValidateAndFreezeCustomerPaymentAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> GetVendorPaymentAsync(
         Guid vendorPaymentId,
@@ -30,6 +39,10 @@ public interface IFinancePaymentDimensionAdapter
 
     Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> GetCustomerPaymentAsync(
         Guid customerPaymentId,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FinanceSettlementDimensionComponentDto>> GetCustomerPaymentAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolveVendorPostingDimensionsAsync(
@@ -42,5 +55,11 @@ public interface IFinancePaymentDimensionAdapter
         Guid componentEvidenceId,
         Guid postingAccountId,
         DateTime postingDate,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolveCustomerPostingDimensionsAsync(
+        Guid componentEvidenceId,
+        Guid postingAccountId,
+        DateTime postingDate,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken = default);
 }

@@ -135,4 +135,44 @@ public sealed class FinanceDimensionRouteConsumerContractTests
         FinanceReconciliationDimensionIdentity.OffsetLine(transactionId)
             .Should().NotBe(FinanceReconciliationDimensionIdentity.BankLine(transactionId));
     }
+
+    [Fact]
+    public void FixedAssetRoutesAreDistinctStableFinanceContracts()
+    {
+        var routeIds = Enumerable.Range(46, 15)
+            .Select(value => (FinanceDimensionRouteId)value)
+            .ToArray();
+        var routes = routeIds.Select(FinanceDimensionRouteCatalog.GetRequired).ToArray();
+
+        routes.Select(item => (int)item.Id).Should().Equal(Enumerable.Range(46, 15));
+        routes.Should().OnlyContain(item =>
+            item.ProducerModule == "Finance"
+            && item.Owner == "Finance / Fixed Assets"
+            && item.Grain == FinanceDimensionGrain.SourceDocumentLine
+            && item.DefaultState == FinanceDimensionCertificationState.CaptureOptional
+            && item.RequiresReadinessProvider);
+        routes.Select(item => item.SourceRoute).Should().OnlyHaveUniqueItems();
+        routes.Select(item => item.DocumentType).Should().OnlyContain(item =>
+            !string.IsNullOrWhiteSpace(item));
+
+        var documentId = Guid.NewGuid();
+        var lineageId = Guid.NewGuid();
+        FinanceSourceLineIdentity.Create(documentId, "asset-cost", lineageId)
+            .Should().Be(FinanceSourceLineIdentity.Create(documentId, "ASSET-COST", lineageId));
+        FinanceSourceLineIdentity.Create(documentId, "asset-cost", lineageId)
+            .Should().NotBe(FinanceSourceLineIdentity.Create(documentId, "clearing", lineageId));
+
+        typeof(IPaymentService).GetMethods().Should().Contain(method =>
+            method.Name == nameof(IPaymentService.CreateAsync)
+            && method.GetParameters().Any(parameter =>
+                parameter.ParameterType == typeof(FinancePostingProducerContext)));
+        typeof(IInvoiceService).GetMethods().Should().Contain(method =>
+            method.Name == nameof(IInvoiceService.SendInvoiceAsync)
+            && method.GetParameters().Any(parameter =>
+                parameter.ParameterType == typeof(FinancePostingProducerContext)));
+        typeof(IFxAccountingService).GetMethods().Should().Contain(method =>
+            method.Name == nameof(IFxAccountingService.PostRealizedFxForArReceiptAsync)
+            && method.GetParameters().Any(parameter =>
+                parameter.ParameterType == typeof(FinancePostingProducerContext)));
+    }
 }

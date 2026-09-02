@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -15,15 +16,23 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUser;
         private readonly IFixedAssetService _fixedAssetService;
+        private readonly IFinancePostingEngine _postingEngine;
+        private readonly IFixedAssetDimensionService _fixedAssetDimensions;
+        private static readonly FinancePostingProducerContext SettlementProducer =
+            new(FinanceDimensionRouteId.FinanceCapitalProjectSettlement);
 
         public CapitalProjectService(
             ApplicationDbContext context,
             ICurrentUserService currentUser,
-            IFixedAssetService fixedAssetService)
+            IFixedAssetService fixedAssetService,
+            IFinancePostingEngine postingEngine,
+            IFixedAssetDimensionService fixedAssetDimensions)
         {
             _context = context;
             _currentUser = currentUser;
             _fixedAssetService = fixedAssetService;
+            _postingEngine = postingEngine;
+            _fixedAssetDimensions = fixedAssetDimensions;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -49,7 +58,19 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 .Where(p => p.TenantId == TenantId && p.Id == id)
                 .FirstOrDefaultAsync();
 
-            return project == null ? null : MapToDetailDto(project);
+            if (project == null)
+                return null;
+            var result = MapToDetailDto(project);
+            var lines = BuildSettlementPreviewLines(project);
+            if (lines.Count > 0)
+            {
+                result.FinanceDimensions = await _fixedAssetDimensions.GetAsync(
+                    SettlementProducer,
+                    project.Id,
+                    project.ActualCompletionDate ?? project.TargetCompletionDate ?? DateTime.UtcNow,
+                    lines);
+            }
+            return result;
         }
 
         // ── Create / Update / Delete ─────────────────────────────────────
@@ -246,14 +267,21 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         // ── Capitalization ───────────────────────────────────────────────
 
-        public async Task<CapitalProjectDetailDto> CapitalizeProjectAsync(Guid projectId)
+        public async Task<CapitalProjectDetailDto> CapitalizeProjectAsync(
+            Guid projectId,
+            CapitalizeCapitalProjectDto? dto = null,
+            CancellationToken cancellationToken = default)
         {
             var project = await _context.CapitalProjects
                 .Include(p => p.CostLines)
                 .Include(p => p.SettlementRules)
                     .ThenInclude(r => r.TargetFixedAssetCategory)
-                .FirstOrDefaultAsync(p => p.TenantId == TenantId && p.Id == projectId)
+                .FirstOrDefaultAsync(p => p.TenantId == TenantId && p.Id == projectId, cancellationToken)
                 ?? throw new KeyNotFoundException("Capital project not found.");
+
+            if (project.Status == ProjectStatus.Completed)
+                return await GetByIdAsync(projectId)
+                    ?? throw new InvalidOperationException("Failed to retrieve capitalized project.");
 
             if (project.Status != ProjectStatus.InProgress)
                 throw new InvalidOperationException("Only InProgress projects can be capitalized.");
@@ -269,14 +297,24 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 throw new InvalidOperationException(
                     $"Settlement rules total {totalAllocation}%. They must sum to exactly 100%.");
 
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                var journalLines = new List<(Guid DebitAccountId, Guid CreditAccountId, decimal Amount, string Description)>();
-
-                foreach (var rule in project.SettlementRules)
+                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                try
                 {
-                    var allocatedAmount = Math.Round(project.TotalAccumulatedCost * (rule.AllocationPercentage / 100m), 2);
+                var postingDate = DateTime.UtcNow;
+                var postingLines = new List<FinancePostingLineDto>();
+                var orderedRules = project.SettlementRules.OrderBy(rule => rule.Id).ToArray();
+                var allocatedSoFar = 0m;
+
+                for (var index = 0; index < orderedRules.Length; index++)
+                {
+                    var rule = orderedRules[index];
+                    var allocatedAmount = index == orderedRules.Length - 1
+                        ? project.TotalAccumulatedCost - allocatedSoFar
+                        : Math.Round(project.TotalAccumulatedCost * (rule.AllocationPercentage / 100m), 2);
+                    allocatedSoFar += allocatedAmount;
 
                     // Create the fixed asset via existing service
                     var category = rule.TargetFixedAssetCategory;
@@ -286,7 +324,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         Name = rule.ProposedAssetName,
                         Description = $"Capitalized from project {project.ProjectCode}",
                         FixedAssetCategoryId = rule.TargetFixedAssetCategoryId,
-                        PurchaseDate = DateTime.UtcNow,
+                        PurchaseDate = postingDate,
                         PurchasePrice = allocatedAmount,
                         AcquisitionCost = allocatedAmount,
                         DepreciationMethod = category.DefaultMethod,
@@ -298,60 +336,53 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     rule.AllocatedAmount = allocatedAmount;
                     rule.ResultingFixedAssetId = createdAsset.Id;
 
-                    // Prepare GL: DR Asset Account, CR AUC Account (if RevaluationSurplusAccountId is available as fallback)
-                    if (category.RevaluationSurplusAccountId.HasValue)
+                    var aucAccountId = category.AucAccountId
+                        ?? throw new InvalidOperationException(
+                            $"AUC/CIP account is not configured for category '{category.Name}'.");
+                    var description = $"Capitalize {project.ProjectCode} → {rule.ProposedAssetName}";
+                    postingLines.Add(new FinancePostingLineDto
                     {
-                        journalLines.Add((
-                            category.AssetAccountId,
-                            category.RevaluationSurplusAccountId.Value,
-                            allocatedAmount,
-                            $"Capitalize {project.ProjectCode} → {rule.ProposedAssetName}"
-                        ));
-                    }
+                        AccountId = category.AssetAccountId,
+                        SourceDocumentLineId = FinanceSourceLineIdentity.Create(project.Id, "SETTLEMENT-ASSET", rule.Id),
+                        DebitAmount = allocatedAmount,
+                        Description = description,
+                        LineNumber = postingLines.Count + 1
+                    });
+                    postingLines.Add(new FinancePostingLineDto
+                    {
+                        AccountId = aucAccountId,
+                        SourceDocumentLineId = FinanceSourceLineIdentity.Create(project.Id, "SETTLEMENT-AUC", rule.Id),
+                        CreditAmount = allocatedAmount,
+                        Description = description,
+                        LineNumber = postingLines.Count + 1
+                    });
                 }
 
-                // Post consolidated GL journal if we have lines
-                if (journalLines.Any())
+                var functionalCurrency = (await _context.FinanceSettings.AsNoTracking()
+                    .Where(settings => settings.TenantId == TenantId)
+                    .Select(settings => settings.BaseCurrency)
+                    .FirstOrDefaultAsync(cancellationToken) ?? "GHS").Trim().ToUpperInvariant();
+                await _fixedAssetDimensions.SynchronizeAsync(
+                    SettlementProducer, project.Id, postingDate, postingLines,
+                    dto?.FinanceDimensions, inheritedAssetJournalBySourceLine: null,
+                    "Capital project settlement dimensions synchronized.", cancellationToken);
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    SettlementProducer, project.Id, postingDate, postingLines, cancellationToken);
+                await _postingEngine.PostAsync(new FinancePostingRequestDto
                 {
-                    var journal = new JournalEntry
-                    {
-                        TenantId = TenantId,
-                        EntryDate = DateTime.UtcNow,
-                        ReferenceNumber = $"AUC-CAP-{project.ProjectCode}",
-                        Description = $"Capital project capitalization: {project.Name}",
-                        PostingStatus = "Posted",
-                        JournalType = "System Generated",
-                        CreatedAt = DateTime.UtcNow,
-                        CreatedBy = UserName
-                    };
-
-                    foreach (var line in journalLines)
-                    {
-                        journal.Transactions.Add(new AccountTransaction
-                        {
-                            TenantId = TenantId,
-                            AccountId = line.DebitAccountId,
-                            TransactionDate = DateTime.UtcNow,
-                            DebitAmount = line.Amount,
-                            CreditAmount = 0,
-                            Description = line.Description,
-                            CreatedAt = DateTime.UtcNow
-                        });
-
-                        journal.Transactions.Add(new AccountTransaction
-                        {
-                            TenantId = TenantId,
-                            AccountId = line.CreditAccountId,
-                            TransactionDate = DateTime.UtcNow,
-                            DebitAmount = 0,
-                            CreditAmount = line.Amount,
-                            Description = line.Description,
-                            CreatedAt = DateTime.UtcNow
-                        });
-                    }
-
-                    _context.JournalEntries.Add(journal);
-                }
+                    SourceModule = SettlementProducer.Definition.PostingSourceModule,
+                    OriginModuleCode = SettlementProducer.Definition.ProducerModule,
+                    SourceDocumentType = SettlementProducer.Definition.DocumentType,
+                    SourceDocumentId = project.Id,
+                    SourceDocumentTenantId = TenantId,
+                    SourceDocumentReference = project.ProjectCode,
+                    Description = $"Capital project capitalization: {project.Name}",
+                    PostingDate = postingDate,
+                    JournalType = "System Generated",
+                    FunctionalCurrencyCode = functionalCurrency,
+                    IdempotencyKey = $"CAPITAL-PROJECT-SETTLEMENT:{TenantId:D}:{project.Id:D}",
+                    Lines = postingLines
+                }, SettlementProducer, cancellationToken);
 
                 // Mark project as completed
                 project.CapitalizedAmount = project.TotalAccumulatedCost;
@@ -360,20 +391,21 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 project.UpdatedAt = DateTime.UtcNow;
                 project.UpdatedBy = UserName;
 
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                await transaction.RollbackAsync();
-                throw new InvalidOperationException(
-                    "The project was modified by another user. Please refresh and try again.");
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
+                await _context.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw new InvalidOperationException(
+                        "The project was modified by another user. Please refresh and try again.");
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
 
             return await GetByIdAsync(projectId)
                 ?? throw new InvalidOperationException("Failed to retrieve capitalized project.");
@@ -399,6 +431,41 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 throw new InvalidOperationException(
                     "The record was modified by another user. Please refresh and try again.");
             }
+        }
+
+        private static List<FinancePostingLineDto> BuildSettlementPreviewLines(CapitalProject project)
+        {
+            var rules = project.SettlementRules.OrderBy(item => item.Id).ToArray();
+            if (rules.Length == 0 || project.TotalAccumulatedCost <= 0m)
+                return [];
+            var lines = new List<FinancePostingLineDto>();
+            var allocated = 0m;
+            for (var index = 0; index < rules.Length; index++)
+            {
+                var rule = rules[index];
+                var amount = rule.AllocatedAmount > 0m
+                    ? rule.AllocatedAmount
+                    : index == rules.Length - 1
+                        ? project.TotalAccumulatedCost - allocated
+                        : Math.Round(project.TotalAccumulatedCost * (rule.AllocationPercentage / 100m), 2);
+                allocated += amount;
+                var category = rule.TargetFixedAssetCategory;
+                if (category?.AucAccountId is null)
+                    continue;
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = category.AssetAccountId,
+                    SourceDocumentLineId = FinanceSourceLineIdentity.Create(project.Id, "SETTLEMENT-ASSET", rule.Id),
+                    DebitAmount = amount
+                });
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = category.AucAccountId.Value,
+                    SourceDocumentLineId = FinanceSourceLineIdentity.Create(project.Id, "SETTLEMENT-AUC", rule.Id),
+                    CreditAmount = amount
+                });
+            }
+            return lines;
         }
 
         private static void ValidateStatusTransition(ProjectStatus current, ProjectStatus target)

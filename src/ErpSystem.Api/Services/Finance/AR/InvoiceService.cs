@@ -1088,8 +1088,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingProducerContext producer)
         {
             ArgumentNullException.ThrowIfNull(producer);
-            if (producer.RouteId != FinanceDimensionRouteId.FinanceArCustomerInvoice)
-                throw new InvalidOperationException("The trusted producer context is not the Finance AR customer-invoice route.");
+            if (producer.RouteId is not (FinanceDimensionRouteId.FinanceArCustomerInvoice
+                or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice))
+                throw new InvalidOperationException("The trusted producer context is not a supported Finance AR customer-invoice route.");
             return producer;
         }
 

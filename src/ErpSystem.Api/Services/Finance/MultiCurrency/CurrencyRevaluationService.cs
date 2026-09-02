@@ -315,6 +315,26 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         Guid customerPaymentId,
         CancellationToken cancellationToken = default)
     {
+        return await PostRealizedFxForArReceiptAsync(
+            customerPaymentId,
+            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerPayment),
+            cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<FxRealizedSettlement>> PostRealizedFxForArReceiptAsync(
+        Guid customerPaymentId,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(producer);
+        if (producer.Definition.Id is not (
+            FinanceDimensionRouteId.FinanceArCustomerPayment or
+            FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt))
+        {
+            throw new InvalidOperationException(
+                $"Route '{producer.Definition.SourceRoute}' is not authorized for AR realized FX posting.");
+        }
+
         var tenantId = TenantId;
         var payment = await _context.Set<CustomerPayment>()
             .Include(p => p.Allocations)
@@ -375,6 +395,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                     payment,
                     allocation,
                     paymentCurrency,
+                    producer,
                     cancellationToken);
 
                 if (settlement != null)
@@ -1004,6 +1025,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         CustomerPayment payment,
         PaymentAllocation allocation,
         string paymentCurrency,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken)
     {
         if (allocation.Invoice == null || allocation.Invoice.TenantId != tenantId)
@@ -1073,7 +1095,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
 
         var amount = Math.Abs(delta);
         var dimensionEvidence = await RequireArRealizedFxDimensionEvidenceAsync(
-            payment.Id, allocation.Id, delta, cancellationToken);
+            payment.Id, allocation.Id, delta, producer, cancellationToken);
         var postingLines = new List<FinancePostingLineDto>();
         var lineNumber = 1;
         if (gainLossType == "Gain")
@@ -1086,7 +1108,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             var dimensions = _paymentDimensions is null
                 ? Array.Empty<FinancePostingDimensionValueDto>()
                 : await _paymentDimensions.ResolveCustomerPostingDimensionsAsync(
-                    component.Id, gainLossAccount.Id, payment.PaymentDate, cancellationToken);
+                    component.Id, gainLossAccount.Id, payment.PaymentDate, producer, cancellationToken);
             postingLines.Add(BuildFunctionalPostingLine(
                 gainLossAccount.Id,
                 $"AR realized FX {gainLossType.ToLowerInvariant()} - {payment.PaymentNumber}",
@@ -1681,6 +1703,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Guid paymentId,
             Guid allocationId,
             decimal expectedSignedAmount,
+            FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
     {
         if (_paymentDimensions is null)
@@ -1696,7 +1719,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                     ExchangeRate = 1m
                 }
             };
-        var rows = (await _paymentDimensions.GetCustomerPaymentAsync(paymentId, cancellationToken))
+        var rows = (await _paymentDimensions.GetCustomerPaymentAsync(
+                paymentId, producer, cancellationToken))
             .Where(item => item.SettlementSourceLineId == allocationId
                 && item.ComponentType == FinanceSettlementComponentType.RealizedFx)
             .OrderBy(item => item.OriginatingSourceLineId)

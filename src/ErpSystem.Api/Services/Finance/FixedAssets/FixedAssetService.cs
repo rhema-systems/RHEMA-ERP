@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -34,6 +35,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IWorkflowService? _workflowService;
         private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
+        private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+        private static readonly FinancePostingProducerContext DirectCapitalizationProducer =
+            new(FinanceDimensionRouteId.FinanceFixedAssetCapitalization);
+        private static readonly FinancePostingProducerContext CapitalizationReversalProducer =
+            new(FinanceDimensionRouteId.FinanceFixedAssetCapitalizationReversal);
 
         public FixedAssetService(
         ApplicationDbContext context,
@@ -42,7 +49,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IWorkflowService? workflowService = null,
-        IFinanceReversalPolicyService? financeReversalPolicyService = null)
+        IFinanceReversalPolicyService? financeReversalPolicyService = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -51,6 +59,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
         _financeReversalPolicyService = financeReversalPolicyService;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -75,7 +84,32 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             .Where(a => a.TenantId == TenantId && a.Id == id)
             .FirstOrDefaultAsync();
 
-        return asset == null ? null : MapToDto(asset);
+        if (asset == null)
+            return null;
+        var result = MapToDto(asset);
+        var snapshot = TryReadCapitalizationApprovalSnapshot(asset);
+        if (_fixedAssetDimensions is not null && snapshot is not null
+            && !string.Equals(snapshot.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.Ordinal))
+        {
+            var sourceDocumentId = DirectCapitalizationDocumentId(asset);
+            result.FinanceDimensions = await _fixedAssetDimensions.GetAsync(
+                DirectCapitalizationProducer,
+                sourceDocumentId,
+                snapshot.CapitalizationDate,
+                BuildDirectCapitalizationDimensionLines(
+                    asset,
+                    sourceDocumentId,
+                    snapshot.DebitAccountId,
+                    snapshot.CreditAccountId,
+                    snapshot.TransactionAmount,
+                    snapshot.TransactionCurrencyCode,
+                    snapshot.FunctionalCurrencyCode,
+                    snapshot.ExchangeRate,
+                    snapshot.ExchangeRateId,
+                    snapshot.ExchangeRateDate,
+                    snapshot.Reference));
+        }
+        return result;
     }
 
     public async Task<IEnumerable<FixedAssetDto>> GetAllAsync()
@@ -1418,6 +1452,32 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         var snapshotJson = JsonSerializer.Serialize(snapshot, CapitalizationSnapshotJsonOptions);
         var snapshotHash = HashCapitalizationEvidence(snapshotJson);
 
+        if (string.Equals(snapshot.SourceDocumentType, "FixedAsset", StringComparison.Ordinal)
+            && _fixedAssetDimensions is not null)
+        {
+            var sourceDocumentId = DirectCapitalizationDocumentId(asset);
+            var dimensionLines = BuildDirectCapitalizationDimensionLines(
+                asset, sourceDocumentId, snapshot.DebitAccountId, snapshot.CreditAccountId,
+                snapshot.TransactionAmount, snapshot.TransactionCurrencyCode,
+                snapshot.FunctionalCurrencyCode, snapshot.ExchangeRate,
+                snapshot.ExchangeRateId, snapshot.ExchangeRateDate, snapshot.Reference);
+            await _fixedAssetDimensions!.SynchronizeAsync(
+                DirectCapitalizationProducer,
+                sourceDocumentId,
+                snapshot.CapitalizationDate,
+                dimensionLines,
+                dto.FinanceDimensions,
+                inheritedAssetJournalBySourceLine: null,
+                "Fixed asset capitalization submitted for approval.",
+                cancellationToken);
+            await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                DirectCapitalizationProducer,
+                sourceDocumentId,
+                snapshot.CapitalizationDate,
+                dimensionLines,
+                cancellationToken);
+        }
+
         if (_workflowService == null)
         {
             ApplyCapitalizationApprovalSubmission(asset, snapshot, snapshotJson, snapshotHash, workflowInstanceId: null);
@@ -1531,14 +1591,47 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             // new cycle document id; otherwise the original, already-reversed event would be
             // returned as a duplicate and the corrected cost would never reach the ledger.
             var isCorrectedCapitalization = asset.CapitalizationReversalPostingEventId.HasValue;
-            var postingSourceDocumentType = isCorrectedCapitalization
-                ? "FixedAssetCapitalizationCycle"
-                : "FixedAsset";
-            var postingSourceDocumentId = isCorrectedCapitalization ? Guid.NewGuid() : asset.Id;
+            var postingSourceDocumentType = DirectCapitalizationProducer.Definition.DocumentType;
+            var postingSourceDocumentId = DirectCapitalizationDocumentId(asset);
+
+            var postingLines = BuildDirectCapitalizationDimensionLines(
+                asset,
+                postingSourceDocumentId,
+                assetAccount.Id,
+                creditAccountId,
+                transactionAmount,
+                transactionCurrency,
+                functionalCurrency,
+                exchangeRate,
+                dto.ExchangeRateId ?? asset.ExchangeRateId,
+                dto.ExchangeRateDate ?? asset.ExchangeRateDate ?? dto.CapitalizationDate.Date,
+                dto.Reference ?? asset.AssetCode);
+            if (_fixedAssetDimensions is not null)
+            {
+                var existingDimensionAssignments = await _context.FinanceSourceDimensionAssignments
+                    .AsNoTracking().AnyAsync(item => item.TenantId == TenantId
+                        && item.RouteId == DirectCapitalizationProducer.RouteId
+                        && item.SourceDocumentId == postingSourceDocumentId && !item.IsDeleted);
+                if (!existingDimensionAssignments)
+                    await _fixedAssetDimensions.SynchronizeAsync(
+                        DirectCapitalizationProducer,
+                        postingSourceDocumentId,
+                        dto.CapitalizationDate.Date,
+                        postingLines,
+                        dto.FinanceDimensions,
+                        inheritedAssetJournalBySourceLine: null,
+                        "Fixed asset capitalization prepared for posting.");
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DirectCapitalizationProducer,
+                    postingSourceDocumentId,
+                    dto.CapitalizationDate.Date,
+                    postingLines);
+            }
 
             var request = new FinancePostingRequestDto
             {
-                SourceModule = "FA",
+                SourceModule = DirectCapitalizationProducer.Definition.PostingSourceModule,
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
                 SourceDocumentType = postingSourceDocumentType,
                 SourceDocumentId = postingSourceDocumentId,
                 SourceDocumentTenantId = asset.TenantId,
@@ -1553,40 +1646,10 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     ? $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize:{postingSourceDocumentId:N}"
                     : $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize",
                 ReturnExistingOnDuplicate = true,
-                Lines = new[]
-                {
-                    BuildCapitalizationPostingLine(
-                        assetAccount.Id,
-                        $"Capitalize fixed asset {asset.AssetCode}",
-                        transactionAmount,
-                        0m,
-                        transactionCurrency,
-                        functionalCurrency,
-                        exchangeRate,
-                        dto.ExchangeRateId ?? asset.ExchangeRateId,
-                        dto.ExchangeRateDate ?? asset.ExchangeRateDate ?? dto.CapitalizationDate.Date,
-                        dto.Reference ?? asset.AssetCode,
-                        1,
-                        $"FixedAssetId={asset.Id:N}",
-                        "FA-Capitalization"),
-                    BuildCapitalizationPostingLine(
-                        creditAccountId,
-                        $"Clear capitalization source for fixed asset {asset.AssetCode}",
-                        0m,
-                        transactionAmount,
-                        transactionCurrency,
-                        functionalCurrency,
-                        exchangeRate,
-                        dto.ExchangeRateId ?? asset.ExchangeRateId,
-                        dto.ExchangeRateDate ?? asset.ExchangeRateDate ?? dto.CapitalizationDate.Date,
-                        dto.Reference ?? asset.AssetCode,
-                        2,
-                        $"FixedAssetId={asset.Id:N}",
-                        "FA-Capitalization-Clearing")
-                }
+                Lines = postingLines
             };
 
-            var postingResult = await _financePostingEngine.PostAsync(request);
+            var postingResult = await _financePostingEngine.PostAsync(request, DirectCapitalizationProducer);
 
             // The central posting engine clears the DbContext tracker when it recovers from a
             // concurrent/idempotent insert race. That recovery is correct for the ledger, but it
@@ -1991,10 +2054,19 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     policy.Reason,
                     policy.ReversalDate,
                     cancellationToken);
+                var reversalLines = plan.ReversalLines.ToList();
+                if (_fixedAssetDimensions is not null)
+                    await _fixedAssetDimensions.RegisterHistoricalReversalAsync(
+                        CapitalizationReversalProducer,
+                        request.Id,
+                        plan.OriginalJournalEntryId,
+                        reversalLines,
+                        cancellationToken);
                 var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
                 {
-                    SourceModule = "FA",
-                    SourceDocumentType = "FixedAssetCapitalizationReversal",
+                    SourceModule = CapitalizationReversalProducer.Definition.PostingSourceModule,
+                    OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                    SourceDocumentType = CapitalizationReversalProducer.Definition.DocumentType,
                     SourceDocumentId = request.Id,
                     SourceDocumentTenantId = request.TenantId,
                     PostingAction = "Reverse",
@@ -2012,8 +2084,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     ReversalType = "FA Capitalization",
                     IdempotencyKey = $"FA:FixedAsset:{request.TenantId:N}:{request.FixedAssetId:N}:CapitalizationReverse:{request.Id:N}",
                     ReturnExistingOnDuplicate = true,
-                    Lines = plan.ReversalLines
-                }, cancellationToken);
+                    Lines = reversalLines
+                }, CapitalizationReversalProducer, cancellationToken);
 
                 // The posting engine may clear the shared DbContext tracker while resolving an
                 // idempotency race (for example, two operators posting the approved request at
@@ -2904,6 +2976,70 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             Notes = notes,
             TransactionTag = transactionTag
         };
+    }
+
+    private static Guid DirectCapitalizationDocumentId(FixedAsset asset) =>
+        asset.CapitalizationReversalPostingEventId.HasValue
+            ? FinanceSourceLineIdentity.Create(
+                asset.Id,
+                "CAPITALIZATION-CYCLE",
+                asset.CapitalizationReversalPostingEventId.Value)
+            : asset.Id;
+
+    private static List<FinancePostingLineDto> BuildDirectCapitalizationDimensionLines(
+        FixedAsset asset,
+        Guid sourceDocumentId,
+        Guid debitAccountId,
+        Guid creditAccountId,
+        decimal transactionAmount,
+        string transactionCurrency,
+        string functionalCurrency,
+        decimal exchangeRate,
+        Guid? exchangeRateId,
+        DateTime? exchangeRateDate,
+        string reference)
+    {
+        var debit = BuildCapitalizationPostingLine(
+            debitAccountId,
+            $"Capitalize fixed asset {asset.AssetCode}",
+            transactionAmount,
+            0m,
+            transactionCurrency,
+            functionalCurrency,
+            exchangeRate,
+            exchangeRateId,
+            exchangeRateDate,
+            reference,
+            1,
+            $"FixedAssetId={asset.Id:N}",
+            "FA-Capitalization");
+        debit.SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+            sourceDocumentId, "ASSET-COST", asset.Id);
+
+        var credit = BuildCapitalizationPostingLine(
+            creditAccountId,
+            $"Clear capitalization source for fixed asset {asset.AssetCode}",
+            0m,
+            transactionAmount,
+            transactionCurrency,
+            functionalCurrency,
+            exchangeRate,
+            exchangeRateId,
+            exchangeRateDate,
+            reference,
+            2,
+            $"FixedAssetId={asset.Id:N}",
+            "FA-Capitalization-Clearing");
+        credit.SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+            sourceDocumentId, "CAPITALIZATION-CLEARING", asset.Id);
+        return [debit, credit];
+    }
+
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for this posting route.");
     }
 
     private static bool IsFixedAssetLine(VendorInvoiceLineItem line)

@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -12,7 +14,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
 public partial class FixedAssetDepreciationService : IFixedAssetDepreciationService
 {
-    private const string SourceModule = "FixedAssets";
+    private const string SourceModule = "FA";
     private const string SourceDocumentType = "FixedAssetDepreciationRun";
     private const string PostingAction = "Depreciation";
 
@@ -23,6 +25,12 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowService? _workflowService;
     private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
+    private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+    private static readonly FinancePostingProducerContext DepreciationProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDepreciation);
+    private static readonly FinancePostingProducerContext DepreciationReversalProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDepreciationReversal);
 
     public FixedAssetDepreciationService(
         ApplicationDbContext context,
@@ -32,7 +40,8 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IWorkflowService? workflowService = null,
-        IFinanceReversalPolicyService? financeReversalPolicyService = null)
+        IFinanceReversalPolicyService? financeReversalPolicyService = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -41,6 +50,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
         _financeReversalPolicyService = financeReversalPolicyService;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -304,6 +314,16 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         _context.FixedAssetDepreciationRuns.Add(run);
         await _context.SaveChangesAsync(cancellationToken);
 
+        FinancePostingRequestDto? preparedPostingRequest = null;
+        if (dto.PostToGl)
+        {
+            var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
+            preparedPostingRequest = BuildPostingRequest(run, fiscalPeriod, depreciationLines, functionalCurrency);
+            await SynchronizeDepreciationDimensionsAsync(
+                run, preparedPostingRequest.Lines.ToList(), depreciationLines,
+                dto.FinanceDimensions, cancellationToken);
+        }
+
         await RecordDepreciationAuditAsync(
             FinanceAuditEvents.FixedAssetDepreciationRunCreated,
             run.Id,
@@ -319,6 +339,13 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
         if (dto.PostToGl && _workflowService != null)
         {
+            if (_fixedAssetDimensions is not null)
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DepreciationProducer,
+                    run.Id,
+                    run.PostingDate,
+                    preparedPostingRequest!.Lines.ToList(),
+                    cancellationToken);
             run.Status = "PendingApproval";
             run.UpdatedAt = DateTime.UtcNow;
             run.UpdatedBy = _currentUser.UserName;
@@ -382,9 +409,17 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
         try
         {
-            var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
-            var request = BuildPostingRequest(run, fiscalPeriod, depreciationLines, functionalCurrency);
-            var postingResult = await _financePostingEngine!.PostAsync(request, cancellationToken);
+            var request = preparedPostingRequest
+                ?? BuildPostingRequest(
+                    run, fiscalPeriod, depreciationLines,
+                    await GetFunctionalCurrencyAsync(cancellationToken));
+            var mutableLines = request.Lines.ToList();
+            if (_fixedAssetDimensions is not null)
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DepreciationProducer, run.Id, run.PostingDate, mutableLines, cancellationToken);
+            request.Lines = mutableLines;
+            var postingResult = await _financePostingEngine!.PostAsync(
+                request, DepreciationProducer, cancellationToken);
 
             run.Status = "Posted";
             run.JournalEntryId = postingResult.JournalEntryId;
@@ -571,7 +606,23 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         {
             var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
             var request = BuildPostingRequest(run, run.FiscalPeriod, depreciationLines, functionalCurrency);
-            var postingResult = await _financePostingEngine.PostAsync(request, cancellationToken);
+            var mutableLines = request.Lines.ToList();
+            if (_fixedAssetDimensions is not null)
+            {
+                var hasDimensionProvenance = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+                    .AnyAsync(item => item.TenantId == TenantId
+                        && item.RouteId == DepreciationProducer.RouteId
+                        && item.SourceDocumentId == run.Id && !item.IsDeleted,
+                        cancellationToken);
+                if (!hasDimensionProvenance)
+                    await SynchronizeDepreciationDimensionsAsync(
+                        run, mutableLines, depreciationLines, input: null, cancellationToken);
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DepreciationProducer, run.Id, run.PostingDate, mutableLines, cancellationToken);
+            }
+            request.Lines = mutableLines;
+            var postingResult = await _financePostingEngine.PostAsync(
+                request, DepreciationProducer, cancellationToken);
 
             run.Status = "Posted";
             run.JournalEntryId = postingResult.JournalEntryId;
@@ -737,6 +788,9 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             postingLines.Add(new FinancePostingLineDto
             {
                 AccountId = item.ExpenseAccountId,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                    run.Id, "DEPRECIATION-EXPENSE", item.Asset.Id, item.Schedule.Id,
+                    item.Schedule.AccountingBookId ?? Guid.Empty),
                 DebitAmount = item.Schedule.DepreciationAmount,
                 CreditAmount = 0m,
                 TransactionCurrency = functionalCurrency,
@@ -752,6 +806,9 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             postingLines.Add(new FinancePostingLineDto
             {
                 AccountId = item.AccumulatedDepreciationAccountId,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                    run.Id, "ACCUMULATED-DEPRECIATION", item.Asset.Id, item.Schedule.Id,
+                    item.Schedule.AccountingBookId ?? Guid.Empty),
                 DebitAmount = 0m,
                 CreditAmount = item.Schedule.DepreciationAmount,
                 TransactionCurrency = functionalCurrency,
@@ -768,8 +825,9 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
         return new FinancePostingRequestDto
         {
-            SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceModule = DepreciationProducer.Definition.PostingSourceModule,
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = DepreciationProducer.Definition.DocumentType,
             SourceDocumentId = run.Id,
             SourceDocumentTenantId = run.TenantId,
             PostingAction = PostingAction,
@@ -784,6 +842,47 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             ReturnExistingOnDuplicate = true,
             Lines = postingLines
         };
+    }
+
+    private async Task SynchronizeDepreciationDimensionsAsync(
+        FixedAssetDepreciationRun run,
+        IReadOnlyList<FinancePostingLineDto> postingLines,
+        IReadOnlyList<DepreciationLineWorkItem> workItems,
+        FinanceSourceDocumentDimensionInputDto? input,
+        CancellationToken cancellationToken)
+    {
+        if (_fixedAssetDimensions is null)
+            return;
+        var journalByAsset = workItems
+            .Where(item => item.Asset.JournalEntryId.HasValue)
+            .GroupBy(item => item.Asset.Id)
+            .ToDictionary(group => group.Key, group => group.First().Asset.JournalEntryId!.Value);
+        var inheritedByLine = new Dictionary<Guid, Guid>();
+        foreach (var line in postingLines)
+        {
+            if (!line.SourceDocumentLineId.HasValue) continue;
+            var item = workItems.FirstOrDefault(candidate =>
+                line.Notes?.Contains($"FixedAssetId={candidate.Asset.Id:N};", StringComparison.Ordinal) == true);
+            if (item is not null && journalByAsset.TryGetValue(item.Asset.Id, out var journalEntryId))
+                inheritedByLine[line.SourceDocumentLineId.Value] = journalEntryId;
+        }
+
+        await _fixedAssetDimensions.SynchronizeAsync(
+            DepreciationProducer,
+            run.Id,
+            run.PostingDate,
+            postingLines,
+            input,
+            inheritedByLine,
+            "Fixed asset depreciation components prepared from stable asset/book/schedule lineage.",
+            cancellationToken);
+    }
+
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for depreciation.");
     }
 
     private void ApplyPostedDepreciation(

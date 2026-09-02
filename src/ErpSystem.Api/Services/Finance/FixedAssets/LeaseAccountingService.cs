@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -17,17 +18,27 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly ICurrentUserService _currentUser;
         private readonly IFixedAssetService _fixedAssetService;
         private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IFinancePostingEngine _postingEngine;
+        private readonly IFixedAssetDimensionService _fixedAssetDimensions;
+        private static readonly FinancePostingProducerContext RecognitionProducer =
+            new(FinanceDimensionRouteId.FinanceLeaseRecognition);
+        private static readonly FinancePostingProducerContext PeriodProducer =
+            new(FinanceDimensionRouteId.FinanceLeasePeriodPosting);
 
         public LeaseAccountingService(
             ApplicationDbContext context,
             ICurrentUserService currentUser,
             IFixedAssetService fixedAssetService,
-            IDocumentNumberingService documentNumberingService)
+            IDocumentNumberingService documentNumberingService,
+            IFinancePostingEngine postingEngine,
+            IFixedAssetDimensionService fixedAssetDimensions)
         {
             _context = context;
             _currentUser = currentUser;
             _fixedAssetService = fixedAssetService;
             _documentNumberingService = documentNumberingService;
+            _postingEngine = postingEngine;
+            _fixedAssetDimensions = fixedAssetDimensions;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -53,7 +64,30 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 .Where(l => l.TenantId == TenantId && l.Id == id)
                 .FirstOrDefaultAsync();
 
-            return lease == null ? null : MapToDetailDto(lease);
+            if (lease == null)
+                return null;
+            var result = MapToDetailDto(lease);
+            var settings = await _context.FinanceSettings.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted);
+            if (settings?.LeaseRouAssetAccountId.HasValue == true
+                && settings.LeaseLiabilityAccountId.HasValue)
+            {
+                result.RecognitionFinanceDimensions = await _fixedAssetDimensions.GetAsync(
+                    RecognitionProducer, lease.Id, lease.StartDate,
+                    BuildRecognitionLines(lease, settings));
+            }
+            if (settings?.LeaseLiabilityAccountId.HasValue == true
+                && settings.LeaseInterestExpenseAccountId.HasValue)
+            {
+                foreach (var scheduleLine in lease.ScheduleLines)
+                {
+                    var scheduleDto = result.ScheduleLines.Single(item => item.Id == scheduleLine.Id);
+                    scheduleDto.FinanceDimensions = await _fixedAssetDimensions.GetAsync(
+                        PeriodProducer, scheduleLine.Id, scheduleLine.PeriodDate,
+                        BuildPeriodLines(lease, scheduleLine, settings));
+                }
+            }
+            return result;
         }
 
         // ── Preview ──────────────────────────────────────────────────────
@@ -147,34 +181,43 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         // ── Activate (with ROU asset creation — EzFMC gap fix) ───────────
 
-        public async Task<LeaseContractDetailDto> ActivateLeaseAsync(Guid leaseId)
+        public async Task<LeaseContractDetailDto> ActivateLeaseAsync(
+            Guid leaseId,
+            ActivateLeaseDto? dto = null,
+            CancellationToken cancellationToken = default)
         {
             var lease = await _context.LeaseContracts
                 .Include(l => l.Lessor)
-                .FirstOrDefaultAsync(l => l.TenantId == TenantId && l.Id == leaseId)
+                .FirstOrDefaultAsync(l => l.TenantId == TenantId && l.Id == leaseId, cancellationToken)
                 ?? throw new KeyNotFoundException("Lease contract not found.");
 
+            if (lease.Status is LeaseStatus.Active or LeaseStatus.Completed)
+                return await GetLeaseByIdAsync(leaseId)
+                    ?? throw new InvalidOperationException("Failed to retrieve activated lease.");
             if (lease.Status != LeaseStatus.Draft)
                 throw new InvalidOperationException($"Cannot activate a lease in '{lease.Status}' status.");
 
             // Load finance settings for GL account defaults
             var settings = await _context.FinanceSettings
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId);
+                .FirstOrDefaultAsync(s => s.TenantId == TenantId, cancellationToken);
 
             if (settings?.LeaseRouAssetAccountId == null || settings?.LeaseLiabilityAccountId == null)
                 throw new InvalidOperationException(
                     "Lease GL accounts not configured. Set ROU Asset and Lease Liability accounts in Finance Settings.");
 
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
+                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
                 // ── Gap Fix: Actually create the ROU Fixed Asset ──
                 // EzFMC's original code only posted the GL journal but never created the FixedAsset record.
 
                 // Find or use a default category for ROU assets
                 var rouCategory = await _context.FixedAssetCategories
                     .FirstOrDefaultAsync(c => c.TenantId == TenantId &&
-                        (c.Code == "ROU" || c.Name.Contains("Right-of-Use") || c.Name.Contains("Lease")));
+                        (c.Code == "ROU" || c.Name.Contains("Right-of-Use") || c.Name.Contains("Lease")), cancellationToken);
 
                 Guid categoryId;
                 if (rouCategory != null)
@@ -185,7 +228,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 {
                     // Fall back to first available category
                     var fallback = await _context.FixedAssetCategories
-                        .FirstOrDefaultAsync(c => c.TenantId == TenantId)
+                        .FirstOrDefaultAsync(c => c.TenantId == TenantId, cancellationToken)
                         ?? throw new InvalidOperationException(
                             "No fixed asset categories found. Create an ROU/Lease category first.");
                     categoryId = fallback.Id;
@@ -212,64 +255,38 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 lease.UpdatedAt = DateTime.UtcNow;
                 lease.UpdatedBy = UserName;
 
-                // ── Post recognition GL journal ──
-                // DR ROU Asset Account    (balance sheet)
-                // CR Lease Liability      (balance sheet)
-                var journal = new JournalEntry
-                {
-                    TenantId = TenantId,
-                    JournalEntryNumber = await _documentNumberingService.GenerateAsync(
-                        DocumentNumberingModules.Finance,
-                        FinanceDocumentTypes.LeaseJournal,
-                        TenantId,
-                        lease.StartDate,
-                        nameof(JournalEntry)),
-                    EntryDate = lease.StartDate,
-                    ReferenceNumber = $"LEASE-ACT-{lease.ContractNumber}",
-                    Description = $"Lease activation — ROU asset recognition: {lease.Description}",
-                    PostingStatus = "Posted",
-                    JournalType = "System Generated",
-                    CreatedAt = DateTime.UtcNow,
-                    CreatedBy = UserName
-                };
+                var postingLines = BuildRecognitionLines(lease, settings);
+                await _fixedAssetDimensions.SynchronizeAsync(
+                    RecognitionProducer, lease.Id, lease.StartDate, postingLines,
+                    dto?.FinanceDimensions, inheritedAssetJournalBySourceLine: null,
+                    "Lease recognition dimensions synchronized.", cancellationToken);
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    RecognitionProducer, lease.Id, lease.StartDate, postingLines, cancellationToken);
+                await _postingEngine.PostAsync(BuildLeasePostingRequest(
+                    RecognitionProducer,
+                    lease.Id,
+                    lease.ContractNumber,
+                    lease.StartDate,
+                    $"Lease activation — ROU asset recognition: {lease.Description}",
+                    $"LEASE-RECOGNITION:{TenantId:D}:{lease.Id:D}",
+                    settings.BaseCurrency,
+                    postingLines), RecognitionProducer, cancellationToken);
 
-                journal.Transactions.Add(new AccountTransaction
+                await _context.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                }
+                catch (DbUpdateConcurrencyException)
                 {
-                    TenantId = TenantId,
-                    AccountId = settings.LeaseRouAssetAccountId.Value,
-                    TransactionDate = lease.StartDate,
-                    DebitAmount = lease.PresentValue,
-                    CreditAmount = 0,
-                    Description = $"ROU Asset — {lease.ContractNumber}",
-                    CreatedAt = DateTime.UtcNow
-                });
-
-                journal.Transactions.Add(new AccountTransaction
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw new InvalidOperationException(
+                        "The lease was modified by another user. Please refresh and try again.");
+                }
+                catch
                 {
-                    TenantId = TenantId,
-                    AccountId = settings.LeaseLiabilityAccountId.Value,
-                    TransactionDate = lease.StartDate,
-                    DebitAmount = 0,
-                    CreditAmount = lease.PresentValue,
-                    Description = $"Lease liability — {lease.ContractNumber}",
-                    CreatedAt = DateTime.UtcNow
-                });
-
-                _context.JournalEntries.Add(journal);
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                await transaction.RollbackAsync();
-                throw new InvalidOperationException(
-                    "The lease was modified by another user. Please refresh and try again.");
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
 
             return await GetLeaseByIdAsync(leaseId)
                 ?? throw new InvalidOperationException("Failed to activate lease.");
@@ -277,11 +294,15 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         // ── Post Period Journal ──────────────────────────────────────────
 
-        public async Task<LeaseContractDetailDto> PostPeriodJournalAsync(Guid leaseId, Guid scheduleLineId)
+        public async Task<LeaseContractDetailDto> PostPeriodJournalAsync(
+            Guid leaseId,
+            Guid scheduleLineId,
+            PostLeasePeriodDto? dto = null,
+            CancellationToken cancellationToken = default)
         {
             var lease = await _context.LeaseContracts
                 .Include(l => l.ScheduleLines)
-                .FirstOrDefaultAsync(l => l.TenantId == TenantId && l.Id == leaseId)
+                .FirstOrDefaultAsync(l => l.TenantId == TenantId && l.Id == leaseId, cancellationToken)
                 ?? throw new KeyNotFoundException("Lease contract not found.");
 
             if (lease.Status != LeaseStatus.Active)
@@ -291,7 +312,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 ?? throw new KeyNotFoundException("Schedule line not found.");
 
             if (line.IsPosted)
-                throw new InvalidOperationException($"Period {line.PeriodNumber} has already been posted.");
+                return await GetLeaseByIdAsync(leaseId)
+                    ?? throw new InvalidOperationException("Failed to retrieve posted lease period.");
 
             // Ensure periods are posted in order
             var previousUnposted = lease.ScheduleLines
@@ -301,77 +323,28 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
             // Load finance settings for GL accounts
             var settings = await _context.FinanceSettings
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId);
+                .FirstOrDefaultAsync(s => s.TenantId == TenantId, cancellationToken);
 
             if (settings?.LeaseLiabilityAccountId == null || settings?.LeaseInterestExpenseAccountId == null)
                 throw new InvalidOperationException(
                     "Lease GL accounts not configured. Set Liability and Interest Expense accounts in Finance Settings.");
 
-            // DR Interest Expense
-            // DR Lease Liability (principal reduction)
-            // CR Cash/Payable (payment amount)
-            var journal = new JournalEntry
-            {
-                TenantId = TenantId,
-                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
-                    DocumentNumberingModules.Finance,
-                    FinanceDocumentTypes.LeaseJournal,
-                    TenantId,
-                    line.PeriodDate,
-                    nameof(JournalEntry)),
-                EntryDate = line.PeriodDate,
-                ReferenceNumber = $"LEASE-PMT-{lease.ContractNumber}-P{line.PeriodNumber}",
-                Description = $"Lease payment period {line.PeriodNumber}: {lease.ContractNumber}",
-                PostingStatus = "Posted",
-                JournalType = "System Generated",
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = UserName
-            };
-
-            // Debit: Interest Expense
-            if (line.InterestExpense > 0)
-            {
-                journal.Transactions.Add(new AccountTransaction
-                {
-                    TenantId = TenantId,
-                    AccountId = settings.LeaseInterestExpenseAccountId.Value,
-                    TransactionDate = line.PeriodDate,
-                    DebitAmount = line.InterestExpense,
-                    CreditAmount = 0,
-                    Description = $"Interest expense — {lease.ContractNumber} P{line.PeriodNumber}",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // Debit: Lease Liability (principal reduction)
-            if (line.PrincipalReduction > 0)
-            {
-                journal.Transactions.Add(new AccountTransaction
-                {
-                    TenantId = TenantId,
-                    AccountId = settings.LeaseLiabilityAccountId.Value,
-                    TransactionDate = line.PeriodDate,
-                    DebitAmount = line.PrincipalReduction,
-                    CreditAmount = 0,
-                    Description = $"Lease liability reduction — {lease.ContractNumber} P{line.PeriodNumber}",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // Credit: AP control (use AP control from settings, or Liability account as fallback)
-            var creditAccountId = settings.ControlAccountApId ?? settings.LeaseLiabilityAccountId.Value;
-            journal.Transactions.Add(new AccountTransaction
-            {
-                TenantId = TenantId,
-                AccountId = creditAccountId,
-                TransactionDate = line.PeriodDate,
-                DebitAmount = 0,
-                CreditAmount = line.PaymentAmount,
-                Description = $"Lease payment — {lease.ContractNumber} P{line.PeriodNumber}",
-                CreatedAt = DateTime.UtcNow
-            });
-
-            _context.JournalEntries.Add(journal);
+            var postingLines = BuildPeriodLines(lease, line, settings);
+            await _fixedAssetDimensions.SynchronizeAsync(
+                PeriodProducer, line.Id, line.PeriodDate, postingLines,
+                dto?.FinanceDimensions, inheritedAssetJournalBySourceLine: null,
+                "Lease period dimensions synchronized.", cancellationToken);
+            await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                PeriodProducer, line.Id, line.PeriodDate, postingLines, cancellationToken);
+            await _postingEngine.PostAsync(BuildLeasePostingRequest(
+                PeriodProducer,
+                line.Id,
+                $"{lease.ContractNumber}-P{line.PeriodNumber}",
+                line.PeriodDate,
+                $"Lease payment period {line.PeriodNumber}: {lease.ContractNumber}",
+                $"LEASE-PERIOD:{TenantId:D}:{lease.Id:D}:{line.Id:D}",
+                settings.BaseCurrency,
+                postingLines), PeriodProducer, cancellationToken);
             line.IsPosted = true;
 
             // Check if all periods are posted — complete the lease
@@ -383,7 +356,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             lease.UpdatedAt = DateTime.UtcNow;
             lease.UpdatedBy = UserName;
 
-            await SaveWithConcurrencyAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             return await GetLeaseByIdAsync(leaseId)
                 ?? throw new InvalidOperationException("Failed to post period journal.");
@@ -458,6 +431,95 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         }
 
         // ── Helpers ──────────────────────────────────────────────────────
+
+        private static List<FinancePostingLineDto> BuildRecognitionLines(
+            LeaseContract lease,
+            FinanceSettings settings) =>
+        [
+            new FinancePostingLineDto
+            {
+                AccountId = settings.LeaseRouAssetAccountId!.Value,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(lease.Id, "ROU-ASSET", lease.Id),
+                DebitAmount = lease.PresentValue,
+                Description = $"ROU Asset — {lease.ContractNumber}",
+                LineNumber = 1
+            },
+            new FinancePostingLineDto
+            {
+                AccountId = settings.LeaseLiabilityAccountId!.Value,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(lease.Id, "LEASE-LIABILITY", lease.Id),
+                CreditAmount = lease.PresentValue,
+                Description = $"Lease liability — {lease.ContractNumber}",
+                LineNumber = 2
+            }
+        ];
+
+        private static List<FinancePostingLineDto> BuildPeriodLines(
+            LeaseContract lease,
+            LeaseScheduleLine scheduleLine,
+            FinanceSettings settings)
+        {
+            var lines = new List<FinancePostingLineDto>();
+            if (scheduleLine.InterestExpense > 0m)
+            {
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = settings.LeaseInterestExpenseAccountId!.Value,
+                    SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                        scheduleLine.Id, "INTEREST", lease.Id, scheduleLine.Id),
+                    DebitAmount = scheduleLine.InterestExpense,
+                    Description = $"Interest expense — {lease.ContractNumber} P{scheduleLine.PeriodNumber}"
+                });
+            }
+            if (scheduleLine.PrincipalReduction > 0m)
+            {
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = settings.LeaseLiabilityAccountId!.Value,
+                    SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                        scheduleLine.Id, "PRINCIPAL", lease.Id, scheduleLine.Id),
+                    DebitAmount = scheduleLine.PrincipalReduction,
+                    Description = $"Lease liability reduction — {lease.ContractNumber} P{scheduleLine.PeriodNumber}"
+                });
+            }
+            lines.Add(new FinancePostingLineDto
+            {
+                AccountId = settings.ControlAccountApId ?? settings.LeaseLiabilityAccountId!.Value,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                    scheduleLine.Id, "PAYABLE", lease.Id, scheduleLine.Id),
+                CreditAmount = scheduleLine.PaymentAmount,
+                Description = $"Lease payment — {lease.ContractNumber} P{scheduleLine.PeriodNumber}"
+            });
+            for (var index = 0; index < lines.Count; index++)
+                lines[index].LineNumber = index + 1;
+            return lines;
+        }
+
+        private FinancePostingRequestDto BuildLeasePostingRequest(
+            FinancePostingProducerContext producer,
+            Guid sourceDocumentId,
+            string reference,
+            DateTime postingDate,
+            string description,
+            string idempotencyKey,
+            string? functionalCurrency,
+            IReadOnlyList<FinancePostingLineDto> lines) => new()
+        {
+            SourceModule = producer.Definition.PostingSourceModule,
+            OriginModuleCode = producer.Definition.ProducerModule,
+            SourceDocumentType = producer.Definition.DocumentType,
+            SourceDocumentId = sourceDocumentId,
+            SourceDocumentTenantId = TenantId,
+            SourceDocumentReference = reference,
+            Description = description,
+            PostingDate = postingDate,
+            JournalType = "System Generated",
+            FunctionalCurrencyCode = string.IsNullOrWhiteSpace(functionalCurrency)
+                ? "GHS"
+                : functionalCurrency.Trim().ToUpperInvariant(),
+            IdempotencyKey = idempotencyKey,
+            Lines = lines
+        };
 
         private async Task SaveWithConcurrencyAsync()
         {

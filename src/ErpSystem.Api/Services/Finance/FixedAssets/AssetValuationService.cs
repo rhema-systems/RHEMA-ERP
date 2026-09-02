@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -12,8 +14,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
 public partial class AssetValuationService : IAssetValuationService
 {
-    private const string SourceModule = "FixedAssets";
-    private const string SourceDocumentType = "FixedAssetValuation";
+    private const string SourceModule = "FA";
 
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -22,6 +23,10 @@ public partial class AssetValuationService : IAssetValuationService
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowService? _workflowService;
     private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
+    private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+    private static readonly FinancePostingProducerContext ValuationCorrectionProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetValuationCorrection);
 
     public AssetValuationService(
         ApplicationDbContext context,
@@ -31,7 +36,8 @@ public partial class AssetValuationService : IAssetValuationService
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IWorkflowService? workflowService = null,
-        IFinanceReversalPolicyService? financeReversalPolicyService = null)
+        IFinanceReversalPolicyService? financeReversalPolicyService = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -40,6 +46,7 @@ public partial class AssetValuationService : IAssetValuationService
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
         _financeReversalPolicyService = financeReversalPolicyService;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -71,6 +78,31 @@ public partial class AssetValuationService : IAssetValuationService
 
         _context.AssetValuations.Add(valuation);
         await _context.SaveChangesAsync();
+
+        var dimensionResult = _fixedAssetDimensions is null
+            ? null
+            : await SynchronizeValuationDimensionsAsync(
+                valuation,
+                asset,
+                fiscalPeriod ?? throw new InvalidOperationException(
+                    "No fiscal period covers the valuation accounting date."),
+                dto.FinanceDimensions,
+                CancellationToken.None);
+        if (_workflowService != null && _fixedAssetDimensions is not null)
+        {
+            var dimensionRequest = await BuildPostingRequestAsync(
+                valuation,
+                asset,
+                fiscalPeriod ?? throw new InvalidOperationException(
+                    "No fiscal period covers the valuation accounting date."),
+                await GetFunctionalCurrencyAsync());
+            await _fixedAssetDimensions!.ValidateFreezeAndApplyAsync(
+                ValuationProducer(valuation.ValuationType),
+                valuation.Id,
+                ValuationAccountingDate(valuation),
+                dimensionRequest.Lines.ToList(),
+                CancellationToken.None);
+        }
 
         await RecordValuationAuditAsync(
             GetCalculatedAuditEvent(dto.ValuationType),
@@ -106,7 +138,9 @@ public partial class AssetValuationService : IAssetValuationService
                 cancellationToken: CancellationToken.None);
         }
 
-        return MapToDto(valuation, asset);
+        var result = MapToDto(valuation, asset);
+        result.FinanceDimensions = dimensionResult;
+        return result;
     }
 
     public async Task<BulkOperationResultDto<AssetValuationDto>> CreateBulkValuationAsync(
@@ -148,7 +182,8 @@ public partial class AssetValuationService : IAssetValuationService
                     ValuationMethod = dto.ValuationMethod,
                     ValuationReportReference = dto.ValuationReportReference,
                     Reason = dto.Reason ?? $"Bulk revaluation index adjustment {dto.IndexPercentage:N2}%.",
-                    Notes = dto.Notes
+                    Notes = dto.Notes,
+                    FinanceDimensions = dto.FinanceDimensions
                 };
 
                 var valuation = await BuildValuationAsync(asset, bookValue, fiscalPeriod, singleDto, performedByUserId);
@@ -182,6 +217,34 @@ public partial class AssetValuationService : IAssetValuationService
         }
 
         await _context.SaveChangesAsync();
+
+        foreach (var valuation in createdValuations)
+        {
+            var asset = assets.Single(item => item.Id == valuation.FixedAssetId);
+            var dimensionResult = _fixedAssetDimensions is null
+                ? null
+                : await SynchronizeValuationDimensionsAsync(
+                    valuation,
+                    asset,
+                    fiscalPeriod ?? throw new InvalidOperationException(
+                        "No fiscal period covers the valuation accounting date."),
+                    dto.FinanceDimensions,
+                    CancellationToken.None);
+            var resultItem = result.SuccessfulItems.Single(item => item.Id == valuation.Id);
+            resultItem.FinanceDimensions = dimensionResult;
+            if (_workflowService != null && _fixedAssetDimensions is not null)
+            {
+                var dimensionRequest = await BuildPostingRequestAsync(
+                    valuation,
+                    asset,
+                    fiscalPeriod ?? throw new InvalidOperationException(
+                        "No fiscal period covers the valuation accounting date."),
+                    await GetFunctionalCurrencyAsync());
+                await _fixedAssetDimensions!.ValidateFreezeAndApplyAsync(
+                    ValuationProducer(valuation.ValuationType), valuation.Id,
+                    ValuationAccountingDate(valuation), dimensionRequest.Lines.ToList());
+            }
+        }
 
         if (_workflowService != null)
         {
@@ -289,6 +352,20 @@ public partial class AssetValuationService : IAssetValuationService
         try
         {
             var postingRequest = await BuildPostingRequestAsync(valuation, asset, fiscalPeriod, functionalCurrency);
+            var mutableLines = postingRequest.Lines.ToList();
+            var producer = ValuationProducer(valuation.ValuationType);
+            if (_fixedAssetDimensions is not null)
+            {
+                var hasDimensionProvenance = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+                    .AnyAsync(item => item.TenantId == TenantId && item.RouteId == producer.RouteId
+                        && item.SourceDocumentId == valuation.Id && !item.IsDeleted);
+                if (!hasDimensionProvenance)
+                    await SynchronizeValuationDimensionsAsync(
+                        valuation, asset, fiscalPeriod, input: null, CancellationToken.None);
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    producer, valuation.Id, ValuationAccountingDate(valuation), mutableLines);
+            }
+            postingRequest.Lines = mutableLines;
 
             await RecordValuationAuditAsync(
                 FinanceAuditEvents.FixedAssetValuationConfigurationUsed,
@@ -306,7 +383,7 @@ public partial class AssetValuationService : IAssetValuationService
                 comment: "Fixed asset valuation account mappings used for posting.",
                 cancellationToken: CancellationToken.None);
 
-            var postingResult = await _financePostingEngine.PostAsync(postingRequest);
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest, producer);
             ApplyPostedValuation(valuation, asset, bookValue, postingResult);
 
             await _context.SaveChangesAsync();
@@ -562,8 +639,9 @@ public partial class AssetValuationService : IAssetValuationService
 
         return new FinancePostingRequestDto
         {
-            SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceModule = ValuationProducer(valuation.ValuationType).Definition.PostingSourceModule,
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = ValuationProducer(valuation.ValuationType).Definition.DocumentType,
             SourceDocumentId = valuation.Id,
             SourceDocumentTenantId = valuation.TenantId,
             PostingAction = valuation.ValuationType.ToString(),
@@ -599,6 +677,8 @@ public partial class AssetValuationService : IAssetValuationService
         return new FinancePostingLineDto
         {
             AccountId = accountId,
+            SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                valuation.Id, tag, valuation.FixedAssetId),
             DebitAmount = RoundMoney(debit),
             CreditAmount = RoundMoney(credit),
             TransactionCurrency = functionalCurrency,
@@ -610,6 +690,51 @@ public partial class AssetValuationService : IAssetValuationService
             Notes = $"FixedAssetId={valuation.FixedAssetId:N};ValuationId={valuation.Id:N};Book={valuation.BookClassification}",
             TransactionTag = tag
         };
+    }
+
+    private async Task<FinanceSourceDocumentDimensionDto?> SynchronizeValuationDimensionsAsync(
+        AssetValuation valuation,
+        FixedAsset asset,
+        FiscalPeriod fiscalPeriod,
+        FinanceSourceDocumentDimensionInputDto? input,
+        CancellationToken cancellationToken)
+    {
+        if (_fixedAssetDimensions is null)
+            return null;
+        var request = await BuildPostingRequestAsync(
+            valuation, asset, fiscalPeriod, await GetFunctionalCurrencyAsync());
+        var inherited = asset.JournalEntryId.HasValue
+            ? request.Lines.Where(line => line.SourceDocumentLineId.HasValue)
+                .ToDictionary(line => line.SourceDocumentLineId!.Value, _ => asset.JournalEntryId.Value)
+            : new Dictionary<Guid, Guid>();
+        return await _fixedAssetDimensions.SynchronizeAsync(
+            ValuationProducer(valuation.ValuationType),
+            valuation.Id,
+            ValuationAccountingDate(valuation),
+            request.Lines.ToList(),
+            input,
+            inherited,
+            "Fixed asset valuation components prepared from frozen asset lineage.",
+            cancellationToken);
+    }
+
+    private static FinancePostingProducerContext ValuationProducer(ValuationType type) =>
+        new(type switch
+        {
+            ValuationType.Revaluation => FinanceDimensionRouteId.FinanceFixedAssetRevaluation,
+            ValuationType.Impairment => FinanceDimensionRouteId.FinanceFixedAssetImpairment,
+            ValuationType.ImpairmentReversal => FinanceDimensionRouteId.FinanceFixedAssetImpairmentReversal,
+            _ => throw new InvalidOperationException($"Unsupported fixed-asset valuation type '{type}'.")
+        });
+
+    private static DateTime ValuationAccountingDate(AssetValuation valuation) =>
+        (valuation.AccountingDate == default ? valuation.ValuationDate : valuation.AccountingDate).Date;
+
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for valuation posting.");
     }
 
     private void ApplyPostedValuation(
@@ -922,7 +1047,7 @@ public partial class AssetValuationService : IAssetValuationService
             EventType = eventType,
             TenantId = valuation.TenantId,
             SourceModule = "FA",
-            SourceDocumentType = SourceDocumentType,
+            SourceDocumentType = ValuationProducer(valuation.ValuationType).Definition.DocumentType,
             SourceDocumentId = valuation.Id,
             PostingEventId = postingEventId ?? valuation.PostingEventId,
             JournalEntryId = journalEntryId ?? valuation.JournalEntryId,

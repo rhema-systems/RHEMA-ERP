@@ -139,6 +139,7 @@ public class FixedAssetDto
     public DateTime? UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
     public List<FixedAssetBookValueDto> BookValues { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 /// <summary>
@@ -290,6 +291,7 @@ public class CapitalizeFixedAssetDto
     public decimal? ExchangeRate { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public DateTime? ExchangeRateDate { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 /// <summary>
@@ -308,6 +310,7 @@ public sealed class SubmitFixedAssetCapitalizationDto
     public decimal? ExchangeRate { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public DateTime? ExchangeRateDate { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 /// <summary>
@@ -382,6 +385,7 @@ public class RunDepreciationDto
     public string? BookClassification { get; set; }
     public bool PostToGl { get; set; } = true;
     public DateTime? PostingDate { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 
     /// <summary>
     /// Verified output/usage evidence for units-of-production assets included in this run. The
@@ -457,6 +461,7 @@ public class FixedAssetDepreciationRunDto
     public DateTime? FailedAt { get; set; }
     public string? FailureReason { get; set; }
     public List<AssetDepreciationScheduleDto> Lines { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public sealed class RequestFixedAssetDepreciationReversalDto
@@ -582,6 +587,7 @@ public class AssetTransferDto
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public DateTime CreatedAt { get; set; }
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public class RequestAssetTransferDto
@@ -604,6 +610,7 @@ public class RequestAssetTransferDto
     public string? Reason { get; set; }
     public decimal? TransferCost { get; set; }
     public string? IdempotencyKey { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class ApproveAssetTransferDto
@@ -707,6 +714,7 @@ public class AssetDisposalDto
     public Guid? WorkflowInstanceId { get; set; }
     public string? IdempotencyKey { get; set; }
     public DateTime CreatedAt { get; set; }
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public class RequestAssetDisposalDto
@@ -753,6 +761,7 @@ public class RequestAssetDisposalDto
     public decimal? FinalDepreciationProductionUnits { get; set; }
     public string? FinalDepreciationEvidenceReference { get; set; }
     public string? FinalDepreciationEvidenceNotes { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class ApproveAssetDisposalDto

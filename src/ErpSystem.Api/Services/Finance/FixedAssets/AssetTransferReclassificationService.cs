@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -201,8 +202,42 @@ public partial class AssetTransferService
             var currentBalances = await CalculateCurrentReclassificationBalancesAsync(transfer.FixedAssetId, bookValue);
             ValidateApprovedBalanceSnapshot(transfer, currentBalances);
 
+            var postingRequest = await BuildReclassificationPostingRequestAsync(transfer);
+            var mutableLines = postingRequest.Lines.ToList();
+            if (_fixedAssetDimensions is not null)
+            {
+                var hasDimensionProvenance = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+                    .AnyAsync(item => item.TenantId == TenantId
+                        && item.RouteId == ReclassificationProducer.RouteId
+                        && item.SourceDocumentId == transfer.Id && !item.IsDeleted);
+                if (!hasDimensionProvenance)
+                {
+                    var inheritedByLine = transfer.FixedAsset.JournalEntryId.HasValue
+                        ? mutableLines
+                            .Where(line => line.SourceDocumentLineId.HasValue
+                                && line.Description?.Contains("source classification", StringComparison.OrdinalIgnoreCase) == true)
+                            .ToDictionary(
+                                line => line.SourceDocumentLineId!.Value,
+                                _ => transfer.FixedAsset.JournalEntryId.Value)
+                        : new Dictionary<Guid, Guid>();
+                    await _fixedAssetDimensions.SynchronizeAsync(
+                        ReclassificationProducer,
+                        transfer.Id,
+                        transfer.AccountingDate ?? transfer.TransferDate,
+                        mutableLines,
+                        input: null,
+                        inheritedByLine,
+                        "Legacy approved fixed asset reclassification adapted before posting.");
+                }
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    ReclassificationProducer,
+                    transfer.Id,
+                    transfer.AccountingDate ?? transfer.TransferDate,
+                    mutableLines);
+            }
+            postingRequest.Lines = mutableLines;
             var posting = await _financePostingEngine.PostAsync(
-                await BuildReclassificationPostingRequestAsync(transfer));
+                postingRequest, ReclassificationProducer);
 
             var asset = transfer.FixedAsset;
             var beforeValues = new
@@ -444,11 +479,11 @@ public partial class AssetTransferService
 
         return new FinancePostingRequestDto
         {
-            SourceModule = SourceModule,
+            SourceModule = ReclassificationProducer.Definition.PostingSourceModule,
             // Fixed Assets is a Finance subledger. Period locks operate on canonical top-level
             // modules, so the journal must use FIN rather than the descriptive FA source value.
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
-            SourceDocumentType = SourceDocumentType,
+            SourceDocumentType = ReclassificationProducer.Definition.DocumentType,
             SourceDocumentId = transfer.Id,
             SourceDocumentTenantId = transfer.TenantId,
             PostingAction = ReclassificationPostingAction,
@@ -523,6 +558,8 @@ public partial class AssetTransferService
         => lines.Add(new FinancePostingLineDto
         {
             AccountId = accountId,
+            SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                transfer.Id, $"{tag}:{description}", transfer.FixedAssetId),
             DebitAmount = debit,
             CreditAmount = credit,
             TransactionCurrency = functionalCurrency,
