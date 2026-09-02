@@ -291,6 +291,9 @@ public sealed class FixedAssetOpeningBalanceCandidateDto
     public decimal NetBookValue { get; set; }
     public bool OpeningPostedToGl { get; set; }
     public Guid? OpeningJournalEntryId { get; set; }
+    public Guid? OpeningReversalJournalEntryId { get; set; }
+    public Guid? OpeningReversalPostingEventId { get; set; }
+    public DateTime? OpeningReversedAt { get; set; }
 }
 
 public sealed class OpeningBalanceBatchDto

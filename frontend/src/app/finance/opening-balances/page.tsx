@@ -1767,7 +1767,7 @@ export default function OpeningBalancesPage() {
                                                         <td className="p-3 text-right">{formatAmount(candidate.acquisitionCost)}</td>
                                                         <td className="p-3 text-right">{formatAmount(candidate.accumulatedDepreciation)}</td>
                                                         <td className="p-3 text-right font-medium">{formatAmount(candidate.netBookValue)}</td>
-                                                        <td className="p-3"><Badge variant={candidate.openingPostedToGl ? 'default' : 'secondary'}>{candidate.openingPostedToGl ? 'Posted' : 'Ready'}</Badge></td>
+                                                        <td className="p-3"><Badge variant={candidate.openingPostedToGl ? 'default' : 'secondary'}>{candidate.openingPostedToGl ? (candidate.openingReversalPostingEventId ? 'Replacement posted' : 'Posted') : candidate.openingReversalPostingEventId ? 'Reversed — correction permitted' : candidate.openingJournalEntryId ? 'Blocked' : 'Ready'}</Badge></td>
                                                     </tr>
                                                 );
                                             })}

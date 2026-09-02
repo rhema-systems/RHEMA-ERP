@@ -1986,7 +1986,10 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 AccumulatedDepreciation = value.AccumulatedDepreciation,
                 NetBookValue = value.NetBookValue,
                 OpeningPostedToGl = value.OpeningPostedToGl,
-                OpeningJournalEntryId = value.OpeningJournalEntryId
+                OpeningJournalEntryId = value.OpeningJournalEntryId,
+                OpeningReversalJournalEntryId = value.OpeningReversalJournalEntryId,
+                OpeningReversalPostingEventId = value.OpeningReversalPostingEventId,
+                OpeningReversedAt = value.OpeningReversedAt
             })
             .ToListAsync(cancellationToken);
 
@@ -2142,7 +2145,12 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
     private static void ValidateFixedAssetOpeningCandidate(FixedAssetBookValue value, DateTime openingDate)
     {
-        if (value.OpeningPostedToGl || value.OpeningJournalEntryId.HasValue)
+        // A posted compensating reversal reopens the source without erasing the immutable
+        // original journal reference. The reversal posting-event is the authoritative evidence
+        // that the old journal no longer consumes opening eligibility. Pending/rejected/failed
+        // requests never populate that reference and therefore remain blocked.
+        if (value.OpeningPostedToGl ||
+            (value.OpeningJournalEntryId.HasValue && !value.OpeningReversalPostingEventId.HasValue))
             throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening balance is already posted to GL.");
         if (!value.OpeningAsOfDate.HasValue || value.OpeningAsOfDate.Value.Date != openingDate)
             throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening as-of date must equal {openingDate:yyyy-MM-dd}.");

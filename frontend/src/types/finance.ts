@@ -1642,6 +1642,9 @@ export interface FixedAssetOpeningBalanceCandidate {
     netBookValue: number;
     openingPostedToGl: boolean;
     openingJournalEntryId?: string;
+    openingReversalJournalEntryId?: string;
+    openingReversalPostingEventId?: string;
+    openingReversedAt?: string;
 }
 
 export interface SubledgerOpeningBalanceReadiness {
