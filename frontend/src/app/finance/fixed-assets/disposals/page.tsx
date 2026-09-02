@@ -587,9 +587,9 @@ export default function AssetDisposalsPage() {
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="saleTaxTreatment">Statutory Tax Treatment <span className="text-red-500">*</span></Label>
-                                            <Select value={formData.saleTaxTreatment || 'Standard'} onValueChange={(value: RequestAssetDisposalDto['saleTaxTreatment']) => setFormData({
+                                            <Select value={formData.saleTaxTreatment || 'Standard'} onValueChange={(value) => setFormData({
                                                 ...formData,
-                                                saleTaxTreatment: value,
+                                                saleTaxTreatment: value as RequestAssetDisposalDto['saleTaxTreatment'],
                                                 saleTaxGroupId: value === 'Standard'
                                                     ? (formData.saleTaxGroupId || saleTaxGroups.find(group => group.isDefault)?.id || saleTaxGroups[0]?.id)
                                                     : undefined,

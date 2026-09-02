@@ -166,6 +166,7 @@ export interface SubmitFixedAssetCapitalizationDto {
   exchangeRate?: number;
   exchangeRateId?: string;
   exchangeRateDate?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface FixedAssetApprovalActionDto {
