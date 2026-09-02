@@ -206,6 +206,58 @@ public sealed class ApInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task CreateInvoice_ShouldApplyLineTradeDiscountBeforeTax()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        TaxCalculationRequestDto? capturedTaxRequest = null;
+        var taxEngine = new Mock<ITaxCalculationEngine>();
+        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
+                It.IsAny<TaxCalculationRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            {
+                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+            });
+        var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
+
+        var created = await service.CreateAsync(new VendorInvoiceCreateDto
+        {
+            SupplierId = fixture.Supplier.Id,
+            SupplierInvoiceNumber = "SUP-DISCOUNT-001",
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            LineItems = new List<VendorInvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "Expense",
+                    GLAccountId = fixture.ExpenseAccount.Id,
+                    Description = "Discounted service",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    DiscountPercentage = 10m,
+                    TaxGroupId = Guid.NewGuid(),
+                    TaxTreatment = TaxTreatment.Standard
+                }
+            }
+        });
+
+        capturedTaxRequest.Should().NotBeNull();
+        capturedTaxRequest!.BaseAmount.Should().Be(90m);
+        created.SubTotal.Should().Be(90m);
+        created.DiscountAmount.Should().Be(10m);
+        created.TaxAmount.Should().Be(13.5m);
+        created.TotalAmount.Should().Be(103.5m);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-APBudget")]
     [Trait("Category", "AccountsPayable")]
     public async Task DirectBudgetControlledExpense_ShouldReserveBeforeApprovalWorkflowStarts()
@@ -1085,7 +1137,8 @@ public sealed class ApInvoicePostingMigrationTests
         Guid tenantId,
         IWorkflowService? workflowService = null,
         IFinanceBudgetCommitmentService? budgetCommitments = null,
-        IFinanceSourceDimensionService? sourceDimensions = null)
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        ITaxCalculationEngine? taxEngine = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -1102,16 +1155,27 @@ public sealed class ApInvoicePostingMigrationTests
             auditService,
             budgetCommitments: budgetCommitments);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("VI-2026-TEST");
 
         var service = new VendorInvoiceService(
             new UnitOfWork(db),
             currentUser.Object,
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             workflowService ?? Mock.Of<IWorkflowService>(),
             postingEngine,
             auditService,
+            taxEngine: taxEngine,
             budgetCommitments: budgetCommitments,
             sourceDimensions: sourceDimensions);
 
