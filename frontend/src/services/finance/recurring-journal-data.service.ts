@@ -11,6 +11,7 @@ export type RecurringJournalReversalRule = 'None' | 'NextCalendarDay' | 'FirstDa
 export type RecurringJournalReversalStatus = 'NotApplicable' | 'PendingAuthorization' | 'Scheduled' | 'Processing' | 'Failed' | 'Posted';
 
 export interface RecurringJournalLineInput {
+  id?: string;
   accountId: string;
   isDebit: boolean;
   fixedAmount: number;
@@ -26,6 +27,7 @@ export interface CreateRecurringJournalTemplate {
   currencyCode: string;
   referencePattern?: string;
   notes?: string;
+  ownerUserId?: string;
   effectiveFrom: string;
   endDate?: string;
   maximumOccurrences?: number;
@@ -68,8 +70,11 @@ export interface RecurringJournalOccurrence {
   attemptCount: number;
   generatedAt?: string;
   reviewedAt?: string;
+  reviewedByUserId?: string;
   reviewComment?: string;
   postedAt?: string;
+  postedByUserId?: string;
+  reversedAt?: string;
   errorMessage?: string;
   adjustmentExplanation?: string;
 }
