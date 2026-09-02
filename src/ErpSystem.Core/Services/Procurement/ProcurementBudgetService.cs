@@ -341,7 +341,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
         if (budget == null) throw new KeyNotFoundException($"Budget with ID {budgetId} not found");
 
         budget.UtilizedAmount += amount;
-        budget.RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = DateTime.UtcNow;
 
         await UpdateCategoryAllocation(budgetId, category, utilizedDelta: amount);
@@ -356,7 +356,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
         if (budget == null) throw new KeyNotFoundException($"Budget with ID {budgetId} not found");
 
         budget.CommittedAmount += amount;
-        budget.RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = DateTime.UtcNow;
 
         await UpdateCategoryAllocation(budgetId, category, committedDelta: amount);
@@ -373,7 +373,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
         if (budget == null) throw new KeyNotFoundException($"Budget with ID {budgetId} not found");
 
         budget.CommittedAmount = Math.Max(0, budget.CommittedAmount - amount);
-        budget.RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = DateTime.UtcNow;
 
         await UpdateCategoryAllocation(budgetId, category, committedDelta: -amount);
@@ -392,7 +392,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
         // Move from committed to utilized
         budget.CommittedAmount = Math.Max(0, budget.CommittedAmount - amount);
         budget.UtilizedAmount += amount;
-        budget.RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = DateTime.UtcNow;
 
         await UpdateCategoryAllocation(budgetId, category, committedDelta: -amount, utilizedDelta: amount);
@@ -525,6 +525,10 @@ public class ProcurementBudgetService : IProcurementBudgetService
 
     #region Mapping Methods
 
+    private static decimal Available(ProcurementBudget budget) =>
+        budget.AllocatedAmount - budget.UtilizedAmount -
+        budget.CommittedAmount - budget.ReservedAmount;
+
     private static ProcurementBudgetDto MapToDto(ProcurementBudget budget)
     {
         return new ProcurementBudgetDto
@@ -540,7 +544,8 @@ public class ProcurementBudgetService : IProcurementBudgetService
             AllocatedAmount = budget.AllocatedAmount,
             UtilizedAmount = budget.UtilizedAmount,
             CommittedAmount = budget.CommittedAmount,
-            RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount,
+            ReservedAmount = budget.ReservedAmount,
+            RemainingAmount = Available(budget),
             Currency = budget.Currency,
             Status = budget.Status,
             ControlLevel = budget.ControlLevel,
@@ -569,7 +574,8 @@ public class ProcurementBudgetService : IProcurementBudgetService
             AllocatedAmount = budget.AllocatedAmount,
             UtilizedAmount = budget.UtilizedAmount,
             CommittedAmount = budget.CommittedAmount,
-            RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount,
+            ReservedAmount = budget.ReservedAmount,
+            RemainingAmount = Available(budget),
             Currency = budget.Currency,
             Status = budget.Status,
             ControlLevel = budget.ControlLevel,

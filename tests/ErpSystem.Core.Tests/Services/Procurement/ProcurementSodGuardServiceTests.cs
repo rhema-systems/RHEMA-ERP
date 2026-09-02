@@ -174,6 +174,19 @@ public sealed class ProcurementSodGuardServiceTests
             "trace-provision", It.IsAny<CancellationToken>()), Times.Exactly(6));
     }
 
+    [Theory]
+    [InlineData("TenantAdmin")]
+    [InlineData("SuperAdmin")]
+    public async Task LegacyGenericAdministratorCannotAdministerSodControls(string legacyRole)
+    {
+        await using var fixture = new GuardFixture();
+        fixture.SetRoles(legacyRole);
+
+        var action = () => fixture.Service.GetCoverageAsync(Moment);
+
+        await action.Should().ThrowAsync<ProcurementPolicyAuthorizationException>();
+    }
+
     public static IEnumerable<object[]> RequiredControlCodes() =>
         ProcurementSodRequiredControlRegistry.Definitions.Select(item => new object[] { item.Code });
 
@@ -190,7 +203,8 @@ public sealed class ProcurementSodGuardServiceTests
         private Guid _activeTenantId;
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
         private readonly UnitOfWork _unitOfWork;
-        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TenantAdmin" };
+        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase)
+            { ProcurementAccessControlRegistry.IctAdministratorRole };
 
         public GuardFixture()
         {
@@ -224,6 +238,11 @@ public sealed class ProcurementSodGuardServiceTests
         public Mock<IProcurementPolicyService> PolicyService { get; }
         public ProcurementSodGuardService Service { get; }
         public void SwitchTenant(Guid tenantId) => _activeTenantId = tenantId;
+        public void SetRoles(params string[] roles)
+        {
+            _roles.Clear();
+            foreach (var role in roles) _roles.Add(role);
+        }
 
         public async Task AddCompletePolicyAsync()
         {

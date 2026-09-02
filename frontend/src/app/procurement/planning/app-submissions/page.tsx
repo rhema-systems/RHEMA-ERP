@@ -13,7 +13,6 @@ import {
   RefreshCw,
   RotateCcw,
   Send,
-  ShieldCheck,
   XCircle,
 } from 'lucide-react';
 
@@ -59,6 +58,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   procurementAppSubmissionActions,
   procurementAppSubmissionStatusTone,
+  readProcurementAppExportFile,
   validateProcurementAppExport,
 } from '@/lib/procurement-app-submission';
 import { procurementAppSubmissionService } from '@/services/procurement-app-submission.service';
@@ -69,7 +69,6 @@ import type {
   ProcurementAppSubmissionStatus,
   RecordProcurementAppExport,
 } from '@/types/procurement-app-submission';
-import type { ProcurementControlEvidenceReferenceKind } from '@/types/procurement-control-event';
 
 type LifecycleAction = 'submit' | 'acknowledge' | 'reject' | 'resubmit';
 
@@ -152,8 +151,6 @@ export default function ProcurementAppSubmissionsPage() {
   const [actionTarget, setActionTarget] = useState<ProcurementAppSubmission>();
   const [lifecycleForm, setLifecycleForm] =
     useState<LifecycleForm>(newLifecycle);
-  const [evidenceKind, setEvidenceKind] =
-    useState<ProcurementControlEvidenceReferenceKind>('ExternalReference');
   const [evidenceValue, setEvidenceValue] = useState('');
 
   const summary = useQuery({
@@ -188,20 +185,35 @@ export default function ProcurementAppSubmissionsPage() {
   ): ProcurementAppEvidenceReference[] => {
     if (!evidenceValue.trim()) return [];
     return [
-      evidenceKind === 'ExternalReference'
-        ? {
-            referenceKind: evidenceKind,
-            reference: evidenceValue.trim(),
-            label: 'APP lifecycle evidence',
-            requirementKey,
-          }
-        : {
-            referenceKind: evidenceKind,
-            referenceId: evidenceValue.trim(),
-            label: 'Shared evidence reference',
-            requirementKey,
-          },
+      {
+        referenceKind: 'ExternalReference',
+        reference: evidenceValue.trim(),
+        label: 'APP lifecycle evidence',
+        requirementKey,
+      },
     ];
+  };
+
+  const selectExportPackage = async (
+    file: File | undefined,
+    target: 'export' | 'resubmit'
+  ) => {
+    if (!file) return;
+    try {
+      const metadata = await readProcurementAppExportFile(file);
+      if (target === 'export') {
+        setExportForm((current) => ({ ...current, ...metadata }));
+      } else {
+        setLifecycleForm((current) => ({ ...current, ...metadata }));
+      }
+    } catch (error) {
+      console.error('Unable to calculate APP export checksum:', error);
+      toast({
+        title: 'Unable to read export package',
+        description: 'Select the generated APP export file and try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const invalidate = async (id?: string) => {
@@ -317,7 +329,6 @@ export default function ProcurementAppSubmissionsPage() {
     setAction(nextAction);
     setActionTarget(item);
     setLifecycleForm(newLifecycle());
-    setEvidenceKind('ExternalReference');
     setEvidenceValue('');
   };
 
@@ -369,7 +380,6 @@ export default function ProcurementAppSubmissionsPage() {
             <Button
               onClick={() => {
                 setExportForm(newExport());
-                setEvidenceKind('ExternalReference');
                 setEvidenceValue('');
                 setExportOpen(true);
               }}
@@ -776,8 +786,9 @@ export default function ProcurementAppSubmissionsPage() {
           <DialogHeader>
             <DialogTitle>Record published-plan APP export</DialogTitle>
             <DialogDescription>
-              Register package metadata and checksum only. File content remains
-              in the shared evidence/file service.
+              Select the generated export package. Its file name, format and
+              integrity checksum are calculated automatically; the package
+              content is not uploaded by this screen.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
@@ -812,29 +823,21 @@ export default function ProcurementAppSubmissionsPage() {
               )}
             </div>
             <div className="space-y-2 sm:col-span-2">
-              <Label>Export file name</Label>
+              <Label htmlFor="app-export-package">Export package</Label>
               <Input
-                value={exportForm.exportFileName}
+                id="app-export-package"
+                type="file"
+                accept=".xlsx,.xls,.csv,.xml,.json"
                 onChange={(event) =>
-                  setExportForm((current) => ({
-                    ...current,
-                    exportFileName: event.target.value,
-                  }))
-                }
-                placeholder="TDC-APP-2026.xlsx"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Format</Label>
-              <Input
-                value={exportForm.exportFormat}
-                onChange={(event) =>
-                  setExportForm((current) => ({
-                    ...current,
-                    exportFormat: event.target.value,
-                  }))
+                  void selectExportPackage(event.target.files?.[0], 'export')
                 }
               />
+              {exportForm.exportFileName && (
+                <p className="text-xs text-muted-foreground">
+                  {exportForm.exportFileName} · {exportForm.exportFormat} ·
+                  integrity verified
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Template version</Label>
@@ -849,24 +852,8 @@ export default function ProcurementAppSubmissionsPage() {
                 placeholder="PPA-APP-v1"
               />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>SHA-256 checksum</Label>
-              <Input
-                className="font-mono"
-                value={exportForm.exportChecksumSha256}
-                onChange={(event) =>
-                  setExportForm((current) => ({
-                    ...current,
-                    exportChecksumSha256: event.target.value,
-                  }))
-                }
-                placeholder="64 hexadecimal characters"
-              />
-            </div>
             <EvidenceFields
-              kind={evidenceKind}
               value={evidenceValue}
-              onKind={setEvidenceKind}
               onValue={setEvidenceValue}
             />
             <div className="space-y-2 sm:col-span-2">
@@ -919,28 +906,26 @@ export default function ProcurementAppSubmissionsPage() {
             {action === 'resubmit' ? (
               <>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label>Replacement export file</Label>
+                  <Label htmlFor="app-replacement-package">
+                    Replacement export package
+                  </Label>
                   <Input
-                    value={lifecycleForm.exportFileName}
+                    id="app-replacement-package"
+                    type="file"
+                    accept=".xlsx,.xls,.csv,.xml,.json"
                     onChange={(event) =>
-                      setLifecycleForm((current) => ({
-                        ...current,
-                        exportFileName: event.target.value,
-                      }))
+                      void selectExportPackage(
+                        event.target.files?.[0],
+                        'resubmit'
+                      )
                     }
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Format</Label>
-                  <Input
-                    value={lifecycleForm.exportFormat}
-                    onChange={(event) =>
-                      setLifecycleForm((current) => ({
-                        ...current,
-                        exportFormat: event.target.value,
-                      }))
-                    }
-                  />
+                  {lifecycleForm.exportFileName && (
+                    <p className="text-xs text-muted-foreground">
+                      {lifecycleForm.exportFileName} ·{' '}
+                      {lifecycleForm.exportFormat} · integrity verified
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Template version</Label>
@@ -950,19 +935,6 @@ export default function ProcurementAppSubmissionsPage() {
                       setLifecycleForm((current) => ({
                         ...current,
                         exportTemplateVersion: event.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>SHA-256 checksum</Label>
-                  <Input
-                    className="font-mono"
-                    value={lifecycleForm.exportChecksumSha256}
-                    onChange={(event) =>
-                      setLifecycleForm((current) => ({
-                        ...current,
-                        exportChecksumSha256: event.target.value,
                       }))
                     }
                   />
@@ -1018,9 +990,7 @@ export default function ProcurementAppSubmissionsPage() {
               </>
             )}
             <EvidenceFields
-              kind={evidenceKind}
               value={evidenceValue}
-              onKind={setEvidenceKind}
               onValue={setEvidenceValue}
             />
             <div className="space-y-2 sm:col-span-2">
@@ -1055,61 +1025,20 @@ export default function ProcurementAppSubmissionsPage() {
 }
 
 function EvidenceFields({
-  kind,
   value,
-  onKind,
   onValue,
 }: {
-  kind: ProcurementControlEvidenceReferenceKind;
   value: string;
-  onKind: (value: ProcurementControlEvidenceReferenceKind) => void;
   onValue: (value: string) => void;
 }) {
   return (
-    <>
-      <div className="space-y-2">
-        <Label>Additional shared evidence</Label>
-        <Select
-          value={kind}
-          onValueChange={(next) =>
-            onKind(next as ProcurementControlEvidenceReferenceKind)
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ExternalReference">
-              External reference
-            </SelectItem>
-            <SelectItem value="FileUploadRecord">
-              Shared file record ID
-            </SelectItem>
-            <SelectItem value="WorkflowEvidenceDocument">
-              Workflow evidence ID
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label>
-          {kind === 'ExternalReference'
-            ? 'Reference (optional)'
-            : 'Shared record GUID (optional)'}
-        </Label>
-        <Input
-          value={value}
-          onChange={(event) => onValue(event.target.value)}
-        />
-      </div>
-      <Alert className="sm:col-span-2">
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Shared evidence control</AlertTitle>
-        <AlertDescription>
-          This workspace stores references only. Uploads and workflow evidence
-          remain governed by the existing shared controls.
-        </AlertDescription>
-      </Alert>
-    </>
+    <div className="space-y-2 sm:col-span-2">
+      <Label>External submission or acknowledgement reference (optional)</Label>
+      <Input
+        value={value}
+        onChange={(event) => onValue(event.target.value)}
+        placeholder="Official GHANEPS/PPA reference, if available"
+      />
+    </div>
   );
 }

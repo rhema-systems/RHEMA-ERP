@@ -149,17 +149,29 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
                 []), app, exception);
         }
 
-        var requiredActions = new List<string>();
-        if (!app.Allowed) requiredActions.Add(app.Action);
-        if (!exception.Allowed) requiredActions.Add(exception.Action);
-        var decisionCode = app.Attempted ? app.Code : exception.Attempted ? exception.Code : "PR_APP_OR_EXCEPTION_REQUIRED";
-        var message = app.Attempted && exception.Attempted
-            ? $"APP path: {app.Message} Exception path: {exception.Message}"
-            : app.Attempted
-                ? app.Message
-                : exception.Attempted
-                    ? exception.Message
-                    : "Before submission, link this requisition to an acknowledged APP plan item or to an approved exception with completed shared-workflow lineage.";
+        // GHANEPS/APP exchange is retained for traceability, but the architecture does not make
+        // an acknowledgement a universal prerequisite for starting the configured PR workflow.
+        // An explicitly linked exception remains fail-closed because it is a claimed bypass and
+        // therefore must carry valid approval, workflow, and evidence lineage.
+        if (!exception.Attempted)
+        {
+            return new Evaluation(BuildReadiness(
+                requisition,
+                true,
+                statusAllowsSubmission,
+                "PR_SUBMISSION_READY",
+                app.Attempted
+                    ? $"The configured requisition approval workflow may start. APP exchange remains available for traceability: {app.Message}"
+                    : "The configured requisition approval workflow may start. APP exchange remains available for traceability and does not block submission.",
+                "ConfiguredApprovalWorkflow",
+                app,
+                exception,
+                []), app, exception);
+        }
+
+        var requiredActions = new List<string> { exception.Action };
+        var decisionCode = exception.Code;
+        var message = exception.Message;
         return new Evaluation(BuildReadiness(
             requisition,
             false,
@@ -307,8 +319,10 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
     {
         var allowed = evaluation.Readiness.CanSubmit;
         var evidence = BuildEvidence(evaluation);
-        var decisionKeys = new List<string> { "DEC-009" };
-        if (!evaluation.App.Allowed)
+        var decisionKeys = new List<string>();
+        if (evaluation.App.Attempted)
+            decisionKeys.Add("DEC-009");
+        if (evaluation.Exception.Attempted)
             decisionKeys.Add(evaluation.Exception.Rule?.SourceDecisionKey ?? "DEC-006");
         var exceptionRule = evaluation.Exception.Rule;
         await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest

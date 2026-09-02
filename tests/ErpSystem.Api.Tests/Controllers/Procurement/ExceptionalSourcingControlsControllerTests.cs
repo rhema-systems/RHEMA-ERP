@@ -75,17 +75,16 @@ public sealed class ExceptionalSourcingControlsControllerTests
     }
 
     [Fact]
-    public void MutationRoutesHaveExplicitRoleBoundaries()
+    public void MutationRoutesUseRegisteredProcurementPermissions()
     {
         var type = typeof(ExceptionalSourcingControlsController);
         var recommendation = type.GetMethod(nameof(ExceptionalSourcingControlsController.RecordRecommendation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
         var decision = type.GetMethod(nameof(ExceptionalSourcingControlsController.DecideApproval))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
 
-        Assert.Contains("Employee", recommendation);
-        Assert.DoesNotContain("Employee", decision);
-        Assert.Contains("Manager", decision);
+        Assert.Equal("procurement.tender.evaluate", recommendation);
+        Assert.Equal("procurement.tender.approve", decision);
 
         var awardAuthorization = type
             .GetMethod(nameof(ExceptionalSourcingControlsController.RecordAward))!

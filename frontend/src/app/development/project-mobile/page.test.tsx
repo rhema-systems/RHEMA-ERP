@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ProjectMobilePage from './page';
 import { projectService } from '@/services/projectService';
+import { civilEngineeringDirectTaskService } from '@/services/civil-engineering-direct-task.service';
 
 vi.mock('sonner', () => ({
   toast: {
@@ -10,6 +11,18 @@ vi.mock('sonner', () => ({
     error: vi.fn(),
   },
 }));
+
+vi.mock('@/lib/project-currency', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/project-currency')>('@/lib/project-currency');
+  return {
+    ...actual,
+    loadProjectCurrencyContext: vi.fn().mockResolvedValue({
+      activeCurrencies: [],
+      baseCurrency: actual.DEFAULT_PROJECT_CURRENCY,
+      rawBaseCurrency: null,
+    }),
+  };
+});
 
 vi.mock('@/services/projectService', async () => {
   const actual = await vi.importActual<typeof import('@/services/projectService')>('@/services/projectService');
@@ -26,6 +39,14 @@ vi.mock('@/services/projectService', async () => {
     },
   };
 });
+
+vi.mock('@/services/civil-engineering-direct-task.service', () => ({
+  civilEngineeringDirectTaskService: {
+    feedbackLookups: vi.fn(),
+    feedback: vi.fn(),
+    submitAssigneeFeedback: vi.fn(),
+  },
+}));
 
 describe('ProjectMobilePage', () => {
   const summary = {
@@ -108,6 +129,14 @@ describe('ProjectMobilePage', () => {
       isExternalVisible: false,
       createdAt: '2026-03-10T00:00:00Z',
     });
+    vi.mocked(civilEngineeringDirectTaskService.feedbackLookups).mockResolvedValue({
+      documents: [],
+      availableActions: ['Acknowledge', 'UpdateProgress', 'Complete'],
+      measurementUnits: [],
+      requireFeedbackEvidence: false,
+      requireClosureAcceptance: true,
+    });
+    vi.mocked(civilEngineeringDirectTaskService.feedback).mockResolvedValue([]);
   });
 
   it('renders the mobile summary and assignment details', async () => {
@@ -152,5 +181,21 @@ describe('ProjectMobilePage', () => {
     ));
 
     expect(projectService.getMobileSummary).toHaveBeenCalledTimes(3);
+  });
+
+  it('routes governed Civil assignments only through the Civil feedback lifecycle', async () => {
+    vi.mocked(projectService.getMobileSummary).mockResolvedValue({
+      ...summary,
+      assignments: [{ ...summary.assignments[0], civilDirectTaskId: 'civil-task-1', civilDirectTaskStatus: 'Assigned', civilDirectTaskRowVersion: 'civil-row-version' }],
+    });
+
+    render(<ProjectMobilePage />);
+
+    expect(await screen.findByText('Governed Civil field feedback')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update Progress' })).not.toBeInTheDocument();
+    expect(civilEngineeringDirectTaskService.feedbackLookups).toHaveBeenCalledWith('proj-1', 'civil-task-1');
+    expect(civilEngineeringDirectTaskService.feedback).toHaveBeenCalledWith('proj-1', 'civil-task-1');
+    expect(projectService.updateMobileWorkItemProgress).not.toHaveBeenCalled();
+    expect(projectService.uploadProjectDocument).not.toHaveBeenCalled();
   });
 });

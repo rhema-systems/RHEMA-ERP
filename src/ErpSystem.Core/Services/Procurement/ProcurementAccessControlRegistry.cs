@@ -143,6 +143,11 @@ public static class ProcurementAccessControlRegistry
     public static ProcurementPermissionDefinition? FindPermission(string code) =>
         Permissions.FirstOrDefault(item => string.Equals(item.Code, code, StringComparison.OrdinalIgnoreCase));
 
+    public static bool RoleGrantsPermission(string roleCode, string permissionCode) =>
+        FindRole(roleCode)?.PermissionCodes.Contains(
+            permissionCode,
+            StringComparer.OrdinalIgnoreCase) == true;
+
     private static ProcurementPermissionDefinition P(string code, string name, string description, bool mutation, bool warehouse = false) =>
         new(code, name, description, mutation, warehouse);
 

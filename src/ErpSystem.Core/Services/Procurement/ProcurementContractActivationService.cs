@@ -44,6 +44,7 @@ public sealed class ProcurementContractActivationService :
     private readonly IProcurementControlEventService _controlEvents;
     private readonly INotificationTopicPublisher _notifications;
     private readonly IContractService _contracts;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<ProcurementContractActivationService> _logger;
 
     public ProcurementContractActivationService(
@@ -58,6 +59,7 @@ public sealed class ProcurementContractActivationService :
         IProcurementControlEventService controlEvents,
         INotificationTopicPublisher notifications,
         IContractService contracts,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         ILogger<ProcurementContractActivationService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -71,6 +73,7 @@ public sealed class ProcurementContractActivationService :
         _controlEvents = controlEvents;
         _notifications = notifications;
         _contracts = contracts;
+        _budgetCommitments = budgetCommitments;
         _logger = logger;
     }
 
@@ -523,6 +526,8 @@ public sealed class ProcurementContractActivationService :
                 await ContractRows.UpdateAsync(activation.Contract);
                 await Awards.UpdateAsync(award);
                 await Activations.UpdateAsync(activation);
+                await _budgetCommitments.CommitContractAsync(
+                    activation.Contract, correlation, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await RecordEventAsync(activation, "ContractActivated",
                     ProcurementControlEventResult.Allowed,
@@ -919,12 +924,14 @@ public sealed class ProcurementContractActivationService :
                 commitment.ReservationReference,
                 commitment.Status,
                 commitment.ReservedAmount,
+                commitment.FormallyCommittedAmount,
                 commitment.Currency,
                 budget.Id,
                 budget.TenantId,
                 budget.Status,
                 budget.Currency,
                 budget.CommittedAmount,
+                budget.ReservedAmount,
                 budget.ApprovedById,
                 budget.ApprovedDate,
                 budget.EffectiveDate,

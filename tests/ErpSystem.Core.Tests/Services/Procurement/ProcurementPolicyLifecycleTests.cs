@@ -56,7 +56,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task CreateRequiresImmutableApprovedConfigurationAndMaterializesNormalizedRuleFamilies()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var draftSource = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Draft, published: false);
 
         await fixture.Service.Invoking(service => service.CreatePolicySetAsync(NewPolicy(draftSource.Id), "create-invalid"))
@@ -93,28 +93,29 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
-    public async Task TenantAdminDirectPublishIsRejectedAndAudited()
+    public async Task LegacyTenantAdminCannotPublishExecutablePolicy()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-auth");
         await fixture.AddValidSodRuleAsync(created.Id);
         created = await fixture.Service.GetPolicySetAsync(created.Id);
+        fixture.SetRoles("TenantAdmin");
 
         await fixture.Service.Invoking(service => service.PublishPolicySetAsync(created.Id,
                 new ProcurementPolicyLifecycleRequest { RowVersion = created.RowVersion, Reason = "Bypass" }, "publish-bypass"))
             .Should().ThrowAsync<ProcurementPolicyAuthorizationException>();
 
-        (await fixture.Context.ProcurementPolicyRevisions.SingleAsync(item =>
-            item.PolicySetId == created.Id && item.CorrelationId == "publish-bypass"))
-            .Should().Match<ProcurementPolicyRevision>(item => item.Action == "Publish" && item.Result == "Rejected");
+        (await fixture.Context.ProcurementPolicyRevisions.AnyAsync(item =>
+                item.PolicySetId == created.Id && item.CorrelationId == "publish-bypass"))
+            .Should().BeFalse("legacy generic roles are rejected before entering policy mutation logic");
         (await fixture.Service.GetPolicySetAsync(created.Id)).LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Draft);
     }
 
     [Fact]
     public async Task CompletePolicyPublishesBecomesImmutableClonesWithLineageAndRetiresPriorAtomically()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var draft = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-lifecycle");
         await fixture.AddValidSodRuleAsync(draft.Id);
@@ -133,8 +134,8 @@ public sealed class ProcurementPolicyServiceTests
                 new ProcurementPolicyLifecycleRequest { RowVersion = published.RowVersion }, "retire-bypass"))
             .Should().ThrowAsync<ProcurementPolicyAuthorizationException>();
         (await fixture.Context.ProcurementPolicyRevisions.AnyAsync(item =>
-            item.PolicySetId == published.Id && item.CorrelationId == "retire-bypass" && item.Result == "Rejected")).Should().BeTrue();
-        fixture.SetRoles("SuperAdmin");
+            item.PolicySetId == published.Id && item.CorrelationId == "retire-bypass")).Should().BeFalse();
+        fixture.SetRoles(ProcurementAccessControlRegistry.IctAdministratorRole);
 
         await fixture.Service.Invoking(service => service.UpdatePolicySetAsync(published.Id,
                 UpdateFrom(published), "immutable-update"))
@@ -181,7 +182,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task FutureDatedReplacementKeepsCurrentPolicyEffectiveUntilCutover()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var now = DateTime.UtcNow;
         var currentFrom = now.AddDays(-30);
         var replacementFrom = now.AddDays(30);
@@ -226,7 +227,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task CloneDraftAdvancesPastSoftDeletedVersionsWithoutTreatingThemAsActiveDrafts()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var first = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id, "SOFT-DELETE-VERSION"), "create-v1");
         await fixture.AddValidSodRuleAsync(first.Id);
@@ -248,7 +249,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task TenantIsolationAppliesToListDetailUpdateCloneAndPublish()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-tenant");
         var otherTenant = Guid.NewGuid();
@@ -269,7 +270,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task StalePolicyAndRuleRowVersionsAreRejectedBeforeMutation()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-concurrency");
 
@@ -297,7 +298,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task TypedRuleValidationRejectsAmbiguousPayloadsInvalidSodAndOverlappingThresholds()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-validation");
 
@@ -338,7 +339,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task WorkflowReferenceMustReuseAnActivePublishedDefinitionFromTheCurrentTenant()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-workflow-reference");
 
@@ -359,9 +360,32 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
+    public async Task EvidenceAndExceptionFamiliesAreOptionalWhileSodRemainsRequired()
+    {
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var source = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Retired, published: true);
+        var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-optional-families");
+
+        fixture.Context.ProcurementPolicyEvidenceRules.RemoveRange(
+            fixture.Context.ProcurementPolicyEvidenceRules.Where(item => item.PolicySetId == created.Id));
+        fixture.Context.ProcurementPolicyExceptionRules.RemoveRange(
+            fixture.Context.ProcurementPolicyExceptionRules.Where(item => item.PolicySetId == created.Id));
+        await fixture.Context.SaveChangesAsync();
+
+        var validation = await fixture.Service.ValidatePolicySetAsync(created.Id, "validate-optional-families");
+
+        validation.Errors.Should().NotContain(item =>
+            item.Code == "RULE_FAMILY_MISSING" &&
+            (item.RuleKind == ProcurementPolicyRuleKind.Evidence ||
+             item.RuleKind == ProcurementPolicyRuleKind.Exception));
+        validation.Errors.Should().Contain(item =>
+            item.Code == "RULE_FAMILY_MISSING" && item.RuleKind == ProcurementPolicyRuleKind.SegregationOfDuties);
+    }
+
+    [Fact]
     public async Task RfqPolicyCannotPublishWithoutPositiveCompetitionAndSharedApprovalWorkflow()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-rfq-operational-validation");
 
@@ -374,7 +398,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task TenantOverrideRequiresImmutableBaseAndSourceRuleForReplaceOrDisable()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var baseDraft = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id, "BASE-POLICY"), "create-base");
 
@@ -416,7 +440,7 @@ public sealed class ProcurementPolicyServiceTests
     [Fact]
     public async Task DraftDeleteSoftDeletesRulesAndWritesAppendOnlyAudit()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-delete");
         await fixture.Service.DeleteDraftAsync(created.Id,
@@ -614,11 +638,32 @@ public sealed class ProcurementPolicyServiceTests
                 }, "add-required-sod");
             }
 
+            var workflowEntityType = new ErpSystem.Core.Entities.Workflow.WorkflowEntityType
+            {
+                TenantId = _tenantId,
+                Code = "TENDER_EVALUATION",
+                Name = "Tender evaluation",
+                IsActive = true
+            };
+            var workflow = new ErpSystem.Core.Entities.Workflow.WorkflowDefinition
+            {
+                TenantId = _tenantId,
+                DefinitionKey = Guid.NewGuid(),
+                Name = "TDC RFQ approval",
+                EntityTypeId = workflowEntityType.Id,
+                EntityType = workflowEntityType,
+                Version = 1,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                IsActive = true,
+                PublishedAt = DateTime.UtcNow.AddMinutes(-1)
+            };
+            Context.WorkflowEntityTypes.Add(workflowEntityType);
+            Context.WorkflowDefinitions.Add(workflow);
             var method = await Context.ProcurementPolicyMethodRules.SingleAsync(item =>
                 item.PolicySetId == policyId && item.Method == ProcurementMethodType.RequestForQuotation);
             method.RequiresCompetition = true;
             method.MinimumQuotationCount = 3;
-            method.WorkflowDefinitionId = Guid.NewGuid();
+            method.WorkflowDefinitionId = workflow.Id;
             await Context.SaveChangesAsync();
         }
 

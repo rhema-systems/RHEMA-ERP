@@ -18,6 +18,43 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
+    [Theory]
+    [InlineData("SuperAdmin")]
+    [InlineData("TenantAdmin")]
+    public async Task PlatformAdministratorsDoNotBypassTenderCommitteeCapability(
+        string administratorRole)
+    {
+        await using var fixture = new Fixture();
+        fixture.SwitchAdministrator(administratorRole);
+        fixture.SetCapabilityAllowed(false);
+
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync())
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "committee mutation must require the registered TDC tender-administration capability instead of a generic administrator bypass");
+    }
+
+    [Fact]
+    public async Task ReadinessExposesBindOnlyForARegisteredTdcPermissionBearingRole()
+    {
+        await using var fixture = new Fixture();
+        fixture.SwitchRole("SuperAdmin");
+
+        await fixture.Service.Invoking(service => service.GetReadinessAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        fixture.SwitchRole("TDC_PROCUREMENT_OFFICER");
+        var officerReadiness = await fixture.Service.GetReadinessAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        officerReadiness.AllowedActions.Should().ContainSingle("bind");
+    }
+
     [Fact]
     public async Task OptionsAndBindingReuseExactMasterCommitteeMembership()
     {
@@ -45,6 +82,33 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         bound.ConfigurationProfileId.Should().Be(fixture.Profile.Id);
         bound.ActivationEvidenceReference.Should().Be("evidence://constitution");
         bound.CompositionIntegrityHash.Should().HaveLength(64);
+    }
+
+    [Fact]
+    public async Task CommitteeAdministratorCanActivateWithoutBeingAnEvaluatorMember()
+    {
+        await using var fixture = new Fixture();
+        var bound = await fixture.BindDraftAsync();
+        fixture.MemberUserIds.Should().NotContain(fixture.AdministratorId);
+        fixture.Access.Invocations.Clear();
+
+        var activated = await fixture.Service.ActivateAsync(bound.Id,
+            new ActivateProcurementEvaluationCommitteeRequest
+            {
+                RowVersion = bound.RowVersion,
+                EvidenceReference = "evidence://constitution",
+                IdempotencyKey = "activate-by-independent-administrator"
+            }, "activate-by-independent-administrator");
+
+        activated.Status.Should()
+            .Be(ProcurementEvaluationCommitteeControlStatus.Active);
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.administer" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "committee activation is an administrative action and must not require evaluator membership");
     }
 
     [Fact]
@@ -387,6 +451,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         private Guid _currentTenantId;
         private Guid _currentUserId;
         private bool _administrator = true;
+        private string _administratorRole = "TDC_HEAD_OF_PROCUREMENT";
 
         public Fixture()
         {
@@ -601,21 +666,15 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 $"{_currentUserId:N}@tdc.test");
             _current.SetupGet(item => item.FullName).Returns("TDC Evaluator");
             _current.SetupGet(item => item.Roles).Returns(() =>
-                _administrator ? ["Administrator"] : ["TDC_EVALUATOR"]);
+                _administrator ? [_administratorRole] : ["TDC_EVALUATOR"]);
             _current.Setup(item => item.HasRole(It.IsAny<string>()))
                 .Returns((string role) =>
                     _administrator &&
-                    string.Equals(role, "Administrator",
+                    string.Equals(role, _administratorRole,
                         StringComparison.OrdinalIgnoreCase));
-            var access = new Mock<IProcurementAccessControlService>();
-            access.Setup(item => item.EnforceCapabilityAsync(
-                    It.IsAny<ProcurementAccessCapabilityRequest>(),
-                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
-                {
-                    Allowed = true,
-                    Message = "Allowed"
-                });
+            Access = new Mock<IProcurementAccessControlService>();
+            SetCapabilityAllowed(true);
+            var access = Access;
             var sod = new Mock<IProcurementSodGuardService>();
             sod.Setup(item => item.EnforceAsync(
                     It.IsAny<ProcurementSodGuardRequest>(),
@@ -656,6 +715,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         public ErpSystem.Core.Entities.Workflow.WorkflowDefinition Workflow { get; }
         public List<Guid> MemberUserIds { get; } = new();
         public ProcurementEvaluationCommitteeControlService Service { get; }
+        public Mock<IProcurementAccessControlService> Access { get; }
 
         public void SwitchTenant(Guid tenantId) => _currentTenantId = tenantId;
 
@@ -665,11 +725,29 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             _administrator = false;
         }
 
-        public void SwitchAdministrator()
+        public void SwitchRole(string role)
         {
             _currentUserId = AdministratorId;
             _administrator = true;
+            _administratorRole = role;
         }
+
+        public void SwitchAdministrator(string administratorRole = "TDC_HEAD_OF_PROCUREMENT")
+        {
+            _currentUserId = AdministratorId;
+            _administrator = true;
+            _administratorRole = administratorRole;
+        }
+
+        public void SetCapabilityAllowed(bool allowed) =>
+            Access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = allowed,
+                    Message = allowed ? "Allowed" : "Denied"
+                });
 
         public Task<ProcurementEvaluationCommitteeDto> BindDraftAsync() =>
             Service.BindAsync(

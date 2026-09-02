@@ -44,25 +44,26 @@ public sealed class ProcurementRequisitionSubmissionControlServiceTests
     }
 
     [Fact]
-    public async Task MissingAppAndExceptionBlocksSubmissionAndRecordsDeniedDecision()
+    public async Task MissingAppAndExceptionAllowsConfiguredWorkflowAndRecordsTraceabilityDecision()
     {
         await using var fixture = new Fixture();
         var requisition = fixture.NewRequisition();
         fixture.Context.Add(requisition);
         await fixture.Context.SaveChangesAsync();
 
-        var action = () => fixture.Service.EnforceAsync(requisition, "trace-blocked");
+        var readiness = await fixture.Service.EnforceAsync(requisition, "trace-ready");
 
-        var exception = await action.Should().ThrowAsync<ProcurementRequisitionSubmissionBlockedException>();
-        exception.Which.Readiness.CanSubmit.Should().BeFalse();
-        exception.Which.Readiness.DecisionCode.Should().Be("PR_APP_OR_EXCEPTION_REQUIRED");
-        exception.Which.Readiness.RequiredActions.Should().HaveCount(2);
+        readiness.CanSubmit.Should().BeTrue();
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.DecisionCode.Should().Be("PR_SUBMISSION_READY");
+        readiness.Basis.Should().Be("ConfiguredApprovalWorkflow");
+        readiness.RequiredActions.Should().BeEmpty();
         var history = await fixture.Service.GetHistoryAsync(requisition.Id);
-        history.Should().ContainSingle(item => item.Action == "SubmissionGateBlocked" && item.Result == "Denied" && item.IntegrityHash.Length == 64);
+        history.Should().ContainSingle(item => item.Action == "SubmissionGateAllowed" && item.Result == "Allowed" && item.IntegrityHash.Length == 64);
     }
 
     [Fact]
-    public async Task NewerRejectedAppAttemptOverridesEarlierAcknowledgement()
+    public async Task NewerRejectedAppAttemptIsRetainedForTraceabilityWithoutBlockingSubmission()
     {
         await using var fixture = new Fixture();
         var references = fixture.SeedAppPath();
@@ -83,8 +84,9 @@ public sealed class ProcurementRequisitionSubmissionControlServiceTests
 
         var readiness = await fixture.Service.GetReadinessAsync(requisition.Id);
 
-        readiness.CanSubmit.Should().BeFalse();
-        readiness.DecisionCode.Should().Be("PR_APP_ACKNOWLEDGEMENT_REQUIRED");
+        readiness.CanSubmit.Should().BeTrue();
+        readiness.DecisionCode.Should().Be("PR_SUBMISSION_READY");
+        readiness.Basis.Should().Be("ConfiguredApprovalWorkflow");
         readiness.AppSubmissionAttemptNumber.Should().Be(2);
         readiness.AppSubmissionStatus.Should().Be("Rejected");
     }

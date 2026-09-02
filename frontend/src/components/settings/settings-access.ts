@@ -180,6 +180,10 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     ['quantity-survey.configuration.read']
   ),
   anyAccess(
+    pathPrefix('/administration/project-management/civil-engineering-config'),
+    ['civil-engineering.configuration.read']
+  ),
+  anyAccess(
     pathPrefix('/administration/project-management/quantity-survey-catalogues'),
     ['quantity-survey.configuration.read']
   ),

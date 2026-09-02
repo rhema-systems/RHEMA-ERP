@@ -12,6 +12,7 @@ import type {
   PurchaseRequisitionType,
   SavePurchaseRequisitionLinkageRequest,
 } from '@/services/purchasingService';
+import { deriveRequisitionLinkageFromPlanItem } from '@/lib/procurement-requisition-linkage';
 
 const NONE = '__none__';
 
@@ -51,6 +52,15 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
     setValue('approvedExceptionRuleId', next);
   };
 
+  const selectedBudget = options?.budgets.find((item) => item.id === value.budgetId);
+  const selectPlanItem = (next: string) => {
+    if (next === NONE) {
+      onChange({ ...value, sourcePlanItemId: undefined, budgetId: undefined });
+      return;
+    }
+    onChange(deriveRequisitionLinkageFromPlanItem(value, next, options));
+  };
+
   return (
     <Card data-testid="purchase-requisition-linkage-fields">
       <CardHeader>
@@ -59,8 +69,7 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
           Planning and Governance Linkage
         </CardTitle>
         <CardDescription>
-          Record the planning, budget, specification and approved-exception references carried by this requisition.
-          Draft linkage remains editable; submission is enabled only when the APP/exception and Finance budget controls are ready.
+          Link the requisition to its approved planning source. The linked budget and category are derived automatically when available.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -75,7 +84,7 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
             <Label>Procurement plan item</Label>
             <Select
               value={value.sourcePlanItemId || NONE}
-              onValueChange={(next) => select('sourcePlanItemId', next)}
+              onValueChange={selectPlanItem}
               disabled={disabled || loading}
             >
               <SelectTrigger aria-label="Procurement plan item"><SelectValue placeholder="No plan item linked" /></SelectTrigger>
@@ -106,17 +115,25 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
 
           <div className="space-y-2">
             <Label>Procurement budget</Label>
-            <Select value={value.budgetId || NONE} onValueChange={(next) => select('budgetId', next)} disabled={disabled || loading}>
-              <SelectTrigger aria-label="Procurement budget"><SelectValue placeholder="No budget linked" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>No budget linked</SelectItem>
-                {(options?.budgets || []).map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {optionLabel(option)}{option.currency ? ` · ${option.currency}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {value.sourcePlanItemId ? (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm" data-testid="derived-procurement-budget">
+                {selectedBudget
+                  ? `${optionLabel(selectedBudget)}${selectedBudget.currency ? ` · ${selectedBudget.currency}` : ''}`
+                  : 'The budget assigned to this plan item will be applied automatically when the draft is saved.'}
+              </div>
+            ) : (
+              <Select value={value.budgetId || NONE} onValueChange={(next) => select('budgetId', next)} disabled={disabled || loading}>
+                <SelectTrigger aria-label="Procurement budget"><SelectValue placeholder="No budget linked" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>No budget linked</SelectItem>
+                  {(options?.budgets || []).map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {optionLabel(option)}{option.currency ? ` · ${option.currency}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -134,21 +151,6 @@ export function PurchaseRequisitionLinkageFields({ value, onChange, options, loa
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="pr-cost-center">Cost centre</Label>
-            <Input
-              id="pr-cost-center"
-              list="pr-cost-center-options"
-              value={value.costCenter || ''}
-              onChange={(event) => setValue('costCenter', event.target.value)}
-              placeholder="e.g. CC-001"
-              disabled={disabled}
-            />
-            <datalist id="pr-cost-center-options">
-              {(options?.costCenters || []).map((item) => <option key={item} value={item} />)}
-            </datalist>
           </div>
 
           <div className="space-y-2">

@@ -8,6 +8,10 @@ public static class ProjectCatalogDefaults
     public const string QuantitySurveyTrades = "qs-trades";
     public const string QuantitySurveyCostCodes = "qs-cost-codes";
     public const string QuantitySurveyMeasurementCodes = "qs-measurement-codes";
+    public const string CivilEngineeringCategories = "civil-engineering-categories";
+    public const string CivilPlanningConditions = "civil-planning-conditions";
+    public const string CivilDevelopmentConstraints = "civil-development-constraints";
+    public const string CivilLandUseImpacts = "civil-land-use-impacts";
 
     public static List<ProjectCatalogGroupDto> GetRecommendedCatalogs() =>
     [
@@ -31,8 +35,20 @@ public static class ProjectCatalogDefaults
         Create("cost-categories", "Cost Categories", "Labor", "Materials", "Procurement", "Travel", "Equipment", "Subcontractor", "Miscellaneous"),
         Create("expense-categories", "Expense Categories", "Travel", "Meals", "Lodging", "Supplies", "Equipment", "Other"),
         Create("boq-item-types", "BOQ Item Types", "Item", "ProvisionalSum", "PrimeCost", "Variation", "Allowance"),
-        Create("resource-roles", "Resource Roles", "ProjectManager", "TeamMember", "TaskOwner", "FinanceOfficer", "RiskOfficer", "ProcurementOfficer", "ExternalContributor"),
-        Create("member-roles", "Member Roles", "Sponsor", "Project Manager", "Team Member", "Task Owner", "Finance Officer", "External Contributor"),
+        Create("resource-roles", "Resource Roles", "ProjectManager", "TeamMember", "TaskOwner", "FinanceOfficer", "RiskOfficer", "ProcurementOfficer", "ExternalContributor",
+            CivilEngineeringAccessControlRegistry.CivilEngineerRole,
+            CivilEngineeringAccessControlRegistry.ProjectEngineerRole,
+            CivilEngineeringAccessControlRegistry.DraftsmanRole,
+            CivilEngineeringAccessControlRegistry.TechnicianRole,
+            CivilEngineeringAccessControlRegistry.ArtisanRole),
+        Create("member-roles", "Member Roles", "Sponsor", "Project Manager", "Team Member", "Task Owner", "Finance Officer", "External Contributor",
+            CivilEngineeringAccessControlRegistry.HeadRole,
+            CivilEngineeringAccessControlRegistry.SupervisingEngineerRole,
+            CivilEngineeringAccessControlRegistry.CivilEngineerRole,
+            CivilEngineeringAccessControlRegistry.ProjectEngineerRole,
+            CivilEngineeringAccessControlRegistry.DraftsmanRole,
+            CivilEngineeringAccessControlRegistry.TechnicianRole,
+            CivilEngineeringAccessControlRegistry.ArtisanRole),
         Create("task-statuses", "Task Statuses", "New", "Assigned", "InProgress", "Blocked", "PendingReview", "Completed", "Closed", "Cancelled"),
         Create("task-priorities", "Task Priorities", "Low", "Medium", "High", "Critical"),
         Create("deliverable-statuses", "Deliverable Statuses", "Draft", "InReview", "Approved", "Rejected", "Issued", "Accepted"),
@@ -51,7 +67,11 @@ public static class ProjectCatalogDefaults
         Create(QuantitySurveySections, "QS Sections"),
         Create(QuantitySurveyTrades, "QS Trades"),
         Create(QuantitySurveyCostCodes, "QS Cost Codes"),
-        Create(QuantitySurveyMeasurementCodes, "QS Measurement Codes")
+        Create(QuantitySurveyMeasurementCodes, "QS Measurement Codes"),
+        Create(CivilEngineeringCategories, "Civil Engineering Categories", "RoadsAndDrainage", "Structures", "WaterAndSanitation", "SiteInfrastructure", "PropertyDevelopment", "MaintenanceAndRehabilitation", "DefectsAndRectification"),
+        Create(CivilPlanningConditions, "Civil Planning Conditions", "Setback", "ZoningApproval", "AccessAndEasement", "DrainageReservation", "EnvironmentalCondition"),
+        Create(CivilDevelopmentConstraints, "Civil Development Constraints", "BoundaryConstraint", "UtilityWayleave", "FloodRisk", "Topography", "AccessConstraint"),
+        Create(CivilLandUseImpacts, "Civil Land-use Impacts", "NoMaterialImpact", "CompatibleUse", "ConditionalUse", "MaterialChangeOfUse", "RestrictedUse")
     ];
 
     public static bool IsQuantitySurveyCatalogType(string? catalogType)

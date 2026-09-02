@@ -100,6 +100,30 @@ public class WorkflowChecklistEvidenceValidatorTests
         errors.Should().ContainSingle().Which.Should().Contain("before this step can continue");
     }
 
+    [Fact]
+    public void ReadResponses_reads_the_shared_step_result_envelope_case_insensitively()
+    {
+        const string resultData = """
+            {"ApprovalChecklistResponses":[{"id":"civil-design","name":"Design reviewed","isSatisfied":true}]}
+            """;
+
+        var responses = WorkflowChecklistEvidenceValidator.ReadResponses(resultData);
+
+        responses.Should().ContainSingle();
+        responses[0].Id.Should().Be("civil-design");
+        responses[0].IsSatisfied.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-json")]
+    [InlineData("{}")]
+    public void ReadResponses_returns_empty_for_missing_or_invalid_step_data(string? resultData)
+    {
+        WorkflowChecklistEvidenceValidator.ReadResponses(resultData).Should().BeEmpty();
+    }
+
     private static WorkflowQualityCheckDto ChecklistItem(bool isRequired, bool requiresDocument)
     {
         return new WorkflowQualityCheckDto

@@ -25,7 +25,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Get all evaluation criteria
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationCriterionDto>>> GetAll()
     {
         try
@@ -44,7 +44,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Get active evaluation criteria
     /// </summary>
     [HttpGet("active")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationCriterionDto>>> GetActive()
     {
         try
@@ -63,7 +63,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Get evaluation criterion by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<EvaluationCriterionDto>> GetById(Guid id)
     {
         try
@@ -86,7 +86,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Get evaluation criteria by category
     /// </summary>
     [HttpGet("category/{category}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationCriterionDto>>> GetByCategory(string category)
     {
         try
@@ -105,7 +105,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Create evaluation criterion
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<EvaluationCriterionDto>> Create([FromBody] CreateEvaluationCriterionDto dto)
     {
         try
@@ -128,7 +128,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Update evaluation criterion
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<EvaluationCriterionDto>> Update(Guid id, [FromBody] UpdateEvaluationCriterionDto dto)
     {
         try
@@ -151,7 +151,7 @@ public class EvaluationCriteriaController : ControllerBase
     /// Delete evaluation criterion
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> Delete(Guid id)
     {
         try
@@ -170,4 +170,3 @@ public class EvaluationCriteriaController : ControllerBase
         }
     }
 }
-

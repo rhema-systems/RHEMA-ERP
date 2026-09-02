@@ -104,6 +104,23 @@ public sealed class FinanceOperationalResilienceReadinessTests
     }
 
     [Fact]
+    public async Task LivenessResponseWriter_ReturnsOnlyTheDependencyFreeProcessCheck()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+
+        await HealthCheckResponseWriter.WriteLivenessAsync(context);
+        context.Response.Body.Position = 0;
+        using var document = await JsonDocument.ParseAsync(context.Response.Body);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
+        document.RootElement.GetProperty("status").GetString().Should().Be("Healthy");
+        document.RootElement.GetProperty("checks").GetArrayLength().Should().Be(1);
+        document.RootElement.GetProperty("checks")[0].GetProperty("name").GetString().Should().Be("self");
+        document.RootElement.GetProperty("checks")[0].GetProperty("tags")[0].GetString().Should().Be("live");
+    }
+
+    [Fact]
     public async Task HealthRegistration_SeparatesProcessLivenessFromTrafficReadiness()
     {
         var services = new ServiceCollection();

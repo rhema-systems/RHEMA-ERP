@@ -33,7 +33,7 @@ type ProjectAccessTabProps = {
   assetLinkTypeOptions: string[];
   assetLinkStatusOptions: string[];
   maintenanceAssets: MaintenanceAssetLookupOption[];
-  companyAssets: FixedAsset[];
+  financeFixedAssets: FixedAsset[];
   jobCards: ProjectJobCardLinkOptionDto[];
   onAddAssetLink: () => void;
   externalPolicy: CreateProjectExternalAccessPolicyDto;
@@ -55,7 +55,7 @@ export function ProjectAccessTab({
   assetLinkTypeOptions,
   assetLinkStatusOptions,
   maintenanceAssets,
-  companyAssets,
+  financeFixedAssets,
   jobCards,
   onAddAssetLink,
   externalPolicy,
@@ -142,12 +142,12 @@ export function ProjectAccessTab({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label>Company Asset</Label>
-              <Select value={assetLink.companyAssetId || 'none'} onValueChange={(value) => setAssetLink((current) => ({ ...current, companyAssetId: value === 'none' ? undefined : value }))}>
-                <SelectTrigger><SelectValue placeholder="Select company asset" /></SelectTrigger>
+              <Label>Finance Fixed Asset</Label>
+              <Select value={assetLink.fixedAssetId || 'none'} onValueChange={(value) => setAssetLink((current) => ({ ...current, fixedAssetId: value === 'none' ? undefined : value }))}>
+                <SelectTrigger><SelectValue placeholder="Select fixed asset" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No company asset</SelectItem>
-                  {companyAssets.map((asset) => (
+                  <SelectItem value="none">No fixed asset</SelectItem>
+                  {financeFixedAssets.map((asset) => (
                     <SelectItem key={asset.id} value={asset.id}>
                       {asset.assetCode ? `${asset.assetCode} - ${asset.name}` : asset.name}
                     </SelectItem>
@@ -176,7 +176,7 @@ export function ProjectAccessTab({
           </div>
           <div className="space-y-3">
             {project.assetLinks.length === 0 ? <div className="text-sm text-muted-foreground">No maintenance or asset links have been added yet.</div> : null}
-            {project.assetLinks.map((link) => <div key={link.id} className="rounded-lg border p-4"><div className="font-medium">{link.assetName || link.jobCardNumber || link.linkType}</div><div className="text-sm text-muted-foreground">{link.status} | maintenance asset {link.maintenanceAssetId || 'N/A'} | company asset {link.companyAssetId || 'N/A'} | job card {link.jobCardId || 'N/A'}</div>{link.notes ? <div className="mt-2 text-sm text-muted-foreground">{link.notes}</div> : null}</div>)}
+            {project.assetLinks.map((link) => <div key={link.id} className="rounded-lg border p-4"><div className="font-medium">{link.assetName || link.jobCardNumber || link.linkType}</div><div className="text-sm text-muted-foreground">{link.status} | maintenance asset {link.maintenanceAssetId || 'N/A'} | finance fixed asset {link.fixedAssetId || 'N/A'} | legacy company asset {link.companyAssetId || 'N/A'} | job card {link.jobCardId || 'N/A'}</div>{link.notes ? <div className="mt-2 text-sm text-muted-foreground">{link.notes}</div> : null}</div>)}
           </div>
         </CardContent>
       </Card>

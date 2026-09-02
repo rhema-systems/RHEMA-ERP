@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 [Authorize]
 public sealed class ProcurementMasterDataChangesController : ControllerBase
 {
-    private const string Administrators = "SuperAdmin,TenantAdmin";
+    private const string AccessManagementPolicy = "procurement.access.manage";
     private readonly IProcurementMasterDataChangeService _service;
 
     public ProcurementMasterDataChangesController(IProcurementMasterDataChangeService service) => _service = service;
@@ -27,19 +27,19 @@ public sealed class ProcurementMasterDataChangesController : ControllerBase
     public Task<IActionResult> GetPolicies(CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetPoliciesAsync(cancellationToken)));
 
-    [HttpPost("policies"), Authorize(Roles = Administrators)]
+    [HttpPost("policies"), Authorize(Policy = AccessManagementPolicy)]
     public Task<IActionResult> CreatePolicy([FromBody] SaveProcurementMasterDataPolicyRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.SavePolicyAsync(null, request, CorrelationId, cancellationToken)));
 
-    [HttpPut("policies/{id:guid}"), Authorize(Roles = Administrators)]
+    [HttpPut("policies/{id:guid}"), Authorize(Policy = AccessManagementPolicy)]
     public Task<IActionResult> UpdatePolicy(Guid id, [FromBody] SaveProcurementMasterDataPolicyRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.SavePolicyAsync(id, request, CorrelationId, cancellationToken)));
 
-    [HttpPost("policies/{id:guid}/activate"), Authorize(Roles = "SuperAdmin")]
+    [HttpPost("policies/{id:guid}/activate"), Authorize(Policy = AccessManagementPolicy)]
     public Task<IActionResult> ActivatePolicy(Guid id, [FromBody] ProcurementMasterDataPolicyLifecycleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.ActivatePolicyAsync(id, request, CorrelationId, cancellationToken)));
 
-    [HttpPost("policies/{id:guid}/retire"), Authorize(Roles = "SuperAdmin")]
+    [HttpPost("policies/{id:guid}/retire"), Authorize(Policy = AccessManagementPolicy)]
     public Task<IActionResult> RetirePolicy(Guid id, [FromBody] ProcurementMasterDataPolicyLifecycleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.RetirePolicyAsync(id, request, CorrelationId, cancellationToken)));
 

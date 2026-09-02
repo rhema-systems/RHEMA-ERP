@@ -1,5 +1,10 @@
 # Procurement and Inventory UAT Test Script
 
+> Procurement acceptance is now governed by the architecture-aligned script in
+> [TDC_PROCUREMENT_ARCHITECTURE_UAT.md](TDC_PROCUREMENT_ARCHITECTURE_UAT.md). The procurement
+> sections below are retained only as a shorter regression reference; use the architecture script
+> for `FR-PR-001` through `FR-PR-012` sign-off.
+
 ## Purpose and status
 
 This script covers the implemented, user-visible procurement and stores controls. It deliberately does **not** claim that an approved procurement plan is exported directly to GHANEPS: the current approved scope is a manual exchange at the RFQ/tender stage, with server-side checksum calculation.
@@ -18,7 +23,7 @@ Status: prepared for UAT. The final authenticated browser/API acceptance for the
    - `TDC Finance Reviewer` (budget approval),
    - `TDC Requisitioner` or `TDC User Department Head` (PR creation),
    - `TDC Stores Officer` and `TDC Stores Manager` (supplier return), with the required warehouse responsibility assignments for the stores roles.
-4. Have an active HR department, an active inventory item with a Last Purchase Cost, Standard Cost, or Average Cost, and a **Stock Updated** GRN with accepted quantity available in the same tenant. Create these through their owning modules; do not use SQL updates.
+4. Have an active HR department, an approved plan item with a positive controlled estimate (or an active inventory item with a controlled fallback cost), and a **Stock Updated** GRN with accepted quantity available in the same tenant. Create these through their owning modules; do not use SQL updates.
 
 ## A. Budget workflow and plan linkage
 
@@ -33,11 +38,11 @@ Status: prepared for UAT. The final authenticated browser/API acceptance for the
 
 1. Go to **Procurement → Purchasing → Purchase Requests → New**.
 2. Open the **Department** selector. Expected: it is an active HR department dropdown, not free text.
-3. Add an inventory item. Expected: the item dialog has no editable estimated-price input. The rendered line uses the controlled item-master cost (Last Purchase Cost, then Standard Cost, then Average Cost).
+3. Add an approved plan item. Expected: the rendered line first uses the approved plan-item estimate. When no plan-item estimate exists on an otherwise permitted route, the controlled item-master cost is the fallback; a zero estimate is rejected.
 4. Save the requisition and submit it through the configured shared PR workflow.
 5. Negative access check: repeat as a user without a requisition role. Expected: `403 PR_LINKAGE_FORBIDDEN`.
 6. Positive access check: repeat after assigning `TDC Requisitioner`, `TDC User Department Head`, `TDC Procurement Officer`, or `TDC Senior Procurement Officer`, then signing out/in. Expected: the PR is created/submitted successfully. A warehouse responsibility is not required just to create a PR.
-7. API tamper check (optional): post a deliberately inflated estimated price for the selected inventory item. Expected: the stored line price and total use the inventory master cost, not the posted value.
+7. API tamper check (optional): post a deliberately inflated estimate. Expected: the server derives the stored line price and total from the approved plan item or controlled fallback source rather than trusting the posted value.
 
 ## C. Manual GHANEPS exchange
 

@@ -70,9 +70,11 @@ public static class ProcurementPurchaseOrderComplianceRules
         if (value.ReservedAmount <= 0m || value.RequiredExposure <= 0m)
             return Invalid("PO_BUDGET_COMMITMENT_AMOUNT_INVALID",
                 "The approved budget commitment and downstream exposure must be positive.");
-        if (value.BudgetCommittedAmount < value.ReservedAmount)
-            return Invalid("PO_BUDGET_COMMITMENT_LEDGER_MISMATCH",
-                "The budget committed balance is lower than its active requisition commitment.");
+        var outstandingReservation = Math.Max(0m,
+            value.ReservedAmount - value.FormallyCommittedAmount);
+        if (value.BudgetReservedAmount < outstandingReservation)
+            return Invalid("PO_BUDGET_RESERVATION_LEDGER_MISMATCH",
+                "The budget reserved balance is lower than the requisition's outstanding reservation.");
         if (!IsBudgetExposureCovered(value.ReservedAmount, value.RequiredExposure))
             return Invalid("PO_BUDGET_COMMITMENT_INSUFFICIENT",
                 $"The active reservation does not cover cumulative downstream exposure {value.RequiredExposure:N2} of {value.ReservedAmount:N2} {currency}.");
@@ -150,12 +152,14 @@ public sealed record ProcurementCommitmentLifecycleSnapshot(
     string CommitmentReference,
     ProcurementBudgetCommitmentStatus CommitmentStatus,
     decimal ReservedAmount,
+    decimal FormallyCommittedAmount,
     string CommitmentCurrency,
     Guid BudgetId,
     Guid BudgetTenantId,
     string BudgetStatus,
     string BudgetCurrency,
     decimal BudgetCommittedAmount,
+    decimal BudgetReservedAmount,
     Guid? BudgetApprovedById,
     DateTime? BudgetApprovedAtUtc,
     DateTime? BudgetEffectiveFromUtc,

@@ -283,12 +283,13 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     {
         EnsureEditor();
         var policySet = await FindPolicySetAsync(id, tracked: true, cancellationToken);
-        if (!_currentUser.HasRole("SuperAdmin"))
+        if (!CanManageAccess())
         {
             await AddRevisionAsync(policySet.Id, null, null, "Publish", "Rejected", correlationId,
-                "Only SuperAdmin may publish an executable procurement policy.", PolicySnapshot(policySet), null);
+                "The TDC access-management permission is required to publish an executable procurement policy.", PolicySnapshot(policySet), null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementPolicyAuthorizationException("Only SuperAdmin may publish executable procurement policies.");
+            throw new ProcurementPolicyAuthorizationException(
+                "The TDC ICT Administrator role is required to publish executable procurement policies.");
         }
 
         ProcurementPolicyLifecyclePolicy.EnsureCanPublish(policySet);
@@ -373,12 +374,13 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     {
         EnsureEditor();
         var policySet = await FindPolicySetAsync(id, tracked: true, cancellationToken);
-        if (!_currentUser.HasRole("SuperAdmin"))
+        if (!CanManageAccess())
         {
             await AddRevisionAsync(policySet.Id, null, null, "Retire", "Rejected", correlationId,
-                "Only SuperAdmin may retire an executable procurement policy.", PolicySnapshot(policySet), null);
+                "The TDC access-management permission is required to retire an executable procurement policy.", PolicySnapshot(policySet), null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementPolicyAuthorizationException("Only SuperAdmin may retire executable procurement policies.");
+            throw new ProcurementPolicyAuthorizationException(
+                "The TDC ICT Administrator role is required to retire executable procurement policies.");
         }
         ProcurementPolicyLifecyclePolicy.EnsureCanRetire(policySet);
         EnsureRowVersion(policySet.RowVersion, request.RowVersion, "policy");
@@ -497,7 +499,17 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             AddError(errors, "BASE_POLICY_REQUIRED", "A tenant override requires an immutable base policy.");
 
         var rules = await GetRuleEntitiesAsync(policySet.Id, tracked: false, cancellationToken);
-        foreach (var kind in Enum.GetValues<ProcurementPolicyRuleKind>())
+        // Evidence and exception requirements are workflow/method-specific. They remain validated
+        // when configured, but are not universal policy-family publication prerequisites.
+        var requiredRuleFamilies = new[]
+        {
+            ProcurementPolicyRuleKind.Category,
+            ProcurementPolicyRuleKind.Method,
+            ProcurementPolicyRuleKind.Threshold,
+            ProcurementPolicyRuleKind.Authority,
+            ProcurementPolicyRuleKind.SegregationOfDuties
+        };
+        foreach (var kind in requiredRuleFamilies)
         {
             if (!rules.Any(item => item.Kind == kind && GetRuleEnabled(item.Entity)))
                 AddError(errors, "RULE_FAMILY_MISSING", $"At least one enabled {RuleKindLabel(kind)} rule is required.", kind);
@@ -1221,9 +1233,14 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     private void EnsureEditor()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("TenantAdmin"))
-            throw new ProcurementPolicyAuthorizationException("Procurement policy administration requires SuperAdmin or TenantAdmin.");
+        if (!CanManageAccess())
+            throw new ProcurementPolicyAuthorizationException(
+                "The TDC ICT Administrator role is required to administer procurement policy.");
     }
+
+    private bool CanManageAccess() => _currentUser.Roles.Any(role =>
+        ProcurementAccessControlRegistry.RoleGrantsPermission(
+            role, "procurement.access.manage"));
 
     private void Touch(ProcurementPolicySet policySet)
     {

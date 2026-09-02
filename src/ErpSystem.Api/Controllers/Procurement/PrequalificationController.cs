@@ -27,12 +27,12 @@ public sealed class PrequalificationController : ControllerBase
         ExecuteAsync(() => _service.GetAsync(exerciseId, cancellationToken));
 
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public Task<IActionResult> Create(CreateProcurementPrequalificationExerciseRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.CreateAsync(request, Correlation(), cancellationToken));
 
     [HttpPost("{exerciseId:guid}/advertise")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public Task<IActionResult> Advertise(Guid exerciseId, AdvertiseProcurementPrequalificationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.AdvertiseAsync(exerciseId, request, Correlation(), cancellationToken));
 
@@ -41,27 +41,27 @@ public sealed class PrequalificationController : ControllerBase
         ExecuteAsync(() => _service.SubmitApplicationAsync(exerciseId, request, Correlation(), cancellationToken));
 
     [HttpPost("{exerciseId:guid}/close")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public Task<IActionResult> Close(Guid exerciseId, CloseProcurementPrequalificationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.CloseAsync(exerciseId, request, Correlation(), cancellationToken));
 
     [HttpPost("{exerciseId:guid}/applications/{applicationId:guid}/evaluate")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<IActionResult> Evaluate(Guid exerciseId, Guid applicationId, EvaluateProcurementPrequalificationApplicationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.EvaluateAsync(exerciseId, applicationId, request, Correlation(), cancellationToken));
 
     [HttpPost("{exerciseId:guid}/decision/submit")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public Task<IActionResult> SubmitDecision(Guid exerciseId, SubmitProcurementPrequalificationDecisionRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.SubmitDecisionAsync(exerciseId, request, Correlation(), cancellationToken));
 
     [HttpPost("{exerciseId:guid}/decision")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.sourcing.approve")]
     public Task<IActionResult> Decide(Guid exerciseId, DecideProcurementPrequalificationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.DecideAsync(exerciseId, request, Correlation(), cancellationToken));
 
     [HttpPost("{exerciseId:guid}/expire")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public Task<IActionResult> Expire(Guid exerciseId, ExpireProcurementPrequalificationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.ExpireAsync(exerciseId, request, Correlation(), cancellationToken));
 

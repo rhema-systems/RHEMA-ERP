@@ -172,6 +172,15 @@ public class TenderBidConfiguration : IEntityTypeConfiguration<TenderBid>
     }
 }
 
+public class TenderEvaluationConfiguration : IEntityTypeConfiguration<TenderEvaluation>
+{
+    public void Configure(EntityTypeBuilder<TenderEvaluation> builder)
+    {
+        builder.ToTable("TenderEvaluations", table =>
+            table.HasTrigger("TR_TenderEvaluations_CommitteeScoreProjection"));
+    }
+}
+
 public class TenderAwardConfiguration : IEntityTypeConfiguration<TenderAward>
 {
     public void Configure(EntityTypeBuilder<TenderAward> builder)

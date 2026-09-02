@@ -120,7 +120,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task CreateSeedsFourteenDraftDecisionsAndIsTenantScoped()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-1");
         created.Decisions.Should().HaveCount(14);
         created.Decisions.Should().OnlyContain(item => item.Status == ProcurementConfigurationDecisionStatus.Draft);
@@ -148,7 +148,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task IncompleteProfileCannotPublishAndRejectedAttemptIsAudited()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-2");
 
         await fixture.Service.Invoking(service => service.PublishProfileAsync(created.Id,
@@ -160,12 +160,13 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
-    public async Task TenantAdministratorCannotApproveOrPublishAndBothBypassesAreAudited()
+    public async Task LegacyTenantAdministratorCannotApproveOrPublishConfiguration()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-3");
         var decision = created.Decisions.Single(item => item.DecisionKey == "DEC-001");
         using var document = JsonDocument.Parse(ProcurementConfigurationDecisionRegistryTests.ValidDec001Json);
+        fixture.SetRoles("TenantAdmin");
 
         await fixture.Service.Invoking(service => service.SaveDecisionAsync(created.Id, "DEC-001",
                 new SaveProcurementConfigurationDecisionRequest
@@ -188,17 +189,15 @@ public sealed class ProcurementConfigurationServiceTests
         (await fixture.Service.GetProfileAsync(created.Id)).Decisions.Single(item => item.DecisionKey == "DEC-001")
             .Status.Should().Be(ProcurementConfigurationDecisionStatus.Draft);
 
-        var rejected = await fixture.Context.ProcurementConfigurationRevisions
-            .Where(item => item.ProfileId == created.Id && item.Result == "Rejected")
-            .Select(item => item.Action)
-            .ToListAsync();
-        rejected.Should().Contain(new[] { "ApproveDecision", "Publish" });
+        (await fixture.Context.ProcurementConfigurationRevisions
+                .AnyAsync(item => item.ProfileId == created.Id && item.Result == "Rejected"))
+            .Should().BeFalse("legacy generic roles are rejected before entering configuration mutation logic");
     }
 
     [Fact]
     public async Task StaleProfileRowVersionIsRejectedBeforeMutation()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-4");
         var tracked = await fixture.Context.ProcurementConfigurationProfiles.SingleAsync(item => item.Id == created.Id);
         tracked.RowVersion = new byte[] { 1, 2, 3 };
@@ -218,7 +217,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task CompleteProfilePublishes_CloneRetiresPriorAtomically_AndHistoryIsAuditable()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var first = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-publish");
         await PrepareForPublicationAsync(fixture.Service, first.Id,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -270,7 +269,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task FutureDatedReplacementKeepsCurrentProfileEffectiveUntilCutover()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var now = DateTime.UtcNow;
         var currentFrom = now.AddDays(-30);
         var replacementFrom = now.AddDays(30);
@@ -323,7 +322,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task CloneDraftAdvancesPastSoftDeletedVersionsWithoutTreatingThemAsActiveDrafts()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var first = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-soft-delete-version");
         await PrepareForPublicationAsync(fixture.Service, first.Id,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -352,7 +351,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task DraftDeletionIsBlockedByEvidence_AndEligibleDeletionIsAudited()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var protectedDraft = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-protected");
         var decision = protectedDraft.Decisions.Single(item => item.DecisionKey == "DEC-001");
         await fixture.Service.LinkEvidenceAsync(protectedDraft.Id, decision.DecisionKey,
@@ -380,9 +379,9 @@ public sealed class ProcurementConfigurationServiceTests
     }
 
     [Fact]
-    public async Task OnlySuperAdministratorCanReturnApprovedDecisionToProposed_ForGovernedRework()
+    public async Task OnlyTdcAccessManagerCanReturnApprovedDecisionToProposed_ForGovernedRework()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var profile = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-rework");
         var decision = profile.Decisions.Single(item => item.DecisionKey == "DEC-001");
         await fixture.Service.LinkEvidenceAsync(profile.Id, decision.DecisionKey,
@@ -424,13 +423,7 @@ public sealed class ProcurementConfigurationServiceTests
                     Reason = "Unauthorized rework attempt"
                 }, "return-rework-rejected"))
             .Should().ThrowAsync<ProcurementConfigurationAuthorizationException>();
-        (await fixture.Context.ProcurementConfigurationRevisions
-            .AnyAsync(item => item.ProfileId == profile.Id &&
-                              item.Action == "ReturnDecisionToProposed" &&
-                              item.Result == "Rejected"))
-            .Should().BeTrue();
-
-        fixture.SetRoles("SuperAdmin");
+        fixture.SetRoles(ProcurementAccessControlRegistry.IctAdministratorRole);
         approved = (await fixture.Service.GetProfileAsync(profile.Id)).Decisions.Single(item => item.DecisionKey == "DEC-001");
         var returned = await fixture.Service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
             new SaveProcurementConfigurationDecisionRequest
@@ -510,7 +503,7 @@ public sealed class ProcurementConfigurationServiceTests
             "DEC-004" => new ProcurementAuthorityStageDecisionValueDto { AuthorityOrCommittee = "Entity Tender Committee", RoleType = "Committee", Quorum = 3, EvidenceRequirements = new() { "Signed minutes" }, MinimumAmount = 0, MaximumAmount = 100000, ApplicableCategories = new() { ProcurementCategoryClass.Goods }, Sequence = 1, StageGroup = "Approval", EscalationAuthority = "Managing Director" },
             "DEC-005" => new ProcurementPettyPurchaseDecisionValueDto { PettyThreshold = 5000, CurrencyCode = "GHS", WaiverEligible = false, JustificationRequired = true, EvidenceRequirements = new() { "Receipt" }, ApproverRole = "Finance Manager", ExpiryDate = to },
             "DEC-006" => new ProcurementExceptionPrerequisiteDecisionValueDto { Method = ProcurementMethodType.SingleSource, Prerequisites = new() { "Statutory justification" }, ApprovalAuthority = "PPA", MandatoryEvidenceChecklist = new() { "Approval letter" }, FilingReference = "PPA filing", ExpiryDate = to },
-            "DEC-007" => new ProcurementSupplierFeeDecisionValueDto { FeeType = "Registration", Amount = 100, CurrencyCode = "GHS", TaxPercent = 0, PaymentChannels = new() { "Bank" }, ReceiptNumberFormat = "FEE-{YYYY}-{####}", ExemptionRule = "Written approval", RefundRule = "No refund after review", RenewalRule = "Annual renewal" },
+            "DEC-007" => new ProcurementSupplierFeeDecisionValueDto { FeeType = "Registration", Amount = 100, CurrencyCode = "GHS", TaxPercent = 0, PaymentChannels = new() { "Bank" }, RevenueAccountId = Guid.NewGuid(), ReceiptNumberFormat = "FEE-{YYYY}-{####}", ExemptionRule = "Written approval", RefundRule = "No refund after review", RenewalRule = "Annual renewal" },
             "DEC-008" => new ProcurementSignatureDecisionValueDto { DocumentType = "PurchaseOrder", SignatureMode = ProcurementSignatureMode.ElectronicOrManualEvidence, SignatoryRoles = new() { "Managing Director" }, SigningOrder = 1, VerificationRule = "Validate shared signature evidence", EvidenceRequirements = new() { "Signed document" } },
             "DEC-009" => new ProcurementGhanepsDecisionValueDto { ProfileCode = "TDC-GHANEPS", FileTemplateMappings = new() { "Plan=APP" }, Frequency = "Daily", Owner = "Procurement ICT", AcknowledgementRule = "Record acknowledgement", ReconciliationRule = "Daily exception reconciliation" },
             "DEC-010" => new ProcurementNegativeStockDecisionValueDto { DefaultPolicy = ProcurementNegativeStockPolicy.Prohibited, EmergencyOverrideEligible = false, OverridePermission = "Inventory.EmergencyOverride", EvidenceRequirements = new() { "Emergency authority" }, OverrideDurationHours = 1, AuditRequired = true },

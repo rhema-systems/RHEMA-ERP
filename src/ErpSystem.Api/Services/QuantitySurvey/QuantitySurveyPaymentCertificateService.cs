@@ -19,6 +19,7 @@ using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Documents;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Core.Services.Workflow;
@@ -31,13 +32,15 @@ public sealed class QuantitySurveyPaymentCertificateService(
     ApplicationDbContext db,
     ICurrentUserService currentUser,
     IProjectService projectService,
+    ICivilEngineeringIpcEndorsementService ipcEndorsements,
     IWorkflowIntegrationService workflow,
     IWorkflowStatusAdapterRegistry workflowAdapters,
     IVendorInvoiceService vendorInvoices,
     ITaxCalculationEngine taxEngine,
     IDocumentOutputService documentOutput,
     IControlledFileUploadService controlledFiles,
-    ICentralDocumentRepositoryFileService centralDocuments) : IQuantitySurveyPaymentCertificateService
+    ICentralDocumentRepositoryFileService centralDocuments,
+    IProcurementBudgetCommitmentLifecycleService budgetCommitments) : IQuantitySurveyPaymentCertificateService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -262,6 +265,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
             {
                 if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
                     throw Conflict("Only a Draft payment certificate can be amended.");
+                await ipcEndorsements.EnsureCertificateCanBeAmendedAsync(entity.Id, token);
                 if (!entity.AdvanceRecoveryApplied && request.AdvanceRecoveryAmount != 0m)
                     throw Validation("Advance recovery is disabled by the frozen certificate policy.");
                 if (decimal.Round(request.AdvanceRecoveryAmount, 2) != entity.AdvanceRecoveryAmount)
@@ -291,6 +295,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
             {
                 if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
                     throw Conflict("Only a Draft payment certificate can be submitted.");
+                await ipcEndorsements.EnsureCertificateCanProceedAsync(entity.Id, token);
                 await ValidateReadinessAsync(entity, token);
                 var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.PaymentCertificate,
                     entity.Id, entity.ApprovalWorkflowDefinitionId!.Value);
@@ -329,7 +334,11 @@ public sealed class QuantitySurveyPaymentCertificateService(
             {
                 if (entity.Status != ProjectPaymentCertificateStatuses.Issued || entity.ApprovalStatus != "Pending")
                     throw Conflict("The payment certificate must be Pending approval before this decision.");
-                if (approve) await ValidateReadinessAsync(entity, token);
+                if (approve)
+                {
+                    await ipcEndorsements.EnsureCertificateCanProceedAsync(entity.Id, token);
+                    await ValidateReadinessAsync(entity, token);
+                }
                 try { QuantitySurveyPaymentCertificateRules.RequireIndependentApprover(entity.PreparedById ?? Guid.Empty, entity.SubmittedById ?? Guid.Empty, UserId); }
                 catch (InvalidOperationException exception) { throw Conflict(exception.Message); }
                 var workflowStatus = await db.WorkflowInstances.AsNoTracking().Where(value => value.TenantId == TenantId &&
@@ -369,6 +378,15 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 entity.ApHandoffStatus = approve ? ProjectPaymentCertificateApHandoffStatuses.Ready : ProjectPaymentCertificateApHandoffStatuses.NotReady;
                 if (approve)
                 {
+                    if (!entity.ContractId.HasValue)
+                        throw Conflict("The approved payment certificate has no procurement contract lineage.");
+                    await budgetCommitments.UtilizeContractCertificateAsync(
+                        entity.ContractId.Value,
+                        entity.Id,
+                        entity.CertificateNumber ?? entity.Id.ToString("N"),
+                        entity.GrossCertifiedAmount,
+                        correlationId,
+                        token);
                     // QS owns certification; Finance owns the resulting AP invoice and every
                     // approval, posting, payment and reversal after it. Creating the draft AP
                     // invoice inside this serializable approval transaction removes the former

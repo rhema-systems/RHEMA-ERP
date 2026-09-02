@@ -81,21 +81,19 @@ public sealed class RfqsControllerStatutoryControlsTests
     }
 
     [Fact]
-    public void StatutoryRoutesDeclareExplicitRoleBoundaries()
+    public void StatutoryRoutesUseRegisteredProcurementPermissions()
     {
         var controllerType = typeof(RfqsController);
-        var controlsRoles = controllerType.GetMethod(nameof(RfqsController.GetControls))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var evaluationRoles = controllerType.GetMethod(nameof(RfqsController.SaveEvaluation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var decisionRoles = controllerType.GetMethod(nameof(RfqsController.DecideEvaluation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+        var controlsPolicy = controllerType.GetMethod(nameof(RfqsController.GetControls))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
+        var evaluationPolicy = controllerType.GetMethod(nameof(RfqsController.SaveEvaluation))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
+        var decisionPolicy = controllerType.GetMethod(nameof(RfqsController.DecideEvaluation))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
 
-        Assert.Contains("TDC_INTERNAL_AUDIT", controlsRoles);
-        Assert.Contains("TDC_OBSERVER", controlsRoles);
-        Assert.Contains("TDC_EVALUATOR", evaluationRoles);
-        Assert.DoesNotContain("TDC_EVALUATOR", decisionRoles);
-        Assert.Contains("TDC_HEAD_OF_PROCUREMENT", decisionRoles);
+        Assert.Equal("procurement.records.read", controlsPolicy);
+        Assert.Equal("procurement.tender.evaluate", evaluationPolicy);
+        Assert.Equal("procurement.tender.approve", decisionPolicy);
 
         var awardAuthorization = controllerType
             .GetMethod(nameof(RfqsController.AwardRfqAndCreatePurchaseOrders))!

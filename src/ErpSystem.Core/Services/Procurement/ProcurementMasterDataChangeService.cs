@@ -179,7 +179,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        EnsureSuperAdministrator();
+        EnsureAccessManager();
         EnsureReason(request.Reason);
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -253,7 +253,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        EnsureSuperAdministrator();
+        EnsureAccessManager();
         EnsureReason(request.Reason);
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -727,8 +727,9 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             EnsureRowVersion(entity.RowVersion, request.RowVersion, "change request");
             if (entity.Status is not (ProcurementMasterDataChangeStatus.Draft or ProcurementMasterDataChangeStatus.PendingApproval or ProcurementMasterDataChangeStatus.RevalidationFailed))
                 throw new ProcurementMasterDataChangeConflictException("Only a Draft, Pending approval, or Revalidation failed request can be cancelled.");
-            if (entity.MakerUserId != _currentUser.UserId && !IsAdministrator())
-                throw new ProcurementMasterDataChangeAuthorizationException("Only the maker or a tenant administrator can cancel this request.");
+            if (entity.MakerUserId != _currentUser.UserId && !CanManageAccess())
+                throw new ProcurementMasterDataChangeAuthorizationException(
+                    "Only the maker or a TDC ICT Administrator can cancel this request.");
             var before = RequestAuditShape(entity);
             if (entity.WorkflowInstanceId.HasValue)
             {
@@ -1738,9 +1739,9 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             throw new ProcurementMasterDataChangeValidationException("ROLE_SEPARATION_REQUIRED", "Maker and checker role sets must be disjoint.");
         foreach (var role in makerRoles.Concat(checkerRoles))
         {
-            if (role is "SuperAdmin" or "TenantAdmin") continue;
             var definition = ProcurementAccessControlRegistry.FindRole(role)
-                ?? throw new ProcurementMasterDataChangeValidationException("ROLE_UNKNOWN", $"'{role}' is not a registered TDC procurement or tenant-administration role.");
+                ?? throw new ProcurementMasterDataChangeValidationException(
+                    "ROLE_UNKNOWN", $"'{role}' is not a registered TDC procurement role.");
             if (definition.IsReadOnly)
                 throw new ProcurementMasterDataChangeValidationException("READ_ONLY_ROLE", $"'{role}' is read-only and cannot be configured as maker or checker.");
         }
@@ -1760,7 +1761,9 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
 
     private void EnsureMakerOrChecker(ProcurementMasterDataControlPolicy policy)
     {
-        if (!HasAnyRole(DeserializeRoles(policy.MakerRolesJson)) && !HasAnyRole(DeserializeRoles(policy.CheckerRolesJson)) && !IsAdministrator())
+        if (!HasAnyRole(DeserializeRoles(policy.MakerRolesJson)) &&
+            !HasAnyRole(DeserializeRoles(policy.CheckerRolesJson)) &&
+            !CanManageAccess())
             throw new ProcurementMasterDataChangeAuthorizationException("The current user is not authorized to revalidate this request.");
     }
 
@@ -1776,26 +1779,31 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
+        if (CanManageAccess() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
             _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
-        throw new ProcurementMasterDataChangeAuthorizationException("A TDC procurement role or tenant-administration role is required.");
+        throw new ProcurementMasterDataChangeAuthorizationException(
+            "A registered TDC procurement role is required.");
     }
 
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        if (!IsAdministrator())
-            throw new ProcurementMasterDataChangeAuthorizationException("SuperAdmin or TenantAdmin is required to configure maker-checker policies.");
+        if (!CanManageAccess())
+            throw new ProcurementMasterDataChangeAuthorizationException(
+                "The TDC ICT Administrator role is required to configure maker-checker policies.");
     }
 
-    private void EnsureSuperAdministrator()
+    private void EnsureAccessManager()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin"))
-            throw new ProcurementMasterDataChangeAuthorizationException("SuperAdmin is required to activate or retire a maker-checker policy.");
+        if (!CanManageAccess())
+            throw new ProcurementMasterDataChangeAuthorizationException(
+                "The TDC ICT Administrator role is required to activate or retire a maker-checker policy.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool CanManageAccess() => _currentUser.Roles.Any(role =>
+        ProcurementAccessControlRegistry.RoleGrantsPermission(
+            role, "procurement.access.manage"));
 
     private void EnsureAuthenticatedTenant()
     {

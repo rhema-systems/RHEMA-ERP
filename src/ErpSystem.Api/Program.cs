@@ -127,6 +127,7 @@ if (args.Length > 0 && args[0] == "seed-db")
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddErpSystemDatabaseSeeders();
     tempBuilder.Services.AddDatabaseSeeding();
 
     var tempApp = tempBuilder.Build();
@@ -433,6 +434,21 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// A liveness probe verifies only that this process can answer. Keep it ahead of routing,
+// authentication, authorization, rate limiting, response caching and dependency health checks;
+// those controls are intentionally evaluated by /health/ready and /health instead.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        string.Equals(context.Request.Path.Value, "/health/live", StringComparison.OrdinalIgnoreCase))
+    {
+        await HealthCheckResponseWriter.WriteLivenessAsync(context);
+        return;
+    }
+
+    await next();
+});
+
 // Enable Swagger in all environments for testing
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -568,11 +584,6 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     Predicate = check => check.Tags.Contains("ready"),
     ResponseWriter = HealthCheckResponseWriter.WriteAsync
 });
-app.MapHealthChecks("/health/live", new HealthCheckOptions
-{
-    Predicate = check => check.Tags.Contains("live"),
-    ResponseWriter = HealthCheckResponseWriter.WriteAsync
-});
 app.MapHealthChecks("/health/shutdown", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("shutdown"),
@@ -617,6 +628,9 @@ if (!skipStartupInitialization)
     try
     {
         await InitializeDatabaseAsync(app, databaseConnectionTimeout, migrationTimeout);
+        app.Logger.LogInformation("Starting TDC procurement security-baseline reconciliation...");
+        await ReconcileProcurementSecurityBaselineAsync(app);
+        app.Logger.LogInformation("TDC procurement security-baseline reconciliation completed");
         databaseInitializationSucceeded = true;
         app.Logger.LogInformation("Database initialization completed");
     }
@@ -822,6 +836,13 @@ async Task SeedFinanceCloseTemplateBaselineAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<FinanceCloseTemplateBaselineSeeder>();
     await seeder.SeedAllActiveTenantsAsync();
+}
+
+async Task ReconcileProcurementSecurityBaselineAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<ProcurementAccessControlSeeder>();
+    await seeder.ReconcileIdentityAccessBaselineAsync();
 }
 
 static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(

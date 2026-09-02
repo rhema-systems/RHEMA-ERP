@@ -75,6 +75,7 @@ import { getAuthorityControlPresentation } from '@/lib/procurement-requisition-a
 import { getSubmissionControlPresentation } from '@/lib/procurement-requisition-submission';
 import { getSourcingReleasePresentation } from '@/lib/procurement-requisition-sourcing';
 import { PurchaseRequisitionSourcingReleaseControl } from '@/components/procurement/PurchaseRequisitionSourcingReleaseControl';
+import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseRequisitionDocuments';
 import { format } from 'date-fns';
 import Link from 'next/link';
 
@@ -349,8 +350,7 @@ export default function PurchaseRequisitionDetailPage() {
     canSubmit:
       requisition?.status === 'Draft' &&
       submissionReadiness?.canSubmit === true &&
-      budgetReadiness?.canReserve === true &&
-      authorityReadiness?.canSubmit === true,
+      budgetReadiness?.canReserve === true,
     canApproveReject:
       requisition?.status === 'Pending Approval' ||
       requisition?.status === 'Submitted',
@@ -611,8 +611,9 @@ export default function PurchaseRequisitionDetailPage() {
               Submission control
             </CardTitle>
             <CardDescription className="mt-1">
-              An acknowledged APP linkage or a traceable approved exception is
-              required before workflow submission.
+              Required requisition details are checked before the configured
+              approval workflow starts. APP exchange is shown for traceability
+              and does not block submission.
             </CardDescription>
           </div>
           <Badge variant="outline">{submissionPresentation.basisLabel}</Badge>
@@ -724,8 +725,9 @@ export default function PurchaseRequisitionDetailPage() {
               Finance budget control
             </CardTitle>
             <CardDescription className="mt-1">
-              Submission atomically reserves current approved budget; concurrent
-              requests cannot spend the same availability.
+              Current approved budget availability is checked before submission.
+              The commitment is created when an approved purchase order or
+              contract is issued.
             </CardDescription>
           </div>
           <Badge variant="outline">{budgetPresentation.basisLabel}</Badge>
@@ -873,9 +875,8 @@ export default function PurchaseRequisitionDetailPage() {
               Approval authority route
             </CardTitle>
             <CardDescription className="mt-1">
-              Category, amount, currency, effective policy, authority stages,
-              quorum, SOD, and one exact shared-workflow version are resolved
-              server-side.
+              Optional policy-routing guidance is shown for administrators. PR
+              submission uses the configured Purchase Requisition workflow.
             </CardDescription>
           </div>
           <Badge variant="outline">{authorityPresentation.basisLabel}</Badge>
@@ -1065,6 +1066,7 @@ export default function PurchaseRequisitionDetailPage() {
           <TabsTrigger value="items">
             Items ({requisition.itemCount})
           </TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="linkage">Planning &amp; Governance</TabsTrigger>
           <WorkflowTabTrigger value="approval" />
         </TabsList>
@@ -1417,6 +1419,14 @@ export default function PurchaseRequisitionDetailPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="documents" className="space-y-6">
+          <PurchaseRequisitionDocuments
+            requisitionId={id}
+            requisitionStatus={requisition.status}
+            editable={canEdit}
+          />
         </TabsContent>
 
         <TabsContent value="linkage" className="space-y-6">

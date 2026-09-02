@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Procurement;
@@ -8,6 +10,7 @@ using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Entities.HR.StaffLeave;
@@ -645,13 +648,19 @@ public partial class ProjectService : IProjectService
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManageMembers);
         if (dto.UserId == Guid.Empty)
             throw new InvalidOperationException("Select an active user before adding a project member.");
+        var selectedRole = await GetActiveProjectCatalogEntryAsync(
+            "member-roles",
+            dto.Role,
+            "project member role");
+        if (string.Equals(selectedRole.Code, CivilEngineeringAccessControlRegistry.ProjectEngineerRole, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Use the governed Civil Engineering Project Engineer assignment control to appoint this project role.");
         var selectedUser = await _userService.GetUserByIdAsync(dto.UserId);
         if (selectedUser is null || selectedUser.TenantId != _currentUserProvider.TenantId ||
             !selectedUser.IsActive)
             throw new InvalidOperationException(
                 "The selected user is not an active member of the current tenant.");
         var repo = _unitOfWork.Repository<ProjectMember>();
-        var existing = await repo.FirstOrDefaultAsync(x => x.ProjectId == projectId && x.UserId == dto.UserId && x.Role == dto.Role && x.TenantId == _currentUserProvider.TenantId);
+        var existing = await repo.FirstOrDefaultAsync(x => x.ProjectId == projectId && x.UserId == dto.UserId && x.Role == selectedRole.Code && x.TenantId == _currentUserProvider.TenantId);
         if (existing != null)
         {
             if (!existing.IsActive)
@@ -671,7 +680,7 @@ public partial class ProjectService : IProjectService
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             UserId = dto.UserId,
-            Role = dto.Role,
+            Role = selectedRole.Code,
             CreatedBy = _currentUserProvider.Username,
             CreatedById = _currentUserProvider.UserId
         };
@@ -688,6 +697,50 @@ public partial class ProjectService : IProjectService
         await RequireProjectAsync(member.ProjectId, ProjectAccessOperation.ManageMembers);
         await _unitOfWork.Repository<ProjectMember>().DeleteAsync(memberId);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    private async Task<ProjectCatalogEntry> GetActiveProjectCatalogEntryAsync(
+        string catalogType,
+        string? requestedCode,
+        string selectionName)
+    {
+        var normalizedCode = requestedCode?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedCode))
+            throw new InvalidOperationException($"Select an active {selectionName} configured for the current tenant.");
+
+        return await _unitOfWork.Repository<ProjectCatalogEntry>().FirstOrDefaultAsync(entry =>
+                entry.TenantId == _currentUserProvider.TenantId
+                && !entry.IsDeleted
+                && entry.IsActive
+                && entry.CatalogType == catalogType
+                && entry.Code == normalizedCode)
+            ?? throw new InvalidOperationException($"Select an active {selectionName} configured for the current tenant.");
+    }
+
+    private async Task EnsureActiveTenantProjectUserAsync(Guid userId, string selectionName)
+    {
+        if (userId == Guid.Empty)
+            throw new InvalidOperationException($"Select an active {selectionName} from the current tenant.");
+
+        var selectedUser = await _userService.GetUserByIdAsync(userId);
+        if (selectedUser is null
+            || selectedUser.TenantId != _currentUserProvider.TenantId
+            || !selectedUser.IsActive)
+            throw new InvalidOperationException($"The selected {selectionName} is not an active user in the current tenant.");
+    }
+
+    private async Task EnsureProjectWorkItemSelectionAsync(Guid projectId, Guid? workItemId)
+    {
+        if (!workItemId.HasValue)
+            return;
+
+        var exists = await _unitOfWork.Repository<ProjectWorkItem>().ExistsAsync(item =>
+            item.Id == workItemId.Value
+            && item.ProjectId == projectId
+            && item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted);
+        if (!exists)
+            throw new InvalidOperationException("The selected work item is not active in the current project and tenant.");
     }
 
     public async Task<IEnumerable<ProjectWorkItemDto>> GetWorkItemsAsync(Guid projectId)
@@ -746,6 +799,8 @@ public partial class ProjectService : IProjectService
         var repo = _unitOfWork.Repository<ProjectWorkItem>();
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == workItemId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project work item with ID {workItemId} not found");
+        if (await _unitOfWork.Repository<ProjectCivilDirectTaskControl>().ExistsAsync(value => value.TenantId == _currentUserProvider.TenantId && value.WorkItemId == workItemId && !value.IsDeleted))
+            throw new InvalidOperationException("This is a governed Civil Engineering task. Use the Civil direct-task workflow rather than the generic Projects work-item editor.");
         var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
         var projectPackage = await ValidateProjectWorkItemPackageAsync(entity.ProjectId, dto.ProjectPackageId);
         var planningChanged = entity.PlannedStartDate?.Date != dto.PlannedStartDate?.Date || entity.PlannedEndDate?.Date != dto.PlannedEndDate?.Date;
@@ -823,6 +878,8 @@ public partial class ProjectService : IProjectService
         var repo = _unitOfWork.Repository<ProjectWorkItem>();
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == workItemId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project work item with ID {workItemId} not found");
+        if (await _unitOfWork.Repository<ProjectCivilDirectTaskControl>().ExistsAsync(value => value.TenantId == _currentUserProvider.TenantId && value.WorkItemId == workItemId && !value.IsDeleted))
+            throw new InvalidOperationException("This is a governed Civil Engineering task. It cannot be deleted through the generic Projects work-item endpoint.");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
         await repo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -879,13 +936,19 @@ public partial class ProjectService : IProjectService
     public async Task<ProjectResourceAllocationDto> AddResourceAllocationAsync(Guid projectId, CreateProjectResourceAllocationDto dto)
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageExecution);
+        var selectedRole = await GetActiveProjectCatalogEntryAsync(
+            "resource-roles",
+            dto.AllocationRole,
+            "project resource role");
+        await EnsureActiveTenantProjectUserAsync(dto.UserId, "project resource");
+        await EnsureProjectWorkItemSelectionAsync(projectId, dto.WorkItemId);
         var entity = new ProjectResourceAllocation
         {
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             WorkItemId = dto.WorkItemId,
             UserId = dto.UserId,
-            AllocationRole = dto.AllocationRole,
+            AllocationRole = selectedRole.Code,
             AllocationType = dto.AllocationType,
             AllocationValue = dto.AllocationValue,
             PlannedHours = dto.PlannedHours,
@@ -920,10 +983,16 @@ public partial class ProjectService : IProjectService
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == allocationId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project resource allocation with ID {allocationId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
+        var selectedRole = await GetActiveProjectCatalogEntryAsync(
+            "resource-roles",
+            dto.AllocationRole,
+            "project resource role");
+        await EnsureActiveTenantProjectUserAsync(dto.UserId, "project resource");
+        await EnsureProjectWorkItemSelectionAsync(entity.ProjectId, dto.WorkItemId);
 
         entity.WorkItemId = dto.WorkItemId;
         entity.UserId = dto.UserId;
-        entity.AllocationRole = dto.AllocationRole;
+        entity.AllocationRole = selectedRole.Code;
         entity.AllocationType = dto.AllocationType;
         entity.AllocationValue = dto.AllocationValue;
         entity.PlannedHours = dto.PlannedHours;
@@ -1420,6 +1489,8 @@ public partial class ProjectService : IProjectService
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == checkpointId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project quality checkpoint with ID {checkpointId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageGovernance);
+        if (await _unitOfWork.Repository<ProjectCivilInspectionControl>().ExistsAsync(x => x.TenantId == _currentUserProvider.TenantId && x.QualityCheckpointId == checkpointId && !x.IsDeleted))
+            throw new InvalidOperationException("This quality checkpoint is governed by a Civil inspection control and can be signed off only through its independent inspection closure.");
 
         entity.Status = "SignedOff";
         entity.SignedOffAt = DateTime.UtcNow;
@@ -1437,6 +1508,8 @@ public partial class ProjectService : IProjectService
         var entity = await _unitOfWork.Repository<ProjectQualityCheckpoint>().FirstOrDefaultAsync(x => x.Id == checkpointId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project quality checkpoint with ID {checkpointId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageGovernance);
+        if (await _unitOfWork.Repository<ProjectCivilInspectionControl>().ExistsAsync(x => x.TenantId == _currentUserProvider.TenantId && x.QualityCheckpointId == checkpointId && !x.IsDeleted))
+            throw new InvalidOperationException("This quality checkpoint is governed by a Civil inspection control and cannot be deleted through the generic Projects route.");
         await _unitOfWork.Repository<ProjectQualityCheckpoint>().DeleteAsync(checkpointId);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -1497,6 +1570,8 @@ public partial class ProjectService : IProjectService
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == nonConformanceId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project non-conformance with ID {nonConformanceId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageGovernance);
+        if (await _unitOfWork.Repository<ProjectCivilInspectionControl>().ExistsAsync(x => x.TenantId == _currentUserProvider.TenantId && x.NonConformanceId == nonConformanceId && !x.IsDeleted))
+            throw new InvalidOperationException("This non-conformance is governed by a Civil inspection control and can be resolved only by an independent passed reinspection.");
 
         entity.Status = "Resolved";
         entity.ResolvedAt = DateTime.UtcNow;
@@ -1513,6 +1588,8 @@ public partial class ProjectService : IProjectService
         var entity = await _unitOfWork.Repository<ProjectNonConformance>().FirstOrDefaultAsync(x => x.Id == nonConformanceId && x.TenantId == _currentUserProvider.TenantId)
             ?? throw new InvalidOperationException($"Project non-conformance with ID {nonConformanceId} not found");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageGovernance);
+        if (await _unitOfWork.Repository<ProjectCivilInspectionControl>().ExistsAsync(x => x.TenantId == _currentUserProvider.TenantId && x.NonConformanceId == nonConformanceId && !x.IsDeleted))
+            throw new InvalidOperationException("This non-conformance is governed by a Civil inspection control and cannot be deleted through the generic Projects route.");
         await _unitOfWork.Repository<ProjectNonConformance>().DeleteAsync(nonConformanceId);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -3083,12 +3160,16 @@ public partial class ProjectService : IProjectService
         await RequireProjectAsync(projectId, ProjectAccessOperation.View);
         var links = (await _unitOfWork.Repository<ProjectAssetLink>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var maintenanceAssetIds = links.Where(l => l.MaintenanceAssetId.HasValue).Select(l => l.MaintenanceAssetId!.Value).Distinct().ToList();
+        var fixedAssetIds = links.Where(l => l.FixedAssetId.HasValue).Select(l => l.FixedAssetId!.Value).Distinct().ToList();
         var companyAssetIds = links.Where(l => l.CompanyAssetId.HasValue).Select(l => l.CompanyAssetId!.Value).Distinct().ToList();
         var jobCardIds = links.Where(l => l.JobCardId.HasValue).Select(l => l.JobCardId!.Value).Distinct().ToList();
 
         var maintenanceAssets = maintenanceAssetIds.Count == 0
             ? new Dictionary<Guid, MaintenanceAsset>()
             : (await _unitOfWork.Repository<MaintenanceAsset>().FindAsync(x => maintenanceAssetIds.Contains(x.Id))).ToDictionary(x => x.Id);
+        var fixedAssets = fixedAssetIds.Count == 0
+            ? new Dictionary<Guid, FixedAsset>()
+            : (await _unitOfWork.Repository<FixedAsset>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && fixedAssetIds.Contains(x.Id))).ToDictionary(x => x.Id);
         var companyAssets = companyAssetIds.Count == 0
             ? new Dictionary<Guid, CompanyAsset>()
             : (await _unitOfWork.Repository<CompanyAsset>().FindAsync(x => companyAssetIds.Contains(x.Id))).ToDictionary(x => x.Id);
@@ -3098,7 +3179,13 @@ public partial class ProjectService : IProjectService
 
         return links.Select(x => MapToDto(
             x,
-            x.MaintenanceAssetId.HasValue && maintenanceAssets.TryGetValue(x.MaintenanceAssetId.Value, out var maintenanceAsset) ? maintenanceAsset.Name : x.CompanyAssetId.HasValue && companyAssets.TryGetValue(x.CompanyAssetId.Value, out var companyAsset) ? companyAsset.AssetName : null,
+            x.MaintenanceAssetId.HasValue && maintenanceAssets.TryGetValue(x.MaintenanceAssetId.Value, out var maintenanceAsset)
+                ? maintenanceAsset.Name
+                : x.FixedAssetId.HasValue && fixedAssets.TryGetValue(x.FixedAssetId.Value, out var fixedAsset)
+                    ? $"{fixedAsset.AssetCode} - {fixedAsset.Name}"
+                    : x.CompanyAssetId.HasValue && companyAssets.TryGetValue(x.CompanyAssetId.Value, out var companyAsset)
+                        ? companyAsset.AssetName
+                        : null,
             x.JobCardId.HasValue && jobCards.TryGetValue(x.JobCardId.Value, out var jobCard) ? jobCard.JobCardNumber : null))
             .ToList();
     }
@@ -3106,22 +3193,76 @@ public partial class ProjectService : IProjectService
     public async Task<ProjectAssetLinkDto> AddAssetLinkAsync(Guid projectId, CreateProjectAssetLinkDto dto)
     {
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageExecution);
+        if (!dto.MaintenanceAssetId.HasValue && !dto.FixedAssetId.HasValue && !dto.CompanyAssetId.HasValue && !dto.JobCardId.HasValue)
+        {
+            throw new InvalidOperationException("Select at least one authoritative maintenance asset, fixed asset, company asset, or job card before linking it to the project.");
+        }
+
+        var tenantId = _currentUserProvider.TenantId;
+        if (dto.MaintenanceAssetId.HasValue && await _unitOfWork.Repository<MaintenanceAsset>().FirstOrDefaultAsync(x =>
+                x.Id == dto.MaintenanceAssetId.Value && x.TenantId == tenantId) == null)
+        {
+            throw new InvalidOperationException("The selected maintenance asset is not available in this tenant.");
+        }
+
+        if (dto.FixedAssetId.HasValue && await _unitOfWork.Repository<FixedAsset>().FirstOrDefaultAsync(x =>
+                x.Id == dto.FixedAssetId.Value && x.TenantId == tenantId) == null)
+        {
+            throw new InvalidOperationException("The selected fixed asset is not available in this tenant.");
+        }
+
+        if (dto.CompanyAssetId.HasValue && await _unitOfWork.Repository<CompanyAsset>().FirstOrDefaultAsync(x =>
+                x.Id == dto.CompanyAssetId.Value && x.TenantId == tenantId) == null)
+        {
+            throw new InvalidOperationException("The selected company asset is not available in this tenant.");
+        }
+
+        if (dto.JobCardId.HasValue)
+        {
+            var jobCard = await _unitOfWork.Repository<JobCard>().FirstOrDefaultAsync(x => x.Id == dto.JobCardId.Value && x.TenantId == tenantId)
+                ?? throw new InvalidOperationException("The selected job card is not available in this tenant.");
+            if (dto.MaintenanceAssetId.HasValue && jobCard.AssetId != dto.MaintenanceAssetId.Value)
+            {
+                throw new InvalidOperationException("The selected job card does not belong to the selected maintenance asset.");
+            }
+        }
+
+        var linkType = string.IsNullOrWhiteSpace(dto.LinkType) ? "Asset" : dto.LinkType.Trim();
+        var status = string.IsNullOrWhiteSpace(dto.Status) ? "Linked" : dto.Status.Trim();
+        var reconciliationKey = BuildAssetLinkReconciliationKey(projectId, linkType, dto.MaintenanceAssetId, dto.FixedAssetId, dto.CompanyAssetId, dto.JobCardId);
+        var repository = _unitOfWork.Repository<ProjectAssetLink>();
+        var existing = await repository.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ReconciliationKey == reconciliationKey);
+        if (existing != null)
+        {
+            return (await GetAssetLinksAsync(projectId)).First(x => x.Id == existing.Id);
+        }
+
         var entity = new ProjectAssetLink
         {
-            TenantId = _currentUserProvider.TenantId,
+            TenantId = tenantId,
             ProjectId = projectId,
             MaintenanceAssetId = dto.MaintenanceAssetId,
+            FixedAssetId = dto.FixedAssetId,
             CompanyAssetId = dto.CompanyAssetId,
             JobCardId = dto.JobCardId,
-            LinkType = dto.LinkType,
-            Status = dto.Status,
+            LinkType = linkType,
+            Status = status,
             Notes = dto.Notes,
+            ReconciliationKey = reconciliationKey,
             CreatedBy = _currentUserProvider.Username,
             CreatedById = _currentUserProvider.UserId
         };
-        await _unitOfWork.Repository<ProjectAssetLink>().AddAsync(entity);
+        await repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        await PublishActivityAsync(project, "AssetLinked", new Dictionary<string, object> { ["ProjectAssetLinkId"] = entity.Id, ["LinkType"] = entity.LinkType });
+        await PublishActivityAsync(project, "AssetLinked", new Dictionary<string, object>
+        {
+            ["ProjectAssetLinkId"] = entity.Id,
+            ["LinkType"] = entity.LinkType,
+            ["HasMaintenanceAsset"] = entity.MaintenanceAssetId.HasValue,
+            ["HasFixedAsset"] = entity.FixedAssetId.HasValue,
+            ["HasCompanyAsset"] = entity.CompanyAssetId.HasValue,
+            ["HasJobCard"] = entity.JobCardId.HasValue
+        });
         return (await GetAssetLinksAsync(projectId)).First(x => x.Id == entity.Id);
     }
 
@@ -3761,6 +3902,11 @@ public partial class ProjectService : IProjectService
     public async Task<ProjectMobileSummaryDto> GetMobileSummaryAsync(Guid userId)
     {
         var assignments = (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.AssignedToUserId == userId)).OrderBy(x => x.PlannedEndDate).ToList();
+        var assignmentIds = assignments.Select(item => item.Id).ToList();
+        var directTasks = assignmentIds.Count == 0
+            ? new Dictionary<Guid, ProjectCivilDirectTaskControl>()
+            : (await _unitOfWork.Repository<ProjectCivilDirectTaskControl>().FindAsync(item => item.TenantId == _currentUserProvider.TenantId && assignmentIds.Contains(item.WorkItemId) && !item.IsDeleted))
+                .ToDictionary(item => item.WorkItemId);
         var projects = (await _projectRepository.LookupAsync(take: 500)).ToDictionary(x => x.Id);
         var timesheetEntries = (await _unitOfWork.Repository<ProjectTimesheetEntry>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.UserId == userId)).ToList();
         var expenseEntries = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && x.UserId == userId)).ToList();
@@ -3775,6 +3921,9 @@ public partial class ProjectService : IProjectService
             PendingExpenses = pendingExpenses,
             Assignments = assignments.Select(x => new ProjectMobileAssignmentDto
             {
+                CivilDirectTaskId = directTasks.GetValueOrDefault(x.Id)?.Id,
+                CivilDirectTaskStatus = directTasks.GetValueOrDefault(x.Id)?.Status,
+                CivilDirectTaskRowVersion = directTasks.GetValueOrDefault(x.Id) is { } directTask ? Convert.ToBase64String(directTask.RowVersion) : null,
                 ProjectId = x.ProjectId,
                 WorkItemId = x.Id,
                 ProjectCode = projects.TryGetValue(x.ProjectId, out var project) ? project.ProjectCode : string.Empty,
@@ -5667,6 +5816,24 @@ public partial class ProjectService : IProjectService
         var project = await _projectRepository.GetByIdAsync(projectId) ?? throw new InvalidOperationException($"Project with ID {projectId} not found");
         await EnsureProjectAccessAsync(project, operation);
         return project;
+    }
+
+    private static string BuildAssetLinkReconciliationKey(
+        Guid projectId,
+        string linkType,
+        Guid? maintenanceAssetId,
+        Guid? fixedAssetId,
+        Guid? companyAssetId,
+        Guid? jobCardId)
+    {
+        var value = string.Join('|',
+            projectId.ToString("N"),
+            linkType.Trim().ToUpperInvariant(),
+            maintenanceAssetId?.ToString("N") ?? string.Empty,
+            fixedAssetId?.ToString("N") ?? string.Empty,
+            companyAssetId?.ToString("N") ?? string.Empty,
+            jobCardId?.ToString("N") ?? string.Empty);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     }
 
     private async Task<string> GenerateProjectCodeAsync(string numberFormat)
@@ -7887,7 +8054,7 @@ public partial class ProjectService : IProjectService
         CanDelete = string.Equals(entity.Status, "Draft", StringComparison.OrdinalIgnoreCase) || string.Equals(entity.Status, "Rejected", StringComparison.OrdinalIgnoreCase)
     };
     private static ProjectRevenueRecognitionDto MapToDto(ProjectRevenueRecognition entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, InvoiceRequestId = entity.InvoiceRequestId, RecognitionPeriod = entity.RecognitionPeriod, RecognizedRevenue = entity.RecognizedRevenue, RecognizedCost = entity.RecognizedCost, GrossMargin = entity.GrossMargin, CashCollected = entity.CashCollected, Status = entity.Status, Notes = entity.Notes };
-    private static ProjectAssetLinkDto MapToDto(ProjectAssetLink entity, string? assetName, string? jobCardNumber) => new() { Id = entity.Id, ProjectId = entity.ProjectId, MaintenanceAssetId = entity.MaintenanceAssetId, CompanyAssetId = entity.CompanyAssetId, JobCardId = entity.JobCardId, LinkType = entity.LinkType, Status = entity.Status, Notes = entity.Notes, AssetName = assetName, JobCardNumber = jobCardNumber };
+    private static ProjectAssetLinkDto MapToDto(ProjectAssetLink entity, string? assetName, string? jobCardNumber) => new() { Id = entity.Id, ProjectId = entity.ProjectId, MaintenanceAssetId = entity.MaintenanceAssetId, FixedAssetId = entity.FixedAssetId, CompanyAssetId = entity.CompanyAssetId, JobCardId = entity.JobCardId, LinkType = entity.LinkType, Status = entity.Status, Notes = entity.Notes, AssetName = assetName, JobCardNumber = jobCardNumber };
     private static ProjectExternalAccessPolicyDto MapToDto(ProjectExternalAccessPolicy entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, BusinessPartnerId = entity.BusinessPartnerId, ArtifactType = entity.ArtifactType, ArtifactId = entity.ArtifactId, AccessLevel = entity.AccessLevel, CanComment = entity.CanComment, CanUpload = entity.CanUpload, CanApprove = entity.CanApprove, Notes = entity.Notes };
     private static ProjectDecisionDto MapToDto(ProjectDecision entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, Title = entity.Title, DecisionDate = entity.DecisionDate, ApproverId = entity.ApproverId, Rationale = entity.Rationale, AlternativesConsidered = entity.AlternativesConsidered, ImpactSummary = entity.ImpactSummary, Status = entity.Status, ApprovedAt = entity.ApprovedAt };
     private static ProjectMeetingMinuteDto MapToDto(ProjectMeetingMinute entity) => new() { Id = entity.Id, ProjectId = entity.ProjectId, Title = entity.Title, MeetingDate = entity.MeetingDate, FacilitatorId = entity.FacilitatorId, MeetingType = entity.MeetingType, Minutes = entity.Minutes, AttendeesJson = entity.AttendeesJson };

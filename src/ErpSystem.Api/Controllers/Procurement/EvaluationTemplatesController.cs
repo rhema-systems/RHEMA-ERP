@@ -25,7 +25,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get all evaluation templates
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationTemplateDto>>> GetAll()
     {
         try
@@ -44,7 +44,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get active evaluation templates
     /// </summary>
     [HttpGet("active")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationTemplateDto>>> GetActive()
     {
         try
@@ -63,7 +63,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get active evaluation templates for dropdown
     /// </summary>
     [HttpGet("dropdown")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationTemplateListItemDto>>> GetForDropdown()
     {
         try
@@ -82,7 +82,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get evaluation template by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<EvaluationTemplateDto>> GetById(Guid id)
     {
         try
@@ -105,7 +105,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get evaluation templates by category
     /// </summary>
     [HttpGet("category/{category}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationTemplateDto>>> GetByCategory(string category)
     {
         try
@@ -124,7 +124,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get evaluation templates by tender type
     /// </summary>
     [HttpGet("tender-type/{tenderType}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<EvaluationTemplateDto>>> GetByTenderType(string tenderType)
     {
         try
@@ -143,7 +143,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Get default evaluation template for category and tender type
     /// </summary>
     [HttpGet("default")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<EvaluationTemplateDto>> GetDefault([FromQuery] string category, [FromQuery] string tenderType)
     {
         try
@@ -166,7 +166,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Create evaluation template
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<EvaluationTemplateDto>> Create([FromBody] CreateEvaluationTemplateDto dto)
     {
         try
@@ -189,7 +189,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Update evaluation template
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<EvaluationTemplateDto>> Update(Guid id, [FromBody] UpdateEvaluationTemplateDto dto)
     {
         try
@@ -212,7 +212,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Delete evaluation template
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> Delete(Guid id)
     {
         try
@@ -235,7 +235,7 @@ public class EvaluationTemplatesController : ControllerBase
     /// Validate that criteria weights sum to 100
     /// </summary>
     [HttpGet("{id}/validate-weights")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> ValidateWeights(Guid id)
     {
         try
@@ -250,4 +250,3 @@ public class EvaluationTemplatesController : ControllerBase
         }
     }
 }
-

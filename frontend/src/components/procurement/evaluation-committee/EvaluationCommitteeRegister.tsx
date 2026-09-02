@@ -448,6 +448,7 @@ function CompositionSection({
                       <div className="flex justify-end gap-2">
                         {canEvaluate &&
                           isSelf &&
+                          control.status === 'Active' &&
                           member.status === 'Pending' &&
                           serverAllows(control.allowedActions, [
                             'respondToAppointment',
@@ -470,6 +471,7 @@ function CompositionSection({
                         )}
                         {canEvaluate &&
                           isSelf &&
+                          control.status === 'Active' &&
                           member.status === 'Accepted' &&
                           serverAllows(control.allowedActions, [
                             'submitConflictDeclaration',
@@ -483,6 +485,14 @@ function CompositionSection({
                                 ? 'Renew declaration'
                                 : 'Declare COI'}
                             </Button>
+                          )}
+                        {canEvaluate &&
+                          isSelf &&
+                          control.status === 'Draft' &&
+                          member.status === 'Pending' && (
+                            <span className="text-xs text-muted-foreground">
+                              Awaiting committee activation
+                            </span>
                           )}
                       </div>
                     </td>

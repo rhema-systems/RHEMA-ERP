@@ -65,6 +65,131 @@ public sealed class ProcurementAccessControlServiceTests
             item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft && !item.IsActive && item.PublishedAt == null);
     }
 
+    [Theory]
+    [InlineData(ProcurementAccessControlRegistry.IctAdministratorRole, true)]
+    [InlineData("TenantAdmin", false)]
+    [InlineData("SuperAdmin", false)]
+    public void AccessManagementPermissionIsGrantedOnlyByTheRegisteredTdcRole(
+        string role,
+        bool expected)
+    {
+        ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage")
+            .Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task SecurityBaselineReconciliationIsMissingOnlyAndDoesNotGrantLegacyGenericRoles()
+    {
+        await using var fixture = new Fixture();
+        var officer = new ApplicationRole("TDC_PROCUREMENT_OFFICER")
+        {
+            Id = Guid.NewGuid(),
+            NormalizedName = "TDC_PROCUREMENT_OFFICER",
+            Description = "Tenant-configured officer description",
+            IsSystemRole = false,
+            CreatedBy = "Security administrator"
+        };
+        var legacyProcurementUser = new ApplicationRole("Procurement User")
+        {
+            Id = Guid.NewGuid(),
+            NormalizedName = "PROCUREMENT USER"
+        };
+        var employee = new ApplicationRole("Employee")
+        {
+            Id = Guid.NewGuid(),
+            NormalizedName = "EMPLOYEE"
+        };
+        var manager = new ApplicationRole("Manager")
+        {
+            Id = Guid.NewGuid(),
+            NormalizedName = "MANAGER"
+        };
+        var readPermission = new Permission
+        {
+            Id = Guid.NewGuid(),
+            Name = "procurement.records.read",
+            DisplayName = "Tenant-configured label",
+            Description = "Tenant-configured description",
+            Category = "Tenant security catalogue",
+            IsSystemPermission = false
+        };
+        var additionalPermission = new Permission
+        {
+            Id = Guid.NewGuid(),
+            Name = "tenant.procurement.custom",
+            DisplayName = "Custom procurement permission",
+            Category = "Tenant security catalogue"
+        };
+        fixture.Context.Roles.AddRange(officer, legacyProcurementUser, employee, manager);
+        fixture.Context.Permissions.AddRange(readPermission, additionalPermission);
+        fixture.Context.RolePermissions.Add(new RolePermission
+        {
+            RoleId = officer.Id,
+            PermissionId = additionalPermission.Id,
+            GrantedBy = "Security administrator"
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Seeder.ReconcileIdentityAccessBaselineAsync();
+        await fixture.Seeder.ReconcileIdentityAccessBaselineAsync();
+
+        (await fixture.Context.Roles.CountAsync(item => item.Name!.StartsWith("TDC_")))
+            .Should().Be(ProcurementAccessControlRegistry.Roles.Count);
+        var requiredPermissionNames = ProcurementAccessControlRegistry.Permissions
+            .Select(item => item.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var requiredPermissions = await fixture.Context.Permissions.IgnoreQueryFilters()
+            .Where(item => requiredPermissionNames.Contains(item.Name))
+            .ToListAsync();
+        requiredPermissions.Should().HaveCount(ProcurementAccessControlRegistry.Permissions.Count);
+
+        var requiredPermissionIds = requiredPermissions.Select(item => item.Id).ToHashSet();
+        var tdcRoleIds = (await fixture.Context.Roles
+                .Where(item => item.Name!.StartsWith("TDC_"))
+                .Select(item => item.Id)
+                .ToListAsync())
+            .ToHashSet();
+        (await fixture.Context.RolePermissions.CountAsync(item =>
+                tdcRoleIds.Contains(item.RoleId) && requiredPermissionIds.Contains(item.PermissionId)))
+            .Should().Be(ProcurementAccessControlRegistry.Roles.Sum(item => item.PermissionCodes.Count));
+
+        officer.Description.Should().Be("Tenant-configured officer description");
+        officer.IsSystemRole.Should().BeFalse();
+        readPermission.DisplayName.Should().Be("Tenant-configured label");
+        readPermission.Description.Should().Be("Tenant-configured description");
+        readPermission.Category.Should().Be("Tenant security catalogue");
+        readPermission.IsSystemPermission.Should().BeFalse();
+        (await fixture.Context.RolePermissions.AnyAsync(item =>
+            item.RoleId == officer.Id && item.PermissionId == additionalPermission.Id)).Should().BeTrue();
+        (await fixture.Context.RolePermissions.AnyAsync(item =>
+            item.RoleId == legacyProcurementUser.Id || item.RoleId == employee.Id || item.RoleId == manager.Id))
+            .Should().BeFalse("ambiguous legacy and generic roles must not receive TDC privileges implicitly");
+    }
+
+    [Fact]
+    public async Task SecurityBaselineReconciliationFailsClosedForSoftDeletedRequiredPermission()
+    {
+        await using var fixture = new Fixture();
+        fixture.Context.Permissions.Add(new Permission
+        {
+            Id = Guid.NewGuid(),
+            Name = "procurement.tender.evaluate",
+            DisplayName = "Evaluate tenders",
+            Category = ProcurementAccessControlRegistry.Category,
+            IsDeleted = true,
+            DeletedAt = DateTime.UtcNow,
+            DeletedBy = "Security administrator"
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Seeder.ReconcileIdentityAccessBaselineAsync();
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*soft-deleted*procurement.tender.evaluate*");
+        (await fixture.Context.Roles.CountAsync(item => item.Name!.StartsWith("TDC_"))).Should().Be(0);
+    }
+
     [Fact]
     public async Task SecurityRoleGrantsAnUnscopedPrivilegeWithoutAProcurementResponsibilityAssignment()
     {
@@ -488,8 +613,10 @@ public sealed class ProcurementAccessControlServiceTests
             _currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
             _currentUser.SetupGet(item => item.Username).Returns("stores@tdc.test");
             _currentUser.SetupGet(item => item.FullName).Returns("Stores Officer");
-            _currentUser.SetupGet(item => item.Roles).Returns(new HashSet<string> { "TenantAdmin" });
-            _currentUser.Setup(item => item.HasRole(It.IsAny<string>())).Returns((string role) => role == "TenantAdmin");
+            _currentUser.SetupGet(item => item.Roles).Returns(
+                new HashSet<string> { ProcurementAccessControlRegistry.IctAdministratorRole });
+            _currentUser.Setup(item => item.HasRole(It.IsAny<string>())).Returns(
+                (string role) => role == ProcurementAccessControlRegistry.IctAdministratorRole);
             _unitOfWork = new UnitOfWork(Context);
             var controlEvents = new ProcurementControlEventService(_unitOfWork, _currentUser.Object,
                 NullLogger<ProcurementControlEventService>.Instance);

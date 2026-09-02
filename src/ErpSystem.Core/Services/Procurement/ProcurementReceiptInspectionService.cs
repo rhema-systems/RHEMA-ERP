@@ -47,7 +47,7 @@ public sealed class ProcurementReceiptInspectionService :
     private readonly IProcurementReceiptInspectionStore _store;
     private readonly IInventoryValuationService _valuation;
     private readonly IInventoryReceiptFinancePostingService _receiptFinancePosting;
-    private readonly IProcurementBudgetService _budgetService;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<ProcurementReceiptInspectionService> _logger;
 
     public ProcurementReceiptInspectionService(
@@ -66,7 +66,7 @@ public sealed class ProcurementReceiptInspectionService :
         IProcurementReceiptInspectionStore store,
         IInventoryValuationService valuation,
         IInventoryReceiptFinancePostingService receiptFinancePosting,
-        IProcurementBudgetService budgetService,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         ILogger<ProcurementReceiptInspectionService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -84,7 +84,7 @@ public sealed class ProcurementReceiptInspectionService :
         _store = store;
         _valuation = valuation;
         _receiptFinancePosting = receiptFinancePosting;
-        _budgetService = budgetService;
+        _budgetCommitments = budgetCommitments;
         _logger = logger;
     }
 
@@ -749,6 +749,18 @@ public sealed class ProcurementReceiptInspectionService :
             try
             {
                 await ApplyAcceptedQuantitiesAndStockAsync(inspection, cancellationToken);
+                var acceptedValue = inspection.Lines.Sum(item =>
+                    item.AcceptedQuantity * item.PurchaseOrderReceiptItem.PurchaseOrderItem.UnitPrice);
+                if (acceptedValue > 0m)
+                {
+                    await _budgetCommitments.UtilizePurchaseOrderAsync(
+                        inspection.PurchaseOrderReceipt.PurchaseOrderId,
+                        inspection.PurchaseOrderReceiptId,
+                        inspection.PurchaseOrderReceipt.ReceiptNumber,
+                        acceptedValue,
+                        correlation,
+                        cancellationToken);
+                }
                 var hasRejection = inspection.RejectedQuantity > 0;
                 inspection.Status = hasRejection
                     ? ProcurementReceiptInspectionStatus.QualityHold
@@ -1383,10 +1395,6 @@ public sealed class ProcurementReceiptInspectionService :
         PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken)
     {
-        var wasFullyReceived = string.Equals(
-            purchaseOrder.Status,
-            "Received",
-            StringComparison.OrdinalIgnoreCase);
         var lines = await _unitOfWork.Repository<PurchaseOrderItem>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                   item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
@@ -1397,12 +1405,6 @@ public sealed class ProcurementReceiptInspectionService :
         purchaseOrder.ReceivedDate = fullyAccepted ? DateTime.UtcNow : purchaseOrder.ReceivedDate;
         purchaseOrder.UpdatedAt = DateTime.UtcNow;
         await _unitOfWork.Repository<PurchaseOrder>().UpdateAsync(purchaseOrder);
-        if (fullyAccepted && !wasFullyReceived)
-        {
-            await _budgetService.UtilizePurchaseOrderCommittedBudgetAsync(
-                purchaseOrder.Id,
-                purchaseOrder.TotalAmount);
-        }
     }
 
     private async Task ValidateReplacementReceiptAsync(

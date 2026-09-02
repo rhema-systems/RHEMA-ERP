@@ -105,8 +105,8 @@
 
   <Target Name="RejectEfToolingWithFastMigrationBuild"
           BeforeTargets="GetEFProjectMetadata"
-          Condition="'$(TdcFastEfBuild)' == 'true'">
-    <Error Text="EF tooling requires the complete migration target-model history. Re-run the dotnet ef command with --configuration Release (or build Debug with -p:TdcFastEfBuild=false)." />
+          Condition="'$(TdcFastEfBuild)' == 'true' and '$(TdcAllowFastEfRuntimeMigrationCommands)' != 'true'">
+    <Error Text="EF authoring tooling requires the complete migration target-model history. For an explicit runtime-only migration list or database update, set TdcAllowFastEfRuntimeMigrationCommands=true; never use that opt-in for migrations add or remove." />
   </Target>
 
 </Project>

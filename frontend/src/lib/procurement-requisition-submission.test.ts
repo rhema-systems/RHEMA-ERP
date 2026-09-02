@@ -25,12 +25,12 @@ describe('getSubmissionControlPresentation', () => {
     });
   });
 
-  it('labels acknowledged APP readiness as controlled and ready', () => {
+  it('does not present APP acknowledgement as a submission prerequisite', () => {
     expect(getSubmissionControlPresentation(readiness({
       isCompliant: true,
       canSubmit: true,
       basis: 'AcknowledgedAPP'
-    }))).toMatchObject({ tone: 'ready', basisLabel: 'Acknowledged APP' });
+    }))).toMatchObject({ tone: 'ready', basisLabel: 'Required details verified' });
   });
 
   it('labels approved exception readiness without presenting it as an APP acknowledgement', () => {
@@ -48,5 +48,13 @@ describe('getSubmissionControlPresentation', () => {
       canSubmit: false,
       basis: 'AcknowledgedAPP'
     }))).toMatchObject({ tone: 'blocked', title: 'Submission no longer available' });
+  });
+
+  it('describes an incomplete draft as missing required details', () => {
+    expect(getSubmissionControlPresentation(readiness())).toMatchObject({
+      tone: 'blocked',
+      title: 'Required details incomplete',
+      basisLabel: 'Action required'
+    });
   });
 });

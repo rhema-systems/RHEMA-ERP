@@ -854,6 +854,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ProcurementBudgetAllocation> ProcurementBudgetAllocations { get; set; }
     public DbSet<ProcurementBudgetRevision> ProcurementBudgetRevisions { get; set; }
     public DbSet<ProcurementBudgetCommitment> ProcurementBudgetCommitments { get; set; }
+    public DbSet<ProcurementBudgetCommitmentLedgerEntry> ProcurementBudgetCommitmentLedgerEntries { get; set; }
     public DbSet<ProcurementRequisitionAuthorityRoute> ProcurementRequisitionAuthorityRoutes { get; set; }
     public DbSet<ProcurementRequisitionAuthorityRouteStep> ProcurementRequisitionAuthorityRouteSteps { get; set; }
     public DbSet<ProcurementRequisitionSourcingRelease> ProcurementRequisitionSourcingReleases { get; set; }
@@ -1192,6 +1193,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<WorkflowDelegation>().HasIndex(item => item.WorkflowStepId);
         ConfigureProcurementConfiguration(builder);
         ConfigureQuantitySurveyConfiguration(builder);
+        ConfigureCivilEngineeringConfiguration(builder);
         ConfigureProcurementPolicy(builder);
         ConfigureProcurementRequisitionAuthorityRoutes(builder);
         ConfigureProcurementRequisitionSourcingReleases(builder);
@@ -1236,6 +1238,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderBidConfiguration());
         builder.ApplyConfiguration(new TenderBidLotConfiguration());
         builder.ApplyConfiguration(new TenderBidItemConfiguration());
+        builder.ApplyConfiguration(new TenderEvaluationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationItemConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
@@ -9228,6 +9231,41 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(c => c.OverrideWorkflowInstance)
                 .WithMany()
                 .HasForeignKey(c => c.OverrideWorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementBudgetCommitmentLedgerEntry>(entity =>
+        {
+            entity.HasIndex(item => new
+                { item.TenantId, item.EntryType, item.SourceType, item.SourceId })
+                .IsUnique();
+            entity.HasIndex(item => new
+                { item.TenantId, item.ProcurementBudgetCommitmentId, item.OccurredAtUtc });
+            entity.HasIndex(item => new
+                { item.TenantId, item.FormalCommitmentEntryId, item.EntryType });
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_ProcurementBudgetCommitmentLedgerEntries_Immutable");
+                table.HasCheckConstraint(
+                    "CK_ProcurementBudgetCommitmentLedgerEntries_Amount", "[Amount] > 0");
+                table.HasCheckConstraint(
+                    "CK_ProcurementBudgetCommitmentLedgerEntries_EntryType", "[EntryType] IN (1, 2, 3, 4)");
+            });
+            entity.HasOne(item => item.ProcurementBudgetCommitment)
+                .WithMany(item => item.LedgerEntries)
+                .HasForeignKey(item => item.ProcurementBudgetCommitmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ProcurementBudget)
+                .WithMany()
+                .HasForeignKey(item => item.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PurchaseRequisition)
+                .WithMany()
+                .HasForeignKey(item => item.PurchaseRequisitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FormalCommitmentEntry)
+                .WithMany(item => item.UtilizationEntries)
+                .HasForeignKey(item => item.FormalCommitmentEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

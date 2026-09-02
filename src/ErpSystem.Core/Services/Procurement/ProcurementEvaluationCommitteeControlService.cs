@@ -364,7 +364,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         RequireIdempotency(request.IdempotencyKey);
         var control = await LoadControlAsync(committeeControlId, true, cancellationToken);
         await EnforceCapabilityAsync(ManagePermission, control.SourceType, control.SourceId,
-            control.CommitteeCode, correlationId, cancellationToken);
+            null, correlationId, cancellationToken);
         if (control.ActivationIdempotencyKey == request.IdempotencyKey &&
             control.Status == ProcurementEvaluationCommitteeControlStatus.Active)
             return Map(control, await ResolveSourceAsync(control.SourceType, control.SourceId,
@@ -570,7 +570,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 "Remote or hybrid meetings require remote-meeting evidence.");
         var control = await LoadControlAsync(committeeControlId, true, cancellationToken);
         await EnforceCapabilityAsync(ManagePermission, control.SourceType, control.SourceId,
-            control.CommitteeCode, correlationId, cancellationToken);
+            null, correlationId, cancellationToken);
         var replay = control.Meetings.FirstOrDefault(item =>
             item.IdempotencyKey == request.IdempotencyKey);
         if (replay is not null) return MapMeeting(replay, DateTime.UtcNow);
@@ -709,7 +709,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 "The evaluation meeting was not found.");
         await EnforceCapabilityAsync(ManagePermission,
             meeting.CommitteeControl.SourceType, meeting.CommitteeControl.SourceId,
-            meeting.CommitteeControl.CommitteeCode, correlationId, cancellationToken);
+            null, correlationId, cancellationToken);
         if (meeting.QuorumIdempotencyKey == request.IdempotencyKey &&
             meeting.Status is ProcurementEvaluationMeetingStatus.QuorumConfirmed or
                 ProcurementEvaluationMeetingStatus.QuorumFailed)
@@ -1162,7 +1162,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         await EnforceCapabilityAsync(ApprovePermission,
             recall.ScoreSheet.CommitteeControl.SourceType,
             recall.ScoreSheet.CommitteeControl.SourceId,
-            recall.ScoreSheet.CommitteeControl.CommitteeCode,
+            null,
             correlationId, cancellationToken);
         if (recall.DecisionIdempotencyKey == request.IdempotencyKey &&
             recall.Status != ProcurementEvaluationScoreRecallStatus.PendingApproval)
@@ -1937,13 +1937,18 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 item.Status is ProcurementEvaluationMeetingStatus.Draft or
                     ProcurementEvaluationMeetingStatus.QuorumFailed))
             actions.Add("confirmQuorum");
+        var acceptsMemberActions = control.Status ==
+                                   ProcurementEvaluationCommitteeControlStatus.Active &&
+                                   IsEffective(control, now);
         var appointment = control.Appointments.FirstOrDefault(item =>
             item.UserId == _currentUser.UserId);
-        if (appointment?.Status == ProcurementEvaluationAppointmentStatus.Pending)
+        if (acceptsMemberActions &&
+            appointment?.Status == ProcurementEvaluationAppointmentStatus.Pending)
             actions.Add("respondToAppointment");
-        if (appointment?.Status == ProcurementEvaluationAppointmentStatus.Accepted)
+        if (acceptsMemberActions &&
+            appointment?.Status == ProcurementEvaluationAppointmentStatus.Accepted)
             actions.Add("submitConflictDeclaration");
-        if (appointment is not null &&
+        if (acceptsMemberActions && appointment is not null &&
             AppointmentEligibilityIssues(appointment, now).Count == 0)
         {
             actions.Add("signAttendance");
@@ -2439,8 +2444,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
+        if (_currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
             _currentUser.Roles.Any(role =>
                 ProcurementAccessControlRegistry.FindRole(role) is not null))
             return;
@@ -2459,25 +2463,14 @@ public sealed class ProcurementEvaluationCommitteeControlService
     }
 
     private bool CanAdminister() =>
-        IsAdministrator() ||
         _currentUser.Roles.Any(role =>
-            string.Equals(role, "TDC_PROCUREMENT_OFFICER",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role, "TDC_SENIOR_PROCUREMENT_OFFICER",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role, "TDC_HEAD_OF_PROCUREMENT",
-                StringComparison.OrdinalIgnoreCase));
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, ManagePermission));
 
     private bool CanApprove() =>
-        IsAdministrator() ||
         _currentUser.Roles.Any(role =>
             ProcurementAccessControlRegistry.FindRole(role)?.PermissionCodes
                 .Contains(ApprovePermission, StringComparer.OrdinalIgnoreCase) == true);
-
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("Admin");
 
     private string ActorName() =>
         string.IsNullOrWhiteSpace(_currentUser.FullName)

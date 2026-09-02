@@ -1647,6 +1647,13 @@ export function ProjectCommercialAdminTab(props: Props) {
             <CardTitle>Extension of Time</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {worksContracts.length > 0 ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                Works extensions of time are governed in <span className="font-medium">Site controls → Civil variation and extension of time</span>.
+                That workspace selects the active Works contract, an applied QS variation where there is cost impact, current central-DMS evidence, and the configured workflow. Historical EOT records remain visible below.
+              </div>
+            ) : (
+              <>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="grid gap-2 md:col-span-2">
                 <Label>Title</Label>
@@ -1800,6 +1807,8 @@ export function ProjectCommercialAdminTab(props: Props) {
                 {editingExtensionOfTimeId ? 'Save EOT' : 'Add EOT'}
               </Button>
             </div>
+              </>
+            )}
             <div className="space-y-3">
               {project.extensionOfTimeRequests.length === 0 ? (
                 <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
@@ -1831,7 +1840,7 @@ export function ProjectCommercialAdminTab(props: Props) {
                           </div>
                         ) : null}
                       </div>
-                      <div className="flex items-center gap-2">
+                      {worksContracts.length === 0 ? <div className="flex items-center gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -1847,7 +1856,7 @@ export function ProjectCommercialAdminTab(props: Props) {
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                      </div>
+                      </div> : null}
                     </div>
                   </div>
                 ))

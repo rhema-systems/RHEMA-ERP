@@ -1724,13 +1724,20 @@ public class ProjectServiceTests
             LastName = "Resource",
             EmployeeNumber = "EMP-EXEC-1"
         });
+        fixture.Users.Add(new ApplicationUser
+        {
+            Id = assignedUserId,
+            TenantId = tenantId,
+            UserName = "taylor.resource",
+            IsActive = true
+        });
 
         var service = fixture.CreateService();
 
         var result = await service.AddResourceAllocationAsync(projectId, new CreateProjectResourceAllocationDto
         {
             UserId = assignedUserId,
-            AllocationRole = "Engineer",
+            AllocationRole = CivilEngineeringAccessControlRegistry.ProjectEngineerRole,
             AllocationType = "Hours",
             AllocationValue = 24m,
             PlannedHours = 24m,
@@ -1745,7 +1752,7 @@ public class ProjectServiceTests
         fixture.ResourceAllocations.Should().ContainSingle(x =>
             x.ProjectId == projectId
             && x.UserId == assignedUserId
-            && x.AllocationRole == "Engineer");
+            && x.AllocationRole == CivilEngineeringAccessControlRegistry.ProjectEngineerRole);
     }
 
     [Fact]
@@ -4730,7 +4737,11 @@ public class ProjectServiceTests
         fixture.Users.Add(foreignUser);
 
         var action = () => fixture.CreateService().AddMemberAsync(project.Id,
-            new AddProjectMemberDto { UserId = foreignUser.Id, Role = "QuantitySurveyor" });
+            new AddProjectMemberDto
+            {
+                UserId = foreignUser.Id,
+                Role = CivilEngineeringAccessControlRegistry.CivilEngineerRole
+            });
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*not an active member of the current tenant*");
@@ -4757,15 +4768,102 @@ public class ProjectServiceTests
             IsActive = true
         };
         var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.SetRoles();
         fixture.Projects.Add(project);
         fixture.Users.Add(selectedUser);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = actorId,
+            Role = CivilEngineeringAccessControlRegistry.HeadRole,
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
 
         var result = await fixture.CreateService().AddMemberAsync(project.Id,
-            new AddProjectMemberDto { UserId = selectedUser.Id, Role = "QuantitySurveyor" });
+            new AddProjectMemberDto
+            {
+                UserId = selectedUser.Id,
+                Role = CivilEngineeringAccessControlRegistry.CivilEngineerRole
+            });
 
         result.UserId.Should().Be(selectedUser.Id);
         fixture.Members.Should().ContainSingle(item => item.ProjectId == project.Id &&
-            item.UserId == selectedUser.Id && item.TenantId == tenantId);
+            item.UserId == selectedUser.Id && item.TenantId == tenantId &&
+            item.Role == CivilEngineeringAccessControlRegistry.CivilEngineerRole);
+    }
+
+    [Fact]
+    public async Task CivilExecutionMember_ShouldOnlyViewTheAssignedProject()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var assignedProject = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-CIV-SCOPE-001",
+            Title = "Assigned Civil project"
+        };
+        var otherProject = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-CIV-SCOPE-002",
+            Title = "Unassigned Civil project"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.SetRoles();
+        fixture.Projects.AddRange([assignedProject, otherProject]);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = assignedProject.Id,
+            UserId = actorId,
+            Role = CivilEngineeringAccessControlRegistry.CivilEngineerRole,
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+        var service = fixture.CreateService();
+
+        (await service.GetWorkItemsAsync(assignedProject.Id)).Should().BeEmpty();
+        var denied = () => service.GetWorkItemsAsync(otherProject.Id);
+        await denied.Should().ThrowAsync<UnauthorizedAccessException>()
+            .WithMessage("*View*PRJ-CIV-SCOPE-002*");
+    }
+
+    [Fact]
+    public async Task AddMemberAsync_ShouldRejectAFreeTextRoleNotConfiguredForTheTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var selectedUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserName = "civil.user",
+            IsActive = true
+        };
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-MEMBER-003",
+            Title = "Controlled role validation"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.Projects.Add(project);
+        fixture.Users.Add(selectedUser);
+
+        var action = () => fixture.CreateService().AddMemberAsync(project.Id,
+            new AddProjectMemberDto { UserId = selectedUser.Id, Role = "Made Up Civil Role" });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*active project member role configured for the current tenant*");
+        fixture.Members.Should().BeEmpty();
     }
 
     private sealed class ProjectServiceFixture
@@ -4943,6 +5041,23 @@ public class ProjectServiceTests
 
         public ProjectServiceFixture(Guid tenantId, Guid userId)
         {
+            foreach (var group in ProjectCatalogDefaults.GetRecommendedCatalogs()
+                         .Where(group => group.Key is "member-roles" or "resource-roles"))
+            {
+                ProjectCatalogEntries.AddRange(group.Items.Select((item, index) => new ProjectCatalogEntry
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    CatalogType = group.Key,
+                    Code = item.Code,
+                    Name = item.Name,
+                    SortOrder = (index + 1) * 10,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "Tests"
+                }));
+            }
+
             _projectEntityRepository = CreateRepository(Projects);
             _memberRepository = CreateRepository(Members);
             _developmentProfileRepository = CreateRepository(DevelopmentProfiles);

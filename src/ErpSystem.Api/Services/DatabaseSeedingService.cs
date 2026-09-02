@@ -45,10 +45,13 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
         private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
         private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
+        private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
+        private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
         private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
+        private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
@@ -119,12 +122,15 @@ namespace ErpSystem.Web.Services
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
             QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
             QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
+            CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
+            CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
             ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
             ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null,
-            QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null)
+            QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
+            CivilEngineeringStatutoryReportSeeder? civilEngineeringStatutoryReportSeeder = null)
         {
             _context = context;
             _userManager = userManager;
@@ -135,10 +141,13 @@ namespace ErpSystem.Web.Services
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
             _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
             _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
+            _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
+            _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
             _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
+            _civilEngineeringStatutoryReportSeeder = civilEngineeringStatutoryReportSeeder;
             _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
@@ -228,6 +237,18 @@ namespace ErpSystem.Web.Services
                     await _quantitySurveyAccessControlSeeder.SeedAsync();
                 }
 
+                if (_civilEngineeringConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft Civil Engineering configuration profiles are seeded...");
+                    await _civilEngineeringConfigurationProfileSeeder.SeedAsync();
+                }
+
+                if (_civilEngineeringAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring Civil Engineering configuration permissions are seeded...");
+                    await _civilEngineeringAccessControlSeeder.SeedAsync();
+                }
+
                 if (_procurementStatutoryReportSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring TDC procurement statutory report catalogue is seeded...");
@@ -250,6 +271,12 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC Quantity Survey report catalogue is seeded...");
                     await _quantitySurveyStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_civilEngineeringStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Civil Engineering report catalogue is seeded...");
+                    await _civilEngineeringStatutoryReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
@@ -7068,6 +7095,7 @@ namespace ErpSystem.Web.Services
                 new { ModuleName = "HR", Description = "HR and employee reports" },
                 new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
+                new { ModuleName = "Project Management", Description = "Projects, development, quantity survey, and civil engineering operations" },
                 new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
                 new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };

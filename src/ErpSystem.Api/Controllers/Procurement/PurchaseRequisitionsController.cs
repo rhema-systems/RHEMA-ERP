@@ -106,6 +106,7 @@ public class PurchaseRequisitionsController : ControllerBase
             await ApplyAuthoritativeInventoryPricingAsync(
                 updateDto.Items,
                 requisition.TenantId,
+                updateDto.Linkage.SourcePlanItemId,
                 cancellationToken);
             if (string.IsNullOrWhiteSpace(updateDto.Linkage.CostCenter))
                 updateDto.Linkage.CostCenter = updateDto.CostCenter;
@@ -555,6 +556,7 @@ public class PurchaseRequisitionsController : ControllerBase
             await ApplyAuthoritativeInventoryPricingAsync(
                 createDto.Items,
                 tenantId,
+                createDto.Linkage.SourcePlanItemId,
                 cancellationToken);
             var requisitionNumber = await _purchaseRequisitionRepository.GenerateRequisitionNumberAsync();
             var totalAmount = createDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
@@ -771,8 +773,7 @@ public class PurchaseRequisitionsController : ControllerBase
             }
 
             if (requisition.Status != "Pending Approval" &&
-                requisition.Status != "Submitted" &&
-                requisition.Status != "Draft")
+                requisition.Status != "Submitted")
             {
                 return BadRequest($"Purchase requisition cannot be approved in current status: {requisition.Status}");
             }
@@ -986,6 +987,14 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Conflict(Problem("PR_NOT_DRAFT", $"Purchase requisition cannot be submitted in current status: {requisition.Status}.", 409));
             }
 
+            if (requisition.TotalAmount <= 0 || requisition.Items.Any(item =>
+                    item.Quantity <= 0 || item.EstimatedUnitPrice <= 0 || item.LineTotal <= 0))
+            {
+                return UnprocessableEntity(Problem(
+                    "PR_ESTIMATE_REQUIRED",
+                    "Every requisition line requires a governed positive estimated cost before submission.",
+                    422));
+            }
 
             var submissionReadiness = await _submissionControlService.EnforceAsync(
                 requisition, CorrelationId, HttpContext.RequestAborted);
@@ -1592,19 +1601,56 @@ public class PurchaseRequisitionsController : ControllerBase
     }
 
     /// <summary>
-    /// Inventory-backed demand must be valued from the controlled item master.  The
-    /// requester UI deliberately has no editable price control, and direct API
-    /// callers must not be able to reintroduce one by posting an arbitrary amount.
-    /// Non-inventory demand retains its existing governed linkage valuation path.
+    /// A linked approved-plan estimate is authoritative for its requisition line.
+    /// Otherwise inventory-backed demand is valued from the controlled item master;
+    /// non-inventory demand retains its captured governed estimate. Zero or negative
+    /// estimates are rejected before the requisition can enter approval workflow.
     /// </summary>
     private async Task ApplyAuthoritativeInventoryPricingAsync(
         IEnumerable<CreatePurchaseRequisitionItemDto> items,
         Guid tenantId,
+        Guid? sourcePlanItemId,
         CancellationToken cancellationToken)
     {
+        var requestItems = items.ToList();
+        var planPricedLines = new HashSet<CreatePurchaseRequisitionItemDto>();
+        ProcurementPlanItem? planItem = null;
+        if (sourcePlanItemId.HasValue && sourcePlanItemId.Value != Guid.Empty)
+        {
+            planItem = await _unitOfWork.Repository<ProcurementPlanItem>()
+                .GetQueryable(item => item.Id == sourcePlanItemId.Value &&
+                    item.TenantId == tenantId && !item.IsDeleted)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+
+        if (planItem is not null)
+        {
+            var plannedUnitEstimate = planItem.EstimatedUnitPrice > 0
+                ? planItem.EstimatedUnitPrice
+                : planItem.EstimatedQuantity > 0 && planItem.EstimatedTotalCost > 0
+                    ? planItem.EstimatedTotalCost / planItem.EstimatedQuantity
+                    : 0;
+            var matchingLines = requestItems.Where(item =>
+                    planItem.InventoryItemId.HasValue && item.InventoryItemId == planItem.InventoryItemId)
+                .ToList();
+            if (matchingLines.Count == 0 && requestItems.Count == 1)
+                matchingLines.Add(requestItems[0]);
+            if (plannedUnitEstimate > 0)
+            {
+                foreach (var line in matchingLines)
+                {
+                    line.EstimatedUnitPrice = plannedUnitEstimate;
+                    planPricedLines.Add(line);
+                }
+            }
+        }
+
         var inventoryItems = _unitOfWork.Repository<InventoryItem>();
 
-        foreach (var requestItem in items.Where(item => item.InventoryItemId.HasValue && item.InventoryItemId.Value != Guid.Empty))
+        foreach (var requestItem in requestItems.Where(item =>
+                     !planPricedLines.Contains(item) &&
+                     item.InventoryItemId.HasValue && item.InventoryItemId.Value != Guid.Empty))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var inventoryItem = await inventoryItems.GetByIdAsync(requestItem.InventoryItemId!.Value);
@@ -1620,6 +1666,13 @@ public class PurchaseRequisitionsController : ControllerBase
                 : inventoryItem.StandardCost > 0
                     ? inventoryItem.StandardCost
                     : inventoryItem.AverageCost;
+        }
+
+        if (requestItems.Any(item => item.EstimatedUnitPrice <= 0))
+        {
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_ESTIMATE_REQUIRED",
+                "Every requisition line requires a governed positive estimate from its linked plan item, controlled item master, or captured requisition estimate.");
         }
     }
 

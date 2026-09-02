@@ -475,8 +475,11 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("TenantAdmin"))
-            throw new ProcurementPolicyAuthorizationException("Only SuperAdmin or TenantAdmin may administer procurement SOD controls.");
+        if (!_currentUser.Roles.Any(role =>
+                ProcurementAccessControlRegistry.RoleGrantsPermission(
+                    role, "procurement.access.manage")))
+            throw new ProcurementPolicyAuthorizationException(
+                "The TDC ICT Administrator role is required to administer procurement SOD controls.");
     }
 
     private void EnsureEditor() => EnsureAdministrator();

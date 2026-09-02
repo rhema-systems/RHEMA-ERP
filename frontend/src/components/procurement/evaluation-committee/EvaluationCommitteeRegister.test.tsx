@@ -64,6 +64,76 @@ describe('evaluation committee history-first register', () => {
     expect(screen.getByText('Evaluation controls are not ready')).toBeInTheDocument();
   });
 
+  it('does not offer appointment responses until the committee is active', () => {
+    const control = {
+      id: 'control-draft',
+      sourceType: 'Tender',
+      sourceId: 'tender-1',
+      version: 1,
+      sourceReference: 'TDR-001',
+      purpose: 'Technical evaluation',
+      status: 'Draft',
+      committeeTemplateId: 'committee-1',
+      committeeCode: 'TDC-EVAL',
+      committeeName: 'Evaluation Committee',
+      requiredQuorum: 2,
+      compositionReady: true,
+      quorumMet: false,
+      policySetId: 'policy-1',
+      policyCode: 'TDC-POLICY',
+      policyVersion: 4,
+      methodRuleId: 'rule-1',
+      methodRuleCode: 'NCT-GOODS',
+      effectiveFromUtc: '2026-07-23T00:00:00Z',
+      compositionIntegrityHash: 'a'.repeat(64),
+      requiredRoles: [],
+      members: [
+        {
+          id: 'appointment-1',
+          committeeMemberId: 'member-1',
+          responsibilityAssignmentId: 'assignment-1',
+          userId: 'user-1',
+          userDisplayName: 'Tender Evaluator',
+          roleName: 'TDC_EVALUATOR',
+          memberKind: 'Chair',
+          isVoting: true,
+          effectiveFromUtc: '2026-07-23T00:00:00Z',
+          status: 'Pending',
+          eligibleToScore: false,
+          blockedReasons: ['Appointment acceptance is missing.'],
+          rowVersion: 'AQID',
+        },
+      ],
+      meetings: [],
+      scoreSheets: [],
+      recalls: [],
+      timeline: [],
+      allowedActions: ['RespondToAppointment'],
+      blockedReasons: ['The committee control is not active.'],
+      rowVersion: 'AQID',
+    } as ProcurementEvaluationCommitteeControl;
+
+    render(
+      <EvaluationCommitteeRegister
+        readiness={readiness({
+          hasControl: true,
+          blockedReasons: ['The committee control is not active.'],
+        })}
+        control={control}
+        scorerEligibility={{}}
+        currentUserId="user-1"
+        canAdminister={false}
+        canEvaluate
+        canApprove={false}
+        {...callbacks}
+      />
+    );
+
+    expect(screen.getByText('Awaiting committee activation')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
+  });
+
   it('renders composition, quorum, score-lock, and immutable timeline evidence', () => {
     const control = {
       id: 'control-1',

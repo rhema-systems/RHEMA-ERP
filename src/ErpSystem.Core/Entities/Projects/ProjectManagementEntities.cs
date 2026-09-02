@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
@@ -801,6 +802,7 @@ public class Project : TenantEntity
 
     public virtual ICollection<ProjectInitiationVersion> InitiationVersions { get; set; } = new List<ProjectInitiationVersion>();
     public virtual ICollection<ProjectMember> Members { get; set; } = new List<ProjectMember>();
+    public virtual ICollection<ProjectCivilProjectEngineerAssignment> CivilProjectEngineerAssignments { get; set; } = new List<ProjectCivilProjectEngineerAssignment>();
     public virtual ICollection<ProjectPhase> Phases { get; set; } = new List<ProjectPhase>();
     public virtual ICollection<ProjectPackage> Packages { get; set; } = new List<ProjectPackage>();
     public virtual ICollection<ProjectBoqItem> BoqItems { get; set; } = new List<ProjectBoqItem>();
@@ -1311,6 +1313,18 @@ public class ProjectRfi : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    // Civil Engineering extends the authoritative Projects RFI header for controlled
+    // cross-section design inputs. Null values identify ordinary project/site RFIs.
+    public Guid? CivilDesignCaseId { get; set; }
+    public Guid? RequestedSectionId { get; set; }
+    public Guid? RequestedByUserId { get; set; }
+    public bool BlocksCivilDesignReadiness { get; set; }
+    public Guid? ClientRequestId { get; set; }
+    [MaxLength(64)] public string? RequestHash { get; set; }
+    public Guid? LastMutationClientRequestId { get; set; }
+    [MaxLength(64)] public string? LastMutationRequestHash { get; set; }
+    [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     [ForeignKey(nameof(ProjectId))]
     public virtual Project Project { get; set; } = null!;
 
@@ -1319,6 +1333,14 @@ public class ProjectRfi : TenantEntity
 
     [ForeignKey(nameof(ProjectPackageId))]
     public virtual ProjectPackage? ProjectPackage { get; set; }
+
+    [ForeignKey(nameof(CivilDesignCaseId))]
+    public virtual ProjectCivilDesignCase? CivilDesignCase { get; set; }
+
+    [ForeignKey(nameof(RequestedSectionId))]
+    public virtual Section? RequestedSection { get; set; }
+
+    public virtual ICollection<ProjectCivilDesignInputResponse> CivilDesignInputResponses { get; set; } = [];
 }
 
 public class ProjectSiteInstruction : TenantEntity
@@ -3429,8 +3451,22 @@ public class ProjectAssetLink : TenantEntity
     public Guid ProjectId { get; set; }
 
     public Guid? MaintenanceAssetId { get; set; }
+    /// <summary>
+    /// Authoritative Finance fixed-asset register link.  This deliberately does not create or
+    /// update a FixedAsset; Finance remains the sole owner of capitalization and its history.
+    /// </summary>
+    public Guid? FixedAssetId { get; set; }
+
+    // Legacy HR company-asset links remain readable for pre-existing Projects records.
     public Guid? CompanyAssetId { get; set; }
     public Guid? JobCardId { get; set; }
+
+    /// <summary>
+    /// SHA-256 identity for a controlled project-to-owner reconciliation.  New links use this
+    /// immutable identity so retrying the same request cannot create a second history link.
+    /// </summary>
+    [MaxLength(64)]
+    public string? ReconciliationKey { get; set; }
 
     [MaxLength(30)]
     public string LinkType { get; set; } = "Asset";
