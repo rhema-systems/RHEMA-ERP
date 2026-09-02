@@ -65,6 +65,7 @@ import {
     toFinancePostingDimensionValues,
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
+import { calculateNetTradeDiscountLineAmount } from '@/lib/finance/invoice-trade-discount';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -491,7 +492,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
         const discount = Number(item.discountPercentage) || 0;
-        return acc + (qty * price * (1 - discount / 100));
+        return acc + calculateNetTradeDiscountLineAmount(qty * price, discount);
     }, 0);
 
     const resolveLineTaxGroupId = (
@@ -516,7 +517,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
         const discount = Number(item.discountPercentage) || 0;
-        const lineSubtotal = qty * price * (1 - discount / 100);
+        const lineSubtotal = calculateNetTradeDiscountLineAmount(qty * price, discount);
         const activeGroupId = resolveLineTaxGroupId(item, isOpeningBalance, headerTaxGroupId);
         const activeGroup = taxGroupsData?.find(tg => tg.id === activeGroupId);
 
@@ -566,7 +567,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             const qty = Number(item.quantity) || 0;
             const price = Number(item.unitPrice) || 0;
             const discount = Number(item.discountPercentage) || 0;
-            const lineSubtotal = qty * price * (1 - discount / 100);
+            const lineSubtotal = calculateNetTradeDiscountLineAmount(qty * price, discount);
 
             // Resolve line tax group or fallback to header
             const activeGroupId = item.taxGroupId || watchTaxGroupId;
@@ -1535,7 +1536,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             <Label className={index !== 0 ? 'sr-only' : ''}>Price</Label>
                                             <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
                                         </div>
-                                        <div className="col-span-3 space-y-2">
+                                        <div className="col-span-1 space-y-2">
+                                            <Label className={index !== 0 ? 'sr-only' : ''}>Trade Disc %</Label>
+                                            <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                            {form.formState.errors.lineItems?.[index]?.discountPercentage && (
+                                                <p className="text-xs text-red-500">Use 0–100</p>
+                                            )}
+                                        </div>
+                                        <div className="col-span-2 space-y-2">
                                             <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
                                             <Controller
                                                 control={form.control}

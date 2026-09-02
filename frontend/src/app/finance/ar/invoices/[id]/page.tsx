@@ -206,13 +206,13 @@ export default function InvoiceDetailsPage() {
                             </div>
                             {lineDiscounts > 0 && (
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Line Discounts</span>
+                                    <span className="text-muted-foreground">Line Trade Discounts</span>
                                     <span>-{formatCurrency(lineDiscounts, invoice.currencyCode)}</span>
                                 </div>
                             )}
                             {documentDiscount > 0 && (
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Discount Allowed</span>
+                                    <span className="text-muted-foreground">Document Trade Discount</span>
                                     <span>-{formatCurrency(documentDiscount, invoice.currencyCode)}</span>
                                 </div>
                             )}

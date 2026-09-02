@@ -61,6 +61,10 @@ import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import {
+    allocateDocumentTradeDiscount,
+    calculateNetTradeDiscountLineAmount,
+} from '@/lib/finance/invoice-trade-discount';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -89,6 +93,18 @@ const invoiceSchema = z.object({
     notes: z.string().optional(),
     taxGroupId: z.string().optional(),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
+}).superRefine((invoice, context) => {
+    const eligibleAmount = invoice.lineItems.reduce((total, line) => {
+        const gross = line.quantity * line.unitPrice;
+        return total + Math.max(0, calculateNetTradeDiscountLineAmount(gross, line.discountPercentage || 0));
+    }, 0);
+    if ((invoice.discountAmount || 0) > eligibleAmount) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['discountAmount'],
+            message: 'Document trade discount cannot exceed the net line amount',
+        });
+    }
 });
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
@@ -232,13 +248,21 @@ export default function NewInvoicePage() {
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
         const discount = Number(item.discountPercentage) || 0;
-        const lineTotal = qty * price * (1 - discount / 100);
+        const lineTotal = calculateNetTradeDiscountLineAmount(qty * price, discount);
         return acc + lineTotal;
+    }, 0);
+    const documentDiscountBasis = watchLineItems.reduce((acc, item) => {
+        const gross = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+        const net = calculateNetTradeDiscountLineAmount(
+            gross,
+            Number(item.discountPercentage) || 0
+        );
+        return acc + Math.max(0, net);
     }, 0);
 
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
-    const documentDiscount = Math.min(Number(form.watch('discountAmount')) || 0, subtotal);
+    const documentDiscount = Number(form.watch('discountAmount')) || 0;
 
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
@@ -293,11 +317,28 @@ export default function NewInvoicePage() {
         let totalTaxAmount = 0;
         const breakdowns: { [taxCode: string]: { name: string; rate: number; amount: number } } = {};
 
-        watchLineItems.forEach((item) => {
+        const linesBeforeDocumentDiscount = watchLineItems.map((item) => {
             const qty = Number(item.quantity) || 0;
             const price = Number(item.unitPrice) || 0;
             const discount = Number(item.discountPercentage) || 0;
-            const lineSubtotal = qty * price * (1 - discount / 100);
+            return {
+                sourceLineId: item.sourceLineId,
+                netAmount: calculateNetTradeDiscountLineAmount(qty * price, discount),
+            };
+        });
+        const documentDiscountAllocations = allocateDocumentTradeDiscount(
+            linesBeforeDocumentDiscount,
+            documentDiscount
+        );
+
+        watchLineItems.forEach((item, index) => {
+            const qty = Number(item.quantity) || 0;
+            const price = Number(item.unitPrice) || 0;
+            const discount = Number(item.discountPercentage) || 0;
+            const lineSubtotal = Math.max(
+                0,
+                calculateNetTradeDiscountLineAmount(qty * price, discount) - documentDiscountAllocations[index]
+            );
 
             // Resolve line tax group override or default to header
             const activeGroupId = item.taxGroupId || watchTaxGroupId;
@@ -767,16 +808,20 @@ export default function NewInvoicePage() {
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="discountAmount">Document Discount Allowed</Label>
+                            <Label htmlFor="discountAmount">Document Trade Discount</Label>
                             <Input
                                 id="discountAmount"
                                 type="number"
                                 min="0"
+                                max={documentDiscountBasis}
                                 step="0.01"
                                 {...form.register('discountAmount')}
                             />
+                            {form.formState.errors.discountAmount && (
+                                <p className="text-sm text-red-500">{form.formState.errors.discountAmount.message}</p>
+                            )}
                             <span className="text-[11px] text-muted-foreground block mt-1">
-                                Posts to the configured Discount Allowed control account when the invoice is posted.
+                                Fixed currency amount allocated across invoice lines. It reduces revenue and the taxable base.
                             </span>
                         </div>
 
@@ -1002,8 +1047,11 @@ export default function NewInvoicePage() {
                                             <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
                                         </div>
                                         <div className="col-span-1 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Disc %</Label>
-                                            <Input type="number" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                            <Label className={index !== 0 ? 'sr-only' : ''}>Trade Disc %</Label>
+                                            <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                            {form.formState.errors.lineItems?.[index]?.discountPercentage && (
+                                                <p className="text-xs text-red-500">Use 0–100</p>
+                                            )}
                                         </div>
                                         <div className="col-span-2 space-y-2">
                                             <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
@@ -1074,7 +1122,7 @@ export default function NewInvoicePage() {
                                 </div>
                                 {documentDiscount > 0 && (
                                     <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Discount Allowed:</span>
+                                        <span>Document Trade Discount:</span>
                                         <span className="font-medium text-red-600">-{formatAmountWithCurrency(documentDiscount)}</span>
                                     </div>
                                 )}
