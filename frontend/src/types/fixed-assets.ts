@@ -331,6 +331,25 @@ export interface AssetDepreciationSchedule {
   depreciationReversalId?: string;
 }
 
+export interface FixedAssetDepreciationRun {
+  id: string;
+  fiscalPeriodId: string;
+  fixedAssetId?: string;
+  bookClassification: string;
+  postingDate: string;
+  status: 'Calculated' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Failed' | 'Reversed';
+  totalDepreciationAmount: number;
+  correctionSequence: number;
+  journalEntryId?: string;
+  postingEventId?: string;
+  calculatedAt?: string;
+  postedAt?: string;
+  failedAt?: string;
+  failureReason?: string;
+  assetCount: number;
+  preparedBy?: string;
+}
+
 export type FixedAssetDepreciationReversalStatus =
   | 'PendingApproval'
   | 'Approved'

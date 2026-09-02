@@ -345,6 +345,7 @@ public class FixedAssetsController : ControllerBase
     }
 
     [HttpPost("depreciation/runs/{runId}/post-approved")]
+    [Authorize(Policy = FinancePermissions.PostJournalEntries)]
     public async Task<ActionResult<IReadOnlyList<AssetDepreciationScheduleDto>>> PostApprovedDepreciationRun(Guid runId)
     {
         try
@@ -360,6 +361,14 @@ public class FixedAssetsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+    }
+
+    [HttpGet("depreciation/runs")]
+    public async Task<ActionResult<IReadOnlyList<FixedAssetDepreciationRunDto>>> GetDepreciationRuns(
+        [FromQuery] Guid? fiscalPeriodId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _depreciationService.GetRunsAsync(fiscalPeriodId, cancellationToken));
     }
 
     [HttpGet("depreciation/runs/{runId}/reversals")]

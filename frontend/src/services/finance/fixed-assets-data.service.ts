@@ -13,6 +13,7 @@ import type {
   UpdateFixedAssetCategoryDto,
   RunDepreciationDto,
   AssetDepreciationSchedule,
+  FixedAssetDepreciationRun,
   FixedAssetGlAccountOptions,
   AssetTransfer,
   RequestAssetTransferDto,
@@ -173,6 +174,17 @@ class FixedAssetsDataService {
 
   async getPeriodSchedule(fiscalPeriodId: string): Promise<AssetDepreciationSchedule[]> {
     return apiService.get<AssetDepreciationSchedule[]>(`/finance/fixed-assets/depreciation/period/${fiscalPeriodId}`);
+  }
+
+  async getDepreciationRuns(fiscalPeriodId?: string): Promise<FixedAssetDepreciationRun[]> {
+    const query = fiscalPeriodId ? `?fiscalPeriodId=${encodeURIComponent(fiscalPeriodId)}` : '';
+    return apiService.get<FixedAssetDepreciationRun[]>(`/finance/fixed-assets/depreciation/runs${query}`);
+  }
+
+  async postApprovedDepreciationRun(runId: string): Promise<AssetDepreciationSchedule[]> {
+    return apiService.post<AssetDepreciationSchedule[]>(
+      `/finance/fixed-assets/depreciation/runs/${runId}/post-approved`
+    );
   }
 
   // A posted depreciation correction is deliberately split into request, independent review,

@@ -460,6 +460,8 @@ public class FixedAssetDepreciationRunDto
     public DateTime? PostedAt { get; set; }
     public DateTime? FailedAt { get; set; }
     public string? FailureReason { get; set; }
+    public int AssetCount { get; set; }
+    public string? PreparedBy { get; set; }
     public List<AssetDepreciationScheduleDto> Lines { get; set; } = new();
     public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }

@@ -163,7 +163,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         }
 
         var existingScheduleKeys = await _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed
+            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed && !s.IsProjected
                 // A disposal-linked partial charge belongs only to the portion that left service;
                 // the retained asset still needs its ordinary depreciation for this period.
                 && (s.AssetDisposalId == null || s.AssetDisposal!.DisposalScope == AssetDisposalScope.WholeAsset))
@@ -496,6 +496,42 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             .ToListAsync(cancellationToken);
 
         return schedules;
+    }
+
+    public async Task<IReadOnlyList<FixedAssetDepreciationRunDto>> GetRunsAsync(
+        Guid? fiscalPeriodId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _context.FixedAssetDepreciationRuns
+            .AsNoTracking()
+            .Include(run => run.Lines)
+            .Where(run => run.TenantId == TenantId && !run.IsDeleted);
+        if (fiscalPeriodId.HasValue)
+            query = query.Where(run => run.FiscalPeriodId == fiscalPeriodId.Value);
+
+        return await query
+            .OrderByDescending(run => run.PostingDate)
+            .ThenByDescending(run => run.CreatedAt)
+            .Select(run => new FixedAssetDepreciationRunDto
+            {
+                Id = run.Id,
+                FiscalPeriodId = run.FiscalPeriodId,
+                FixedAssetId = run.FixedAssetId,
+                BookClassification = run.BookClassification,
+                PostingDate = run.PostingDate,
+                Status = run.Status,
+                TotalDepreciationAmount = run.TotalDepreciationAmount,
+                CorrectionSequence = run.CorrectionSequence,
+                JournalEntryId = run.JournalEntryId,
+                PostingEventId = run.PostingEventId,
+                CalculatedAt = run.CalculatedAt,
+                PostedAt = run.PostedAt,
+                FailedAt = run.FailedAt,
+                FailureReason = run.FailureReason,
+                AssetCount = run.Lines.Select(line => line.FixedAssetId).Distinct().Count(),
+                PreparedBy = run.CreatedBy
+            })
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<AssetDepreciationScheduleDto>> PostApprovedRunAsync(
@@ -1358,8 +1394,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                !value.IsDeleted &&
                (value.CapitalizationPostingEventId.HasValue ||
                 value.CapitalizationJournalEntryId.HasValue ||
-                value.OpeningPostedToGl ||
-                value.OpeningSource.Contains("Opening", StringComparison.OrdinalIgnoreCase)));
+                value.OpeningPostedToGl));
 
     private static decimal RoundMoney(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
