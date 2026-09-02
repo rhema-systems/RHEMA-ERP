@@ -887,6 +887,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // the hosted service below only creates scopes and never posts.
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRecurringJournalService, ErpSystem.Api.Services.Finance.GL.RecurringJournalService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.RecurringJournalGenerationProcessor>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.RecurringJournalReversalProcessor>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSystemPostingEngine, ErpSystem.Api.Services.Finance.GL.FinanceSystemPostingEngine>();
             services.AddScoped<ErpSystem.Core.Finance.IBusinessCalendarProvider, ErpSystem.Data.Services.PayrollBusinessCalendarProvider>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAuditService, ErpSystem.Api.Services.Finance.FinanceAuditService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccessScopeService, ErpSystem.Api.Services.Finance.Security.FinanceAccessScopeService>();

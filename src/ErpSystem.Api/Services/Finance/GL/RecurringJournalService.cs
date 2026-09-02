@@ -26,6 +26,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
     private readonly IFinancePostingEngine _postingEngine;
     private readonly IFinanceAuditService _audit;
     private readonly RecurringJournalGenerationProcessor _generator;
+    private readonly RecurringJournalReversalProcessor _reversals;
 
     public RecurringJournalService(
         ApplicationDbContext db,
@@ -33,7 +34,8 @@ public sealed class RecurringJournalService : IRecurringJournalService
         IDocumentNumberingService numbering,
         IFinancePostingEngine postingEngine,
         IFinanceAuditService audit,
-        RecurringJournalGenerationProcessor generator)
+        RecurringJournalGenerationProcessor generator,
+        RecurringJournalReversalProcessor reversals)
     {
         _db = db;
         _currentUser = currentUser;
@@ -41,6 +43,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         _postingEngine = postingEngine;
         _audit = audit;
         _generator = generator;
+        _reversals = reversals;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -225,6 +228,10 @@ public sealed class RecurringJournalService : IRecurringJournalService
     public Task<RecurringJournalGenerationResultDto> GenerateDueAsync(DateOnly asOfDate, CancellationToken cancellationToken = default) =>
         _generator.ProcessTenantAsync(TenantId, asOfDate, _currentUser.UserName ?? "Finance user", cancellationToken);
 
+    public Task<RecurringJournalReversalProcessingResultDto> ProcessDueReversalsAsync(
+        DateOnly asOfDate, Guid? occurrenceId = null, CancellationToken cancellationToken = default) =>
+        _reversals.ProcessTenantAsync(TenantId, asOfDate, occurrenceId, cancellationToken);
+
     public async Task<RecurringJournalOccurrenceDto> ApproveOccurrenceAsync(
         Guid occurrenceId,
         string comment,
@@ -255,7 +262,16 @@ public sealed class RecurringJournalService : IRecurringJournalService
         occurrence.LastModifiedById = reviewerId;
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceApproved, occurrence.Id, null,
-            new { occurrence.Status, occurrence.ReviewedAt, occurrence.ReviewedByUserId }, comment, cancellationToken);
+            new
+            {
+                occurrence.Status,
+                occurrence.ReviewedAt,
+                occurrence.ReviewedByUserId,
+                occurrence.ReversalDueDate,
+                occurrence.ReversalStatus,
+                occurrence.ReversalAuthorizedAt,
+                occurrence.ReversalAuthorizedByUserId
+            }, comment, cancellationToken);
         return MapOccurrence(occurrence);
     }
 
@@ -318,6 +334,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
                 Lines = snapshot.Lines.OrderBy(item => item.LineNumber).Select(line => new FinancePostingLineDto
                 {
                     AccountId = line.AccountId,
+                    SourceDocumentLineId = line.SourceLineId == Guid.Empty ? null : line.SourceLineId,
                     Description = line.Description ?? snapshot.Name,
                     DebitAmount = line.IsDebit ? line.FixedAmount : 0m,
                     CreditAmount = line.IsDebit ? 0m : line.FixedAmount,
@@ -932,11 +949,12 @@ internal sealed record RecurringJournalSnapshot(
         template.TemplateNumber, template.Name, template.BookClassification, template.CurrencyCode,
         template.ReferencePattern, template.Frequency, template.AutoReverse, template.ReversalRule,
         template.ReversalDayOffset, template.Lines.OrderBy(line => line.LineNumber).Select(line =>
-            new RecurringJournalSnapshotLine(line.LineNumber, line.AccountId, line.IsDebit, line.FixedAmount,
+            new RecurringJournalSnapshotLine(line.Id, line.LineNumber, line.AccountId, line.IsDebit, line.FixedAmount,
                 line.Description, line.DimensionValuesJson)).ToList());
 }
 
 internal sealed record RecurringJournalSnapshotLine(
+    Guid SourceLineId,
     int LineNumber,
     Guid AccountId,
     bool IsDebit,

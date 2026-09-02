@@ -1526,18 +1526,23 @@ WHERE [Id] = {delta.AccountId}
         var policyOverrideUsed = policy.IsOverride;
         var preservesHistoricalSourceMeasurement =
             request.PreserveHistoricalExchangeRateSnapshot &&
-            string.Equals(request.SourceModule, "AP", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(request.SourceDocumentType, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase) &&
+            ((string.Equals(request.SourceModule, "AP", StringComparison.OrdinalIgnoreCase) &&
+              string.Equals(request.SourceDocumentType, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase)) ||
+             (request.ReversalOfJournalEntryId.HasValue &&
+              string.Equals(request.SourceModule, "GL", StringComparison.OrdinalIgnoreCase) &&
+              string.Equals(request.SourceDocumentType, "RecurringJournalOccurrence", StringComparison.Ordinal) &&
+              string.Equals(request.PostingAction, "AutoReverseRecurringJournal", StringComparison.Ordinal))) &&
             exchangeRateId.HasValue &&
             suppliedRate.HasValue;
         if (request.PreserveHistoricalExchangeRateSnapshot && !preservesHistoricalSourceMeasurement)
             throw new InvalidOperationException(
-                "Historical exchange-rate preservation is restricted to an AP supplier debit note with explicit source-rate evidence.");
+                "Historical exchange-rate preservation requires an approved Finance correction or exact recurring-journal reversal with explicit source-rate evidence.");
         if (preservesHistoricalSourceMeasurement)
         {
             // A supplier debit note corrects the approved source invoice at its immutable rate;
             // this is not a user-entered current-period FX override.
-            EnsureExchangeRateOverrideApproval(request, requireApproval: true);
+            if (!request.ReversalOfJournalEntryId.HasValue)
+                EnsureExchangeRateOverrideApproval(request, requireApproval: true);
             policyOverrideUsed = true;
         }
         if (exchangeRateId.HasValue)
