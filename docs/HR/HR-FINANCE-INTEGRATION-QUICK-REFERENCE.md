@@ -5,6 +5,11 @@ integration work in this repo, without needing to re-read the full sweep/backlog
 This is the workspace-file counterpart of the agent's internal repo-memory note, so it can be
 referenced by other tools/agents that don't have access to that memory store.
 
+**Vetted 2026-09-02** against the code together with every other document in this folder; the
+key-facts list below was corrected inline (manpower actuals, exchange rates, the missed revenue
+flow, SHE's backlog placeholder, payroll ownership). The entity sweep's own vetting block holds
+the full audit trail.
+
 ---
 
 ## Read these four docs, in this order
@@ -41,6 +46,20 @@ referenced by other tools/agents that don't have access to that memory store.
 8. **[`docs/HR/HR-IMPORT-EXPORT-CATALOGUE.md`](HR-IMPORT-EXPORT-CATALOGUE.md)** — which HR/SHE
    entities need a bulk import or export capability, what already exists, and the one pattern
    (Finance's `BulkImportAssets`: Excel + dry-run + row-level errors) to standardize new ones on.
+9. **[`docs/HR/HR-MODULE-INTEGRATION-MAP.md`](HR-MODULE-INTEGRATION-MAP.md)** — every OTHER
+   module (not Finance) HR/SHE needs a real integration with — Maintenance/Fleet, Procurement,
+   Inventory, Projects, Estate, Identity, EHC, Sales, Pricing, Quantity Survey, plus Workflow,
+   Identity reconciliation, Payroll and DMS (added 2026-09-02) — with a verdict per link.
+10. **[`docs/HR/HR-PAYROLL-BOUNDARY.md`](HR-PAYROLL-BOUNDARY.md)** — payroll is another
+    developer's module; what HR reads, what it never writes, the three bridges (salary structure,
+    pay components, payroll membership), and which Finance-sweep items are the payroll owner's.
+11. **[`docs/HR/HR-WORKFLOW-ENGINE-INTEGRATION.md`](HR-WORKFLOW-ENGINE-INTEGRATION.md)** — the
+    four-step plug-in recipe, the traps, and the engine defects every approval-bearing money event
+    inherits (#3 conditional routing, #15 generic approvals strand the record).
+12. **[`docs/HR/README.md`](README.md)** — the index of everything HR, with the governing rules.
+
+Also read `docs/HR/HR-SHE-INTEGRATION-AND-BOUNDARIES.md` if the task touches Safety money (rows
+60–63) and `docs/HR/HR-VERIFICATION-HARNESS-GUIDE.md` before running any harness.
 
 ## Governance rule (confirmed in writing, 2026-08-31)
 
@@ -68,15 +87,27 @@ governance message."
   is now confirmed **out of policy** per the governance rule above, not just technical debt.
   Migrating that call is flagged as the highest-leverage next step; it upgrades every other money
   event that already routes through payroll (loans, advances, bonuses, backpay, leave encashment,
-  benefit contributions) at once.
+  benefit contributions) at once. ⚠ **Payroll is another developer's module** — HR raises this
+  with the payroll owner (the `docs/HANDOFF-PAYROLL-*.md` shape), it does not edit
+  `PayrollService.cs`. See `HR-PAYROLL-BOUNDARY.md`.
+- **HR's only revenue flow is not in the backlog at all** *(found 2026-09-02)*:
+  `TimesheetInvoice` bills external consultant clients (hours × rate, tax, receipt) with no Finance
+  AR leg and no customer link. Entity-sweep row 64 / decision #11. Register it before the sweep.
 - **`PayrollJournalMapping`** entity
   (`src/ErpSystem.Core/Entities/HR/Payroll/PayrollEntities.cs`) is the config bridge:
   `TransactionType`/`ComponentCode` → `AccountCode`/`DebitCredit`.
 - **Biggest open decision, blocking the most rows:** *"payroll vs. direct payment"* for
   reimbursements — governs Medical claims, Travel claims, Separation settlement, Asset
   surcharge/rental recovery, and Awards paid. One TDC answer closes six+ rows in the sweep.
-- **`ManpowerBudget.ActualSpent` / `.Variance` have no writer anywhere** — permanently zero today.
-  They can only be correctly populated from Finance's GL actuals.
+- **`ManpowerBudget.ActualSpent` is caller-supplied on every budget update** (`UpdateManpowerBudgetDto`),
+  and `Variance` is derived from it — a self-declared figure that no screen sends, so it is 0 in
+  practice. It can only be *correctly* populated from Finance's GL actuals, and the caller path
+  should go once that feed exists. *(Corrected 2026-09-02; the earlier "no writer anywhere" was
+  wrong.)*
+- **Master-data rule status:** Travel, Assets, Letters, Separation and Succession all read
+  Finance's rates through `HrCurrencyBridge`. The one HR violation left is
+  `StaffRequisitionCost.ExchangeRate` (caller-supplied, default 1). Payroll keeps its own
+  `PayrollExchangeRate` table — the payroll owner's to fix.
 - **Three-way training-budget double-count risk, unresolved:** `ManpowerBudget.TrainingBudget`
   vs. area-7's own `TrainingBudget` vs. `SuccessionDevelopmentActivity` cost. Settle ownership
   before wiring any of the three to Finance.
@@ -92,7 +123,14 @@ governance message."
   `.AmountPaid`/`.InsuranceClaimFiled` is a real insurance-claim payment flow, the same shape as
   Medical's already-flagged priority back-fill — and `SafetyIncidentInvolvedPerson` links directly
   to Medical's own `MedicalExpenseClaim`, so the two should be solved together, not separately.
-  Also not yet registered in the backlog.
+  The backlog has only a placeholder row for SHE ("any compensation or remediation spend, to
+  record"); the entity-level detail is still owed there.
+- **Medical is three third-party flows, not one:** the premium payable
+  (`MedicalInsurancePremiumRecord`), the recovery from the insurer (`MedicalInsuranceClaim`) and
+  the NHIS recovery (`NHISClaim`) all exist beside the employee reimbursement. Rows 70–72.
+- **The payee question already has an answer in one HR area:** the six travel booking entities
+  carry `VendorId → Procurement.Supplier`. Reuse that FK for healthcare facilities, insurers and
+  training vendors rather than inventing an HR payee.
 
 ## Rule of thumb while working in HR
 

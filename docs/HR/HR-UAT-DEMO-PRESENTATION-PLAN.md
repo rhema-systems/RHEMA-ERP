@@ -22,6 +22,26 @@ still in progress
 | `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` | Direct source for the "questions we need answered" segment. |
 | `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` | Direct source for the Finance-integration roadmap segment. |
 | `plans/HR-Area-*.md` | Direct source for the requirement-ID evidence in §3.2 below — each FR-HR-### claim in this document is quoted from these. |
+| **`docs/demo-runbook/`** *(added 2026-09-02)* | Books 0–4 + cheat-sheet: the click-by-click, per-persona demo script that already exists. **Covers §3.3 (runbook) and most of §3.7 (seed checklist)** — do not write those again. |
+| **`docs/UAT-DEMO-DATABASE.md`** + `scripts/New-UatDatabase.ps1` *(added)* | How the `ErpSystemDB_UAT` demo database is built, switched, reset and checked; expected counts (127 employees, 41 units / 38 headed, 90 workflow definitions, 48 roles, 8 demo logins). Replaces §2's "prepare a demo tenant" from scratch. |
+| **`docs/HR-CLOSURE-LEDGER.md`** / **`docs/HR-FINISH-PLAN.md`** *(added)* | What was decided (D-01…D-40) and what is still owed, by lane. The plan's "Where to start next" table is the current build status — read it before finalizing which segments are "accept" vs "preview". |
+| **`docs/HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md`** *(added)* | Cross-module defect #23: payroll's profile upsert cannot create a new profile; HR's membership bridge carries a fallback. Say so if asked why a new hire's payroll profile "appeared" without the payroll screen. |
+
+---
+
+## ⚠ Vetting pass, 2026-09-02 — what changed since this plan was written
+
+| Where | Verdict | Corrected fact |
+|---|---|---|
+| §6 and every "org-unit-head" caveat (FR-HR-032, 080, 136, 173, responder matrix); §2 "assign organisational unit heads" | **STALE — the gap was closed by lane 7 on 2026-08-31.** | TDC answered open question 4 ("a head of department is `OrganizationUnits.HeadEmployeeId`; a supervisor is `Employees.ManagerId`"). `seed-hr-org-authority` gives every unit a head and every employee a manager without overwriting real data. Measured after seeding: **41 of 41 units headed, 1,057 of 1,084 employees with a manager, 0 cycles**. The UAT database reports 38 of 41 headed (`UAT-DEMO-DATABASE.md` §A5). The "2 of 48" figure quoted in §6 was the 2026-08-27 measurement from the area 9c plan. **Production data is still TDC's to maintain** — the caveat moves from "cannot demonstrate" to "the demo tenant is seeded; confirm TDC will keep this maintained." |
+| §3.2 FR-HR-080 "Blocked — Deferred" | **STALE — built.** | Lane 7 `f6599ea2`: `ResolveIssuingAuthorityAsync` reads the organisation (HR/SuperAdmin/Admin full authority; the head of the employee's unit or any unit above it holds head-of-department authority; nobody else). The ten sanctions were then built (`8667ab0e`). Proven by `probe-authority-gate.mjs` (33 assertions): a head holding no discipline permission can decide for their unit, is capped at HOD actions, and a head of an unrelated unit is refused. **Row changed to Accept.** |
+| §3.2 FR-HR-173 "promoted from advisory to an enforced block" | Half right. | `StaffMovementService.DescribeEstablishmentPressureAsync` is a **conditional** block: it throws only where `position.EstablishmentApprovedOn` is set; for un-established posts it appends an advisory note. FR-HR-136's requisition gate likewise fires only for established posts, and its mode is a tenant setting (`EstablishmentEnforcementMode`, default **Block**; budget mode default Warn). Say "hard block on established posts, advisory elsewhere." |
+| §3.2 FR-HR-185 / §2 "Internal Audit role" | Closed for the demo tenant, open for production. | `TdcDemoPersonaSeeder` creates `TDC_INTERNAL_AUDIT` if missing and the `auditor` persona ("Chief Internal Auditor"). The dev/production role list (47 roles) still has neither `TDC_INTERNAL_AUDIT` nor `TDC_MANAGING_DIRECTOR` — `HR-OPEN-QUESTIONS-FOR-TDC.md` "Operational prerequisite". |
+| §1 / §3.2 / §7 — "reminders … the emails/alerts themselves are not wired yet" | **Wrong as a blanket statement; right for exactly the two rows that cite it.** | Asset, Discipline, Movement, Travel and SHE reminders deliver through the notification pipeline (in-app/email/SMS rows + dispatcher). **Probation (FR-HR-140) and Separation (FR-HR-111) are the silent ones** — they write a dispatch log nothing reads. So the caveat on those two rows stands; do not generalise it to the whole module, and do show a discipline or asset reminder landing in the in-app feed if asked. |
+| §3 "Documents to produce" | Partly done. | 3.3 runbook and 3.7 seed checklist exist (`docs/demo-runbook/`, `UAT-DEMO-DATABASE.md`). **Still owed:** 3.1 agenda, 3.2 traceability matrix as a signable artefact (the runbook books contain zero FR-IDs), 3.4 known-issues handout, 3.5 roadmap handout, 3.6 glossary, 3.8 tracker, 3.9 briefings. |
+| §5 / §7 — "roadmap segment (#22)" | Numbering slip. | Roadmap is segment **#23**; #22 is Reports & Analytics. |
+| §3.2 FR-ID provenance | Confirmed, no fabrication. | 30 distinct FR-HR ids exist across plans/docs/src; every FR-HR row in the matrix appears in `plans/`. FR-SHE/ENV/CON ids appear **only in `src/`** (20 / 26 / 1 distinct) — the plan's own caveat that they are not in the build plans is correct. |
+| Payroll segment (#8) | Ownership. | Everything shown there is the payroll developer's module; HR presents the bridges (grade projection, pay-component mirror, `IsOnPayroll`, the reconciliation screen `hr/employees/payroll-reconciliation`). Defect #23 means a brand-new hire's payroll profile is created by HR's fallback, not by payroll's own upsert — be ready to say so. |
 
 ---
 
@@ -44,8 +64,9 @@ and again before the roadmap segment):
   `HR-FINANCE-INTEGRATION-BACKLOG.md`'s 2026-08-31 governance entry).
 - Bulk/multi-select actions on approval queues (Leave, Travel, Medical claims, etc.) — not built
   yet; see `HR-BULK-OPERATIONS-CATALOGUE.md`.
-- Reminder-driven notifications (probation, separation, asset return, disciplinary deadlines) —
-  the sweeps run and log correctly; the emails/alerts themselves are not wired yet.
+- Reminder-driven notifications for **probation and separation** (FR-HR-140, FR-HR-111) — those
+  two sweeps run and log correctly but hand nothing to the notification engine. Asset-return,
+  disciplinary, movement, travel and SHE reminders **do** deliver (corrected 2026-09-02).
 - Any Tier-B "tail" area still marked in-progress at demo time (confirm current status against
   `plans/HR-Area-19-23-Tier-B-Tail-Build-Plan.md` before finalizing the agenda — do not assume
   the status recorded when this document was written still holds).
@@ -57,6 +78,12 @@ and again before the roadmap segment):
 - [ ] **Confirm current build status per area** against the relevant `plans/HR-Area-*.md` before
       finalizing which modules go in "accept" vs "roadmap preview" — build status moves faster
       than any document describing it; treat §5 below as a starting draft, not a final agenda.
+- [ ] **Build the UAT database with `scripts/New-UatDatabase.ps1`** (rebuild-db → seed-workflows →
+      seed-hr-all → seed-hr-demo) the evening before, per `docs/UAT-DEMO-DATABASE.md` and
+      `docs/demo-runbook/book-0-demo-day-operations.html`. It seeds the 8 persona logins, the
+      `TDC_INTERNAL_AUDIT` role and auditor, unit heads and managers, and 103 synthetic staff
+      (99 on payroll / 4 off). ⚠ It rebuilds from the EF model, not migrations — never for go-live.
+      *(Added 2026-09-02; the two checklist items below are now satisfied by it.)*
 - [ ] **Prepare a demo tenant with realistic, synthetic (non-real) data.** No real employee PII —
       salary, medical, bank, disciplinary data must all be fabricated. This matters doubly here
       because Payroll's own live data was measured at points during build (e.g. "202 of 3,883
@@ -105,29 +132,29 @@ requirement in the FRD, only the ones confirmed during this research pass.
 |---|---|---|---|---|
 | FR-HR-030 | Oath of secrecy | Probation/Onboarding | ✅ Delivered | Accept |
 | FR-HR-031 | Probation length by staff category (6mo senior / 3mo junior) | Probation | ✅ Delivered, validated against live position data | Accept |
-| FR-HR-032 | Month-5 probation form routed to "the head"; confirmation letter generated | Probation | ✅ Delivered, **but** routing depends on org units having an assigned head — see §6 | Accept with caveat |
+| FR-HR-032 | Month-5 probation form routed to "the head"; confirmation letter generated | Probation | ✅ Delivered; unit heads are now seeded in the demo tenant (lane 7, 41/41) — the residual caveat is that TDC must maintain heads in production (§6) | Accept, note the data-maintenance commitment |
 | FR-HR-033 | Appointment letter | Probation | ✅ Delivered (reuses the offer-letter service) | Accept |
 | FR-HR-046 | Leave accrues near retirement; encashed only on exit, no other route | Leave / Separation | ✅ Delivered | Accept |
 | FR-HR-090 | Manage terminations and designations | Separation | ✅ Delivered | Accept |
 | FR-HR-091 | Completed clearance form required before separation | Separation | ✅ Delivered — clearance is a hard gate | Accept |
 | FR-HR-092 | MD signs all terminations except procedural ones (HR signs those) | Separation | ✅ Delivered | Accept |
 | FR-HR-093 | Retirement at 60, effective on birthday, with advance alerts | Separation | ✅ Delivered | Accept |
-| FR-HR-111 | 30-day advance alerts for retirement/contract-expiry | Separation | ✅ Delivered (reminder sweep) | Accept — **note:** the sweep runs and logs; whether it *notifies* anyone is the cross-module sweep's flagged gap |
+| FR-HR-111 | 30-day advance alerts for retirement/contract-expiry | Separation | ✅ Delivered (reminder sweep) — **the separation sweep is one of the two that write a dispatch log and hand nothing to the notification engine** (confirmed 2026-09-02) | Accept with caveat: the alert is computed and logged, not yet delivered |
 | FR-HR-113 | Report on long-service-award eligibility | Awards | ✅ Delivered | Accept |
 | FR-HR-134 | Approved job descriptions maintained against positions | Job Architecture | ✅ Delivered | Accept |
 | FR-HR-135 | Manpower requisitions through an approval chain (Dept Head → HR → MD) | Job Architecture / Manpower Budget | ✅ Delivered | Accept |
 | FR-HR-136 | Verify a position against the approved establishment before a vacancy is approved | Job Architecture | ✅ Delivered, enforced as a hard block | Accept |
-| FR-HR-140 | Notify employee/supervisor/HR ahead of probation expiry | Probation | ✅ Delivered (reminder sweep) | Accept, same notification-wiring caveat as FR-HR-111 |
+| FR-HR-140 | Notify employee/supervisor/HR ahead of probation expiry | Probation | ✅ Delivered (reminder sweep) — the probation sweep is the other silent one (dispatch log only) | Accept with the same caveat as FR-HR-111 |
 | FR-HR-152 | Leave encashment on separation capped at 56 days | Leave / Separation | ✅ Delivered | Accept |
 | FR-HR-181 | Grievance escalation ladder (6 rungs), HR interpretation, investigation, resolution, union consultation | Grievance/Employee Relations | ✅ **Fully delivered** (explicitly marked complete in the build plan) | Accept |
 | FR-HR-182 | Support every named separation type (resignation through dismissal, plus contract expiry) | Separation | ✅ Delivered | Accept |
 | FR-HR-183 | Exit clearance across loans, advances, company property, office equipment, keys, documents, payroll recoveries | Separation + Assets | ✅ Delivered (built jointly across two areas) | Accept |
 | FR-HR-184 | Final settlement = unpaid salary + notice pay + leave encashment + benefits − deductions | Separation | ✅ Delivered | Accept |
-| FR-HR-185 | Internal Audit reviews the final settlement before payment release | Separation | ✅ Delivered **in code**; **confirmed not reachable** in the data measured during build because nobody held the required Internal Audit role | Accept with caveat — confirm the role is assigned in TDC's real org before go-live |
+| FR-HR-185 | Internal Audit reviews the final settlement before payment release | Separation | ✅ Delivered; the demo seeder creates `TDC_INTERNAL_AUDIT` and the `auditor` persona so it **is** demonstrable ("switch to auditor… review and pass", runbook book 3). The production role list still lacks both `TDC_INTERNAL_AUDIT` and `TDC_MANAGING_DIRECTOR` | Accept with caveat — confirm both roles are created and assigned in TDC's real org before go-live |
 | FR-HR-084 | Model a responder matrix for who handles what at each escalation rung | Grievance/Employee Relations | ✅ Delivered | Accept |
 | FR-HR-004 | Manpower/establishment planning linked to strategic planning cycles | Job Architecture | Marked "Desirable" priority (not Mandatory) — confirm current delivery status before the demo | Accept, or explicitly defer if not yet built |
-| FR-HR-080 | Head-of-Department disciplinary sanction authority rule | Discipline | ⚠ **Blocked** — the org-authority data needed to resolve "who is this employee's HOD" was measured as largely absent | Deferred — flag to TDC as needing their organisational data, not a system defect |
-| FR-HR-173 | Establishment/headcount advisory rule (Movements area) | Staff Movements / Job Architecture | Promoted from advisory to an enforced block once FR-HR-136's data existed | Accept, confirm same org-data dependency as FR-HR-080/032 |
+| FR-HR-080 | Head-of-Department disciplinary sanction authority rule | Discipline | ✅ **Built, lane 7 (2026-08-31)** — `ResolveIssuingAuthorityAsync` reads unit headship from the organisation; a HOD with no discipline permission can decide for their unit and is capped at HOD-level actions; the ten sanctions are built; 33-assertion probe green. *(The "blocked" verdict here was stale, corrected 2026-09-02.)* | Accept, note the same data-maintenance commitment as FR-HR-032 |
+| FR-HR-173 | Establishment/headcount rule (Movements area) | Staff Movements / Job Architecture | **Hard block where the position has `EstablishmentApprovedOn`; advisory note elsewhere** (`StaffMovementService.DescribeEstablishmentPressureAsync`). FR-HR-136's requisition gate is likewise scoped to established posts and its mode is a tenant setting (default Block) | Accept, stating the scope out loud — "enforced on approved establishment, advisory on the rest" |
 | FR-SHE-200 | Stop-work authority and clearance | Safety/SHE | ✅ Confirmed built (`SheStopWorkOrder`) | Accept |
 | FR-SHE-229 | SHE audit management (planning → closure) | Safety/SHE | ✅ Confirmed built (`SheAudit`, `SheAuditFinding`) | Accept |
 | FR-SHE-230/232/248 | KPI computation, incident rate, hazard heat-map | Safety/SHE | ✅ Confirmed built (`ShePerformanceSnapshot`, `SheKpiComputationService`) | Accept |
@@ -273,19 +300,29 @@ own dedicated time even in a compressed format.
 
 ---
 
-## 6. The single biggest cross-cutting caveat to prepare for
+## 6. The single biggest cross-cutting caveat — now a data-maintenance commitment, not a blocker (rewritten 2026-09-02)
 
-**Several requirements route decisions to "the head of the unit," and TDC's organisational data,
-as measured during build, mostly does not have unit heads assigned** (one build plan states this
-plainly: unit heads assigned in roughly 2 of 48 units at the time it was written). This is not a
-defect in the HR module — the routing logic is built and correct — but it means **FR-HR-032
-(probation routing), FR-HR-080 (disciplinary sanction authority), and the establishment/movement
-rules tied to FR-HR-136/173** may not be demonstrable exactly as designed unless the demo tenant's
-organisational structure has heads assigned, or unless this is explained as a data-readiness item
-TDC needs to complete before go-live rather than a gap in the system. **Decide before the demo
-whether to (a) seed the demo tenant with heads assigned so the flow can be shown working, or
-(b) show it honestly as blocked and use it as the concrete example of what "accept with caveat"
-means.** Either is defensible; walking into it without a plan is not.
+**Several requirements route decisions to "the head of the unit."** When this plan was first
+written, TDC's organisational data had heads on roughly 2 of 48 units (the area 9c plan's
+2026-08-27 measurement; 0 of 41 on 2026-08-16 and again on 2026-08-31), and FR-HR-032, FR-HR-080
+and FR-HR-136/173 were not demonstrable.
+
+**That changed on 2026-08-31 (lane 7).** TDC answered the question — a head of department is the
+employee on `OrganizationUnits.HeadEmployeeId`, a supervisor is `Employees.ManagerId` — and the
+foundation was built to the answer: `seed-hr-org-authority` places a head on every unit and a
+manager on every employee **without overwriting anything real**, and every row it writes is
+stamped so it can be told apart from TDC's own data. After seeding: 41 of 41 units headed,
+1,057 of 1,084 employees with a manager, no cycles. The UAT database reports 38 of 41 (the three
+are demo fixtures). FR-HR-080's authority rule was then built on top of it and proven.
+
+**What is left for the room:** the demo will show these flows working on seeded management lines.
+The commitment to get from TDC — out loud, in the sign-off matrix — is that unit heads and
+reporting lines **will be maintained in production**, because every one of these features
+resolves to "nobody" the moment they are not. Open question 4 in `HR-OPEN-QUESTIONS-FOR-TDC.md`
+records the answer; the maintenance commitment is the follow-through. The alternative design
+(explicit per-unit responder assignment, which the grievance ladder already uses via
+`EmployeeRelationsResponder`) exists as a fallback if TDC decides the org data will not be kept
+current.
 
 ---
 
@@ -297,9 +334,15 @@ means.** Either is defensible; walking into it without a plan is not.
 - **If asked to bulk-approve something live:** this is the expected moment `HR-BULK-OPERATIONS-CATALOGUE.md`'s
   gap analysis becomes relevant — have the answer ready ("not built yet, here's the plan") rather
   than looking surprised.
-- **If asked why a reminder wasn't actually emailed:** same posture — the sweep and the dispatch
-  log are real and can be shown; the notification itself is the known, already-documented gap.
-- **Keep the roadmap segment (#22) visually distinct** (a different slide background, a clear
+- **If asked why a reminder wasn't actually emailed:** for probation and separation, same posture
+  — the sweep and the dispatch log are real and can be shown; delivery is the documented gap. For
+  asset, discipline, movement, travel and SHE reminders the notification *does* land in the
+  in-app feed — show one (`POST api/hr/reminders/…/run-now` endpoints exist per engine).
+- **If asked "how does a new hire get onto payroll":** the `IsOnPayroll` tick on the employee form
+  drives an HR-side bridge that asks payroll to create the profile; because payroll's own upsert
+  cannot create a brand-new profile today (cross-module defect #23), the bridge writes a minimal
+  profile itself and logs that it did. Say this plainly; it is the payroll owner's fix.
+- **Keep the roadmap segment (#23) visually distinct** (a different slide background, a clear
   "ROADMAP — NOT FOR SIGN-OFF" header) so it cannot be mistaken for an acceptance segment in
   meeting notes taken by someone who steps out and back in.
 

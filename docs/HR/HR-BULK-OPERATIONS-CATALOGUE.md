@@ -23,25 +23,42 @@ exists, rather than something to solve twice.
 
 ---
 
+## ⚠ Vetting pass, 2026-09-02 — corrections
+
+| Where | Verdict | Corrected fact |
+|---|---|---|
+| §1 — "~40 controllers", "296+ single-item action endpoints" | **Both undercounts.** | `Controllers/HR/` holds **262 controller classes** (266 files) including the 28 SHE ones; `{id}/<verb>` POST/PATCH/PUT action routes number **799** (95 of them SHE). Top verbs: approve 40, submit 33, reject 31, complete 29, cancel 20, close 19, deactivate 17, activate 14, verify 13, recall 11, acknowledge 10. |
+| §1 — "zero HR list/queue pages have checkbox multi-select" | **WRONG (and §2 contradicts it).** | Two HR pages have real multi-select: `hr/attendance/alerts/page.tsx` (toggle-all + `bulkAcknowledge`) and `hr/recruitment/vacancies/[id]/pipeline/page.tsx` (`bulkAction` toolbar); plus the six payroll `pickerSelectedIds` pages. None of the 🔴 approval queues in §3 has it — that part stands. |
+| §2 — Recruitment `notify-shortlist` / `notify-reject` | **Do not exist anywhere in `src/`.** | Recruitment has **five** bulk endpoints, not seven. Rows removed. |
+| §2 — route strings | Several wrong. | Real routes: Payroll `api/hr/payroll/setup/bonus-rules/bulk`, `setup/bonus-exceptions/bulk` (+ the other five under `api/hr/payroll/`); Recruitment `POST api/job-applications/vacancy/{vacancyId}/bulk-shortlist\|bulk-reject\|auto-shortlist` (vacancy-scoped) and `POST api/applications/bulk-move\|bulk-pipeline-reject` (prefix `api/applications`); Training bulk record is **`POST api/training-completions/bulk`**, needs-assessment `POST api/training-needs-assessments/bulk`; Orientation `POST api/employee-orientations/bulk-enroll`; Competency `POST api/employee-competencies/batch-assess`, `PUT api/position-competencies/position/{positionId}/bulk-set`; Appraisal `POST api/AppraisalCycleTemplates/bulk-assign/{cycleId}`; Attendance `POST api/staff-attendance-alerts/bulk-acknowledge`; Separations `POST api/hr/separations/repair/disciplinary-orphans?dryRun=true` (dryRun defaults **true**). The method names the table quoted (`BulkCreateNeedsAssessment`, `BulkEnrollOrientations`, …) are not the real method names. |
+| §2 — bulk endpoints the table missed | Five. | `PATCH api/succession-candidates/bulk-rank` (used by `CandidatesPanel.tsx`); `POST api/talent-pool/bulk` (returns `RecruitmentBulkOperationResultDto`); `POST api/training-nominations/attendance/bulk`; `POST api/PerformanceAppraisals/{appraisalId}/peer-nominations/batch`; `POST api/hr/separations/contract-expiries/sweep`. Adjacent: `UserEmployeeLinkController` `bulk-link`. |
+| §3 — route strings throughout | **Indicative, not verified — several are wrong.** | Spot-check of ten: leave approve/reject/cancel/close are **`PUT api/leaves/{id}/…`** and **no `recall` route exists**; `PATCH api/hr/leave-encashments/{id}/approve` ✓; `POST api/staff-movements/{id}/approve` ✓; `POST api/SalaryReviewProposals/{id}/approve` ✓; `POST api/EmployeeGoals/{goalId}/approve` ✓; assets is **`requisitions`** (plural); `POST api/staff-travel/requests/{id}/approve` ✓; `POST api/hr/employee-relations/{id}/assign` ✓; letters are **`api/hr/letter-requests/{id}/issue`**; benefits has **no `{id}/enroll` or `/withdraw`** — real is `POST api/hr/employee-benefit-enrollments`, `POST {id}/status`, `POST reconcile`. SHE: **no `she-*` prefixes** — `POST api/safety/permits/{id}/approve` (permits have `/close`, not `/cancel`), `api/safety/audits/{id}/close` (+ `/cancel`), `api/safety/stop-work/{id}/cancel`, `api/safety/environmental/reviews/{id}/approve` (+ `management-approve`, `approve-commencement`), `api/safety/risk-assessments/{id}/approve`. **Before building any bulk sibling, read the route off the controller; do not copy it from §3.** |
+| §4.5 — "every existing bulk operation uses best-effort processing" | **Overstated.** | Recruitment `BulkRejectAsync` is true per-item best-effort (try/catch, Succeeded/Skipped). Training `BulkRecordCompletionAsync` skips invalid items but persists the rest in **one** `SaveChangesAsync` (atomic under EF's implicit transaction). Payroll `SaveBonusRulesAsync` is a replace-set with one save that throws outright — **all-or-nothing**. None uses an explicit transaction. The recommendation (best-effort, per-item result) stands; the claim that it is already uniform does not. |
+| §4.6 — "no BulkOperation.Completed event exists" | CONFIRMED. | |
+
+---
+
 ## 1. Executive summary
 
 **HR already has bulk operations — just not where the queues are busiest.** Confirmed, working
 bulk endpoints exist for: Payroll setup data (7 endpoints — bonus rules/exceptions, tax reliefs,
 component exceptions, promotion arrears, overtime summaries, contribution opening balances),
-Recruitment (7 endpoints — bulk shortlist/reject/move-stage/notify, auto-shortlist), Training
+Recruitment (5 endpoints — bulk shortlist/reject/pipeline-reject/move-stage, auto-shortlist), Training
 (bulk nominate, bulk record completion, bulk needs-assessment), Orientation (bulk enroll),
 Competency (batch assess), Appraisal (bulk-assign cycle templates), and Attendance (bulk
 acknowledge alerts, bulk import). That is real, proven infrastructure — the request/response
 shapes, the "best-effort with per-item result" transaction model, and even a working frontend
 multi-select pattern all already exist somewhere in this codebase.
 
-**What's missing is coverage of the highest-volume queues.** A full enumeration of HR's ~40
-controllers found **296+ single-item action endpoints**, of which only a handful have a bulk
-sibling. Cross-referencing against the frontend confirms the gap is exactly where it hurts most:
-**zero HR list/queue pages have checkbox multi-select today**, even though several are explicitly
-manager- or HR-officer-facing approval queues that can run into the dozens or hundreds of pending
-items (a manager with 50+ direct reports approving leave one row at a time; a claims team
-adjudicating a daily batch of medical claims one row at a time).
+**What's missing is coverage of the highest-volume queues.** A full enumeration of HR's 262
+controllers (28 of them SHE) found **799 `{id}/<verb>` action endpoints**, of which about two
+dozen have a bulk sibling. Cross-referencing against the frontend confirms the gap is exactly
+where it hurts most: only two HR pages have checkbox multi-select today (attendance alerts and
+the recruitment pipeline), plus the six payroll setup pages — **none of the approval queues in §3
+does**, even though several are explicitly manager- or HR-officer-facing queues that can run into
+the dozens or hundreds of pending items (a manager with 50+ direct reports approving leave one
+row at a time; a claims team adjudicating a daily batch of medical claims one row at a time).
+*(Counts corrected 2026-09-02.)*
 
 **The single most important design rule, stated once so it isn't relearned per bulk endpoint
 (§4.1 has the detail):** a bulk endpoint must call the exact same per-item service method /
@@ -57,28 +74,32 @@ approve would have triggered, for every item in the batch.
 
 | Module | Operation | Endpoint | Request shape | Response shape |
 |---|---|---|---|---|
-| Payroll | Bonus rules | `POST bonus-rules/bulk` | Full DTOs + `IsSelected` flag | List of saved DTOs |
-| Payroll | Bonus exceptions | `POST bonus-exceptions/bulk` | Full DTOs + overrides | List of saved DTOs |
-| Payroll | Tax reliefs | `POST tax-reliefs/bulk` | Full DTOs | List of saved DTOs |
-| Payroll | Component exceptions | `POST component-exceptions/bulk` | Full DTOs | List of saved DTOs |
-| Payroll | Promotion arrears | `POST promotion-arrears/bulk` | Full DTOs | List of saved DTOs |
-| Payroll | Overtime summaries | `POST overtime-summaries/bulk` | Full DTOs | List of saved DTOs |
-| Payroll | Contribution opening balances | `POST contribution-opening-balances/bulk` | Full DTOs | List of saved DTOs |
-| Recruitment | Bulk shortlist | `POST .../bulk-shortlist` | IDs + notes | `RecruitmentBulkOperationResultDto` (Succeeded/Skipped/per-item Results) |
-| Recruitment | Bulk reject (application) | `POST job-applications/bulk-reject` | IDs + reason | Same shape |
-| Recruitment | Bulk reject (pipeline stage) | `POST .../bulk-pipeline-reject` | IDs + reason | Same shape |
-| Recruitment | Bulk move stage | `POST application-pipeline/bulk-move` | IDs + targetStageId | Same shape |
-| Recruitment | Auto-shortlist | `POST .../auto-shortlist` | VacancyId + score threshold | Same shape |
-| Recruitment | Notify shortlisted/rejected | `POST .../notify-shortlist` \| `notify-reject` | VacancyId | Same shape |
-| Training | Bulk nominate | `POST training-nominations/bulk` | DTOs array | Counts + skip list |
-| Training | Bulk record completion | `POST training/schedule/{id}/bulk-record` | Items array (per-person date/status) | `{createdCount, requestedCount, skipped[]}` — **the cleanest existing pattern, see §4.2** |
-| Training | Bulk needs-assessment | `BulkCreateNeedsAssessment` | — | Counts + skip list |
-| Orientation | Bulk enroll | `BulkEnrollOrientations` | — | List of enrollment DTOs |
-| Competency | Batch assess | `BatchAssessCompetency`, `BulkSetPositionCompetencies` | — | Custom result DTOs |
-| Appraisal | Bulk assign cycle templates | `BulkAssignCycleTemplates` | — | `IActionResult` |
-| Attendance | Bulk acknowledge alerts | `BulkAcknowledgeAlerts` | — | Count |
-| Attendance | Bulk import | `StaffBulkAttendanceImport` | File | Import record |
-| Separations | Repair disciplinary orphans | `POST separations/repair/disciplinary-orphans` | `dryRun` flag | Repair summary |
+| Payroll (payroll dev's) | Bonus rules | `POST api/hr/payroll/setup/bonus-rules/bulk` | Full DTOs + `IsSelected` flag | List of saved DTOs — **replace-set, all-or-nothing** |
+| Payroll (payroll dev's) | Bonus exceptions | `POST api/hr/payroll/setup/bonus-exceptions/bulk` | Full DTOs + overrides | List of saved DTOs |
+| Payroll (payroll dev's) | Tax reliefs | `POST api/hr/payroll/tax-reliefs/bulk` | Full DTOs | List of saved DTOs |
+| Payroll (payroll dev's) | Component exceptions | `POST api/hr/payroll/component-exceptions/bulk` | Full DTOs | List of saved DTOs |
+| Payroll (payroll dev's) | Promotion arrears | `POST api/hr/payroll/promotion-arrears/bulk` | Full DTOs | List of saved DTOs |
+| Payroll (payroll dev's) | Overtime summaries | `POST api/hr/payroll/overtime-summaries/bulk` | Full DTOs | List of saved DTOs |
+| Payroll (payroll dev's) | Contribution opening balances | `POST api/hr/payroll/contribution-opening-balances/bulk` | Full DTOs | List of saved DTOs |
+| Recruitment | Bulk shortlist | `POST api/job-applications/vacancy/{vacancyId}/bulk-shortlist` | IDs + notes | `RecruitmentBulkOperationResultDto` (Succeeded/Skipped/per-item Results) — true per-item best-effort |
+| Recruitment | Bulk reject (application) | `POST api/job-applications/vacancy/{vacancyId}/bulk-reject` | IDs + reason | Same shape |
+| Recruitment | Bulk reject (pipeline stage) | `POST api/applications/bulk-pipeline-reject` | IDs + reason | Same shape |
+| Recruitment | Bulk move stage | `POST api/applications/bulk-move` | IDs + targetStageId | Same shape |
+| Recruitment | Auto-shortlist | `POST api/job-applications/vacancy/{vacancyId}/auto-shortlist` | VacancyId + score threshold | Same shape |
+| Recruitment | Talent-pool bulk add | `POST api/talent-pool/bulk` | DTOs array | `RecruitmentBulkOperationResultDto` |
+| Training | Bulk nominate | `POST api/training-nominations/bulk` | DTOs array | Counts + skip list |
+| Training | Bulk record completion | `POST api/training-completions/bulk` (`BulkRecordCompletion`) | Items array (per-person date/status) | `{createdCount, requestedCount, skipped[]}` — **the cleanest existing result shape, see §4.2**; note it persists the valid subset in one save |
+| Training | Bulk attendance | `POST api/training-nominations/attendance/bulk` | Items array | Counts |
+| Training | Bulk needs-assessment | `POST api/training-needs-assessments/bulk` (`BulkCreate`) | DTOs array | Counts + skip list |
+| Orientation | Bulk enroll | `POST api/employee-orientations/bulk-enroll` (`BulkEnroll`) | — | List of enrollment DTOs |
+| Competency | Batch assess / bulk set | `POST api/employee-competencies/batch-assess` (`BatchAssess`), `PUT api/position-competencies/position/{positionId}/bulk-set` | — | Custom result DTOs |
+| Appraisal | Bulk assign cycle templates | `POST api/AppraisalCycleTemplates/bulk-assign/{cycleId}` (`BulkAssign`) | — | `IActionResult` |
+| Appraisal | Batch peer nominations | `POST api/PerformanceAppraisals/{appraisalId}/peer-nominations/batch` | IDs | — |
+| Succession | Bulk rank candidates | `PATCH api/succession-candidates/bulk-rank` | Ranked IDs | — (used by `CandidatesPanel.tsx`) |
+| Attendance | Bulk acknowledge alerts | `POST api/staff-attendance-alerts/bulk-acknowledge` | IDs | Count — **has a working multi-select UI** (`hr/attendance/alerts`) |
+| Attendance | Bulk import | `StaffBulkAttendanceImport` (`api/staff-bulk-attendance-imports`) | File | Import record |
+| Separations | Repair disciplinary orphans | `POST api/hr/separations/repair/disciplinary-orphans?dryRun=true` | `dryRun` (default **true**) | Repair summary |
+| Separations | Contract-expiry sweep | `POST api/hr/separations/contract-expiries/sweep` | — | Sweep summary |
 
 **Frontend precedent already proven:**
 - **`pickerSelectedIds` picker pattern** — used identically across 6 Payroll setup pages
@@ -103,15 +124,19 @@ Legend — **Bulk today?**: ✅ yes · 🔲 no. **Priority**: 🔴 high (confirm
 build first) · 🟡 medium (real benefit, lower volume/frequency) · 🟢 low (rarely batched in
 practice, or inherently one-at-a-time by nature).
 
+⚠ **Route strings in this section are indicative** (vetting 2026-09-02 found roughly a third of
+the spot-checked ones wrong in verb, prefix or spelling — see the corrections block). The
+*assessment* columns are the content; read the real route off the controller before building.
+
 ### 3.1 Leave
 
 | Action | Route | Bulk today? | Priority | Notes |
 |---|---|---|---|---|
-| Submit | `POST leaves/{id}/submit` | 🔲 | 🟢 | Employee self-service, one request at a time by nature |
-| **Approve** | `POST leaves/{id}/approve` | 🔲 | 🔴 | Manager queue — the #1 candidate found; a manager with many reports approves dozens at a time |
-| **Reject** | `POST leaves/{id}/reject` | 🔲 | 🔴 | Same queue, same priority |
-| Cancel | `POST leaves/{id}/cancel` | 🔲 | 🟢 | Usually one-off |
-| Recall | `POST leaves/{id}/recall` | 🔲 | 🟢 | Employee-initiated, one-off |
+| Submit | `POST api/leaves/{id}/submit` | 🔲 | 🟢 | Employee self-service, one request at a time by nature |
+| **Approve** | `PUT api/leaves/{id}/approve` | 🔲 | 🔴 | Manager queue — the #1 candidate found; a manager with many reports approves dozens at a time. Workflow-validated (`CanUserApproveAsync`) — the bulk loop must call the same service method |
+| **Reject** | `PUT api/leaves/{id}/reject` | 🔲 | 🔴 | Same queue, same priority |
+| Cancel / close | `PUT api/leaves/{id}/cancel` \| `/close` | 🔲 | 🟢 | Usually one-off |
+| Recall | — | — | — | **No recall route exists on `LeavesController`** (the generic workflow recall button calls the engine directly); row kept so the absence is recorded |
 | Approve/reject (leave plan) | `POST leave-plans/{id}/approve` \| `/reject` | 🔲 | 🟡 | Same queue shape as leave requests, lower volume |
 | Approve/reject (encashment) | `PATCH leave-encashments/{id}/approve` \| `/reject` | 🔲 | 🟡 | Periodic (e.g. year-end), can spike in volume |
 | Deactivate leave type | `POST leave-types/{id}/deactivate` | 🔲 | 🟢 | Admin config, rare |
@@ -229,7 +254,7 @@ is triage (**Assign**), not the substantive decisions.
 | Transfer / submit-transfer / recall-transfer | `POST assets/{id}/transfer` \| `/submit-transfer` \| `/recall-transfer` | 🔲 | 🟢 | Typically one asset, one move |
 | Dispose | `POST assets/{id}/dispose` | 🔲 | 🟡 | End-of-life batches (e.g. annual laptop refresh) are plausible |
 | Acknowledge receipt | `POST assets/{id}/acknowledge` | 🔲 | 🟢 | Employee-personal act |
-| **Approve requisition** | `POST assets/requisition/{id}/approve` | 🔲 | 🟡 | HR/procurement approving a batch of requests |
+| **Approve requisition** | `POST api/assets/requisitions/{id}/approve` | 🔲 | 🟡 | HR/procurement approving a batch of requests — workflow-validated (`HrAssetRequisition` adapter) |
 
 ### 3.13 Separations
 
@@ -267,7 +292,7 @@ is triage (**Assign**), not the substantive decisions.
 | Action | Route | Bulk today? | Priority | Notes |
 |---|---|---|---|---|
 | Activate/deactivate employee bank | `POST employee-banks/{id}/activate` \| `/deactivate` | 🔲 | 🟢 | Individual, sensitive (bank detail) act — see masking guidance in `HR-REPORTS-CATALOGUE.md` §5 |
-| **Enroll/withdraw benefit** | `POST benefit-enrollments/{id}/enroll` \| `/withdraw` | 🔲 | 🟡 | Annual open-enrollment window is a real batch moment (confirmed by frontend research) |
+| **Enroll / change status** | `POST api/hr/employee-benefit-enrollments` (create), `POST …/{id}/status`, `POST …/reconcile` — there is **no** `{id}/enroll` or `/withdraw` route (corrected 2026-09-02) | 🔲 | 🟡 | Annual open-enrollment window is a real batch moment; the "mass benefit application" row in the closure ledger §F is this item |
 
 ### 3.18 HR policies, letters & announcements
 
@@ -275,7 +300,7 @@ is triage (**Assign**), not the substantive decisions.
 |---|---|---|---|---|
 | Publish/archive policy | `POST hr-policies/{id}/publish` \| `/archive` | 🔲 | 🟢 | Rare, deliberate, one-at-a-time by nature |
 | Publish/retract announcement | `POST hr-announcements/{id}/publish` \| `/retract` | 🔲 | 🟢 | Same |
-| Issue/cancel letter request | `POST hr-letter-requests/{id}/issue` \| `/cancel` | 🔲 | 🟡 | A batch of confirmation-of-employment letters (e.g. for a bank/embassy drive) is a plausible real scenario |
+| Issue/cancel letter request | `POST api/hr/letter-requests/{id}/issue` \| `/cancel` | 🔲 | 🟡 | A batch of confirmation-of-employment letters (e.g. for a bank/embassy drive) is a plausible real scenario |
 | Acknowledge policy (employee) | `POST my-policies/{id}/acknowledge` | 🔲 | 🟢 | Employee self-service |
 
 ### 3.19 Succession
@@ -288,10 +313,13 @@ is triage (**Assign**), not the substantive decisions.
 
 | Action | Route | Bulk today? | Priority | Notes |
 |---|---|---|---|---|
-| Approve/cancel permit-to-work | `POST she-permit-to-work/{id}/approve` \| `/cancel` | 🔲 | 🟢 | Site-specific, individually assessed |
-| Close audit | `POST she-audits/{id}/close` | 🔲 | 🟢 | One-off |
-| Approve environmental review / risk assessment | `POST she-environmental-review/{id}/approve` \| `she-risk-assessment/{id}/approve` | 🔲 | 🟢 | Individually assessed, deliberately not batchable |
-| Cancel stop-work order | `POST she-stop-work/{id}/cancel` | 🔲 | 🟢 | Safety-critical, should stay individual |
+| Approve/close permit-to-work | `POST api/safety/permits/{id}/approve` \| `/close` (no `/cancel`) | 🔲 | 🟢 | Site-specific, individually assessed; approval is gated on hazards/controls/gas-test sections (FR-PTW-002) |
+| Close / cancel audit | `POST api/safety/audits/{id}/close` \| `/cancel` | 🔲 | 🟢 | One-off |
+| Approve environmental review / risk assessment | `POST api/safety/environmental/reviews/{id}/approve` (+ `management-approve`, `approve-commencement`) \| `api/safety/risk-assessments/{id}/approve` | 🔲 | 🟢 | Individually assessed, deliberately not batchable; the review has a statutory ladder |
+| Cancel stop-work order | `POST api/safety/stop-work/{id}/cancel` | 🔲 | 🟢 | Safety-critical, should stay individual |
+
+*(SHE routes corrected 2026-09-02 — all 28 SHE controllers live under `api/safety/*`; the earlier
+`she-*` prefixes did not exist. See `HR-SHE-INTEGRATION-AND-BOUNDARIES.md`.)*
 
 ### 3.21 Client/contractor engagements
 
@@ -353,16 +381,22 @@ Two real shapes are needed, and both already have a working example:
 
 ### 4.4 Preview/dry-run before committing, for anything consequential
 
-`SeparationsController`'s repair endpoint already supports a `dryRun` flag. Reuse this for any
+`SeparationsController`'s repair endpoint already supports a `dryRun` flag (default true), and so
+does `HrLegacyFileMigrationController`'s `run`. Reuse this for any
 bulk action where an item might be silently ineligible (wrong status, already processed, outside
 the actor's authority) — show the user "47 of 50 selected will be approved; 3 are not eligible
 because X" **before** they commit, not as a surprise in the result screen afterward.
 
 ### 4.5 Transaction model: best-effort, consistently
 
-Every existing bulk operation in this codebase uses best-effort processing (partial success is
-acceptable and reported per item) rather than all-or-nothing. **Keep doing this** for approval-type
-bulk actions — a single malformed row shouldn't block 49 good ones. The one exception to flag: once
+The existing bulk operations are **not** uniform *(corrected 2026-09-02)*: Recruitment's
+`BulkRejectAsync` is true per-item best-effort (try/catch around each `RejectAsync`); Training's
+`BulkRecordCompletionAsync` skips ineligible items but persists the rest in one `SaveChangesAsync`;
+Payroll's `SaveBonusRulesAsync` is a replace-set that throws outright (all-or-nothing). None uses an
+explicit transaction. **Standardise on the Recruitment shape** for approval-type bulk actions —
+per-item try/catch, per-item result, partial success reported — so a single malformed row doesn't
+block 49 good ones and, more importantly, so a workflow-engine refusal on item 12 does not roll
+back the eleven approvals the engine already recorded. The one exception to flag: once
 Payroll migrates its journal posting to `IFinancePostingEngine` (per `HR-FINANCE-ENTITY-SWEEP.md`),
 any bulk action that ends in a GL posting should think harder about atomicity per Finance's own
 rules — that is a Finance-owned decision, not something to default silently either way.

@@ -18,9 +18,26 @@ file) capability, what already exists, and how the missing ones should be built.
 
 ---
 
+## ⚠ Vetting pass, 2026-09-02 — corrections
+
+| Where | Verdict | Corrected fact |
+|---|---|---|
+| §1 — "no bulk import for the core `Employee` entity **at all**" | Right about bulk, wrong about "at all". | A **single-record** import exists: `POST api/employees/import` (`EmployeesController.cs:162`, `EmployeeAdminPolicy`) → `EmployeeService.ImportEmployeeAsync` → `StaffNumberService.AcceptImportedAsync`. No frontend caller. **This is the seam an Employee bulk import must be built on** — see §4.1's staff-number rule, which the earlier text did not know about. |
+| §2 — Asset Register Report "Export (CSV/Excel)" | **WRONG.** | Print only (`window.print()`); no CSV or XLSX anywhere in `hr/assets/report/page.tsx`. Backend register read: `GET api/assets/reports/register`. |
+| §2 — `StaffAttendancePayrollExportsController` "export" | Nuance. | `POST export` creates an export **record** (`ExportReference`, `TargetSystem`, `TotalEmployees`, `Status`) — **no file is produced**. It is a hand-off ledger, not an export. |
+| §2 — `JobApplicationController` `shortlist/export` | Confirmed — and it is the **only** HR controller that emits a CSV. | |
+| §3.3 — `PublicHoliday` "notably absent" | **WRONG.** | `PublicHoliday` exists (`StaffAttendanceEntities.cs:1365`, with `HolidayCalendarId`, `DateFrom/DateTo`, `Recurring`, `AttractsHolidayPay`, `HolidayPayMultiplier`) with `HolidayCalendarsController` (`api/holiday-calendars`: per-holiday CRUD, `holidays/by-year/{year}`, `holidays/range`, `recurring`), plus a separate `PayrollHoliday` in the payroll module. No bulk load — that gap stands. TDC has no calendar loaded: `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` §3. |
+| §3.4 — biometric feed | Confirmed, with the precise state. | `StaffAttendanceDevice` (`LastSyncDate`, `PendingSyncCount`) + `StaffAttendanceDevicesController` (`external/{externalDeviceId}`, `overdue-sync`, `{id}/sync` — a bookkeeping stamp, not a data pull); `EmployeeBiometric` + enrol/revoke. `POST api/staff-attendance-logs/punch` takes the actor from the **token's** EmployeeId — a self-service punch, not a device feed. No device-authenticated ingestion endpoint. "Verify, don't build" stands. |
+| §3.10 — "SHE has no import and no export anywhere" | Confirmed for file I/O; nuance. | SHE does produce **report artefacts**: `POST audits/{id}/issue-report`, `GET environmental/reviews/{id}/clearance-report`, monthly-report list/get/generate/submit with two frontend pages. Reports exist, exports don't. |
+| §4.3 — `DataExportTools.tsx` | Confirmed mock. | Mounted only by `app/administration/reports/page.tsx` — an **Administration** screen, not an HR one; HR did not build it and should not be the one to relabel it without the platform owner. |
+| §2 — existing bulk-load mechanisms omitted | Add. | `Program.cs` CLI commands `seed-hr-all` (`HrSeedOrchestrator`), `seed-hr-demo` (`HrDemoSeedOrchestrator`), `seed-hr-org-authority`, wrapped by `scripts/New-UatDatabase.ps1`. **All bypass the service layer** — which is exactly why the staff-number counter hazard in §4.1 exists. `TdcDemoPersonaSeeder` links 8 demo logins to existing employees; it loads no employees. |
+| §2 — other I/O the table missed | Add. | `POST api/hr/payroll/runs/{runId}/oracle-report` (the Oracle report executor, payroll dev's); `POST api/hr/separations/clearance-templates/seed-defaults`; client-side CSV in `components/hr/payroll/PayrollGridExportButton.tsx`; screens `hr/attendance/payroll-exports` and `hr/employees/payroll-reconciliation` (a read, not an import UI). |
+
+---
+
 ## 1. Executive summary
 
-**HR has four real import/export capabilities today, and they're inconsistent with each other:**
+**HR has five real import/export capabilities today (four bulk, one single-record), and they're inconsistent with each other:**
 Attendance has a genuine staged bulk-import (upload → review → process, with row-level status).
 Payroll has an employee-reconciliation import (matches legacy IDs to HR employees). Two exports
 exist: a payroll-handoff export for finalized attendance, and a CSV export of a recruitment
@@ -32,8 +49,9 @@ dry-run mode, row-level field errors, a reusable `BulkImportResultDto`).
 
 **Three gaps stand out as genuinely significant, not just "nice to have":**
 
-1. **There is no bulk import for the core `Employee` entity at all.** No onboarding-a-whole-
-   workforce tool, and no correction tool for a partial legacy migration. This matters because
+1. **There is no bulk import for the core `Employee` entity** — only a single-record
+   `POST api/employees/import` with no screen. No onboarding-a-whole-workforce tool, and no
+   correction tool for a partial legacy migration. This matters because
    this session's own research already found live evidence of incomplete migrated data (a
    measured finding that only a small fraction of employees had a salary on record at one point).
    A proper import/correction tool is the direct fix for exactly that kind of gap — not a
@@ -53,14 +71,16 @@ dry-run mode, row-level field errors, a reusable `BulkImportResultDto`).
 
 | Capability | Entity | Direction | Where | Notes |
 |---|---|---|---|---|
-| Bulk attendance import | `StaffBulkAttendanceImport` | Import | `StaffBulkAttendanceImportsController` + frontend staging page | The most mature import in HR: upload → stage → review → process, with per-row status |
+| Single-record employee import | `Employee` | Import (one row per call) | `POST api/employees/import` (`EmployeesController.cs:162`, Admin-tier) → `EmployeeService.ImportEmployeeAsync` → `StaffNumberService.AcceptImportedAsync` | Accepts a supplied staff number verbatim and advances the tenant's number sequence past it. No screen. **The seam a bulk Employee import must wrap** — see §4.1 (added 2026-09-02) |
+| Bulk attendance import | `StaffBulkAttendanceImport` | Import | `StaffBulkAttendanceImportsController` (`api/staff-bulk-attendance-imports`) + screens `hr/attendance/imports[/new,/[id]]` | The most mature import in HR: upload → stage → review → process, with per-row status |
 | Payroll employee reconciliation import | `PayrollImportBatch` | Import | `PayrollController` (`imports/employee-reconciliation`) | Matches legacy employee numbers/IDs; tracks matched/unmatched/duplicate rows |
 | Job offer benefit import | `JobOfferBenefit` | Import (in-memory, not file-based) | `JobOfferController` | Copies benefits from a position's grade into an offer — not a bulk-file import, listed here only so it isn't mistaken for one |
 | Legacy file migration | Documents (not data records) | Import | `HrLegacyFileMigrationController` | Moves old files into the central DMS; dry-run supported; SuperAdmin/cross-tenant scope. Out of this document's scope (files, not entity data) but the dry-run pattern is worth copying |
-| Attendance-to-payroll export | `StaffAttendancePayrollExport` | Export | `StaffAttendancePayrollExportsController` | Finalized attendance for a closed pay period, with an audit trail and status tracking |
-| Recruitment shortlist export | N/A (query result) | Export (CSV) | `JobApplicationController` (`shortlist/export`) | Candidate name/email/phone/score/status for a vacancy |
-| Asset Register Report | `CompanyAsset` | Export (CSV/Excel) | `frontend/src/app/hr/assets/report/page.tsx` | Already covered in `HR-REPORTS-CATALOGUE.md` |
-| Legacy payroll reports | Various payroll entities | Export (CSV/Excel) | `frontend/src/app/reports/hr/page.tsx` | Already covered in `HR-REPORTS-CATALOGUE.md` |
+| Attendance-to-payroll hand-off | `StaffAttendancePayrollExport` | Hand-off **record** (no file) | `StaffAttendancePayrollExportsController` (`POST export`) | Finalized attendance for a closed pay period, with an audit trail and status tracking — it records *that* a hand-off happened; nothing is written to disk (corrected 2026-09-02) |
+| Recruitment shortlist export | N/A (query result) | Export (CSV) | `JobApplicationController` (`shortlist/export`) | Candidate name/email/phone/score/status for a vacancy — **the only CSV emitted by any HR controller** |
+| Asset Register Report | `CompanyAsset` | Print only | `frontend/src/app/hr/assets/report/page.tsx` + `GET api/assets/reports/register` | `window.print()`; **no CSV/Excel** (corrected 2026-09-02). Already covered in `HR-REPORTS-CATALOGUE.md` |
+| Legacy payroll reports | Various payroll entities | Export (CSV/Excel, client-side XLSX) | `frontend/src/app/reports/hr/page.tsx` ← `POST api/hr/payroll/runs/{runId}/oracle-report` | Payroll developer's; already covered in `HR-REPORTS-CATALOGUE.md` |
+| Dev/UAT bulk load | Whole HR dataset | Import (CLI, bypasses services) | `Program.cs` commands `seed-hr-all`, `seed-hr-demo`, `seed-hr-org-authority`; `scripts/New-UatDatabase.ps1` | Not a product feature — but it is how every current database was populated, and it is why the staff-number counter can be behind the data (§4.1) |
 
 **The one pattern worth standardizing on:** Finance's `IFixedAssetService.ImportAssetsFromExcelAsync(stream, fileName, dryRun)` — Excel upload, a `dryRun` flag that validates without persisting, and a `BulkImportResultDto` with row-level field errors (row number, field name, error message). HR's own two imports (Attendance, Payroll reconciliation) each built a bespoke version of the same idea with their own status enum — a good sign the concept is right, worth consolidating on one shared DTO shape going forward rather than a third bespoke version for the next entity.
 
@@ -99,14 +119,14 @@ Legend — **Priority**: 🔴 high · 🟡 medium · 🟢 low/optional.
 | `LeaveType`, `LeaveCategoryAllocation`, `LeaveAccrualPolicy` | Yes — initial policy bulk setup | No | 🔲 | 🟢 | |
 | `LeaveBalance` (opening balances) | **Yes** — carrying over every employee's leave balance at cutover is inherently a bulk, one-time-critical operation | Yes — same gap as the missing Leave Balance Report in `HR-REPORTS-CATALOGUE.md` §3.3 | 🔲 | 🔴 | Get this wrong once at go-live and it's wrong for every employee, permanently, unless corrected — treat as migration-critical |
 | `LeaveRequest`/register | No (transactional, created live) | Yes — same as the missing Leave Register in `HR-REPORTS-CATALOGUE.md` §3.3 | 🔲 | 🟡 | |
-| `PublicHoliday` | Yes — annual calendar bulk load, a common gap in ERP go-lives | No | 🔲 | 🟡 | Notably absent from what was found — worth confirming this isn't already handled elsewhere before building |
+| `PublicHoliday` (+ `HolidayCalendar`) | Yes — annual calendar bulk load, a common gap in ERP go-lives | Yes — the year's calendar for staff | Entity + per-holiday CRUD exist (`api/holiday-calendars`); no bulk load, no export | 🟡 | Corrected 2026-09-02 — it exists. TDC has **no calendar loaded** (`HR-OPEN-QUESTIONS-FOR-TDC.md` §3), which makes the bulk load the go-live blocker, not the entity. Payroll keeps a separate `PayrollHoliday` — settle which is authoritative before loading both |
 
 ### 3.4 Attendance
 
 | Entity | Import? | Export? | Status | Priority | Notes |
 |---|---|---|---|---|---|
 | `StaffAttendanceLog`/`StaffDailyAttendance` | ✅ Already covered (the staged bulk-import) | Yes — a general attendance register export distinct from the payroll handoff export, for HR's own analysis | Import ✅, export 🔲 | 🟡 | |
-| Biometric device feed | Confirmed: devices are registered and "sync" is tracked (a pending-count), but **no actual raw punch-data ingestion from a device was found** — worth confirming with whoever owns the physical devices whether data currently arrives some other way (direct DB write, a separate unlisted integration) before assuming this is a real gap | — | ⚠ unclear, needs confirmation | 🟡 | Flagged as a finding to verify, not a confirmed gap — do not build a webhook speculatively |
+| Biometric device feed | Confirmed 2026-09-02: `StaffAttendanceDevice` is registered with `LastSyncDate`/`PendingSyncCount` and `{id}/sync` is a bookkeeping stamp, not a pull; `EmployeeBiometric` enrol/revoke exists; `POST api/staff-attendance-logs/punch` takes the actor from the **token**, so it is a self-service punch, not a device feed. **No device-authenticated ingestion endpoint exists** — confirm with whoever owns the physical devices how data is meant to arrive before building | — | ⚠ needs TDC confirmation | 🟡 | Do not build a webhook speculatively; if one is needed it must authenticate the device, not a user |
 
 ### 3.5 Benefits & Medical
 
@@ -147,10 +167,14 @@ Legend — **Priority**: 🔴 high · 🟡 medium · 🟢 low/optional.
 
 ### 3.10 Safety, Health & Environment (SHE) — confirmed zero capability today
 
-Every one of the entities below is a genuine gap — SHE has **no import and no export anywhere**,
-confirmed by direct search. Given the module's own compliance nature (incident records, audit
-trails, contractor compliance), this is worth treating as a coherent block of work, not
-scattered one-offs.
+Every one of the entities below is a genuine gap — SHE has **no file import and no file export
+anywhere**, confirmed by direct search (re-confirmed 2026-09-02). It does produce report
+*artefacts* — `POST api/safety/audits/{id}/issue-report`, `GET api/safety/environmental/reviews/{id}/clearance-report`,
+and the auto-generated monthly environmental report with its own screens — so "SHE cannot
+produce a document" is wrong; "SHE cannot get a register into a file" is right. Given the
+module's own compliance nature (incident records, audit trails, contractor compliance), this is
+worth treating as a coherent block of work, not scattered one-offs. Module overview:
+`HR-SHE-INTEGRATION-AND-BOUNDARIES.md`.
 
 | Entity | Import? | Export? | Priority | Notes |
 |---|---|---|---|---|
@@ -187,6 +211,20 @@ numbers, invalid FK references to department/position/location, malformed dates)
 and a row-level result showing exactly which rows would fail and why — the same shape Finance
 already uses, not a new design.
 
+**The staff-number rule the importer must honour (added 2026-09-02).** Staff numbers are issued
+by a configurable register (`StaffNumberService`, lane 3b): under an auto-generating rule the
+ordinary create path **refuses** a supplied number (`ResolveForCreateAsync`), and the unique index
+on `(TenantId, EmployeeNumber)` is unfiltered, so soft-deleted leavers still occupy their numbers.
+`AcceptImportedAsync` is the sanctioned exception — it takes the supplied number verbatim and
+advances the counter past it (`AdvanceToAtLeastAsync`), best-effort, after the row commits. A bulk
+importer therefore must go **row by row through `ImportEmployeeAsync`** (or call
+`AcceptImportedAsync` per row) and finish with `ReconcileCounterAsync`; the repair endpoints are
+`GET api/reference-dimensions/staff-number-formats/{id}/counter` and `POST …/counter/reconcile`.
+Any load that bypasses this — SQL, the `seed-hr-*` CLI commands, a restore — leaves the counter
+behind the data, and the first real hire collides. `IsOnPayroll` (lane 3f) is the other field with
+a rule: off-payroll rows must carry an `OffPayrollReason` and no salary block, or the service
+refuses them.
+
 ### 4.2 Safety/SHE — a compliance-heavy module with no bulk tooling at all
 
 Sixty-plus entities, real regulatory stakes (incident submissions to authorities, audit trails,
@@ -201,7 +239,10 @@ and can plausibly reuse the same tooling once it exists.
 ### 4.3 No tenant-level data export
 
 `DataExportTools.tsx` in the frontend renders as though a "export all my data" feature exists —
-confirmed to be **mock data with no backend behind it**. This is worth flagging clearly rather
+confirmed to be **mock data with no backend behind it**, mounted only by the **Administration**
+reports page (`app/administration/reports/page.tsx`), so it is a platform screen rather than an HR
+one; relabelling it is the platform owner's call, raised here because HR data is what it implies
+it would export. This is worth flagging clearly rather
 than leaving it looking functional: anyone who clicks it today gets an illusion of a feature, not
 an error that says it isn't built yet. Three real reasons to eventually build the backend for it:
 a data-subject-access-request under data-protection obligations (already flagged as an open
@@ -238,7 +279,14 @@ not left as-is.
    records. This is the same semantic-audit-service gap already flagged in
    `HR-CROSS-MODULE-PATTERNS-SWEEP.md` §3.4, and import/export is exactly the kind of event that
    generic per-row audit logging doesn't capture well on its own.
-7. **Distinguish "opening balance" imports as their own category.** Leave balances, benefit
+7. **Go through the service, never the table** *(added 2026-09-02)*. Every HR aggregate has
+   rules that live in its service and nowhere else: the staff-number register (§4.1), the
+   payroll-membership gate (`IsOnPayroll`), tenant stamping (the DbContext auto-stamp is inert —
+   ported services set `TenantId` explicitly), soft-delete-aware number generators, and the
+   workflow adapters. An importer that writes rows directly reproduces the exact class of defect
+   the `seed-hr-*` commands already cause (a counter behind its data). Loop the create/import
+   service per row; accept the throughput cost.
+8. **Distinguish "opening balance" imports as their own category.** Leave balances, benefit
    enrollments, and payroll opening balances aren't ongoing operational imports — they're one-time
    (or rare, per-cutover) migration events that need to be gotten right once and are unusually
    painful to correct after the fact if wrong. Treat them with the highest validation rigor in

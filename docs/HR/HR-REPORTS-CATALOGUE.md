@@ -28,6 +28,27 @@ its own rather than one. §4 below has the corrected picture and the recommendat
 
 ---
 
+## ⚠ Vetting pass, 2026-09-02 — corrections
+
+Every route, service name and "missing" verdict was re-checked against the controllers and the
+`frontend/src/app/hr` tree. Corrections are applied inline; this is the audit trail.
+
+| Where | Verdict | Corrected fact |
+|---|---|---|
+| §1/§2.3/§5.9 — Asset Register Report "CSV built inline" / "CSV/Excel export" | **WRONG.** | `hr/assets/report/page.tsx` has `window.print()` and `print:hidden` only — no CSV, no XLSX. It does have a real backend, `GET api/assets/reports/register` (`AssetsController.cs:447`), which the doc called "bespoke frontend". The import/export catalogue repeated the error and is corrected too. |
+| §1 item 3 / §2.4 — "Thirteen dashboards" | Undercount. | The table lists 14; at least a dozen more dashboard/analytics reads exist (see the addendum under §2.4). |
+| §2.4 — `PipDashboardService`, `RecruitmentDashboardService` | **Do not exist.** | `PipDashboardController.cs:21-22` computes directly from `IPerformanceImprovementPlanService` + `ApplicationDbContext`; `RecruitmentDashboardController.cs:127-131` composes five services, and `RecruitmentAnalyticsService` backs `GET analytics`. |
+| §2.4 — `/hr/safety/performance/analytics` "(SHE monthly environmental)" | Wrong backend. | Backed by `ShePerformanceController` (`kpis/departmental`, `kpis/contractor-ranking`, `kpis/hazard-heatmap`), not the monthly environmental report. |
+| §1 — "23 Oracle reports" | Nuance. | The crosswalk lists 23; `reports/hr/page.tsx` carries 21 distinct `REP3_` codes. The data source is `POST api/hr/payroll/runs/{runId}/oracle-report` (`PayrollController.cs:403`) — payroll owner's file. |
+| §2.2/§4.1 — "`HrAwardsReportCatalogue` is HR's most reusable pattern, used exactly once" | Nuance that *strengthens* the recommendation. | It is a **platform** pattern: Inventory, Procurement (×2) and Quantity Survey each have a `*ReportCatalogue.cs` with their own `system://tdc/<module>/` prefix. HR has one definition; the mechanism is proven across four modules. |
+| §3 — several 🔲 "missing entirely" rows | **Overstated.** Registers exist as filterable APIs/screens; what is missing is export. | Leave balances (`GET api/leaves/balances`, screen `hr/leave/balances`); Attendance register (`StaffDailyAttendanceController`, `StaffMonthlyAttendanceSummariesController`, screens `hr/attendance/{daily,summaries,overtime}`); **Discipline case register** (`GET api/discipline/cases` + status/severity/offense/date filters, `with/outstanding-fine`, fines `fines/outstanding`, screen `hr/discipline/queues`); **Grievance register** (a literally-named `GET api/hr/employee-relations/register`, paged); Separation register (`GET api/hr/separations`, `retirements/upcoming`, `contract-expiries/upcoming`); Awards register (`GET api/awards` + paged + `pending/presentations`, screen `hr/awards/results`); Training certificate expiry (`training-completions/certificates/expiring`, `employee-certificates/expiring`); Asset insurance expiry (`assets/insurance/{expiring,expired,undated}`, screen `hr/assets/insurance`); Travel advances (`advances/employee/{id}/outstanding`, `advances/overdue-settlements`). Statuses corrected to 🟡 below. Still genuinely 🔲: Headcount (only `stats/*` counts), Leave *request* register (no all-requests list on `LeavesController`), Benefits enrollment register (only by-employee/by-policy), asset **warranty** expiry, CBA coverage. |
+| §3.17 — "9 filter routes", `/api/she/performance/...` | Undercount; wrong prefix. | `SafetyIncidentController` has **12** filtered GETs (status, severity, category, date-range, location, employee, for-employee, mine, requiring-investigation, open, lost-time, reportable-pending) + `number/{n}`. **Nothing is under `/api/she/`** — all 28 SHE controllers use `api/safety/*`; contractor ranking is `GET api/safety/performance/kpis/contractor-ranking`. Audits can *issue a report* (`POST audits/{id}/issue-report`) and reviews have a *clearance report* (`GET environmental/reviews/{id}/clearance-report`) — report artefacts exist; file exports do not. |
+| §4.6 — "extend `/reports/hr`" | Nuance. | A second landing already exists: `frontend/src/app/reports/human-resources/page.tsx` is a `ModuleReportLandingPage` whose only item links to `/reports/hr`. The hub shell exists and is empty — fill it, don't create a third. |
+| §4.5 — `FinanceReportAutomationService` recurrence Daily…Annually | Not verified. | Recipients and `NotifyRecipientsAsync` confirmed; the exact recurrence value list was not found on that service (the only `Recurrence` enum located is `RecurringJournal.cs`). Check before relying on it. |
+| Throughout — Payroll reports | Ownership. | Everything under `PayrollController`/`PayrollService`/`reports/hr/page.tsx` is the payroll developer's. HR adds nothing there; see `HR-PAYROLL-BOUNDARY.md`. |
+
+---
+
 ## 1. Executive summary
 
 **HR already has more reporting than a first glance suggests**, spread across three genuinely
@@ -53,7 +74,8 @@ different, independently-evolved patterns:
    a matching frontend page. This pattern is **consistently and successfully applied** across HR.
 4. Two more bespoke, one-off report pages: the **Asset Register Report**
    ([`frontend/src/app/hr/assets/report/page.tsx`](../../frontend/src/app/hr/assets/report/page.tsx),
-   print-optimised, CSV built inline) and the **EEO diversity-compliance report**
+   print-optimised via `window.print()` — **no CSV**, corrected 2026-09-02 — backed by
+   `GET api/assets/reports/register`) and the **EEO diversity-compliance report**
    ([`EeoReportPanel.tsx`](../../frontend/src/components/hr/recruitment/EeoReportPanel.tsx),
    read-only, per-vacancy).
 
@@ -98,7 +120,8 @@ because it's the preferred pattern for anything new.
 
 ### 2.3 Bespoke report pages (2)
 - **Asset Register Report** — filters (Type/Unit/Location/Status/As-of date), breakdowns by
-  status/type/condition/unit/location, watchlist counts, print-optimised CSS classes, inline CSV.
+  status/type/condition/unit/location, watchlist counts, print-optimised CSS classes. Print only;
+  no CSV (corrected 2026-09-02). Backend: `GET api/assets/reports/register`.
 - **EEO diversity-compliance report** — gender/age/internal-vs-external breakdown per vacancy at
   every pipeline stage (all applicants → shortlisted → rejected → hired), read-only.
 
@@ -108,22 +131,34 @@ because it's the preferred pattern for anything new.
 |---|---|---|
 | Attendance | `AttendanceDashboardService` | `/hr/attendance` |
 | Performance analytics | `HRCycleDashboardQueryService` | `/hr/performance/analytics` |
-| PIP (org-wide) | `PipDashboardService` | `/hr/performance/pip` |
+| PIP (org-wide) | `PipDashboardController` computes inline (no service) | `/hr/performance/pip` |
 | Medical | `MedicalDashboardService` | `/hr/medical/dashboard` |
 | Orientation | `OrientationDashboardService` | `/hr/orientation/dashboard` |
 | Safety/SHE | `SheDashboardService` | `/hr/safety/dashboard` |
-| Safety performance | (SHE monthly environmental) | `/hr/safety/performance/analytics` |
+| Safety performance | `ShePerformanceController` (`kpis/departmental`, `kpis/contractor-ranking`, `kpis/hazard-heatmap`) | `/hr/safety/performance/analytics` |
 
 **Correction, 2026-08-31:** SHE is not merely a dashboard the way this table implies. A follow-up
 field-level pass found real register endpoints (incident, audit, environmental review) and one
 fully-automated report (`SheMonthlyEnvironmentalReport`) — see the corrected §3.17.
 | Training analytics | `TrainingDashboardService` | `/hr/training/analytics` |
 | Training compliance | `TrainingDashboardService` | `/hr/training/compliance` |
-| Recruitment | `RecruitmentDashboardService` | `/hr/recruitment/dashboard` |
-| Succession | (succession services) | `/hr/succession/dashboard` |
-| Travel | (travel services) | `/hr/travel/dashboard` |
-| Separation analytics | (separation services) | `/hr/separations/analytics` |
-| Employee Relations analytics | (grievance services) | `/hr/employee-relations/analytics` |
+| Recruitment | `RecruitmentDashboardController` composes five services; `RecruitmentAnalyticsService` behind `GET analytics` | `/hr/recruitment/dashboard` |
+| Succession | `SuccessionPlanController` `GET dashboard` | `/hr/succession/dashboard` |
+| Travel | `StaffTravelRequestsController` dashboard read | `/hr/travel/dashboard` |
+| Separation analytics | `SeparationsController` analytics reads | `/hr/separations/analytics` |
+| Employee Relations analytics | `StaffGrievancesController` + `EmployeeRelationsAnalyticsService` | `/hr/employee-relations/analytics` |
+
+**Dashboards/analytics the table above omits (added 2026-09-02):** the HR home page itself is a
+metric-tile dashboard (`hr/page.tsx`) fed by Discipline `GET api/discipline/cases/dashboard` and
+Movements `GET api/staff-movements/dashboard`; Talent pool (`TalentPoolController`,
+`hr/recruitment/talent-pool`); Job architecture (`JobAnalysisController` → `hr/job-descriptions`
+and `/gaps`); Company/Unit goal dashboards; Employee stats (`EmployeesController` `stats/*`);
+Position-vacancy stats; Performance trend (`PerformanceAnalyticsController`); Leave compliance
+(`hr/leave/compliance`); SHE sustainability KPIs (`hr/safety/environmental/sustainability`), SHE
+corrective-action summary, and the SHE monthly-report pages
+(`hr/safety/environmental/monthly-reports`). Portal dashboards exist for candidates, employees
+and consultant clients. The pattern is applied more widely than the count suggests; the gap in §3
+is still export/print, not aggregation.
 
 ---
 
@@ -156,8 +191,8 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Leave Register** | Leave taken/approved/pending by employee/type/period | 🔲 | 🟡 |
-| **Leave Balance Report** | Entitlement/carried-over/used/available days by employee, org unit | 🔲 | 🟡 |
+| **Leave Register** | Leave taken/approved/pending by employee/type/period — `LeavesController` has only per-employee history and `pending-approvals/{managerId}`; no all-requests list | 🔲 | 🟡 |
+| **Leave Balance Report** | Entitlement/carried-over/used/available days by employee, org unit — `GET api/leaves/balances`, `employee/{id}/balances`, screen `hr/leave/balances`; no export (corrected 2026-09-02) | 🟡 | 🟡 |
 | **Leave Encashment Register** | `LeaveEncashment` payouts — ties to the Finance sweep's leave-encashment posting gap (row 23) | 🔲 | 🔴 |
 | **Leave Liability Report** | Aggregate `LeaveBalance.EncashedDays`/unused-day value — the balance-sheet-adjacent figure the Finance sweep flagged as unmodelled (row 24) | 🔲 | 🔴 |
 
@@ -165,7 +200,7 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Daily/Monthly Attendance Register** | Presence, lateness, absence, overtime by employee/department/period — `StaffMonthlyAttendanceSummary` already aggregates the data, it just isn't exposed as a register | 🔲 | 🟡 |
+| **Daily/Monthly Attendance Register** | Presence, lateness, absence, overtime by employee/department/period — `StaffDailyAttendanceController` (paged/date/status/overtime/late) and `StaffMonthlyAttendanceSummariesController` (year-month, pay-period) expose it; screens `hr/attendance/{daily,summaries,overtime}`; no export (corrected 2026-09-02) | 🟡 | 🟡 |
 | **Overtime Report** | Hours, approval status, cost implication — Oracle REP3_019 exists for Payroll's overtime; a live-system equivalent tied to `StaffDailyAttendance.OvertimeHours` does not | 🔲 | 🟡 |
 | **Exception/Regularization Report** | Outstanding `StaffAttendanceRegularization` requests, aging | 🔲 | 🟡 |
 
@@ -201,7 +236,7 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
 | **Long-Service Eligibility** | Already built (§2.2) — the reference pattern | ✅ | 🟢 |
-| **Awards Register** | All awards conferred, level, value, payment status | 🔲 | 🟡 |
+| **Awards Register** | All awards conferred, level, value, payment status — `GET api/awards` (+ paged, `employee/{id}`, `pending/presentations`), screen `hr/awards/results`; no export (corrected 2026-09-02) | 🟡 | 🟡 |
 | **Award Budget Utilization Report** | `AwardBudget` spent/reserved/available by type/year — same shape as the manpower/training budget gap in the Finance sweep | 🔲 | 🟡 |
 
 ### 3.9 Assets
@@ -210,20 +245,21 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 |---|---|---|---|
 | **Asset Register Report** | Already built (§2.3) | ✅ | 🟢 |
 | **Asset Surcharge Register** | Outstanding/recovered/waived surcharges by employee — an employee-receivable register, same shape as the Finance sweep's AR read-model gap | 🔲 | 🔴 |
-| **Warranty/Insurance Expiry Report** | Upcoming expiries — feeds `AssetReminder`, should also be a pull-able register | 🔲 | 🟡 |
+| **Insurance Expiry Report** | `assets/insurance/{expiring,expired,undated}` + screen `hr/assets/insurance` exist; no export (corrected 2026-09-02) | 🟡 | 🟡 |
+| **Warranty Expiry Report** | No endpoint (only a comment at `AssetsController.cs:1100`) — feeds `AssetReminder`, should also be a pull-able register | 🔲 | 🟡 |
 
 ### 3.10 Discipline
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Discipline Case Register** | All cases, offense, action, status, outcome — nothing found | 🔲 | 🔴 |
-| **Fine Recovery Report** | `StaffDisciplineFine` assessed/paid — the newly-surfaced Finance-sweep gap (fines have no Finance treatment either) | 🔲 | 🔴 |
+| **Discipline Case Register** | All cases, offense, action, status, outcome — `GET api/discipline/cases` with status/severity/offense/date-range filters and `with/outstanding-fine`; screen `hr/discipline/queues`; no export (corrected 2026-09-02 — "nothing found" was wrong) | 🟡 | 🔴 |
+| **Fine Recovery Report** | `StaffDisciplineFine` assessed/paid — `fines/outstanding` exists on the sub-entity controller; no register/export; fines have no Finance treatment either (Finance sweep row 42) | 🟡 | 🔴 |
 
 ### 3.11 Training & development
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Training Completion Report** | Dashboard exists (analytics + compliance); no formal register/certificate-expiry list | 🟡 | 🟡 |
+| **Training Completion Report** | Dashboard exists (analytics + compliance); certificate-expiry lists exist (`training-completions/certificates/expiring`, `employee-certificates/expiring`, plus orientation and SHE training equivalents); no export (corrected 2026-09-02) | 🟡 | 🟡 |
 | **Training Budget Utilization Report** | `TrainingBudget`/`TrainingBudgetTransaction` — same three-way-double-count caveat as the Finance sweep (§3.5 of that doc) | 🔲 | 🟡 |
 | **Service Bond Register** | Outstanding `TrainingServiceBond` obligations, at-risk-of-forfeit employees | 🔲 | 🔴 |
 
@@ -231,7 +267,7 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Separation/Exit Register** | Dashboard (analytics/turnover) exists; no formal register of every separation with reason/settlement status | 🟡 | 🔴 |
+| **Separation/Exit Register** | `GET api/hr/separations` (paged), `retirements/upcoming`, `contract-expiries/upcoming`, per-record `settlement`/`clearance`; dashboard exists; no export | 🟡 | 🔴 |
 | **Final Settlement Report** | `SeparationSettlementLine` payable/recoverable breakdown per leaver — same "largest single money event" the Finance sweep names | 🔲 | 🔴 |
 | **Clearance Outstanding Report** | Employees with unresolved `SeparationClearanceItem` rows blocking exit | 🔲 | 🟡 |
 
@@ -239,7 +275,7 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Grievance Register** | Dashboard (analytics) exists; no formal case-by-case register with resolution/escalation history | 🟡 | 🔴 |
+| **Grievance Register** | A literally-named paged register exists: `GET api/hr/employee-relations/register` (page size capped at 200); analytics dashboard too; no export (corrected 2026-09-02) | 🟡 | 🔴 |
 
 ### 3.14 Succession & talent
 
@@ -253,7 +289,7 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
 | **Travel Expense Register** | Dashboard exists (status); no formal claims/advances register — same reimbursement gap the Finance sweep names as unresolved | 🟡 | 🔴 |
-| **Outstanding Travel Advance Report** | `StaffTravelAdvance.UnsettledAmount` by employee, aging | 🔲 | 🔴 |
+| **Outstanding Travel Advance Report** | `advances/employee/{id}/outstanding`, `advances/overdue-settlements`, `advances/status/{status}` exist on `StaffTravelFinanceController`; no tenant-wide aging view or export (corrected 2026-09-02) | 🟡 | 🔴 |
 
 ### 3.16 Union / CBA
 
@@ -263,18 +299,21 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 
 ### 3.17 Safety, Health & Environment (SHE) — corrected 2026-08-31, more mature than first assumed
 
-Confirmed via a field-level pass: SHE has **60+ entities** and already exposes real, filterable
-register endpoints (`SafetyIncidentController`'s incident register alone has 9 filter routes —
-status, severity, category, date-range, location, employee, investigation-backlog, open) — this is
-ahead of most other HR sub-domains in list/register coverage. What it lacks is **export/print**,
-the same gap the rest of this document flags elsewhere.
+Confirmed via a field-level pass: SHE has **88 entity classes** (all in `StaffSafetyEntities.cs`)
+and 28 controllers, every one under `api/safety/*`, and already exposes real, filterable register
+endpoints (`SafetyIncidentController` alone has 12 filtered reads — status, severity, category,
+date-range, location, employee, for-employee, mine, requiring-investigation, open, lost-time,
+reportable-pending — plus `number/{n}`). This is ahead of most other HR sub-domains in
+list/register coverage. What it lacks is **file export**; it does already produce *report
+artefacts* (audit issue-report, environmental clearance report, the monthly environmental report).
+See `HR-SHE-INTEGRATION-AND-BOUNDARIES.md` for the module as a whole.
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Incident Register (export)** | The incident register already exists as a filterable API (`GET /api/safety/incidents` + 8 more filtered routes) with no CSV/PDF export — same gap as the Asset Register before it got one | 🟡 API exists, no export | 🔴 |
-| **SHE Audit Register (export)** | `SheAuditController` exposes the audit/finding trail; no export found | 🟡 API exists, no export | 🟡 |
-| **Environmental Review Register (export)** | `SheEnvironmentalReviewController`; no export found | 🟡 API exists, no export | 🟡 |
-| **Contractor SHE Ranking Report** | `GET /api/she/performance/kpis/contractor-ranking` already computes and ranks by compliance score, non-compliance count, pre-qualification score — a genuinely complete report, just not exportable/printable for a board pack | 🟡 API exists, no export | 🟡 |
+| **Incident Register (export)** | The incident register already exists as a filterable API (`GET api/safety/incidents` + 11 filtered routes) with no CSV/PDF export — same gap as the Asset Register | 🟡 API exists, no export | 🔴 |
+| **SHE Audit Register (export)** | `SheAuditController` exposes the audit/finding trail and `POST audits/{id}/issue-report` produces the audit report artefact; no register export | 🟡 API + report artefact, no export | 🟡 |
+| **Environmental Review Register (export)** | `SheEnvironmentalReviewController`; `GET environmental/reviews/{id}/clearance-report` exists per review; no register export | 🟡 API + clearance report, no export | 🟡 |
+| **Contractor SHE Ranking Report** | `GET api/safety/performance/kpis/contractor-ranking` (corrected 2026-09-02 — not `/api/she/`) already computes and ranks by compliance score, non-compliance count, pre-qualification score — a genuinely complete report, just not exportable/printable for a board pack | 🟡 API exists, no export | 🟡 |
 | **Monthly Environmental Report** | `SheMonthlyEnvironmentalReport` is auto-generated monthly (obligations compliance %, waste/recycling rate, incidents, audit findings, sustainability cost savings) — the closest thing in all of HR to a fully-automated Pattern-A-style report already working end to end | ✅ Built, auto-generated | 🟡 |
 | **Incident Insurance Claim Report** | `SafetyIncident.ClaimAmount`/`.AmountPaid` (added to `HR-FINANCE-ENTITY-SWEEP.md` row 60) has no reporting view of outstanding vs. paid claims | 🔲 | 🔴 |
 
@@ -292,7 +331,14 @@ the same gap the rest of this document flags elsewhere.
 
 ### 4.1 Pattern A — System report (register/list/compliance reports): **the recommended default**
 
-Model: `HrAwardsReportCatalogue.cs` + `ISystemReportProvider`.
+Model: `HrAwardsReportCatalogue.cs` + `ISystemReportProvider` (executed by
+`Api/Services/Reports/HrAwardsReportService.cs`, seeded by migration
+`20260821233000_TDC0703HrAwardsReportCatalogue`). *(Added 2026-09-02.)* This is a **platform**
+pattern, not an HR invention: `Inventory/InventoryStatutoryReportCatalogue.cs`,
+`Procurement/ProcurementStatutoryReportCatalogue.cs`, `Procurement/AuditComplianceReportCatalogue.cs`
+and `QuantitySurvey/QuantitySurveyStatutoryReportCatalogue.cs` each define reports the same way
+under their own `system://tdc/<module>/` prefix. Copy one of those when adding the second HR
+catalogue; the seeding migration is part of the pattern.
 
 ```csharp
 public sealed record HrAwardsSystemReportDefinition(
@@ -370,9 +416,12 @@ rather than building a second one from scratch.
 
 Today a user has to already know that payroll reports live at `/reports/hr`, the asset register
 lives at `/hr/assets/report`, and everything else is a dashboard scattered across `/hr/<area>/...`.
-**Recommendation:** extend the existing `/reports/hr` landing page (currently payroll-only) into a
-categorized hub for every report in §3 — grouped by the same sub-domain headings used there —
-so "where do I find X" has one answer. This is a navigation/UX change, not a new backend pattern.
+**Recommendation:** fill the hub shell that already exists — `frontend/src/app/reports/human-resources/page.tsx`
+is a `ModuleReportLandingPage` (`components/reports/module-report-landings.ts:87-92`) whose only
+item links to `/reports/hr`, the payroll-only page (which is the payroll developer's; leave it).
+Add every report in §3 to that landing, grouped by the same sub-domain headings used there, so
+"where do I find X" has one answer. This is a navigation/UX change, not a new backend pattern.
+*(Corrected 2026-09-02 — the earlier text would have created a third landing.)*
 
 ---
 
