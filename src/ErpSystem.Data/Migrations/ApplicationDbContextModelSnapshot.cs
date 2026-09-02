@@ -15195,6 +15195,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("EvidenceFrozenAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("ExpectedSourceLineCount")
+                        .HasColumnType("int");
+
                     b.Property<string>("EvidenceHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -15242,6 +15245,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("ResolvedAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal>("RoundingResidualFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -15265,6 +15271,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid>("SourceDocumentId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("SourceDocumentDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("SourceDocumentType")
                         .IsRequired()
@@ -15392,6 +15401,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("SourceLineId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("SourceLineManifestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("SourceRoute")
                         .IsRequired()
                         .HasMaxLength(150)
@@ -15415,6 +15428,8 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "RouteId", "SourceDocumentId");
+
+                    b.HasIndex("TenantId", "ResolvedAccountId");
 
                     b.HasIndex("TenantId", "SourceDocumentType", "SourceDocumentId", "SourceLineId")
                         .IsUnique()
@@ -169071,6 +169086,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSourceDimensionAssignment", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
                         .WithMany()
                         .HasForeignKey("FinanceDimensionSetId")
