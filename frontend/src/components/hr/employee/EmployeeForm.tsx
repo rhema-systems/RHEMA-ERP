@@ -29,6 +29,7 @@ import {
   STAFF_STATUS_OPTIONS,
   EMPLOYMENT_TYPE_OPTIONS,
   BLOOD_TYPE_OPTIONS,
+  OFF_PAYROLL_REASON_OPTIONS,
 } from '@/types/hr/employee';
 import type { EmployeePosition } from '@/types/hr/position';
 import type { OrganizationLevel } from '@/types/hr/organization';
@@ -69,6 +70,11 @@ export const employeeSchema = z.object({
   dateEmployed: opt,
   probationPeriodDays: z.coerce.number().int('Must be a whole number').min(0),
   isFullTime: z.boolean(),
+  // Payroll membership gates the salary block below. The server enforces the same rule
+  // (EmployeeService.ValidatePayrollMembership); these refinements just say it before the round trip.
+  isOnPayroll: z.boolean(),
+  offPayrollReason: opt,
+  offPayrollNote: opt,
   salary: opt,
   taxNumber: opt,
   socialSecurityNumber: opt,
@@ -80,6 +86,23 @@ export const employeeSchema = z.object({
   overtime: z.boolean(),
   badgeNumber: opt,
   notes: opt,
+}).superRefine((v, ctx) => {
+  if (v.isOnPayroll) {
+    const salary = v.salary?.trim() ? Number(v.salary) : null;
+    if (salary == null || !Number.isFinite(salary) || salary <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['salary'],
+        message: 'Enter the monthly basic salary, or take the employee off payroll.',
+      });
+    }
+  } else if (!v.offPayrollReason) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['offPayrollReason'],
+      message: 'Say how this employee is paid instead.',
+    });
+  }
 });
 
 export type EmployeeFormValues = z.infer<typeof employeeSchema>;
@@ -117,6 +140,9 @@ export const emptyEmployee: EmployeeFormValues = {
   dateEmployed: '',
   probationPeriodDays: 90,
   isFullTime: true,
+  isOnPayroll: true,
+  offPayrollReason: '',
+  offPayrollNote: '',
   salary: '',
   taxNumber: '',
   socialSecurityNumber: '',
@@ -276,6 +302,7 @@ export function EmployeeForm({
 
   const positionId = form.watch('positionId');
   const locationId = form.watch('locationId');
+  const isOnPayroll = form.watch('isOnPayroll');
   const managerId = form.watch('managerId') || null;
   const selectedPosition = positions.find((p) => p.id === positionId);
 
@@ -725,10 +752,67 @@ export function EmployeeForm({
 
           {/* Compensation & Tax */}
           <Section title="Compensation & Tax">
+            {/* Payroll membership decides what the rest of this section captures. Off-payroll
+                staff (consultants on invoice, interns on an allowance, secondees) keep their tax
+                identifiers — those are facts about the person — but have no salary and no payroll
+                switches, and the server refuses them if sent. */}
             <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
-              <Field label="Salary (GHS)" htmlFor="salary">
-                <Input id="salary" type="number" step="0.01" min={0} {...form.register('salary')} />
-              </Field>
+              <div className="sm:col-span-2 lg:col-span-4">
+                <SwitchRow
+                  id="isOnPayroll"
+                  label="On payroll — paid through the payroll run"
+                  checked={isOnPayroll}
+                  onChange={(v) => {
+                    form.setValue('isOnPayroll', v, { shouldValidate: true });
+                    if (v) {
+                      form.setValue('offPayrollReason', '');
+                      form.setValue('offPayrollNote', '');
+                    } else {
+                      form.setValue('salary', '');
+                      form.setValue('payTax', false);
+                      form.setValue('ssFund', false);
+                      form.setValue('grossUp', false);
+                      form.setValue('tier2Only', false);
+                      form.setValue('overtime', false);
+                    }
+                  }}
+                />
+              </div>
+              {!isOnPayroll && (
+                <>
+                  <Field
+                    label="How are they paid instead?"
+                    htmlFor="offPayrollReason"
+                    error={form.formState.errors.offPayrollReason?.message}
+                    className="sm:col-span-2"
+                  >
+                    <OptionalSelect
+                      id="offPayrollReason"
+                      value={form.watch('offPayrollReason') ?? ''}
+                      onChange={(v) => form.setValue('offPayrollReason', v, { shouldValidate: true })}
+                      placeholder="Select a reason"
+                      options={OFF_PAYROLL_REASON_OPTIONS}
+                    />
+                  </Field>
+                  <Field
+                    label="Note (who pays, under what arrangement)"
+                    htmlFor="offPayrollNote"
+                    className="sm:col-span-2"
+                  >
+                    <Input id="offPayrollNote" maxLength={500} {...form.register('offPayrollNote')} />
+                  </Field>
+                </>
+              )}
+              {isOnPayroll && (
+                <Field
+                  label="Monthly basic salary (GHS)"
+                  htmlFor="salary"
+                  error={form.formState.errors.salary?.message}
+                  hint="Placement on a grade and notch is recorded on the Salary tab after saving."
+                >
+                  <Input id="salary" type="number" step="0.01" min={0} {...form.register('salary')} />
+                </Field>
+              )}
               <Field label="Tax Number" htmlFor="taxNumber">
                 <Input id="taxNumber" {...form.register('taxNumber')} />
               </Field>
@@ -739,13 +823,22 @@ export function EmployeeForm({
                 <Input id="tinNumber" {...form.register('tinNumber')} />
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-              <SwitchRow id="payTax" label="Pay Tax" checked={form.watch('payTax')} onChange={(v) => form.setValue('payTax', v)} />
-              <SwitchRow id="ssFund" label="SS Fund" checked={form.watch('ssFund')} onChange={(v) => form.setValue('ssFund', v)} />
-              <SwitchRow id="grossUp" label="Gross Up" checked={form.watch('grossUp')} onChange={(v) => form.setValue('grossUp', v)} />
-              <SwitchRow id="tier2Only" label="Tier 2 Only" checked={form.watch('tier2Only')} onChange={(v) => form.setValue('tier2Only', v)} />
-              <SwitchRow id="overtime" label="Overtime" checked={form.watch('overtime')} onChange={(v) => form.setValue('overtime', v)} />
-            </div>
+            {isOnPayroll && (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                <SwitchRow id="payTax" label="Pay Tax" checked={form.watch('payTax')} onChange={(v) => form.setValue('payTax', v)} />
+                <SwitchRow id="ssFund" label="SS Fund" checked={form.watch('ssFund')} onChange={(v) => form.setValue('ssFund', v)} />
+                <SwitchRow id="grossUp" label="Gross Up" checked={form.watch('grossUp')} onChange={(v) => form.setValue('grossUp', v)} />
+                <SwitchRow id="tier2Only" label="Tier 2 Only" checked={form.watch('tier2Only')} onChange={(v) => form.setValue('tier2Only', v)} />
+                <SwitchRow id="overtime" label="Overtime" checked={form.watch('overtime')} onChange={(v) => form.setValue('overtime', v)} />
+              </div>
+            )}
+            {!isOnPayroll && (
+              <p className="text-xs text-muted-foreground">
+                Not on payroll: no salary, payroll switches or grade placement are recorded. Switching
+                this on later enrols the employee in Payroll; switching it off clears the pay figures
+                and closes any open grade placement.
+              </p>
+            )}
             <Field label="Notes" htmlFor="notes">
               <Textarea id="notes" rows={3} {...form.register('notes')} />
             </Field>

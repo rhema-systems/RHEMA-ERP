@@ -15,15 +15,18 @@ namespace ErpSystem.Api.Controllers.HR;
 public class EmployeesController : ControllerBase
 {
     private readonly IEmployeeService _service;
+    private readonly IPayrollMembershipService _payrollMembership;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<EmployeesController> _logger;
 
     public EmployeesController(
         IEmployeeService service,
+        IPayrollMembershipService payrollMembership,
         ICurrentUserService currentUserService,
         ILogger<EmployeesController> logger)
     {
         _service = service;
+        _payrollMembership = payrollMembership;
         _currentUserService = currentUserService;
         _logger = logger;
     }
@@ -1863,6 +1866,38 @@ public class EmployeesController : ControllerBase
             return ToClientError(ex);
         }
     }
+
+    // ── Payroll membership ────────────────────────────────────────────────────────────────
+    // HR's "on payroll" statement beside payroll's own profile. The flag itself is written through
+    // the ordinary create/update; these are the reads that show whether payroll agrees.
+
+    /// <summary>Both sides for one employee: HR's flag and pay basis, payroll's profile, and the discrepancy if any.</summary>
+    [HttpGet("{employeeId:guid}/payroll-status")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(EmployeePayrollStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeePayrollStatusDto>> GetPayrollStatus(Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        try
+        {
+            return Ok(await _payrollMembership.GetStatusAsync(employeeId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Every live employee where HR's statement and payroll's profile disagree, or where an
+    /// on-payroll statement has no pay basis. Compensation-level, not employee-level: it lists pay.
+    /// </summary>
+    [HttpGet("payroll-reconciliation")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
+    [ProducesResponseType(typeof(PayrollReconciliationDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PayrollReconciliationDto>> GetPayrollReconciliation(CancellationToken cancellationToken)
+        => Ok(await _payrollMembership.GetReconciliationAsync(cancellationToken));
 
     // NEW ENDPOINTS: Referees
     [HttpGet("{employeeId:guid}/referees")]

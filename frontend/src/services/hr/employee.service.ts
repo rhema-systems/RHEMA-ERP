@@ -7,6 +7,8 @@ import type {
   CreateEmployeeRequest,
   UpdateEmployeeRequest,
   TerminateEmployeeRequest,
+  EmployeePayrollStatus,
+  PayrollReconciliation,
 } from '@/types/hr/employee';
 import type {
   EmployeeContact,
@@ -106,6 +108,17 @@ class EmployeeService {
 
   getDetails(id: string): Promise<EmployeeDetail> {
     return apiService.get<EmployeeDetail>(`${this.baseUrl}/${id}/details`);
+  }
+
+  // ── Payroll membership ──────────────────────────────────────────────────────
+  // HR's on-payroll flag is written through create/update; these read it beside payroll's own
+  // profile so the screen can say whether payroll agrees.
+  getPayrollStatus(id: string): Promise<EmployeePayrollStatus> {
+    return apiService.get<EmployeePayrollStatus>(`${this.baseUrl}/${id}/payroll-status`);
+  }
+
+  getPayrollReconciliation(): Promise<PayrollReconciliation> {
+    return apiService.get<PayrollReconciliation>(`${this.baseUrl}/payroll-reconciliation`);
   }
 
   create(data: CreateEmployeeRequest): Promise<EmployeeDetail> {

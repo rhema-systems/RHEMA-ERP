@@ -1358,6 +1358,75 @@ document's number is worse than the collision it prevents.
 
 ---
 
+## 23. Payroll — the employee-profile upsert cannot create a NEW profile (FK cycle on insert)
+
+**What is broken.** `POST api/hr/payroll/employee-profiles` → `PayrollService.UpsertEmployeeProfileAsync`
+fails with SQL error 547 for every employee payroll does not already know:
+`FK_PayrollEmployeeProfiles_PayrollPaymentMethods_DefaultPaymentMethodId`. Updating an existing
+profile works; creating one does not. So payroll's own Employee Profiles screen can only maintain
+people who arrived through the legacy reconciliation import (`ImportLegacyEmployees…`, which
+inserts the profile row without a default payment method).
+
+**Why.** `UpsertPaymentMethods` (`PayrollService.cs` ≈13420–13512) adds the payment method to
+`profile.PaymentMethods` AND sets `profile.DefaultPaymentMethod` to it in the same unit of work —
+both branches, the "seed a default" one for an empty list and the "apply the supplied rows" one.
+The two rows point at each other (`PayrollPaymentMethod.EmployeeProfileId` →
+`PayrollEmployeeProfiles`, `PayrollEmployeeProfile.DefaultPaymentMethodId` → `PayrollPaymentMethods`),
+keys are client-generated Guids, and EF inserts the profile first with the default already set, so
+the profile insert references a method that does not exist yet.
+
+**What was proven (2026-09-02, Staging, `ErpSystemDB`).** Two calls with a fresh employee: one with
+`paymentMethods: []`, one with a single 100 % bank row. Both 500 with the same FK message in the
+API log. The HR harness `dev-harness/hr-payroll-membership` reproduces it on every run.
+
+**What it blocks.** The HR payroll-membership bridge (finish plan lane 3f): when HR marks an
+employee "on payroll", HR enrols them through this upsert, create-only. Until this is fixed the
+enrolment cannot go through payroll's code path. **HR's interim handling:** `PayrollMembershipService`
+tries the upsert first and, on failure, inserts the minimal profile itself in two saves (profile +
+salary basis + one default bank method, then the default pointer) and logs a warning naming this
+entry. The fallback is deliberately the same shape the upsert would have produced; remove it once
+the upsert creates profiles.
+
+**Hand-off.** A self-contained report for the payroll owner — reproduction, mechanism, fix options
+and what to tell HR afterwards — is `docs/HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md`, with a
+runnable one-file repro at `…\TDC ERPS\dev-harness\hr-payroll-membership\repro-payroll-profile-create.mjs` (outside the repo)
+(plain node, no dependencies; verified 2026-09-02, both variants 500).
+
+**What a fix needs.** In `UpsertPaymentMethods`, do not assign `DefaultPaymentMethod` while the
+profile is new — save the profile and its methods first, then set `DefaultPaymentMethodId` and
+save again (or make the default a computed "lowest active SequenceNo" and drop the column). Then
+delete the HR fallback.
+
+---
+
+## 24. Shared frontend auth — the `/auth/me` mapper dropped every field it did not name, so a linked user became "unlinked" after five minutes or a reload
+
+**What is broken.** `authService.getCurrentUser()` (`frontend/src/services/auth.ts`) re-mapped the
+`/auth/me` response into the frontend `User` object by copying a fixed list of twelve fields. Anything
+the server sent that was not on the list was discarded: `employeeId`, `currentTenantId` /
+`currentTenantCode` / `currentTenantName`, `accessibleTenants`, `authenticationProvider`,
+`mustChangePassword`, `temporaryPasswordExpiresAtUtc`. The list dates from the initial commit and was
+never extended as the backend grew.
+
+**Why it hid.** The login response is put straight into the React Query cache with every field, and
+the query's `staleTime` is five minutes. So for five minutes after signing in, or until the first page
+reload or new tab, the user object is complete. After that the query refetches through the mapper and
+the fields vanish. Any screen that reads them then misbehaves without an error: the self-service
+portal (`/me`) showed its "your account isn't linked" page to linked staff; the tenant switcher lost
+the user's tenant list; the must-change-password gate went quiet.
+
+**What was proven (2026-09-02, UAT demo database).** `hr.head` is linked to `TDC/00009` in `Users`,
+`/auth/me` returns `employeeId` for it, and the `/me` shell still rendered the unlinked notice once
+the five-minute cache had expired. Thirteen frontend screens read `user.employeeId`.
+
+**Fixed inline (exception to the rule below).** The change is a one-line `...userInfo` spread at the
+top of the mapped object, keeping the explicit fields after it, plus `employeeId` added to the
+`UserInfo` interface in `api.service.ts`. It was applied on the HR branch because the stakeholder demo
+runs the self-service portal and there was no HR-side workaround. Owning team: review that the spread
+is acceptable (the stored `localStorage.user` now carries the full server shape) and keep it.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

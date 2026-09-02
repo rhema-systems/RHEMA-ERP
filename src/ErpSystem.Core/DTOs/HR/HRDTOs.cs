@@ -39,6 +39,8 @@ public class EmployeeDto
     public bool IsActive { get; set; }
     public bool IsFullTime { get; set; }
     public bool IsExpatriate { get; set; }
+    /// <summary>Paid through the payroll run. False for invoice, allowance and secondee staff.</summary>
+    public bool IsOnPayroll { get; set; } = true;
     public DateOnly? DateEmployed { get; set; }
     public int? YearsOfService { get; set; }
     public bool CanBeAssignedToMaintenance { get; set; }
@@ -103,6 +105,9 @@ public class EmployeeDetailDto : EmployeeDto
     public bool GrossUp { get; set; }
     public bool Tier2Only { get; set; }
     public bool Overtime { get; set; }
+    // Payroll membership — IsOnPayroll itself is on the summary DTO.
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
     public string? BadgeNumber { get; set; }
     public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
@@ -244,6 +249,12 @@ public class CreateEmployeeDto
     public bool GrossUp { get; set; }
     public bool Tier2Only { get; set; }
     public bool Overtime { get; set; }
+    // Payroll membership. Defaults to ON so every existing caller (imports, harness fixtures, the
+    // hire path) keeps its meaning; a caller that says OFF must give a reason and must NOT send a
+    // salary or any switch above — the service refuses rather than silently dropping them.
+    public bool IsOnPayroll { get; set; } = true;
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
     public string? BadgeNumber { get; set; }
     // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
     // photo download still serves it, so accepting one on a write let a caller point a photo at
@@ -322,6 +333,11 @@ public class UpdateEmployeeDto
     public bool? GrossUp { get; set; }
     public bool? Tier2Only { get; set; }
     public bool? Overtime { get; set; }
+    // Payroll membership. Omit to leave it alone; false requires a reason and clears the pay
+    // figures; true clears the reason and (when no payroll profile exists yet) enrols the person.
+    public bool? IsOnPayroll { get; set; }
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
     public string? BadgeNumber { get; set; }
     // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
     // photo download still serves it, so accepting one on a write let a caller point a photo at
@@ -350,6 +366,8 @@ public class EmployeeSearchDto
     public bool? IsActive { get; set; }
     public bool? IsFullTime { get; set; }
     public bool? MaintenanceTechniciansOnly { get; set; }
+    /// <summary>True = paid through payroll only; false = off-payroll staff only.</summary>
+    public bool? IsOnPayroll { get; set; }
     public DateOnly? HiredAfter { get; set; }
     public DateOnly? HiredBefore { get; set; }
     public int? MinYearsOfService { get; set; }
@@ -1611,6 +1629,75 @@ public class UpdateEmployeePositionHistoryDto
 /// <summary>
 /// Employee salary assignment list projection.
 /// </summary>
+/// <summary>
+/// HR's payroll-membership statement for one employee, set beside payroll's own answer. The two
+/// are different facts from different owners: HR says whether the person SHOULD be paid through
+/// the run; payroll's profile says whether they ARE. This read puts both on one screen.
+/// </summary>
+public class EmployeePayrollStatusDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public bool IsOnPayroll { get; set; }
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
+
+    /// <summary>The HR-side pay basis: the flat salary, or the current grade/notch amount.</summary>
+    public decimal? HrMonthlyBasicPay { get; set; }
+    public bool HasActiveSalaryAssignment { get; set; }
+
+    /// <summary>Payroll's side, read from its employee profile. Null fields = no profile.</summary>
+    public bool HasPayrollProfile { get; set; }
+    public bool? PayrollActive { get; set; }
+    public decimal? PayrollMonthlyBasicSalary { get; set; }
+    public string? PayrollCurrencyCode { get; set; }
+
+    /// <summary>One of the <see cref="PayrollReconciliationIssue"/> names, or null when consistent.</summary>
+    public string? Issue { get; set; }
+}
+
+/// <summary>Where HR's statement and payroll's profile disagree, or where a statement has no basis.</summary>
+public enum PayrollReconciliationIssue
+{
+    /// <summary>HR says on payroll; payroll has no profile for the person.</summary>
+    AwaitingPayrollSetup = 1,
+    /// <summary>HR says on payroll; payroll's profile is switched off.</summary>
+    InactiveInPayroll = 2,
+    /// <summary>HR says off payroll; payroll's profile is still active — the run will pay them.</summary>
+    StillActiveInPayroll = 3,
+    /// <summary>HR says on payroll but has neither a salary nor a graded notch — the run would skip them silently.</summary>
+    NoPayBasis = 4,
+}
+
+public class PayrollReconciliationRowDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string? PositionTitle { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public EmploymentType EmploymentType { get; set; }
+    public StaffStatus StaffStatus { get; set; }
+    public bool IsOnPayroll { get; set; }
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public bool HasPayrollProfile { get; set; }
+    public bool? PayrollActive { get; set; }
+    public decimal? HrMonthlyBasicPay { get; set; }
+    public PayrollReconciliationIssue Issue { get; set; }
+}
+
+public class PayrollReconciliationDto
+{
+    public DateTime GeneratedAt { get; set; }
+    public int OnPayrollCount { get; set; }
+    public int OffPayrollCount { get; set; }
+    public int AwaitingPayrollSetup { get; set; }
+    public int InactiveInPayroll { get; set; }
+    public int StillActiveInPayroll { get; set; }
+    public int NoPayBasis { get; set; }
+    public List<PayrollReconciliationRowDto> Rows { get; set; } = new();
+}
+
 public class EmployeeSalaryAssignmentListDto
 {
     public Guid Id { get; set; }

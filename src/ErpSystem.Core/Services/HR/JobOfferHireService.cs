@@ -1174,6 +1174,10 @@ public class JobHireService : IJobHireService
 
     private readonly ILogger<JobHireService> _logger;
 
+    // Enrols the new employee in payroll once the hire has committed — the same create-only bridge
+    // the employee master uses, so a hire and a direct create arrive in payroll the same way.
+    private readonly IPayrollMembershipService _payrollMembership;
+
     public JobHireService(
         IJobHireRecordRepository hireRepository,
         IJobOfferRepository offerRepository,
@@ -1190,9 +1194,11 @@ public class JobHireService : IJobHireService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IStaffNumberService staffNumbers,
+        IPayrollMembershipService payrollMembership,
         ILogger<JobHireService> logger)
     {
         _staffNumbers             = staffNumbers;
+        _payrollMembership        = payrollMembership;
         _hireRepository           = hireRepository;
         _offerRepository          = offerRepository;
         _pipelineService          = pipelineService;
@@ -1453,6 +1459,12 @@ public class JobHireService : IJobHireService
             var empNumber = await _staffNumbers.ResolveForCreateAsync(
                 offer.EmploymentType, null, cancellationToken);
             var probDays  = offer.ProbationPeriodMonths.HasValue ? offer.ProbationPeriodMonths.Value * 30 : 90;
+
+            // On payroll when the offer gives the run something to pay from: a base salary, or a
+            // grade to resolve one. An offer with neither (a consultant engaged on a fee, an intern
+            // on an allowance) arrives off payroll, and HR states why on the employee record.
+            var hireGradeId  = offer.SalaryLevel?.SalaryGradeId ?? offer.Position?.SalaryGradeId;
+            var onPayroll    = offer.BaseSalary is > 0 || hireGradeId.HasValue;
             var employee  = new Employee
             {
                 TenantId            = entity.TenantId,
@@ -1476,7 +1488,15 @@ public class JobHireService : IJobHireService
                 DateEmployed        = DateOnly.FromDateTime(actualStartDate),
                 LocationId          = offer.LocationId,
                 LocationLevelId     = offer.LocationLevelId,
-                Salary              = offer.BaseSalary,
+                Salary              = onPayroll ? offer.BaseSalary : null,
+                IsOnPayroll         = onPayroll,
+                OffPayrollReason    = onPayroll ? null
+                                    : offer.EmploymentType is EmploymentType.Consultant or EmploymentType.Freelance
+                                        ? OffPayrollReason.PaidByInvoice
+                                    : offer.EmploymentType is EmploymentType.Internship
+                                        ? OffPayrollReason.Allowance
+                                        : OffPayrollReason.Other,
+                OffPayrollNote      = onPayroll ? null : "Hired without a base salary or salary grade on the offer; confirm how this person is paid.",
                 StaffStatus         = offer.ProbationPeriodMonths is > 0
                                           ? StaffStatus.Probation
                                           : StaffStatus.Active,
@@ -1557,8 +1577,9 @@ public class JobHireService : IJobHireService
 
             // 5 — EmployeeSalaryAssignment
             // Prefer the grade linked to the offer's salary level; fall back to the position's default grade.
+            // Gated on payroll membership like every other grade placement (EmployeeService.AssignSalaryAsync).
             var gradeId = offer.SalaryLevel?.SalaryGradeId ?? offer.Position?.SalaryGradeId;
-            if (gradeId.HasValue)
+            if (gradeId.HasValue && employee.IsOnPayroll)
             {
                 var salaryAssignment = new EmployeeSalaryAssignment
                 {
@@ -1663,6 +1684,15 @@ public class JobHireService : IJobHireService
         _logger.LogInformation(
             "Hire confirmed: {HireNumber}, Employee: {EmployeeId}",
             entity.HireNumber, entity.EmployeeId);
+
+        // After the commit, best-effort, create-only — the hire stands whether or not payroll can
+        // take the person today; a gap shows on the payroll reconciliation read.
+        if (entity.EmployeeId is { } hiredEmployeeId)
+        {
+            var hired = await _employeeRepository.GetByIdAsync(hiredEmployeeId);
+            if (hired != null)
+                await _payrollMembership.EnsurePayrollProfileAsync(hired, cancellationToken);
+        }
 
         return true;
     }

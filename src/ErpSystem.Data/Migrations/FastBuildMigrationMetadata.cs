@@ -269,3 +269,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260901120439_HrReferenceDataDimensions")] partial class HrReferenceDataDimensions { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260901124815_HrIdentificationExpirySweep")] partial class HrIdentificationExpirySweep { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260901174818_HrImagePathGovernance")] partial class HrImagePathGovernance { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260902074117_AddEmployeePayrollMembership")] partial class AddEmployeePayrollMembership { }

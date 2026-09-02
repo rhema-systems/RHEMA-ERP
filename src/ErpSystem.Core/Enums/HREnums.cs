@@ -2224,6 +2224,28 @@ public enum EmploymentType
     Freelance = 9
 }
 
+/// <summary>
+/// Why an employee is NOT paid through the payroll run. Recorded alongside
+/// <c>Employee.IsOnPayroll = false</c>, because a bare "off" cannot answer the question the payroll
+/// owner will ask of every active person missing from a run — and because the answer decides how
+/// that person IS paid (an invoice, an allowance, another employer).
+/// </summary>
+public enum OffPayrollReason
+{
+    /// <summary>Paid against invoices — consultants, freelancers, contractors on a fee.</summary>
+    PaidByInvoice = 1,
+    /// <summary>Paid a stipend or allowance outside the run — interns, national service personnel.</summary>
+    Allowance = 2,
+    /// <summary>Paid by a parent organisation — secondees, attached staff.</summary>
+    PaidByParentOrganisation = 3,
+    /// <summary>Unpaid — volunteers, honorary appointments.</summary>
+    Unpaid = 4,
+    /// <summary>Board and committee members remunerated by sitting allowance, not payroll.</summary>
+    BoardOrCommittee = 5,
+    /// <summary>Anything else; the note says what.</summary>
+    Other = 99
+}
+
 public enum JobApplicantCommunicationType
 {
     Email = 1,

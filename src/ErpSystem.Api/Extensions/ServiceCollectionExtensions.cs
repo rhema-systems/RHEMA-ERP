@@ -1001,6 +1001,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // HR Services - NOW ENABLED
             services.AddScoped<IEmployeeService, EmployeeService>();
+            // HR's payroll-membership statement beside payroll's own profile; the one place HR
+            // reaches into payroll (through IPayrollService's public upsert, create-only).
+            services.AddScoped<IPayrollMembershipService, PayrollMembershipService>();
 
             // Staff numbering is per-register configuration, not a compiled-in format.
             services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,

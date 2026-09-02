@@ -82,6 +82,17 @@ public class HrLetterRequestService : IHrLetterRequestService
         if (string.IsNullOrWhiteSpace(dto.Purpose))
             throw new InvalidOperationException("Say what you need the letter for.");
 
+        // A salary letter states what the payroll run pays. For somebody the run does not pay there
+        // is no such figure, and issuing the letter with the amount clause silently dropped would
+        // hand a lender a "salary confirmation" that confirms nothing.
+        if (dto.LetterType == HrLetterType.SalaryConfirmation)
+        {
+            var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+            if (employee != null && !employee.IsOnPayroll)
+                throw new InvalidOperationException(
+                    "A salary confirmation letter can only be issued to an employee who is on payroll.");
+        }
+
         // One open request per letter type: a second is almost always an anxious re-click, and
         // two identical letters issued days apart is a real problem for whoever receives them.
         var alreadyOpen = await Bare(tenantId).AnyAsync(
@@ -394,7 +405,7 @@ public class HrLetterRequestService : IHrLetterRequestService
             // ⚠ It is null unless BOTH the amount and its currency are known — the template then
             // drops the whole clause. "96,000.00" on a letter to a lender, with no unit, is worse
             // than saying nothing: the reader supplies a currency of their own choosing.
-            ["AnnualSalary"] = e?.Salary is { } salary && !string.IsNullOrWhiteSpace(currencyCode)
+            ["AnnualSalary"] = e is { IsOnPayroll: true, Salary: { } salary } && !string.IsNullOrWhiteSpace(currencyCode)
                 ? $"{currencyCode} {salary.ToString("N2", CultureInfo.InvariantCulture)}"
                 : null,
         };

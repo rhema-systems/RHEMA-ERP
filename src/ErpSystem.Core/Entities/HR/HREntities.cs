@@ -222,6 +222,23 @@ public class Employee : TenantEntity
 
     public bool Overtime { get; set; }
 
+    // ── Payroll membership ──────────────────────────────────────────────────────────────────
+    // Not every employee is paid through the payroll run: consultants are paid on invoice, interns
+    // and national service personnel on an allowance, secondees by their parent body. This is HR's
+    // statement of WHICH; membership of an actual run stays payroll's decision on its own profile
+    // (PayrollEmployeeProfile.PayrollActive). When false, Salary, the five switches above and the
+    // grade/notch assignment are not captured — see EmployeeService.
+
+    /// <summary>Whether this person is paid through the payroll run.</summary>
+    public bool IsOnPayroll { get; set; } = true;
+
+    /// <summary>Why not, when <see cref="IsOnPayroll"/> is false. Null while on payroll.</summary>
+    public OffPayrollReason? OffPayrollReason { get; set; }
+
+    /// <summary>Free text qualifying the reason (who pays, under what arrangement).</summary>
+    [MaxLength(500)]
+    public string? OffPayrollNote { get; set; }
+
     [MaxLength(50)]
     public string? BadgeNumber { get; set; }
 

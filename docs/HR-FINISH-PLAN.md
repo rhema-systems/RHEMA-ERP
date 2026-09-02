@@ -57,8 +57,34 @@ discipline one: "the token's id reaching the service is not the actor being stor
 actor never reached the service at all, and nothing static could see it because the write compiled,
 the payload validated, and only the database said no.**
 
-▶ **After lane 4 closes, the next unblocked work is lane 8a's prerequisites or the remaining 3d /
-2c rows; lane 2's memo still gates the money decisions.**
+▶ **Ledger truth pass re-run 2026-09-01 after lane 4** (lane 0). Section F was under-reporting by
+fourteen rows and now reads **6 `BUILD` + 4 `DECIDE`**. What is actually left in section F:
+
+| Row | Why it is still open |
+| --- | --- |
+| Exit interview question set | Needs schema — no `ExitInterviewQuestion` entity exists. |
+| Appointment letter templates | Needs a template store. Letters ARE produced (three `HrLetterRequest` kinds, plus `IOfferLetterService`) but every template is built into code, so HR cannot author one. |
+| Labour-law checklist | **Needs TDC** — the content is a legal question. The one lane-3 row that genuinely blocks on them. |
+| Mass application of benefits | The excluded `docs/HR/` bulk programme. Build the single-record path; record the bulk need there. |
+| Dependant student-status flag | Needs a column — `IsStudentDependent` is on the DTO and nowhere else, so it is a field a caller may send that vanishes. It gates `MaxChildAge` dependant eligibility. |
+| Recorded BMI is caller-supplied | Compute on save from the height and weight beside it, rather than adding an input. |
+
+⚠ **FOUND 2026-09-02 by the demo rehearsal, and it is the biggest finding this plan has recorded:
+the platform shipped NO workflow definitions for any HR entity type.** `seed-workflows` installed
+65 definitions — finance, estate, projects, procurement — and not one for HR. Every HR area closed
+green because each dev-harness suite publishes its own definition before it runs; on a database
+built from the seeders alone, submitting a requisition, a travel request, a movement, a
+disciplinary decision or a resignation answered *"No active workflow definition found for entity
+type"*. The rehearsal was the first time the seeded database was ever used the way a user would.
+**Fixed:** `DatabaseSeedingService.EnsureHrWorkflowsSeededAsync` seeds 25 role-based
+Draft → PendingApproval → Approved definitions inside `seed-workflows`. Two residues: (1) the
+workflow **entity-type catalogue** is still seeded only by `POST /api/Workflow/entity-types/seed`
+(needs a tenant user), so a CLI path is owed; (2) the definitions route on ROLES, so "the line
+manager approves" is "anyone in the Manager role approves" until cross-module #3 (conditional
+routing never routes) is fixed — the per-record checks in each service do the narrowing today.
+
+▶ **Next unblocked work: lane 8a's back-fill** (Leave, Compensation, Training, Medical, SHE into
+the Finance register — Medical first, it has a live pay path). **One decision is owed: D-13.**
 
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
 `GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job
@@ -161,8 +187,49 @@ argues with a document that disagrees with the code.
       **Done**: `SeparationsController` (29 of 31 wired) and `EmployeeCompetencyController`
       (3 of 4) are now enumerated checklists.
 
+- [x] **Second truth pass — section F re-verified against source, 2026-09-01 (after lane 4).**
+      ⚠ **The table was under-reporting by fourteen rows.** Lane 3 closed them and recorded assertion
+      counts against them in this plan; the ledger's section F table still read `BUILD` for every
+      one, and lane 3a's own checkboxes were unticked inside a section header that said **DONE ·
+      47 assertions ×2**. Nobody had lied; the row-level bookkeeping simply never followed the
+      section-level claim. **Definition-of-done item 3 is measured against that table**, so the
+      remaining work looked roughly four times larger than it is.
+      <br>Each of the fourteen was re-verified in source before being flipped, and the six that
+      remain were re-verified as genuinely open — not assumed from the plan's prose, which is the
+      document that was wrong. Section F now reads **6 `BUILD` + 4 `DECIDE`**, from 24 + 4.
+      <br>⚠ **The lesson, and it is the same one this lane exists for:** a section header that says
+      DONE is not the same claim as the rows inside it, and a ledger row is stale until something
+      re-reads the code. The first pass (2026-08-31) verified section F *before* lane 3 built
+      against it and was right at the time; nothing re-verified it *after*. **A truth pass has to
+      run after the building, not only before it.**
+
+- [x] **⚠⚠ The ledger's generator would have destroyed the ledger — found 2026-09-01 by the same
+      pass.** `docs/HR-CLOSURE-LEDGER.md` began as the output of
+      `scripts/hr-coverage/04_build_ledger.py`, and its own banner told every session to edit the
+      generator instead of the file. Nobody did — lane 5a, 3a-ii, 6, 4 and this pass all edited the
+      artefact. The two had drifted so far that **re-running the generator deleted 697 lines**: the
+      C2 build checklists, section E2's classification pass, the contract-versioning design note,
+      and the ⛔ **"THREE RESERVED BY DECISION, DO NOT DROP"** section, which is the only thing
+      standing between a future session and dropping three live columns.
+      <br>⚠ **This is not a documentation problem, it is a schema hazard**, and the instruction that
+      caused it was printed at the top of the file being destroyed. Two things were wrong at once:
+      the guidance was obsolete, and following it was destructive.
+      <br>Fixed three ways. The generator now writes a **companion** to
+      `scripts/hr-coverage/out/HR-CLOSURE-LEDGER.generated.md` (gitignored) and cannot touch the
+      ledger — proven by md5 across a run. The ledger's banner now says it is hand-curated and how
+      to reconcile. And today's section A rows, all 38 section F rows and D-40 were **ported back
+      into the generator**, so the companion stays a useful diff rather than noise.
+      <br>⚠ **A near-miss worth recording:** restoring the ledger with `git checkout --` after the
+      bad regeneration silently reverted it to the *staged* version and dropped this pass's own
+      corrections. The working copy was only recovered because a backup had been taken first.
+      **Copy before you regenerate, not after.**
+- [x] **Instruments re-run 2026-09-01** (they were four commits stale). Write-DTO gaps **69 across
+      27 DTOs → 24 across 13**, lane 5b's 47 fields leaving on their own; endpoints 2124 → 2157 as
+      lanes 3a-ii/6/4 added routes. Headline numbers refreshed in the ledger.
+
 **Done when:** ~~the queue reads 3 BUILD, and no controller-level disposition names an endpoint that
-no longer exists.~~ ✅ **Both hold as of 2026-08-31.**
+no longer exists.~~ ✅ **Both hold as of 2026-08-31.** Section F re-verified and the generator made
+non-destructive 2026-09-01.
 
 ---
 
@@ -368,16 +435,24 @@ one schema change, one set of screens, one harness run.
 
 ### 3a — Employee record fields · ✅ **DONE 2026-09-01** · 47 assertions ×2
 
-- [ ] Disability tick and description sit on `EmployeeDependent`, not `Employee` — **wrong entity,
-      not merely absent**. Moving it is a migration plus a back-fill, not a new field.
-- [ ] Hometown absent from the employee record. ✅ *verified 2026-08-31 — no `Hometown` anywhere in
-      `Entities/HR/`.*
-- [ ] Gender `Other` has no description field.
-- [ ] Guarantor has no guaranteed amount and no photograph.
-- [ ] Referees cannot carry a reference letter. ⚠ Goes through the controlled upload gate, not a
-      `filePath` string — see 3c.
-- [ ] Expatriate: no issue dates, no resident permit, no family members (`FamilyAccompanying` is a
-      bare bool today).
+- [x] Disability tick and description sit on `EmployeeDependent`, not `Employee` — **DUPLICATED, not
+      moved** (decision 2026-09-01): `HasDisability`/`DisabilityDescription` now sit on both
+      `Employee` (`HREntities.cs:89`) and `EmployeeDependent` (`:1117`). A disabled dependant is a
+      separate fact from a disabled employee, so moving it would have destroyed information.
+- [x] Hometown absent from the employee record — `Employee.Hometown` (`HREntities.cs:75`) and all
+      three DTOs. ⚠ Nullable-means-not-supplied, so `hometown: null` leaves the old value; that is
+      the house convention the neighbouring fields already follow.
+- [x] Gender `Other` has no description field — `GenderDescription` on the employee DTOs and on
+      `EmployeeGuarantor`.
+- [x] Guarantor has no guaranteed amount and no photograph — `AmountGuaranteed` +
+      `AmountGuaranteedCurrencyCode` (validated against Finance's currency master) and the photograph
+      through the controlled upload gate. Guarantors **sum** against the position's requirement.
+- [x] Referees cannot carry a reference letter — `EmployeeReferee.Letter{FileUploadRecordId,
+      DocumentRecordId, DocumentVersionId, FileName, MimeType, FileSizeBytes}`, through the
+      controlled upload gate rather than a `filePath` string.
+- [x] Expatriate: no issue dates, no resident permit, no family members — `WorkPermitIssueDate` and
+      the permit dates on the expatriate record, plus an `ExpatriateFamilyMember` entity carrying its
+      own resident-permit number and dates. `FamilyAccompanying` now says who.
 
 **Done 2026-09-01.** Backend, screens and harness (`hr-employee-docs/run-lane3a.mjs`, 47
 assertions, green twice; lane 3c re-run 47/47, no regression). Screens: the three new employee
@@ -1152,6 +1227,76 @@ declared finished without pretending these are closed.
       overload signature") on a clean tree, so **every frontend type error in every module is
       invisible**. Slices are checked against scoped tsconfigs meanwhile. Nobody has found the
       offending file; cross-module defect #20.
+
+---
+
+## Lane 3f — Payroll membership: "not every employee is on payroll" (built 2026-09-02, awaiting build + harness)
+
+**The requirement.** Some employees are not paid through the payroll run — consultants on invoice,
+interns and national service personnel on an allowance, secondees paid by their parent body, board
+members on a sitting allowance. HR must be able to say so, and the salary block must only be
+captured for people the run pays.
+
+**The design, and why.** Two facts with two owners, never collapsed into one column:
+
+| | Owner | Where |
+| --- | --- | --- |
+| *Should* this person be paid through the run? | HR | `Employee.IsOnPayroll` + `OffPayrollReason` + `OffPayrollNote` |
+| *Is* this person in the run? | Payroll (another developer's module) | `PayrollEmployeeProfile.PayrollActive` |
+
+HR reaches into payroll **exactly once, create-only, through payroll's own published upsert**
+(`PayrollMembershipService.EnsurePayrollProfileAsync`): when HR puts someone on payroll and payroll
+has no profile for them, one is created from what the employee record already says. Never an update
+(the upsert is a replace-set over payment methods and components), never a deactivation (dropping
+someone from a run mid-month is payroll's call). Disagreement is *reported*, on
+`GET api/hr/Employees/payroll-reconciliation` and on the employee's `payroll-status`, in four named
+shapes: `AwaitingPayrollSetup`, `InactiveInPayroll`, `StillActiveInPayroll`, `NoPayBasis`.
+
+**The gate is refusal, not silent dropping.** An off-payroll create or update that carries a salary
+or any of the five payroll switches is refused with a message; a reason is required. Flipping
+on→off clears the figures and **closes** (never deletes) any open grade/notch placement; flipping
+off→on clears the reason and enrols. The grade/notch assignment (`POST salary-assignments`) is
+gated on the flag — the user's call, 2026-09-02 — as is a staff movement carrying a salary or a
+grade (refused at create, and again at apply in case the flip happened during approval). Readers:
+`GetMonthlyBasicPayAsync` returns 0 off payroll; a salary-confirmation letter request is refused;
+the hire path sets the flag from whether the offer carried a base salary or a grade.
+
+⚠ **One rule deliberately NOT enforced server-side:** on payroll does not *require* a salary. The
+hire path, imports and every harness fixture create employees before the pay basis is known, and the
+consequence (a run skips a zero basis silently) is what `NoPayBasis` on the reconciliation read
+exists to catch. The form requires it; the API reports it.
+
+**Screens.** Employee form: the "On payroll" switch heads the Compensation & Tax section; the
+salary and switches render only when on, the reason and note only when off. Detail page: payroll
+badge, "In Payroll module" (payroll's side), the named issue, and the Salary tab read-only with a
+banner off payroll. List: payroll filter + "Not on payroll" tag. New `/hr/employees/payroll-reconciliation`.
+
+**Demo data.** `TdcDemoWorkforceSeeder` now writes `IsOnPayroll`, carves the four most junior posts
+into three NSS personnel (allowance) and one contractor (invoice), and writes payroll's employee
+profile + salary basis + default bank method for everyone on payroll — so the reconciliation screen
+opens clean on demo day and the payroll run has people to pay. Headcount unchanged (103).
+
+**✅ Verified 2026-09-02.** `20260902074117_AddEmployeePayrollMembership` applied and checked in the
+database (three columns, default constraint, history row; the backfill marked 3 consultant/freelance
+rows off payroll out of 1,598 live). `dev-harness/hr-payroll-membership/run-payroll-membership.mjs`:
+**84 / 84, twice.** No-regression: hr-movements slice 4 (38/38). hr-w3-permissions slice 11 reads
+133/142, and the nine are the suite's own fixture assumption — it takes the FIRST paged employee as
+the one linked to `w3.employee`, and that slot is now the estate fixture "Samuel Accounts"
+(proven by comparing the token's `employee_id` with the list); not a regression.
+
+⚠ **The lane's real finding is cross-module defect #23:** payroll's employee-profile upsert cannot
+create a NEW profile at all (FK cycle profile ↔ default payment method inside one insert, with or
+without a supplied payment method). Every HR enrolment in the harness went through the fallback —
+`PayrollMembershipService` tries payroll's upsert, and on failure inserts the same minimal shape
+itself in two saves, logging a warning naming the defect. Remove the fallback when payroll fixes
+the upsert. Recorded in `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
+
+Also learned: this database issues **Consultant** staff numbers from its own series and refuses a
+supplied one — the register rule from lane 3b working as designed; fixtures must let it issue.
+
+**Recorded, not fixed:** `Employee.Salary` is read as *monthly* by `EmolumentService` and by this
+lane's payroll basis, but the salary-confirmation letter prints it as `AnnualSalary`. One of the two
+is wrong; the letter is the likelier. Decide with TDC which unit the flat figure holds.
 
 ---
 

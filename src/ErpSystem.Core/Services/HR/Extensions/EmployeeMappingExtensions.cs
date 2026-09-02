@@ -46,6 +46,7 @@ public static class EmployeeMappingExtensions
             IsActive = e.IsActive,
             IsFullTime = e.IsFullTime,
             IsExpatriate = e.IsExpatriate,
+            IsOnPayroll = e.IsOnPayroll,
             DateEmployed = e.DateEmployed,
             YearsOfService = e.YearsOfService,
             CanBeAssignedToMaintenance = e.CanBeAssignedToMaintenance,
@@ -83,6 +84,7 @@ public static class EmployeeMappingExtensions
             IsActive = e.IsActive,
             IsFullTime = e.IsFullTime,
             IsExpatriate = e.IsExpatriate,
+            IsOnPayroll = e.IsOnPayroll,
             DateEmployed = e.DateEmployed,
             YearsOfService = e.YearsOfService,
             CanBeAssignedToMaintenance = e.CanBeAssignedToMaintenance,
@@ -133,6 +135,8 @@ public static class EmployeeMappingExtensions
             GrossUp = e.GrossUp,
             Tier2Only = e.Tier2Only,
             Overtime = e.Overtime,
+            OffPayrollReason = e.OffPayrollReason,
+            OffPayrollNote = e.OffPayrollNote,
             BadgeNumber = e.BadgeNumber,
             Notes = e.Notes,
             LastPromotionDate = e.LastPromotionDate,
@@ -201,6 +205,7 @@ public static class EmployeeMappingExtensions
         to.IsActive = from.IsActive;
         to.IsFullTime = from.IsFullTime;
         to.IsExpatriate = from.IsExpatriate;
+        to.IsOnPayroll = from.IsOnPayroll;
         to.DateEmployed = from.DateEmployed;
         to.YearsOfService = from.YearsOfService;
         to.CanBeAssignedToMaintenance = from.CanBeAssignedToMaintenance;
@@ -251,6 +256,8 @@ public static class EmployeeMappingExtensions
         to.GrossUp = from.GrossUp;
         to.Tier2Only = from.Tier2Only;
         to.Overtime = from.Overtime;
+        to.OffPayrollReason = from.OffPayrollReason;
+        to.OffPayrollNote = from.OffPayrollNote;
         to.BadgeNumber = from.BadgeNumber;
         to.Notes = from.Notes;
         to.LastPromotionDate = from.LastPromotionDate;
@@ -353,6 +360,11 @@ public static class EmployeeMappingExtensions
             GrossUp = dto.GrossUp,
             Tier2Only = dto.Tier2Only,
             Overtime = dto.Overtime,
+            // Membership is validated in EmployeeService before this runs (an off-payroll create
+            // carrying a salary is refused there); here the fields are simply carried.
+            IsOnPayroll = dto.IsOnPayroll,
+            OffPayrollReason = dto.IsOnPayroll ? null : dto.OffPayrollReason,
+            OffPayrollNote = dto.IsOnPayroll ? null : NullIfBlank(dto.OffPayrollNote),
             BadgeNumber = dto.BadgeNumber,
             // ⚠ PicturePath deliberately NOT set from the DTO — see Apply below.
             Notes = dto.Notes,
@@ -1196,6 +1208,9 @@ public static class EmployeeMappingExtensions
         if (dto.ChangeReason.HasValue) h.ChangeReason = dto.ChangeReason.Value;
         if (dto.Notes != null) h.Notes = dto.Notes;
     }
+
+    private static string? NullIfBlank(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public static EmployeeSalaryAssignmentListDto ToListDto(this EmployeeSalaryAssignment s)
         => new()

@@ -32,10 +32,12 @@ public class EmployeeService : IEmployeeService
         ICurrentUserProvider currentUserProvider,
         HrCurrencyBridge currencies,
         IStaffNumberService staffNumbers,
+        IPayrollMembershipService payrollMembership,
         ILogger<EmployeeService> logger)
     {
         _currencies = currencies;
         _staffNumbers = staffNumbers;
+        _payrollMembership = payrollMembership;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -55,6 +57,10 @@ public class EmployeeService : IEmployeeService
     // Which staff number a new employee gets is the REGISTER's decision, not this service's, and
     // not a compiled-in format. See StaffNumberService.
     private readonly IStaffNumberService _staffNumbers;
+
+    // Whether the person is paid through the payroll run is HR's statement; whether payroll runs
+    // them is payroll's. This is the bridge, and the only place HR reaches into payroll.
+    private readonly IPayrollMembershipService _payrollMembership;
 
     private Guid GetTenantId()
     {
@@ -185,6 +191,9 @@ public class EmployeeService : IEmployeeService
             throw new ArgumentException("Location not found or inactive.");
 
         await ValidatePayrollFlagsAsync(dto.PayTax, dto.SSFund, dto.GrossUp, dto.Tier2Only, dto.Overtime, cancellationToken);
+        ValidatePayrollMembership(
+            dto.IsOnPayroll, dto.OffPayrollReason, dto.Salary,
+            dto.PayTax || dto.SSFund || dto.GrossUp || dto.Tier2Only || dto.Overtime);
 
         if (dto.ManagerId.HasValue)
         {
@@ -206,6 +215,11 @@ public class EmployeeService : IEmployeeService
         }, cancellationToken);
 
         _logger.LogInformation("Employee created: {EmployeeNumber} ({EmployeeId})", employeeEntity.EmployeeNumber, employeeEntity.Id);
+
+        // After the commit, on purpose: the employee exists whether or not payroll can take them
+        // today, and a failed enrolment is reported by the reconciliation read, not by failing
+        // the hire. Create-only — see PayrollMembershipService.
+        await _payrollMembership.EnsurePayrollProfileAsync(employeeEntity, cancellationToken);
 
         var created = await _employeeRepository.GetByIdWithDetailsAsync(employeeEntity.Id);
         if (created == null) throw new InvalidOperationException("Employee created but could not be reloaded.");
@@ -339,6 +353,18 @@ public class EmployeeService : IEmployeeService
         var overtime = dto.Overtime ?? employee.Overtime;
         await ValidatePayrollFlagsAsync(payTax, ssFund, grossUp, tier2Only, overtime, cancellationToken);
 
+        // Payroll membership. The rule is checked against what the record will look like AFTER
+        // this update, so an off-payroll employee cannot be handed a salary by a payload that
+        // simply omits the flag.
+        var wasOnPayroll = employee.IsOnPayroll;
+        var willBeOnPayroll = dto.IsOnPayroll ?? employee.IsOnPayroll;
+        var reasonAfter = dto.OffPayrollReason ?? employee.OffPayrollReason;
+        ValidatePayrollMembership(
+            willBeOnPayroll, reasonAfter,
+            dto.Salary ?? (willBeOnPayroll ? employee.Salary : null),
+            (dto.PayTax ?? false) || (dto.SSFund ?? false) || (dto.GrossUp ?? false)
+                || (dto.Tier2Only ?? false) || (dto.Overtime ?? false));
+
         // Track position changes for history
         var oldPositionId = employee.PositionId;
         var isPositionChanging = dto.PositionId.HasValue && dto.PositionId.Value != oldPositionId;
@@ -346,6 +372,8 @@ public class EmployeeService : IEmployeeService
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
         if (!string.IsNullOrWhiteSpace(dto.EmailAddress))
             employee.EmailAddress = NormalizeEmail(dto.EmailAddress);
+
+        await ApplyPayrollMembershipAsync(employee, dto, wasOnPayroll, willBeOnPayroll, cancellationToken);
 
         await _employeeRepository.UpdateAsync(employee);
 
@@ -391,6 +419,11 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Employee updated: {EmployeeId}", employeeId);
+
+        // Only when the caller SAID on-payroll (the form always does; an API caller that omits the
+        // flag is editing something else and should not create payroll rows as a side effect).
+        if (dto.IsOnPayroll == true && employee.IsOnPayroll)
+            await _payrollMembership.EnsurePayrollProfileAsync(employee, cancellationToken);
 
         var updated = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
         if (updated == null) throw new InvalidOperationException("Employee updated but could not be reloaded.");
@@ -673,6 +706,7 @@ public class EmployeeService : IEmployeeService
         if (searchCriteria.IsActive.HasValue) q = q.Where(e => e.IsActive == searchCriteria.IsActive);
         if (searchCriteria.IsFullTime.HasValue) q = q.Where(e => e.IsFullTime == searchCriteria.IsFullTime);
         if (searchCriteria.MaintenanceTechniciansOnly == true) q = q.Where(e => e.CanBeAssignedToMaintenance);
+        if (searchCriteria.IsOnPayroll.HasValue) q = q.Where(e => e.IsOnPayroll == searchCriteria.IsOnPayroll);
         if (searchCriteria.HiredAfter.HasValue) q = q.Where(e => e.DateEmployed >= searchCriteria.HiredAfter);
         if (searchCriteria.HiredBefore.HasValue) q = q.Where(e => e.DateEmployed <= searchCriteria.HiredBefore);
 
@@ -1925,6 +1959,7 @@ public class EmployeeService : IEmployeeService
     {
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
+        await RequireOnPayrollAsync(dto.EmployeeId, cancellationToken);
 
         if (dto.EffectiveDate == default) throw new ArgumentException("EffectiveDate is required.");
 
@@ -1959,6 +1994,7 @@ public class EmployeeService : IEmployeeService
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Salary assignment not found.");
+        await RequireOnPayrollAsync(entity.EmployeeId, cancellationToken);
 
         dto.Apply(entity);
         await repo.UpdateAsync(entity);
@@ -2485,6 +2521,98 @@ public class EmployeeService : IEmployeeService
     #endregion
 
     #region 5) Payroll, Tax & Contract Logic
+
+    // ── Payroll membership ─────────────────────────────────────────────────────────────────
+    //
+    // "On payroll" gates the salary, the five payroll switches and the grade/notch assignment. The
+    // gate is refusal, not silent dropping: a caller that says "off payroll" and sends a salary is
+    // told so, because dropping the figure would let the form and the record disagree without
+    // anyone noticing. The mirror rule — on payroll REQUIRES a salary — is deliberately NOT
+    // enforced here: the hire path, imports and every fixture create employees before their pay
+    // basis is known, and the run-time consequence (a run skips a zero basis silently) is what the
+    // reconciliation read exists to catch as NoPayBasis.
+
+    private static void ValidatePayrollMembership(
+        bool isOnPayroll, OffPayrollReason? reason, decimal? salary, bool anySwitchOn)
+    {
+        if (isOnPayroll) return;
+
+        if (reason == null)
+            throw new InvalidOperationException(
+                "An employee who is not on payroll needs a reason (paid by invoice, allowance, parent organisation, unpaid, board or committee, other).");
+        if (!Enum.IsDefined(reason.Value))
+            throw new ArgumentException("That is not a recognised off-payroll reason.");
+        if (salary is > 0)
+            throw new InvalidOperationException(
+                "This employee is not on payroll, so a salary cannot be recorded. Put them on payroll first, or leave the salary blank.");
+        if (anySwitchOn)
+            throw new InvalidOperationException(
+                "This employee is not on payroll, so the payroll switches (pay tax, SS fund, gross up, tier 2 only, overtime) do not apply.");
+    }
+
+    /// <summary>
+    /// Applies the membership fields the mapping deliberately leaves alone, and the consequences of
+    /// a flip. Off: the pay figures are cleared and any open grade/notch assignment is closed as of
+    /// today (an "active" placement on a grade for somebody the run does not pay is a contradiction
+    /// the salary tab would otherwise display). The figures survive in position history, movement
+    /// history and the contract line, so nothing is lost that a letter or a settlement needs. On:
+    /// the reason is cleared; enrolment in payroll happens after the save.
+    /// </summary>
+    private async Task ApplyPayrollMembershipAsync(
+        Employee employee, UpdateEmployeeDto dto, bool wasOnPayroll, bool willBeOnPayroll, CancellationToken cancellationToken)
+    {
+        employee.IsOnPayroll = willBeOnPayroll;
+
+        if (willBeOnPayroll)
+        {
+            employee.OffPayrollReason = null;
+            employee.OffPayrollNote = null;
+            return;
+        }
+
+        if (dto.OffPayrollReason.HasValue) employee.OffPayrollReason = dto.OffPayrollReason;
+        if (dto.OffPayrollNote != null)
+            employee.OffPayrollNote = string.IsNullOrWhiteSpace(dto.OffPayrollNote) ? null : dto.OffPayrollNote.Trim();
+
+        employee.Salary = null;
+        employee.PayTax = false;
+        employee.SSFund = false;
+        employee.GrossUp = false;
+        employee.Tier2Only = false;
+        employee.Overtime = false;
+
+        if (!wasOnPayroll) return;
+
+        var today = DateTime.UtcNow.Date;
+        var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
+        var open = await repo.GetQueryable()
+            .Where(a => a.EmployeeId == employee.Id && !a.IsDeleted
+                     && (a.EffectiveTo == null || a.EffectiveTo >= today))
+            .ToListAsync(cancellationToken);
+        foreach (var assignment in open)
+        {
+            // Close, never delete: the row is the record of where they were graded while paid.
+            // A placement that starts today or later is closed on its own start date so the
+            // window stays valid (EffectiveTo >= EffectiveDate) instead of going negative.
+            assignment.EffectiveTo = assignment.EffectiveDate > today.AddDays(-1)
+                ? assignment.EffectiveDate
+                : today.AddDays(-1);
+            await repo.UpdateAsync(assignment);
+        }
+        if (open.Count > 0)
+            _logger.LogInformation(
+                "Closed {Count} open salary assignment(s) for {EmployeeId}: taken off payroll.", open.Count, employee.Id);
+    }
+
+    /// <summary>The grade/notch gate: a placement on the pay structure is meaningless for someone the run does not pay.</summary>
+    private async Task RequireOnPayrollAsync(Guid employeeId, CancellationToken cancellationToken)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+        if (!employee.IsOnPayroll)
+            throw new InvalidOperationException(
+                $"{employee.EmployeeNumber} is not on payroll, so they cannot be placed on a salary grade. Put them on payroll first.");
+    }
 
     public Task ValidatePayrollFlagsAsync(bool payTax, bool ssFund, bool grossUp, bool tier2Only, bool overtime, CancellationToken cancellationToken = default)
     {

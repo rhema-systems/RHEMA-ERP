@@ -366,6 +366,7 @@ public class StaffMovementService : IStaffMovementService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        await RequirePayrollForSalaryChangeAsync(entity, cancellationToken);
         entity.MovementNumber          = await GenerateMovementNumberAsync(cancellationToken);
         entity.Status                  = StaffMovementStatus.Draft;
         entity.RequestSubmissionDate   = DateTime.UtcNow;
@@ -389,6 +390,7 @@ public class StaffMovementService : IStaffMovementService
             throw new InvalidOperationException("An authorised or completed movement cannot be edited.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await RequirePayrollForSalaryChangeAsync(entity, cancellationToken);
 
         await _movementRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -810,7 +812,9 @@ public class StaffMovementService : IStaffMovementService
         if (movement.CurrentLocationId.HasValue) employee.LocationId = movement.CurrentLocationId;
         if (movement.CurrentLocationLevelId.HasValue) employee.LocationLevelId = movement.CurrentLocationLevelId;
         if (movement.CurrentSupervisorId.HasValue) employee.ManagerId = movement.CurrentSupervisorId;
-        if (movement.CurrentSalary > 0) employee.Salary = movement.CurrentSalary;
+        // Restoring the pre-movement salary to somebody since taken off payroll would put a pay
+        // figure back on a record the run does not pay; leave it as the flip left it.
+        if (movement.CurrentSalary > 0 && employee.IsOnPayroll) employee.Salary = movement.CurrentSalary;
 
         employee.UpdatedAt = DateTime.UtcNow;
         employee.UpdatedBy = actorEmployeeId.ToString();
@@ -963,6 +967,27 @@ public class StaffMovementService : IStaffMovementService
     /// pay run belongs to the payroll module, and this records that the movement happened rather
     /// than instructing anyone to pay differently.</para>
     /// </summary>
+    /// <summary>
+    /// A movement may carry a new salary or a new grade/level/notch. Both are pay-structure facts,
+    /// and a pay-structure fact about somebody the payroll run does not pay is a contradiction —
+    /// so it is refused when the movement is raised, not discovered at implementation after three
+    /// approvals. A movement with no salary and no grade (a plain transfer, a secondment) is
+    /// unaffected.
+    /// </summary>
+    private async Task RequirePayrollForSalaryChangeAsync(StaffMovement movement, CancellationToken cancellationToken)
+    {
+        var carriesPay = movement.NewSalary > 0
+                      || movement.NewSalaryGradeId.HasValue
+                      || movement.NewSalaryLevelId.HasValue
+                      || movement.NewSalaryNotchId.HasValue;
+        if (!carriesPay) return;
+
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(movement.EmployeeId);
+        if (employee != null && !employee.IsOnPayroll)
+            throw new InvalidOperationException(
+                $"{employee.EmployeeNumber} is not on payroll, so a movement cannot set a salary or a salary grade for them. Put them on payroll first, or raise the movement without pay details.");
+    }
+
     private async Task ApplyMovementToEmployeeAsync(
         StaffMovement movement, Guid actorEmployeeId, CancellationToken cancellationToken)
     {
@@ -978,6 +1003,11 @@ public class StaffMovementService : IStaffMovementService
         if (movement.NewLocationId.HasValue) employee.LocationId = movement.NewLocationId;
         if (movement.NewLocationLevelId.HasValue) employee.LocationLevelId = movement.NewLocationLevelId;
         if (movement.NewSupervisorId.HasValue) employee.ManagerId = movement.NewSupervisorId;
+        // The gate ran at create/update; this is the same rule at the moment of writing, in case
+        // the person was taken off payroll while the movement sat in approval.
+        if (movement.NewSalary > 0 && !employee.IsOnPayroll)
+            throw new InvalidOperationException(
+                $"{employee.EmployeeNumber} is no longer on payroll, so the new salary on movement {movement.MovementNumber} cannot be applied. Put them on payroll first, or remove the salary from the movement.");
         if (movement.NewSalary > 0) employee.Salary = movement.NewSalary;
 
         if (movement.MovementType == StaffMovementType.Promotion)

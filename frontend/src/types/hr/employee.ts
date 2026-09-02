@@ -70,6 +70,30 @@ export const EMPLOYMENT_TYPE_OPTIONS: { value: EmploymentType; label: string }[]
   { value: 'Freelance', label: 'Freelance' },
 ];
 
+/**
+ * Why an employee is not paid through the payroll run. Mirrors `OffPayrollReason` in HREnums.cs;
+ * the API serialises enums as their names.
+ */
+export type OffPayrollReason =
+  | 'PaidByInvoice'
+  | 'Allowance'
+  | 'PaidByParentOrganisation'
+  | 'Unpaid'
+  | 'BoardOrCommittee'
+  | 'Other';
+
+export const OFF_PAYROLL_REASON_OPTIONS: { value: OffPayrollReason; label: string }[] = [
+  { value: 'PaidByInvoice', label: 'Paid by invoice (consultant, contractor)' },
+  { value: 'Allowance', label: 'Allowance or stipend (intern, national service)' },
+  { value: 'PaidByParentOrganisation', label: 'Paid by parent organisation (secondee)' },
+  { value: 'Unpaid', label: 'Unpaid (volunteer, honorary)' },
+  { value: 'BoardOrCommittee', label: 'Board or committee member (sitting allowance)' },
+  { value: 'Other', label: 'Other (say what in the note)' },
+];
+
+export const offPayrollReasonLabel = (value?: OffPayrollReason | null) =>
+  OFF_PAYROLL_REASON_OPTIONS.find((o) => o.value === value)?.label ?? value ?? '—';
+
 export const BLOOD_TYPE_OPTIONS: { value: BloodType; label: string }[] = [
   { value: 'APositive', label: 'A+' },
   { value: 'ANegative', label: 'A-' },
@@ -102,6 +126,8 @@ export interface EmployeeSearchRequest {
   staffStatus?: StaffStatus;
   employmentType?: EmploymentType;
   isActive?: boolean;
+  /** true = on payroll only; false = off-payroll staff only. */
+  isOnPayroll?: boolean;
 }
 
 export type EmployeePagedResult = PagedResult<EmployeeLookup>;
@@ -133,6 +159,8 @@ export interface Employee {
   isActive: boolean;
   isFullTime: boolean;
   isExpatriate: boolean;
+  /** Paid through the payroll run. False for invoice, allowance and secondee staff. */
+  isOnPayroll: boolean;
   dateEmployed?: string | null;
   yearsOfService?: number | null;
   picturePath?: string | null;
@@ -195,6 +223,9 @@ export interface EmployeeDetail extends Employee {
   grossUp: boolean;
   tier2Only: boolean;
   overtime: boolean;
+  /** Set when `isOnPayroll` is false. */
+  offPayrollReason?: OffPayrollReason | null;
+  offPayrollNote?: string | null;
   badgeNumber?: string | null;
   notes?: string | null;
   terminationDate?: string | null;
@@ -254,6 +285,13 @@ export interface CreateEmployeeRequest {
   grossUp: boolean;
   tier2Only: boolean;
   overtime: boolean;
+  /**
+   * Payroll membership. Off requires a reason and must not carry a salary or any switch above —
+   * the service refuses rather than dropping them (EmployeeService.ValidatePayrollMembership).
+   */
+  isOnPayroll: boolean;
+  offPayrollReason?: OffPayrollReason | null;
+  offPayrollNote?: string | null;
   badgeNumber?: string | null;
   notes?: string | null;
   isExpatriate: boolean;
@@ -268,4 +306,63 @@ export interface TerminateEmployeeRequest {
   terminationDate: string;
   terminationReason: string;
   terminationNotes?: string | null;
+}
+
+// --- Payroll membership: HR's flag beside payroll's own profile ---
+// Mirrors EmployeePayrollStatusDto / PayrollReconciliationDto (HRDTOs.cs). Both sides are read
+// from GET api/hr/Employees/{id}/payroll-status and GET api/hr/Employees/payroll-reconciliation.
+
+export type PayrollReconciliationIssue =
+  | 'AwaitingPayrollSetup'
+  | 'InactiveInPayroll'
+  | 'StillActiveInPayroll'
+  | 'NoPayBasis';
+
+export const PAYROLL_ISSUE_LABELS: Record<PayrollReconciliationIssue, string> = {
+  AwaitingPayrollSetup: 'On payroll in HR, not yet set up in Payroll',
+  InactiveInPayroll: 'On payroll in HR, switched off in Payroll',
+  StillActiveInPayroll: 'Off payroll in HR, still active in Payroll',
+  NoPayBasis: 'On payroll with no salary and no graded notch',
+};
+
+export interface EmployeePayrollStatus {
+  employeeId: string;
+  employeeNumber: string;
+  isOnPayroll: boolean;
+  offPayrollReason?: OffPayrollReason | null;
+  offPayrollNote?: string | null;
+  hrMonthlyBasicPay?: number | null;
+  hasActiveSalaryAssignment: boolean;
+  hasPayrollProfile: boolean;
+  payrollActive?: boolean | null;
+  payrollMonthlyBasicSalary?: number | null;
+  payrollCurrencyCode?: string | null;
+  issue?: PayrollReconciliationIssue | null;
+}
+
+export interface PayrollReconciliationRow {
+  employeeId: string;
+  employeeNumber: string;
+  fullName: string;
+  positionTitle?: string | null;
+  organizationUnitName?: string | null;
+  employmentType: EmploymentType;
+  staffStatus: StaffStatus;
+  isOnPayroll: boolean;
+  offPayrollReason?: OffPayrollReason | null;
+  hasPayrollProfile: boolean;
+  payrollActive?: boolean | null;
+  hrMonthlyBasicPay?: number | null;
+  issue: PayrollReconciliationIssue;
+}
+
+export interface PayrollReconciliation {
+  generatedAt: string;
+  onPayrollCount: number;
+  offPayrollCount: number;
+  awaitingPayrollSetup: number;
+  inactiveInPayroll: number;
+  stillActiveInPayroll: number;
+  noPayBasis: number;
+  rows: PayrollReconciliationRow[];
 }
