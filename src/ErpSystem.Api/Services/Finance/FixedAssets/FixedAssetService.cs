@@ -665,7 +665,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         var categoryRows = await _context.FixedAssetCategories
             .Where(c => c.TenantId == TenantId)
-            .Select(c => new { c.Code, c.Name, c.Id })
+            .Select(c => new
+            {
+                c.Code, c.Name, c.Id, c.DefaultMethod, c.DefaultUsefulLifeMonths,
+                c.DefaultDiminishingBalanceRatePercent, c.DefaultLifetimeProductionCapacity
+            })
             .ToListAsync();
 
         var categories = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
@@ -674,6 +678,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             AddLookupValue(categories, category.Code, category.Id);
             AddLookupValue(categories, category.Name, category.Id);
         }
+        var categoryDefaultsById = categoryRows.ToDictionary(category => category.Id);
 
         var activeBooks = await GetActivePostingBooksAsync(persistFallback: !dryRun);
         var booksByCode = activeBooks
@@ -783,6 +788,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     var summaryValues = CalculateOpeningValues(summaryRow.Data);
                     var data = firstRow.Data;
                     var summaryData = summaryRow.Data;
+                    var categoryDefaults = categoryDefaultsById[firstRow.CategoryId];
 
                     var asset = new FixedAsset
                     {
@@ -799,12 +805,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         TaxAmount = summaryData.TaxAmount ?? 0,
                         AcquisitionCost = summaryValues.AcquisitionCost,
                         NetBookValue = summaryValues.NetBookValue,
-                        DepreciationMethod = ErpSystem.Core.Enums.DepreciationMethod.StraightLine,
+                        DepreciationMethod = categoryDefaults.DefaultMethod,
                         DepreciationConvention = ErpSystem.Core.Enums.DepreciationConvention.FullMonth,
-                        UsefulLifeMonths = summaryData.UsefulLifeMonths ?? 36,
+                        UsefulLifeMonths = summaryData.UsefulLifeMonths ?? categoryDefaults.DefaultUsefulLifeMonths,
                         ResidualValue = summaryData.ResidualValue ?? 0,
+                        DiminishingBalanceRatePercent = categoryDefaults.DefaultDiminishingBalanceRatePercent,
+                        LifetimeProductionCapacity = categoryDefaults.DefaultLifetimeProductionCapacity,
                         SerialNumber = data.SerialNumber,
-                        Status = data.Status ?? ErpSystem.Core.Enums.FixedAssetStatus.Draft,
+                        Status = ErpSystem.Core.Enums.FixedAssetStatus.Draft,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = UserName
                     };
@@ -830,7 +838,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                                 asset.PlacedInServiceDate,
                                 importRow.Data.OpeningAsOfDate,
                                 importRow.Data.OpeningYtdDepreciation ?? 0,
-                                openingValues.AccumulatedDepreciation > 0 ? "OpeningImport" : "Acquisition"));
+                                importRow.Data.OpeningAsOfDate.HasValue || openingValues.AccumulatedDepreciation > 0
+                                    ? "OpeningImport"
+                                    : "Acquisition"));
 
                             _context.AssetTransactions.Add(new AssetTransaction
                             {
@@ -1215,6 +1225,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         if (!string.IsNullOrWhiteSpace(data.RawStatus) && !data.Status.HasValue)
             errors.Add(new BulkImportErrorDto { RowNumber = rowNumber, AssetCode = data.AssetCode, Field = "Status", Error = "Invalid fixed asset status" });
+        else if (!string.IsNullOrWhiteSpace(data.RawStatus) && data.Status != FixedAssetStatus.Draft)
+            errors.Add(new BulkImportErrorDto
+            {
+                RowNumber = rowNumber,
+                AssetCode = data.AssetCode,
+                Field = "Status",
+                Error = "Fixed asset imports may only create controlled Draft records; approval, activation, depreciation and disposal states cannot be imported."
+            });
 
         return errors;
     }
@@ -3695,8 +3713,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
     private static bool HasOpeningImportBasis(FixedAsset asset)
         => asset.BookValues.Any(value =>
             !value.IsDeleted &&
-            (value.OpeningPostedToGl ||
-             value.OpeningSource.Contains("Opening", StringComparison.OrdinalIgnoreCase)));
+            value.OpeningPostedToGl);
 
     private static void ValidateCapitalizedAssetUpdate(
         FixedAsset asset,
