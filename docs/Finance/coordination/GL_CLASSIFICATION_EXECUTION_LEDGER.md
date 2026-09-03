@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 4 — book-specific revaluation policy and execution |
-| Status | `IMPLEMENTING` |
+| Status | `REVIEWING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Branch | `codex/finance-revaluation-policy-phase4` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Partial implementation remains uncommitted in the isolated worktree; independent review has not begun |
+| Review status | Clean Phase 4 stack at `1716ba43`; independent review active |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -76,10 +76,16 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | 1 | `ab53f09e503efd6fee9205129f841b1f5de4bce2` | `CHANGES_REQUIRED` | P2: V2 JSON imports accept classification ID without the required portable stable code; UI view access treats action permissions as substitutes for the API's Finance.Read prerequisite; publication fingerprints omit the frozen book name and per-row book ID/code. Corrections and targeted regression requirements were sent directly. The unrelated Supplier Returns lockdown baseline was independently confirmed unchanged. | Not integrated |
 | 2 | `534fa89696bed17cfe4e6f456b02df760ff98ed7` | `APPROVED` | All three findings closed. Independent verification passed 24 backend and 15 frontend tests, targeted ESLint, EF no-pending-model and diff checks. V2 imports require portable stable classification codes; UI/API read authority is aligned; publication fingerprint v2 covers all frozen book evidence and fails closed on tampering. | Four commits cherry-picked without conflict as `b4af3e4d`, `657cc5d4`, `b6dd0611`, and `48610595`. Primary task-owned blobs match the reviewed tree. Primary verification passed: test-project build with 0 errors, 24 focused backend tests, 15 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Migration remains unapplied. |
 
+## Phase 4 review cycles
+
+| Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
+|---|---|---|---|---|
+| 1 | `1716ba43f18758685ef4b56c3796486e172db4f6` | Independent review active | Clean three-commit stack delivers exact-book/account/currency policy, governed override lifecycle, signed revaluation mathematics, immutable preview/batch evidence, UI, tests, documentation and migration. Review is focused on accounting direction, workflow/audit atomicity, book isolation, fingerprint completeness, seed preservation and migration preflight. | Pending |
+
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 3 is independently approved and integrated, and its coordination checkpoint is committed at primary HEAD `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. Phase 4 began from that exact base and produced an uncommitted Finance-only policy foundation in its isolated worktree. After the implementer turn failed with a transient Codex service `404 Not Found`, the coordinator reconciled the unchanged branch, base and preserved edits and successfully resumed the same task without duplicating or discarding work. No migration or persistent database was applied, reset, seeded or mutated.
+Last verified durable point: Phase 4 recovered from the transient service interruption and returned a clean three-commit stack at `1716ba43f18758685ef4b56c3796486e172db4f6`, based exactly on `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. The coordinator verified the base, ordered commits, clean worktree, Finance-only changed-file inventory, migration metadata and diff check, then activated independent review. Migration `20260903190453_AddBookScopedFxRevaluationPolicy` and all earlier migrations remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Monitor the resumed Phase 4 implementation. After a clean handoff, perform independent accounting/schema/security review, send corrections directly, and integrate only an approved stack. Then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
+Complete independent Phase 4 accounting/schema/security review and send any corrections directly. Integrate only an approved clean stack, rerun primary gates, update the ledger, then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
