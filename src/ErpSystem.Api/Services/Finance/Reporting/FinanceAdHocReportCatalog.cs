@@ -93,14 +93,21 @@ public static class FinanceAdHocReportCatalog
 
         new("chart-of-accounts", "Chart of accounts",
             "Account classifications, balances, posting controls, currency and reporting mappings.",
-            "[Accounts] [a]", "[a].[TenantId]", "[a].[IsDeleted] = 0",
+            "[Accounts] [a] OUTER APPLY (SELECT TOP (1) [ac].[Code], [ac].[Name], [parent].[Name] AS [ParentName] " +
+            "FROM [AccountAccountingBooks] [aab] INNER JOIN [AccountingBooks] [ab] ON [ab].[Id] = [aab].[AccountingBookId] " +
+            "INNER JOIN [AccountClassifications] [ac] ON [ac].[Id] = [aab].[AccountClassificationId] " +
+            "LEFT JOIN [AccountClassifications] [parent] ON [parent].[Id] = [ac].[ParentClassificationId] " +
+            "WHERE [aab].[AccountId] = [a].[Id] AND [aab].[TenantId] = [a].[TenantId] AND [aab].[IsDeleted] = 0 " +
+            "AND [aab].[IsEnabled] = 1 AND [ab].[IsDeleted] = 0 AND [ab].[IsDefault] = 1 AND [ac].[IsDeleted] = 0) [classification]",
+            "[a].[TenantId]", "[a].[IsDeleted] = 0",
             Fields(
                 Text("accountNumber", "Account number", "[a].[AccountNumber]"),
                 Text("accountCode", "Account code", "[a].[AccountCode]"),
                 Text("accountName", "Account name", "[a].[AccountName]"),
                 Text("accountType", "Account type", "CASE [a].[AccountType] WHEN 1 THEN 'Asset' WHEN 2 THEN 'Liability' WHEN 3 THEN 'Equity' WHEN 4 THEN 'Revenue' WHEN 5 THEN 'Expense' ELSE 'Unknown' END"),
-                Text("category", "Category", "[a].[AccountCategory]"),
-                Text("subCategory", "Sub-category", "[a].[AccountSubCategory]"),
+                Text("category", "Classification parent", "COALESCE([classification].[ParentName], [classification].[Name])"),
+                Text("subCategory", "Classification", "[classification].[Name]"),
+                Text("classificationCode", "Classification code", "[classification].[Code]"),
                 Text("currency", "Currency", "[a].[CurrencyCode]"),
                 Money("balance", "Current balance", "[a].[Balance]"),
                 Money("debitBalance", "Cumulative debit", "[a].[DebitBalance]"),

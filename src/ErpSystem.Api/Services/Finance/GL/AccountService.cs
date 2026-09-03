@@ -143,8 +143,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                     a.AccountCode.Contains(term) ||
                     a.AccountNumber.Contains(term) ||
                     a.AccountName.Contains(term) ||
-                    (a.AccountCategory != null && a.AccountCategory.Contains(term)) ||
-                    (a.AccountSubCategory != null && a.AccountSubCategory.Contains(term)));
+                    a.AccountingBooks.Any(mapping => !mapping.IsDeleted
+                        && mapping.AccountClassification != null
+                        && !mapping.AccountClassification.IsDeleted
+                        && (mapping.AccountClassification.Code.Contains(term)
+                            || mapping.AccountClassification.Name.Contains(term))));
             }
 
             IQueryable<Account> orderedQuery = query
@@ -514,10 +517,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                     AccountingBookId = mapping.AccountingBookId,
                     AccountingBookCode = mapping.AccountingBook.Code,
                     AccountingBookName = mapping.AccountingBook.Name,
+                    AccountingBookIsDefault = mapping.AccountingBook.IsDefault,
                     IsEnabled = mapping.IsEnabled,
                     AccountClassificationId = mapping.AccountClassificationId,
                     AccountClassificationCode = mapping.AccountClassification?.Code,
                     AccountClassificationName = mapping.AccountClassification?.Name,
+                    AccountClassificationSystemRole = mapping.AccountClassification?.SystemRole?.ToString(),
                     AccountClassificationStatus = mapping.AccountClassification?.Status.ToString(),
                     IsMigrationReady = !mapping.IsEnabled || mapping.AccountClassification is
                     {

@@ -605,6 +605,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.AccountIds,
                 request.SegmentFilters,
                 new[] { AccountType.Asset, AccountType.Liability, AccountType.Equity });
+            var classificationPresentation = await GetClassificationPresentationAsync(
+                bookClassification, accounts.Select(account => account.Id));
 
             var rawBalances = await CalculatePostedRawBalancesAsOfAsync(
                 tenantId,
@@ -643,7 +645,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 1, 
                 assetAccounts, 
                 accountBalances, 
-                request.BookClassification,
+                classificationPresentation,
                 request.IncludeAccountDetails);
 
             // 6. Build Liabilities section
@@ -652,7 +654,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 2, 
                 liabilityAccounts, 
                 accountBalances, 
-                request.BookClassification,
+                classificationPresentation,
                 request.IncludeAccountDetails);
 
             // 7. Build Equity section
@@ -661,7 +663,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 3, 
                 equityAccounts, 
                 accountBalances, 
-                request.BookClassification,
+                classificationPresentation,
                 request.IncludeAccountDetails);
 
             balanceSheet.Sections = new List<BalanceSheetSectionDto> 
@@ -695,7 +697,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             int sectionOrder,
             List<Account> accounts,
             Dictionary<Guid, decimal> accountBalances,
-            string bookClassification,
+            IReadOnlyDictionary<Guid, ClassificationPresentation> classificationPresentation,
             bool includeAccountDetails)
         {
             var section = new BalanceSheetSectionDto
@@ -704,9 +706,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                 SectionOrder = sectionOrder
             };
 
-            // Group by category
             var categories = accounts
-                .GroupBy(a => a.AccountCategory ?? "Other")
+                .GroupBy(a => classificationPresentation.TryGetValue(a.Id, out var presentation)
+                    ? presentation.ParentName ?? presentation.Name
+                    : "Unclassified")
                 .OrderBy(g => g.Key)
                 .ToList();
 
@@ -720,7 +723,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 // Group by line item
                 var lineItemGroups = categoryGroup
-                    .GroupBy(a => GetLineItem(a, bookClassification) ?? "Unclassified")
+                    .GroupBy(a => classificationPresentation.TryGetValue(a.Id, out var presentation)
+                        ? presentation.Name
+                        : "Unclassified")
                     .OrderBy(g => g.Key)
                     .ToList();
 
@@ -771,6 +776,36 @@ namespace ErpSystem.Api.Services.Finance.GL
                 "MANAGEMENT" => "MANAGEMENT",
                 _ => normalized
             };
+        }
+
+        private sealed record ClassificationPresentation(string Code, string Name, string? ParentName);
+
+        private async Task<IReadOnlyDictionary<Guid, ClassificationPresentation>> GetClassificationPresentationAsync(
+            string accountingBookCode,
+            IEnumerable<Guid> accountIds)
+        {
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            var ids = accountIds.Distinct().ToArray();
+            return await _context.AccountAccountingBooks
+                .AsNoTracking()
+                .Where(mapping => mapping.TenantId == tenantId
+                    && !mapping.IsDeleted
+                    && mapping.IsEnabled
+                    && ids.Contains(mapping.AccountId)
+                    && mapping.AccountingBook.Code == accountingBookCode
+                    && mapping.AccountClassification != null)
+                .Select(mapping => new
+                {
+                    mapping.AccountId,
+                    mapping.AccountClassification!.Code,
+                    mapping.AccountClassification.Name,
+                    ParentName = mapping.AccountClassification.ParentClassification != null
+                        ? mapping.AccountClassification.ParentClassification.Name
+                        : null
+                })
+                .ToDictionaryAsync(
+                    item => item.AccountId,
+                    item => new ClassificationPresentation(item.Code, item.Name, item.ParentName));
         }
 
         private async Task<List<Account>> GetReportingAccountsAsync(
@@ -1133,6 +1168,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.AccountIds,
                 request.SegmentFilters,
                 new[] { AccountType.Revenue, AccountType.Expense });
+            var classificationPresentation = await GetClassificationPresentationAsync(
+                bookClassification, accounts.Select(account => account.Id));
 
             var rawMovements = await CalculatePostedPeriodMovementAsync(
                 tenantId,
@@ -1178,8 +1215,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .ToList();
 
             var otherIncomeAccounts = revenueAccounts
-                .Where(a => (a.AccountCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase)
-                    || (a.AccountSubCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase))
+                .Where(a => classificationPresentation.GetValueOrDefault(a.Id)?.Code == "OTHER_INCOME")
                 .ToList();
             otherIncomeAccounts = otherIncomeAccounts
                 .Concat(disposalGainPresentationAccounts)
@@ -1197,19 +1233,18 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.IncludeAccountDetails);
 
             // 6. Build Expense sections (categorized)
-            var costOfSalesAccounts = expenseAccounts.Where(a => (a.AccountCategory ?? "").Contains("Cost of Sales", StringComparison.OrdinalIgnoreCase)).ToList();
+            var costOfSalesAccounts = expenseAccounts.Where(a => classificationPresentation.GetValueOrDefault(a.Id)?.Code == "COST_OF_SALES").ToList();
             var disposalGainExpenseAccounts = disposalGainPresentationAccounts
                 .Where(a => a.AccountType == AccountType.Expense)
                 .ToList();
             expenseAccounts = expenseAccounts.Except(disposalGainExpenseAccounts).ToList();
             var otherExpenseAccounts = expenseAccounts
-                .Where(a => (a.AccountCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase)
-                    || (a.AccountSubCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase))
+                .Where(a => classificationPresentation.GetValueOrDefault(a.Id)?.Code == "OTHER_EXPENSE")
                 .ToList();
-            var operatingExpenseAccounts = expenseAccounts.Where(a => !(a.AccountCategory ?? "").Contains("Cost of Sales", StringComparison.OrdinalIgnoreCase) 
-                && !(a.AccountCategory ?? "").Contains("Tax", StringComparison.OrdinalIgnoreCase)
+            var operatingExpenseAccounts = expenseAccounts.Where(a => classificationPresentation.GetValueOrDefault(a.Id)?.Code != "COST_OF_SALES"
+                && classificationPresentation.GetValueOrDefault(a.Id)?.Code != "TAX_EXPENSE"
                 && !otherExpenseAccounts.Contains(a)).ToList();
-            var taxExpenseAccounts = expenseAccounts.Where(a => (a.AccountCategory ?? "").Contains("Tax", StringComparison.OrdinalIgnoreCase)).ToList();
+            var taxExpenseAccounts = expenseAccounts.Where(a => classificationPresentation.GetValueOrDefault(a.Id)?.Code == "TAX_EXPENSE").ToList();
 
             var costOfSalesSection = BuildIncomeStatementSection(
                 "Cost of Sales",
@@ -2089,9 +2124,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 Method = cashFlowMethod
             };
 
-            // A bank GL is a cash account because the tenant's bank master maps it as one.
-            // Account names and broad balance-sheet categories are not authoritative enough
-            // on their own, but the legacy fallbacks remain for petty-cash style accounts.
+            // Bank-master mappings and configured classification roles are the only
+            // authoritative ways an account enters cash-flow processing.
             var mappedBankGlAccountIds = await _context.BankAccounts
                 .AsNoTracking()
                 .Where(bank =>
@@ -2102,16 +2136,20 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Distinct()
                 .ToListAsync();
 
-            var cashAccounts = await _context.Accounts
-                .Where(account =>
-                    account.TenantId == tenantId &&
-                    !account.IsDeleted &&
-                    (mappedBankGlAccountIds.Contains(account.Id) ||
-                     account.AccountCategory == "Cash" ||
-                     account.AccountCategory == "Cash and Cash Equivalents" ||
-                     EF.Functions.Like(account.AccountName, "%Cash%")))
+            var roleBasedCashAccountIds = await _context.AccountAccountingBooks
+                .AsNoTracking()
+                .Where(mapping =>
+                    mapping.TenantId == tenantId && !mapping.IsDeleted && mapping.IsEnabled
+                    && mapping.AccountingBook.Code == bookClassification
+                    && mapping.AccountingBook.IsActive && mapping.AccountingBook.AllowsPosting
+                    && mapping.AccountClassification != null
+                    && mapping.AccountClassification.Status == AccountClassificationStatus.Active
+                    && (mapping.AccountClassification.SystemRole == AccountClassificationSystemRole.Cash
+                        || mapping.AccountClassification.SystemRole == AccountClassificationSystemRole.Bank))
+                .Select(mapping => mapping.AccountId)
+                .Distinct()
                 .ToListAsync();
-            var cashAccountIds = cashAccounts.Select(account => account.Id).ToHashSet();
+            var cashAccountIds = mappedBankGlAccountIds.Concat(roleBasedCashAccountIds).ToHashSet();
 
             var activityEndExclusive = periodEnd.AddDays(1);
             var cashActivityJournalIds = cashAccountIds.Count == 0
@@ -2261,16 +2299,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             decimal cashAtBeginning = 0;
             decimal cashAtEnd = 0;
 
-            foreach (var cashAccount in cashAccounts)
+            foreach (var cashAccountId in cashAccountIds)
             {
                 cashAtBeginning += await CalculateAccountBalanceAsOf(
                     tenantId,
-                    cashAccount.Id,
+                    cashAccountId,
                     periodStart.AddDays(-1),
                     bookClassification);
                 cashAtEnd += await CalculateAccountBalanceAsOf(
                     tenantId,
-                    cashAccount.Id,
+                    cashAccountId,
                     periodEnd,
                     bookClassification);
             }
