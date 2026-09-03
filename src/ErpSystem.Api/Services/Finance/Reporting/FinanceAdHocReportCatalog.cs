@@ -93,12 +93,17 @@ public static class FinanceAdHocReportCatalog
 
         new("chart-of-accounts", "Chart of accounts",
             "Account classifications, balances, posting controls, currency and reporting mappings.",
-            "[Accounts] [a] OUTER APPLY (SELECT TOP (1) [ac].[Code], [ac].[Name], [parent].[Name] AS [ParentName] " +
+            "[Accounts] [a] OUTER APPLY (SELECT [ac].[Code], [ac].[Name], [parent].[Name] AS [ParentName] " +
             "FROM [AccountAccountingBooks] [aab] INNER JOIN [AccountingBooks] [ab] ON [ab].[Id] = [aab].[AccountingBookId] " +
+            "AND [ab].[TenantId] = [a].[TenantId] AND [ab].[IsDeleted] = 0 AND [ab].[IsActive] = 1 AND [ab].[AllowsPosting] = 1 AND [ab].[IsDefault] = 1 " +
             "INNER JOIN [AccountClassifications] [ac] ON [ac].[Id] = [aab].[AccountClassificationId] " +
+            "AND [ac].[TenantId] = [a].[TenantId] AND [ac].[AccountingBookId] = [ab].[Id] AND [ac].[IsDeleted] = 0 AND [ac].[Status] = 2 " +
             "LEFT JOIN [AccountClassifications] [parent] ON [parent].[Id] = [ac].[ParentClassificationId] " +
+            "AND [parent].[TenantId] = [a].[TenantId] AND [parent].[AccountingBookId] = [ab].[Id] AND [parent].[IsDeleted] = 0 " +
             "WHERE [aab].[AccountId] = [a].[Id] AND [aab].[TenantId] = [a].[TenantId] AND [aab].[IsDeleted] = 0 " +
-            "AND [aab].[IsEnabled] = 1 AND [ab].[IsDeleted] = 0 AND [ab].[IsDefault] = 1 AND [ac].[IsDeleted] = 0) [classification]",
+            "AND [aab].[IsEnabled] = 1 AND (SELECT COUNT_BIG(*) FROM [AccountingBooks] [authority] " +
+            "WHERE [authority].[TenantId] = [a].[TenantId] AND [authority].[IsDeleted] = 0 AND [authority].[IsActive] = 1 " +
+            "AND [authority].[AllowsPosting] = 1 AND [authority].[IsDefault] = 1) = 1) [classification]",
             "[a].[TenantId]", "[a].[IsDeleted] = 0",
             Fields(
                 Text("accountNumber", "Account number", "[a].[AccountNumber]"),

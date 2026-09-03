@@ -28,6 +28,23 @@ public sealed class FinanceAdHocReportBuilderTests
     }
 
     [Fact]
+    public void ChartOfAccountsCatalogue_UsesOneExactActiveDefaultBookAndTenantSafeClassificationLineage()
+    {
+        var dataset = FinanceAdHocReportCatalog.Required("chart-of-accounts");
+
+        dataset.FromSql.Should().NotContain("TOP (1)");
+        dataset.FromSql.Should().Contain("COUNT_BIG(*)").And.Contain(") = 1");
+        dataset.FromSql.Should().Contain("[ab].[TenantId] = [a].[TenantId]")
+            .And.Contain("[ab].[IsActive] = 1")
+            .And.Contain("[ab].[AllowsPosting] = 1")
+            .And.Contain("[ac].[TenantId] = [a].[TenantId]")
+            .And.Contain("[ac].[AccountingBookId] = [ab].[Id]")
+            .And.Contain("[ac].[Status] = 2")
+            .And.Contain("[parent].[TenantId] = [a].[TenantId]")
+            .And.Contain("[parent].[AccountingBookId] = [ab].[Id]");
+    }
+
+    [Fact]
     public void Compiler_ParameterisesHostileFilterAndAlwaysAddsTenantPredicate()
     {
         var tenantId = Guid.NewGuid();
