@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
@@ -11,6 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/geofence-zones")]
 [Authorize(Policy = "InternalOnly")]
+[GeofenceBusinessRules] // polygon parse errors reach the register with their reason
 public class GeofenceZonesController : AttendanceControllerBase
 {
     private readonly IGeofenceZoneService _service;

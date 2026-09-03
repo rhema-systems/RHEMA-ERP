@@ -381,6 +381,7 @@ public class LocationService : ILocationService
 {
     private readonly ILocationRepository _repository;
     private readonly ILocationLevelRepository _levelRepository;
+    private readonly IGeofenceZoneRepository _geofenceZoneRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationService> _logger;
@@ -388,15 +389,38 @@ public class LocationService : ILocationService
     public LocationService(
         ILocationRepository repository,
         ILocationLevelRepository levelRepository,
+        IGeofenceZoneRepository geofenceZoneRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<LocationService> logger)
     {
         _repository = repository;
         _levelRepository = levelRepository;
+        _geofenceZoneRepository = geofenceZoneRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The map pin and the attendance zone. Both coordinates travel together, and the zone must be one
+    /// of this tenant's. Until 2026-09-03 none of the three reached the entity from any DTO, so
+    /// GeofenceVerificationService could never find a zone for any employee: the geofence feature
+    /// had no door.
+    /// </summary>
+    private async Task ValidateGeoAsync(double? latitude, double? longitude, Guid? geofenceZoneId, Guid tenantId)
+    {
+        // A rule, not a lookup: InvalidOperationException reaches the client as a 400 with this message.
+        // ArgumentException is the service's "not found" idiom and the update endpoint answers it 404.
+        if (latitude.HasValue != longitude.HasValue)
+            throw new InvalidOperationException("Latitude and longitude must be supplied together.");
+
+        if (geofenceZoneId.HasValue)
+        {
+            var zone = await _geofenceZoneRepository.GetByIdAsync(geofenceZoneId.Value);
+            if (zone == null || zone.IsDeleted || zone.TenantId != tenantId)
+                throw new ArgumentException($"Geofence zone with ID '{geofenceZoneId}' not found.");
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
@@ -445,6 +469,7 @@ public class LocationService : ILocationService
             .Include(e => e.Structure)
             .Include(e => e.LocationLevel)
             .Include(e => e.ParentLocation)
+            .Include(e => e.GeofenceZone)
             .OrderBy(e => e.Name)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -577,6 +602,8 @@ public class LocationService : ILocationService
         if (await _repository.ExistsByNameInLevelAsync(createDto.LocationLevelId, createDto.Name))
             throw new InvalidOperationException($"Location with name '{createDto.Name}' already exists in this level.");
 
+        await ValidateGeoAsync(createDto.Latitude, createDto.Longitude, createDto.GeofenceZoneId, tenantId);
+
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
 
@@ -671,6 +698,8 @@ public class LocationService : ILocationService
         // Validate unique name in level
         if (await _repository.ExistsByNameInLevelAsync(updateDto.LocationLevelId, updateDto.Name, updateDto.Id))
             throw new InvalidOperationException($"Location with name '{updateDto.Name}' already exists in this level.");
+
+        await ValidateGeoAsync(updateDto.Latitude, updateDto.Longitude, updateDto.GeofenceZoneId, entity.TenantId);
 
         updateDto.UpdateEntity(entity);
 

@@ -1932,6 +1932,10 @@ public class GeofenceZoneSummaryDto
     public double? CentreLatitude { get; set; }
     public double? CentreLongitude { get; set; }
     public double? RadiusMetres { get; set; }
+    /// <summary>Carried on the summary so the register's edit dialog can round-trip a polygon zone without wiping it.</summary>
+    public string? PolygonCoordinatesJson { get; set; }
+    public string? Description { get; set; }
+    public string? Notes { get; set; }
     public bool SoftEnforcement { get; set; }
     public bool HardEnforcement { get; set; }
     public bool IsActive { get; set; }

@@ -23,12 +23,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import Link from 'next/link';
 import type { Location, LocationLevel, LocationStructureSummary } from '@/types/hr/location';
 import type { Country } from '@/types/hr/country';
+import type { GeofenceZoneSummary } from '@/types/hr/attendance';
+import { GeoPicker } from '@/components/hr/common/geo/GeoPicker';
+import { isValidLat, isValidLng, parsePolygonJson, toNumberOrNull } from '@/components/hr/common/geo/geo';
 
 const NONE = 'none';
 const opt = z.string().max(500).optional().or(z.literal(''));
 
+/**
+ * Coordinates stay strings in the form so an empty field is empty rather than 0 (`z.coerce.number`
+ * turns '' into 0, which is a real place in the Gulf of Guinea). They become numbers in the payload.
+ */
 export const locationSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   code: z.string().max(50).optional().or(z.literal('')),
@@ -42,12 +50,31 @@ export const locationSchema = z.object({
   postalCode: z.string().max(20).optional().or(z.literal('')),
   countryId: z.string().optional().or(z.literal('')),
   digitalAddress: z.string().max(50).optional().or(z.literal('')),
+  latitude: z.string().max(30).optional().or(z.literal('')),
+  longitude: z.string().max(30).optional().or(z.literal('')),
+  geofenceZoneId: z.string().optional().or(z.literal('')),
   phone: z.string().max(50).optional().or(z.literal('')),
   email: z.string().email('Invalid email').max(100).optional().or(z.literal('')),
   website: z.string().max(200).optional().or(z.literal('')),
   faxNumber: z.string().max(50).optional().or(z.literal('')),
   sequence: z.coerce.number().int('Must be a whole number').min(1, 'Must be at least 1'),
   isActive: z.boolean(),
+}).superRefine((v, ctx) => {
+  const lat = toNumberOrNull(v.latitude);
+  const lng = toNumberOrNull(v.longitude);
+  if (lat !== null && !isValidLat(lat)) {
+    ctx.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude must be a number between -90 and 90' });
+  }
+  if (lng !== null && !isValidLng(lng)) {
+    ctx.addIssue({ code: 'custom', path: ['longitude'], message: 'Longitude must be a number between -180 and 180' });
+  }
+  if ((lat === null) !== (lng === null)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [lat === null ? 'latitude' : 'longitude'],
+      message: 'Enter both latitude and longitude, or neither',
+    });
+  }
 });
 
 export type LocationFormValues = z.infer<typeof locationSchema>;
@@ -65,6 +92,9 @@ export const emptyLocation: LocationFormValues = {
   postalCode: '',
   countryId: '',
   digitalAddress: '',
+  latitude: '',
+  longitude: '',
+  geofenceZoneId: '',
   phone: '',
   email: '',
   website: '',
@@ -78,6 +108,8 @@ interface LocationFormProps {
   levels: LocationLevel[];
   locations: Location[];
   countries: Country[];
+  /** Geofence zones the location may be linked to. Managed under Attendance › Geofence Zones. */
+  zones?: GeofenceZoneSummary[];
   defaultValues: LocationFormValues;
   onSubmit: (values: LocationFormValues) => Promise<void>;
   submitting: boolean;
@@ -92,6 +124,7 @@ export function LocationForm({
   levels,
   locations,
   countries,
+  zones = [],
   defaultValues,
   onSubmit,
   submitting,
@@ -107,6 +140,38 @@ export function LocationForm({
   const structureId = form.watch('structureId');
   const levelId = form.watch('locationLevelId');
   const parentValue = form.watch('parentLocationId') || NONE;
+
+  // The pin, as the map sees it: only when both fields hold a usable number.
+  const latNumber = toNumberOrNull(form.watch('latitude'));
+  const lngNumber = toNumberOrNull(form.watch('longitude'));
+  const pin =
+    latNumber !== null && lngNumber !== null && isValidLat(latNumber) && isValidLng(lngNumber)
+      ? { lat: latNumber, lng: lngNumber }
+      : null;
+
+  const zoneId = form.watch('geofenceZoneId') || '';
+  const zone = zones.find((z) => z.id === zoneId) ?? null;
+  const zoneReference = zone
+    ? {
+        centre:
+          zone.centreLatitude != null && zone.centreLongitude != null
+            ? { lat: zone.centreLatitude, lng: zone.centreLongitude }
+            : null,
+        radiusMetres: zone.shape === 'Circle' ? zone.radiusMetres : null,
+        polygon: zone.shape === 'Polygon' ? parsePolygonJson(zone.polygonCoordinatesJson) : [],
+        label: zone.zoneName,
+      }
+    : null;
+
+  const setPin = (p: { lat: number; lng: number } | null | undefined) => {
+    form.setValue('latitude', p ? String(p.lat) : '', { shouldValidate: true, shouldDirty: true });
+    form.setValue('longitude', p ? String(p.lng) : '', { shouldValidate: true, shouldDirty: true });
+  };
+
+  const describeZone = (z: GeofenceZoneSummary) => {
+    const shape = z.shape === 'Circle' ? (z.radiusMetres ? `${z.radiusMetres} m radius` : 'circle') : 'polygon';
+    return `${z.zoneName} · ${shape}${z.isActive ? '' : ' (inactive)'}`;
+  };
 
   const levelsForStructure = levels
     .filter((l) => l.structureId === structureId)
@@ -277,6 +342,60 @@ export function LocationForm({
                 <Input id="digitalAddress" {...form.register('digitalAddress')} />
               </div>
             </div>
+          </section>
+
+          {/* Map & attendance zone */}
+          <section className="space-y-4 border-t pt-6">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Map &amp; Attendance Zone</h3>
+            <p className="text-sm text-muted-foreground">
+              Pin the site on the map, or type its coordinates. The attendance zone decides where staff
+              assigned here may clock in from their phones; punches from a fixed device are not affected.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2">
+                <Label htmlFor="latitude">Latitude</Label>
+                <Input id="latitude" inputMode="decimal" placeholder="5.603700" {...form.register('latitude')} />
+                {err('latitude') && <p className="text-sm text-red-500">{err('latitude')}</p>}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="longitude">Longitude</Label>
+                <Input id="longitude" inputMode="decimal" placeholder="-0.187000" {...form.register('longitude')} />
+                {err('longitude') && <p className="text-sm text-red-500">{err('longitude')}</p>}
+              </div>
+              <div className="space-y-2 lg:col-span-2">
+                <Label htmlFor="geofenceZoneId">Attendance zone</Label>
+                <Select
+                  value={zoneId || NONE}
+                  onValueChange={(v) => form.setValue('geofenceZoneId', v === NONE ? '' : v, { shouldDirty: true })}
+                >
+                  <SelectTrigger id="geofenceZoneId">
+                    <SelectValue placeholder="None (no geofence check)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>None (no geofence check)</SelectItem>
+                    {zones.map((z) => (
+                      <SelectItem key={z.id} value={z.id}>
+                        {describeZone(z)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Zones are drawn under{' '}
+                  <Link href="/administration/hr/attendance/geofence-zones" className="underline underline-offset-2">
+                    Attendance › Geofence Zones
+                  </Link>
+                  . The selected zone is shown on the map in orange.
+                </p>
+              </div>
+            </div>
+            <GeoPicker
+              mode="point"
+              value={{ centre: pin }}
+              onChange={(v) => setPin(v.centre)}
+              reference={zoneReference}
+              height={300}
+            />
           </section>
 
           {/* Contact */}

@@ -11,6 +11,8 @@ import { locationService } from '@/services/hr/location.service';
 import { locationLevelService } from '@/services/hr/location-level.service';
 import { locationStructureService } from '@/services/hr/location-structure.service';
 import { countryService } from '@/services/hr/country.service';
+import { geofenceZoneService } from '@/services/hr/attendance-setup.service';
+import { toNumberOrNull } from '@/components/hr/common/geo/geo';
 
 const s = (v?: string | null) => (v && v.trim() ? v.trim() : null);
 
@@ -40,6 +42,11 @@ export default function NewLocationPage() {
     queryFn: () => countryService.getActive(),
   });
 
+  const { data: zones } = useQuery({
+    queryKey: ['hr', 'geofence-zones'],
+    queryFn: () => geofenceZoneService.getAll(),
+  });
+
   const handleSubmit = async (values: LocationFormValues) => {
     setSubmitting(true);
     try {
@@ -56,6 +63,9 @@ export default function NewLocationPage() {
         postalCode: s(values.postalCode),
         countryId: values.countryId || null,
         digitalAddress: s(values.digitalAddress),
+        latitude: toNumberOrNull(values.latitude),
+        longitude: toNumberOrNull(values.longitude),
+        geofenceZoneId: values.geofenceZoneId || null,
         phone: s(values.phone),
         email: s(values.email),
         website: s(values.website),
@@ -95,6 +105,7 @@ export default function NewLocationPage() {
           levels={levels ?? []}
           locations={locations ?? []}
           countries={countries ?? []}
+          zones={zones ?? []}
           defaultValues={emptyLocation}
           onSubmit={handleSubmit}
           submitting={submitting}

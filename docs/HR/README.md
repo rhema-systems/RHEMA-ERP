@@ -102,8 +102,8 @@ closure ledger; the SHE plan's substance is summarised in `HR-SHE-INTEGRATION-AN
 
 ## Harnesses — outside the repo, `D:\Rhema\TDC ERPS\dev-harness\hr-*`
 
-25 directories (assets, awards, company-schedule, consulting, demo-smoke, discipline,
-employee-docs, employee-relations, finish-lane4, jobarch, medical, movements, orientation,
+26 directories (assets, awards, company-schedule, consulting, demo-smoke, discipline,
+employee-docs, employee-relations, finish-lane4, geofence, jobarch, medical, movements, orientation,
 payroll-membership, performance, portal, probation, recruitment, safety, separation, succession,
 tierb-tail, training, travel, w3-permissions). See `HR-VERIFICATION-HARNESS-GUIDE.md`.
 

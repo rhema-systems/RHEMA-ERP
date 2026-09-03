@@ -642,6 +642,12 @@ public class LocationDto : BaseDto
     public Guid? CountryId { get; set; }
     public string? CountryName { get; set; }
     public string? DigitalAddress { get; set; }
+    /// <summary>Map pin of the site. Both coordinates are set together or not at all.</summary>
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+    /// <summary>The geofence zone self-service punches from staff at this location are checked against.</summary>
+    public Guid? GeofenceZoneId { get; set; }
+    public string? GeofenceZoneName { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Website { get; set; }
@@ -690,6 +696,16 @@ public class CreateLocationDto : CreateDtoBase
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
+    /// <summary>Map pin of the site. Supply both coordinates or neither.</summary>
+    [Range(-90, 90)]
+    public double? Latitude { get; set; }
+
+    [Range(-180, 180)]
+    public double? Longitude { get; set; }
+
+    /// <summary>Geofence zone that governs self-service punches from staff at this location.</summary>
+    public Guid? GeofenceZoneId { get; set; }
 
     [MaxLength(50)]
     public string? Phone { get; set; }
@@ -747,6 +763,16 @@ public class UpdateLocationDto : UpdateDtoBase
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
+    /// <summary>Map pin of the site. Supply both coordinates or neither.</summary>
+    [Range(-90, 90)]
+    public double? Latitude { get; set; }
+
+    [Range(-180, 180)]
+    public double? Longitude { get; set; }
+
+    /// <summary>Geofence zone that governs self-service punches from staff at this location.</summary>
+    public Guid? GeofenceZoneId { get; set; }
 
     [MaxLength(50)]
     public string? Phone { get; set; }

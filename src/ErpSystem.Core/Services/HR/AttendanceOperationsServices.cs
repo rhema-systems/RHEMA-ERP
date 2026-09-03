@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Models.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -158,8 +159,10 @@ public class GeofenceZoneService : IGeofenceZoneService
             return;
         }
 
-        if (shape == GeofenceShape.Polygon && string.IsNullOrWhiteSpace(polygonCoordinatesJson))
-            throw new ArgumentException("Polygon coordinates are required for a polygon zone.");
+        // A polygon that does not parse would be stored and then silently skipped at every punch
+        // ("Unverified"), so it is refused here with the parser's reason.
+        if (shape == GeofenceShape.Polygon && !GeofencePolygon.TryParse(polygonCoordinatesJson, out _, out var error))
+            throw new ArgumentException(error ?? "Polygon coordinates are required for a polygon zone.");
     }
 }
 

@@ -309,6 +309,12 @@ public class LocationController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            // The service's rules (one root per structure, unique code, coordinates in pairs) used to
+            // fall through to the 500 below with a fixed string. Added 2026-09-03.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating location");
@@ -342,6 +348,12 @@ public class LocationController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Rule refusals (deactivating with active children, cycles, coordinates in pairs) used
+            // to fall through to the 500 below with a fixed string. Added 2026-09-03.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {

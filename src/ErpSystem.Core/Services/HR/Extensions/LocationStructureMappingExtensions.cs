@@ -222,6 +222,10 @@ public static class LocationStructureMappingExtensions
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name,
             DigitalAddress = entity.DigitalAddress,
+            Latitude = entity.Latitude,
+            Longitude = entity.Longitude,
+            GeofenceZoneId = entity.GeofenceZoneId,
+            GeofenceZoneName = entity.GeofenceZone?.ZoneName,
             Phone = entity.Phone,
             Email = entity.Email,
             Website = entity.Website,
@@ -272,6 +276,10 @@ public static class LocationStructureMappingExtensions
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name,
             DigitalAddress = entity.DigitalAddress,
+            Latitude = entity.Latitude,
+            Longitude = entity.Longitude,
+            GeofenceZoneId = entity.GeofenceZoneId,
+            GeofenceZoneName = entity.GeofenceZone?.ZoneName,
             Phone = entity.Phone,
             Email = entity.Email,
             Website = entity.Website,
@@ -353,6 +361,9 @@ public static class LocationStructureMappingExtensions
             PostalCode = dto.PostalCode,
             CountryId = dto.CountryId,
             DigitalAddress = dto.DigitalAddress,
+            Latitude = dto.Latitude,
+            Longitude = dto.Longitude,
+            GeofenceZoneId = dto.GeofenceZoneId,
             Phone = dto.Phone,
             Email = dto.Email,
             Website = dto.Website,
@@ -376,6 +387,9 @@ public static class LocationStructureMappingExtensions
         entity.PostalCode = dto.PostalCode;
         entity.CountryId = dto.CountryId;
         entity.DigitalAddress = dto.DigitalAddress;
+        entity.Latitude = dto.Latitude;
+        entity.Longitude = dto.Longitude;
+        entity.GeofenceZoneId = dto.GeofenceZoneId;
         entity.Phone = dto.Phone;
         entity.Email = dto.Email;
         entity.Website = dto.Website;

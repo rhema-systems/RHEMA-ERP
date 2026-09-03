@@ -10,9 +10,9 @@ counts live in the build plans and `docs/HR-FINISH-PLAN.md`.
 ## 1. Where
 
 `D:\Rhema\TDC ERPS\dev-harness\hr-*` — **outside the repo, deliberately** (no fixtures or probe
-output in git). 25 directories as of 2026-09-02: `hr-assets`, `hr-awards`, `hr-company-schedule`,
+output in git). 26 directories as of 2026-09-03: `hr-assets`, `hr-awards`, `hr-company-schedule`,
 `hr-consulting`, `hr-demo-smoke`, `hr-discipline`, `hr-employee-docs`, `hr-employee-relations`,
-`hr-finish-lane4`, `hr-jobarch`, `hr-medical`, `hr-movements`, `hr-orientation`,
+`hr-finish-lane4`, `hr-geofence`, `hr-jobarch`, `hr-medical`, `hr-movements`, `hr-orientation`,
 `hr-payroll-membership`, `hr-performance`, `hr-portal`, `hr-probation`, `hr-recruitment`,
 `hr-safety`, `hr-separation`, `hr-succession`, `hr-tierb-tail`, `hr-training`, `hr-travel`,
 `hr-w3-permissions`. Each is Node (`.mjs`), cloned from its predecessor: `api.mjs` (login +

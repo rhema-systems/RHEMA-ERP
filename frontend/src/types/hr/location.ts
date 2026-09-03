@@ -82,6 +82,12 @@ export interface Location extends AuditFields {
   countryId?: string | null;
   countryName?: string | null;
   digitalAddress?: string | null;
+  /** Map pin. Both set or both null. Until 2026-09-03 the API dropped these on every read and write. */
+  latitude?: number | null;
+  longitude?: number | null;
+  /** The zone self-service punches from staff here are checked against. */
+  geofenceZoneId?: string | null;
+  geofenceZoneName?: string | null;
   phone?: string | null;
   email?: string | null;
   website?: string | null;
@@ -114,6 +120,9 @@ export interface CreateLocationRequest {
   postalCode?: string | null;
   countryId?: string | null;
   digitalAddress?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  geofenceZoneId?: string | null;
   phone?: string | null;
   email?: string | null;
   website?: string | null;

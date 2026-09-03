@@ -203,6 +203,7 @@ public class LocationRepository : GenericRepository<Location>, ILocationReposito
             .Include(l => l.LocationLevel)
             .Include(l => l.ParentLocation)
             .Include(l => l.Country)
+            .Include(l => l.GeofenceZone)
             .FirstOrDefaultAsync(l => l.Id == id && !l.IsDeleted);
     }
 
@@ -213,6 +214,7 @@ public class LocationRepository : GenericRepository<Location>, ILocationReposito
             .Include(l => l.LocationLevel)
             .Include(l => l.ParentLocation)
             .Include(l => l.Country)
+            .Include(l => l.GeofenceZone)
             .Include(l => l.ChildLocations.Where(c => !c.IsDeleted))
             .Include(l => l.LocationContacts.Where(c => !c.IsDeleted))
             .Include(l => l.Employees.Where(e => !e.IsDeleted))
@@ -429,6 +431,7 @@ public class LocationRepository : GenericRepository<Location>, ILocationReposito
             .Include(l => l.LocationLevel)
             .Include(l => l.ParentLocation)
             .Include(l => l.Country)
+            .Include(l => l.GeofenceZone)
             .Include(l => l.LocationContacts.Where(c => !c.IsDeleted))
                 .ThenInclude(c => c.Employee)
             .FirstOrDefaultAsync(l => l.Id == id && !l.IsDeleted);

@@ -1419,6 +1419,11 @@ export interface GeofenceZoneSummary {
   centreLatitude?: number | null;
   centreLongitude?: number | null;
   radiusMetres?: number | null;
+  /** On the summary since 2026-09-03: the register edits from the list, and without these the
+   *  edit dialog wiped a polygon zone's boundary and its text on every save. */
+  polygonCoordinatesJson?: string | null;
+  description?: string | null;
+  notes?: string | null;
   softEnforcement: boolean;
   hardEnforcement: boolean;
   isActive: boolean;

@@ -212,6 +212,17 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)assetsStatus;
                 break;
 
+            // A punch refused by hard geofence enforcement. Until 2026-09-03 this fell through to the
+            // 500 branch, so a correctly refused punch read as "Something went wrong". The message is
+            // composed by GeofenceVerificationService and names the zone, so it is safe to display.
+            case GeofenceVerificationRejectedException geofenceEx:
+                response.Title = "Outside Work Zone";
+                response.Code = "GEOFENCE_REJECTED";
+                response.Status = (int)HttpStatusCode.UnprocessableEntity;
+                response.Detail = geofenceEx.Message;
+                context.Response.StatusCode = (int)HttpStatusCode.UnprocessableEntity;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Code = "RESOURCE_CONFLICT";
