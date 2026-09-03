@@ -141,6 +141,7 @@
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookClassificationAuthorityTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionAdministrationServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionCertificationServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionSourceInfrastructureMigrationTests.cs" />
