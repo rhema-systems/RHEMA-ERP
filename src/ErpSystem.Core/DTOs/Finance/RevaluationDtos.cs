@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
-    public class RevaluationRequestDto
+    public class RevaluationRequestDto : IValidatableObject
     {
         [Required]
         public DateTime RevaluationDate { get; set; }
@@ -23,11 +23,35 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool PreviewOnly { get; set; } = false;
 
         /// <summary>
-        /// Optional fingerprint returned by a preview. When a caller posts from a preview,
-        /// supplying it makes any subsequent policy, authority, exposure or rate change fail closed.
+        /// Canonical SHA-256 fingerprint returned by the immediately preceding preview.
+        /// It is mandatory for posting and is ignored only when <see cref="PreviewOnly"/> is true.
         /// </summary>
         [MaxLength(64)]
         public string? ExpectedPreviewFingerprint { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (PreviewOnly)
+            {
+                yield break;
+            }
+
+            var fingerprint = ExpectedPreviewFingerprint?.Trim();
+            if (string.IsNullOrWhiteSpace(fingerprint))
+            {
+                yield return new ValidationResult(
+                    "A preview fingerprint is required before posting an FX revaluation.",
+                    new[] { nameof(ExpectedPreviewFingerprint) });
+                yield break;
+            }
+
+            if (fingerprint.Length != 64 || fingerprint.Any(character => !Uri.IsHexDigit(character)))
+            {
+                yield return new ValidationResult(
+                    "The preview fingerprint must be a canonical 64-character SHA-256 value.",
+                    new[] { nameof(ExpectedPreviewFingerprint) });
+            }
+        }
     }
     public class CurrencyRevaluationResultDto
     {

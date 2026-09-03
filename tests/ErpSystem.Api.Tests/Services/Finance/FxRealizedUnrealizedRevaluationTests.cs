@@ -5,6 +5,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -490,7 +491,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -525,7 +526,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -548,7 +549,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(8m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -573,7 +574,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -613,7 +614,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var first = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var first = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -623,7 +624,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
-                AccountingBookCode = "IFRS"
+            AccountingBookCode = "IFRS",
+            ExpectedPreviewFingerprint = first.PreviewFingerprint
         });
 
         second.Id.Should().Be(first.Id);
@@ -685,7 +687,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
         var closingRate = fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -714,7 +716,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(13m, new DateTime(2026, 6, 30), ExchangeRateType.QuarterEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 6, 30),
             RevaluationType = "Quarter-End",
@@ -737,7 +739,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var buying = fixture.SeedExchangeRate(13m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd, ExchangeRateQuoteSide.Buying);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -759,7 +761,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var batch = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -813,7 +815,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
 
-        await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -860,6 +862,144 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
     [Trait("Category", "FX")]
+    public async Task PostingRequiresCanonicalPreviewFingerprint()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+            {
+                RevaluationDate = new DateTime(2026, 7, 31),
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*preview fingerprint is required*");
+
+        await fixture.Service.Invoking(service => service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+            {
+                RevaluationDate = new DateTime(2026, 7, 31),
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS",
+                ExpectedPreviewFingerprint = new string('z', 64)
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*fingerprint is malformed*");
+        (await fixture.Db.FxRevaluationBatches.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task GovernanceWarningDriftInvalidatesPreviewFingerprint()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        var account = await fixture.PostGeneralFxExposureAsync(
+            "CORE-EQUITY-TAMPER", AccountType.Equity, revaluationRequired: true, 10m, 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+        var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS"
+        });
+
+        account.AccountType = AccountType.Asset;
+        var mapping = await fixture.Db.AccountAccountingBooks
+            .Include(item => item.AccountClassification)
+            .SingleAsync(item => item.AccountId == account.Id && item.AccountingBook.Code == "IFRS");
+        mapping.AccountClassification!.CoreAccountType = AccountType.Asset;
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+            {
+                RevaluationDate = new DateTime(2026, 7, 31),
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS",
+                ExpectedPreviewFingerprint = preview.PreviewFingerprint
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*changed after preview*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task GainLossPostingAccountDriftInvalidatesPreviewFingerprint()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+        var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS"
+        });
+
+        fixture.Settings.UnrealizedFxGainAccountId = fixture.RealizedGain.Id;
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+            {
+                RevaluationDate = new DateTime(2026, 7, 31),
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS",
+                ExpectedPreviewFingerprint = preview.PreviewFingerprint
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*changed after preview*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task RetryAfterPostCommitFailureReconcilesSingleJournalAndAuditEvidence()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostOpenArInvoiceAsync(rate: 10m, foreignAmount: 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+        var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS"
+        });
+        var request = new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS",
+            ExpectedPreviewFingerprint = preview.PreviewFingerprint
+        };
+
+        var faultingService = fixture.CreatePostCommitFaultService();
+        await faultingService.Invoking(service => service.RunUnrealizedRevaluationAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*simulated post-commit interruption*");
+
+        var interrupted = await fixture.Db.FxRevaluationBatches.SingleAsync();
+        interrupted.Status.Should().Be("PostingRecoveryRequired");
+        interrupted.JournalEntryId.Should().NotBeNull();
+        var recovered = await fixture.Service.RunUnrealizedRevaluationAsync(request);
+
+        recovered.Status.Should().Be("Posted");
+        recovered.JournalEntryId.Should().Be(interrupted.JournalEntryId);
+        (await fixture.Db.FinancePostingEvents.CountAsync(item =>
+            item.SourceModule == "FX" && item.PostingAction == "UnrealizedRevaluation")).Should().Be(1);
+        (await fixture.Db.JournalEntries.CountAsync(item => item.Id == recovered.JournalEntryId)).Should().Be(1);
+        fixture.Audit.Events.Count(item =>
+            item.EventType == FinanceAuditEvents.UnrealizedRevaluationPosted).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
     public async Task RevaluationFrequencyControlsWhichRunIncludesTheAccount()
     {
         await using var fixture = await FxFixture.CreateAsync();
@@ -896,14 +1036,14 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         fixture.SeedExchangeRate(13m, new DateTime(2026, 8, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
-        await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
                 AccountingBookCode = "IFRS"
         });
 
-        var second = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var second = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 8, 31),
             RevaluationType = "Month-End",
@@ -923,7 +1063,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
         fixture.SeedExchangeRate(13m, new DateTime(2026, 8, 31), ExchangeRateType.MonthEnd);
         await fixture.Db.SaveChangesAsync();
-        var first = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var first = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
             RevaluationType = "Month-End",
@@ -931,7 +1071,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         });
         await fixture.Service.ReverseRevaluationBatchAsync(first.Id, new DateTime(2026, 8, 1), "Auto reversal", CancellationToken.None);
 
-        var second = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        var second = await fixture.RunRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 8, 31),
             RevaluationType = "Month-End",
@@ -1117,6 +1257,26 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             };
             Db.ExchangeRates.Add(exchangeRate);
             return exchangeRate;
+        }
+
+        public async Task<FxRevaluationBatch> RunRevaluationAsync(RevaluationRequestDto request)
+        {
+            var preview = await Service.PreviewCurrencyRevaluationAsync(request);
+            request.PreviewOnly = false;
+            request.ExpectedPreviewFingerprint = preview.PreviewFingerprint;
+            return await Service.RunUnrealizedRevaluationAsync(request);
+        }
+
+        public CurrencyRevaluationService CreatePostCommitFaultService()
+        {
+            var currentUser = CreateCurrentUser(TenantId).Object;
+            return new CurrencyRevaluationService(
+                Db,
+                currentUser,
+                new TenantSettingsService(Db, currentUser),
+                new ThrowAfterSuccessfulRevaluationPostingEngine(_postingEngine),
+                Mock.Of<ILogger<CurrencyRevaluationService>>(),
+                Audit);
         }
 
         public async Task MakeControlLinesFunctionalAsync(
@@ -1801,6 +1961,54 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 period.PeriodStatus = "Closed";
             }
         }
+    }
+
+    private sealed class ThrowAfterSuccessfulRevaluationPostingEngine(IFinancePostingEngine inner)
+        : IFinancePostingEngine
+    {
+        private bool _hasThrown;
+
+        public Task<FinancePostingResultDto> PostAsync(
+            FinancePostingRequestDto request,
+            CancellationToken cancellationToken = default) => inner.PostAsync(request, cancellationToken);
+
+        public Task<FinancePostingResultDto> PostAsync(
+            FinancePostingRequestDto request,
+            FinancePostingProducerContext producerContext,
+            CancellationToken cancellationToken = default) => inner.PostAsync(request, producerContext, cancellationToken);
+
+        public async Task<FinancePostingResultDto> PostAsync(
+            FinancePostingRequestV2Dto request,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await inner.PostAsync(request, cancellationToken);
+            if (!_hasThrown && request.PostingAction == "UnrealizedRevaluation")
+            {
+                _hasThrown = true;
+                throw new InvalidOperationException("simulated post-commit interruption");
+            }
+
+            return result;
+        }
+
+        public Task<FinancePostingResultDto> PostAsync(
+            FinancePostingRequestV2Dto request,
+            FinancePostingProducerContext producerContext,
+            CancellationToken cancellationToken = default) => inner.PostAsync(request, producerContext, cancellationToken);
+
+        public Task<FinanceReversalPlanDto> GetReversalPlanAsync(
+            Guid postingEventId,
+            string reason,
+            DateTime? reversalDate = null,
+            CancellationToken cancellationToken = default) =>
+            inner.GetReversalPlanAsync(postingEventId, reason, reversalDate, cancellationToken);
+
+        public Task<FinancePostingResultDto> ReverseAsync(
+            Guid postingEventId,
+            string reason,
+            DateTime? reversalDate = null,
+            CancellationToken cancellationToken = default) =>
+            inner.ReverseAsync(postingEventId, reason, reversalDate, cancellationToken);
     }
 
     private sealed class FxScenario

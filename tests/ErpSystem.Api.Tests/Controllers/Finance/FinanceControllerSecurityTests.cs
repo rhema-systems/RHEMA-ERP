@@ -15,6 +15,24 @@ namespace ErpSystem.Api.Tests.Controllers.Finance;
 
 public sealed class FinanceControllerSecurityTests
 {
+    [Theory]
+    [InlineData("RunRevaluation")]
+    [InlineData("ReverseRevaluation")]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FinanceSecurity")]
+    public void FxRevaluationMutationsRequireReadAndRunPermissions(string actionName)
+    {
+        var action = typeof(RootFinanceController).GetMethod(actionName);
+        action.Should().NotBeNull();
+
+        GetMappedPolicies(typeof(RootFinanceController), action!)
+            .Should().BeEquivalentTo(new[]
+            {
+                FinancePermissions.ViewFinance,
+                FinancePermissions.RunFxRevaluation
+            });
+    }
+
     public static TheoryData<Type> CashAndBankControllerTypes => new()
     {
         typeof(BankAccountController),

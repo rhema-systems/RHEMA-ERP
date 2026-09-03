@@ -21,6 +21,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency;
 public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IFxAccountingService
 {
     private const string PostedStatus = "Posted";
+    private const string PostingRecoveryRequiredStatus = "PostingRecoveryRequired";
     private const string SourceModuleFx = "FX";
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
@@ -458,6 +459,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, revaluationDate, cancellationToken);
         var scope = ResolveRevaluationScope(request);
         var accountingBook = await ResolveRevaluationBookAsync(tenantId, request.AccountingBookCode, cancellationToken);
+        var expectedPreviewFingerprint = request.ExpectedPreviewFingerprint;
 
         if (!request.PreviewOnly)
         {
@@ -474,7 +476,15 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
 
             if (existing != null)
             {
-                return existing;
+                ValidateFrozenPreviewFingerprint(
+                    existing,
+                    RequireCanonicalPreviewFingerprint(expectedPreviewFingerprint));
+                if (existing.Status is PostedStatus or "NoAdjustment" or "Reversed")
+                {
+                    return existing;
+                }
+
+                return await FinalizePersistedRevaluationAsync(existing, cancellationToken);
             }
         }
 
@@ -594,10 +604,9 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         var previewFingerprint = BuildPreviewFingerprint(batch);
         batch.PreviewFingerprint = previewFingerprint;
         if (!request.PreviewOnly
-            && !string.IsNullOrWhiteSpace(request.ExpectedPreviewFingerprint)
-            && !CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(previewFingerprint),
-                Encoding.UTF8.GetBytes(request.ExpectedPreviewFingerprint!.Trim().ToLowerInvariant())))
+            && !FingerprintsMatch(
+                previewFingerprint,
+                RequireCanonicalPreviewFingerprint(expectedPreviewFingerprint)))
         {
             throw new InvalidOperationException("Revaluation exposures or closing rates changed after preview. Run preview again before posting.");
         }
@@ -636,95 +645,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             return batch;
         }
 
-        try
-        {
-            var postingRequest = BuildRevaluationPostingRequest(
-                batch,
-                unrealizedGainAccount.Id,
-                unrealizedLossAccount.Id);
-            var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
-
-            batch.JournalEntryId = postingResult.JournalEntryId;
-            batch.PostingEventId = postingResult.PostingEventId;
-            batch.Status = PostedStatus;
-            batch.PostedAt = DateTime.UtcNow;
-            batch.UpdatedAt = DateTime.UtcNow;
-            batch.UpdatedBy = _currentUserService.UserName;
-            foreach (var line in batch.Lines)
-            {
-                line.JournalEntryId = postingResult.JournalEntryId;
-                line.PostingEventId = postingResult.PostingEventId;
-            }
-
-            await MarkClosingRatesUsedAsync(batch, postingResult.PostingEventId, cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
-
-            await RecordFxAuditAsync(
-                FinanceAuditEvents.UnrealizedRevaluationPosted,
-                tenantId,
-                SourceModuleFx,
-                "FxRevaluationBatch",
-                batch.Id,
-                postingEventId: postingResult.PostingEventId,
-                journalEntryId: postingResult.JournalEntryId,
-                afterValues: BuildRevaluationAuditSnapshot(batch),
-                cancellationToken: cancellationToken);
-
-            foreach (var rateId in batch.Lines.Select(l => l.ClosingExchangeRateId).Distinct())
-            {
-                await RecordFxAuditAsync(
-                    FinanceAuditEvents.ExchangeRateUsedForRevaluation,
-                    tenantId,
-                    SourceModuleFx,
-                    "ExchangeRate",
-                    rateId,
-                    postingEventId: postingResult.PostingEventId,
-                    journalEntryId: postingResult.JournalEntryId,
-                    afterValues: new { batch.Id, rateId, batch.RevaluationDate, batch.FunctionalCurrencyCode },
-                    cancellationToken: cancellationToken);
-            }
-
-            if (batch.Lines.Any(l => l.SourceModule == "BankCash"))
-            {
-                await RecordFxAuditAsync(
-                    FinanceAuditEvents.ForeignBankRevaluationPosted,
-                    tenantId,
-                    SourceModuleFx,
-                    "FxRevaluationBatch",
-                    batch.Id,
-                    postingEventId: postingResult.PostingEventId,
-                    journalEntryId: postingResult.JournalEntryId,
-                    afterValues: BuildRevaluationAuditSnapshot(batch),
-                    cancellationToken: cancellationToken);
-            }
-
-            return batch;
-        }
-        catch (Exception ex)
-        {
-            var failedBatch = await _context.FxRevaluationBatches
-                .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == batch.Id, cancellationToken);
-            if (failedBatch != null)
-            {
-                failedBatch.Status = "Failed";
-                failedBatch.Notes = ex.Message;
-                failedBatch.UpdatedAt = DateTime.UtcNow;
-                failedBatch.UpdatedBy = _currentUserService.UserName;
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
-            await RecordFxAuditAsync(
-                FinanceAuditEvents.UnrealizedRevaluationPostingFailed,
-                tenantId,
-                SourceModuleFx,
-                "FxRevaluationBatch",
-                batch.Id,
-                reason: ex.Message,
-                afterValues: new { batch.Id, error = ex.Message },
-                cancellationToken: cancellationToken);
-
-            throw;
-        }
+        return await FinalizePersistedRevaluationAsync(batch, cancellationToken);
     }
 
     public async Task<FxRevaluationBatch> ReverseRevaluationBatchAsync(
@@ -1642,10 +1563,187 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         return rate;
     }
 
-    private FinancePostingRequestV2Dto BuildRevaluationPostingRequest(
+    private async Task<FxRevaluationBatch> FinalizePersistedRevaluationAsync(
         FxRevaluationBatch batch,
-        Guid unrealizedGainAccountId,
-        Guid unrealizedLossAccountId)
+        CancellationToken cancellationToken)
+    {
+        Guid? committedPostingEventId = null;
+        Guid? committedJournalEntryId = null;
+        try
+        {
+            // FinancePostingEngine owns and commits the accounting transaction. Everything below
+            // is deliberately a recoverable evidence-finalization boundary, not a distributed
+            // transaction pretending that the journal and this workflow share one commit.
+            var postingResult = await _financePostingEngine.PostAsync(
+                BuildRevaluationPostingRequest(batch),
+                cancellationToken);
+            committedPostingEventId = postingResult.PostingEventId;
+            committedJournalEntryId = postingResult.JournalEntryId;
+
+            ApplyCommittedPostingEvidence(batch, postingResult.PostingEventId, postingResult.JournalEntryId);
+            batch.Status = PostingRecoveryRequiredStatus;
+            await MarkClosingRatesUsedAsync(batch, postingResult.PostingEventId, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            // Build audit evidence for the intended terminal state without exposing that state
+            // to an audit service SaveChanges call before all ancillary evidence succeeds.
+            batch.Status = PostedStatus;
+            var postedAuditSnapshot = BuildRevaluationAuditSnapshot(batch);
+            batch.Status = PostingRecoveryRequiredStatus;
+            await RecordRevaluationPostingEvidenceAsync(
+                batch,
+                postingResult.PostingEventId,
+                postingResult.JournalEntryId,
+                postedAuditSnapshot,
+                cancellationToken);
+
+            batch.Status = PostedStatus;
+            batch.Notes = null;
+            batch.PostedAt ??= DateTime.UtcNow;
+            batch.UpdatedAt = DateTime.UtcNow;
+            batch.UpdatedBy = _currentUserService.UserName;
+            await _context.SaveChangesAsync(cancellationToken);
+            return batch;
+        }
+        catch (Exception ex)
+        {
+            var committed = committedPostingEventId.HasValue && committedJournalEntryId.HasValue
+                ? (committedPostingEventId.Value, committedJournalEntryId.Value)
+                : await FindCommittedRevaluationPostingAsync(batch, cancellationToken);
+
+            if (committed != null)
+            {
+                ApplyCommittedPostingEvidence(batch, committed.Value.PostingEventId, committed.Value.JournalEntryId);
+                batch.Status = PostingRecoveryRequiredStatus;
+                batch.Notes = $"Central posting committed; evidence finalization requires retry. {ex.Message}";
+            }
+            else
+            {
+                batch.Status = "Failed";
+                batch.Notes = ex.Message;
+            }
+
+            batch.UpdatedAt = DateTime.UtcNow;
+            batch.UpdatedBy = _currentUserService.UserName;
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+                await RecordFxAuditAsync(
+                    FinanceAuditEvents.UnrealizedRevaluationPostingFailed,
+                    batch.TenantId,
+                    SourceModuleFx,
+                    "FxRevaluationBatch",
+                    batch.Id,
+                    postingEventId: committed?.PostingEventId,
+                    journalEntryId: committed?.JournalEntryId,
+                    reason: ex.Message,
+                    afterValues: new
+                    {
+                        batch.Id,
+                        error = ex.Message,
+                        centralPostingCommitted = committed != null,
+                        recoveryStatus = batch.Status
+                    },
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception recoveryError)
+            {
+                _logger.LogError(
+                    recoveryError,
+                    "Failed to persist FX revaluation recovery evidence for batch {BatchId}; the deterministic posting key remains {IdempotencyKey}.",
+                    batch.Id,
+                    batch.IdempotencyKey);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<(Guid PostingEventId, Guid JournalEntryId)?> FindCommittedRevaluationPostingAsync(
+        FxRevaluationBatch batch,
+        CancellationToken cancellationToken)
+    {
+        var posting = await _context.FinancePostingEvents
+            .AsNoTracking()
+            .Where(item => item.TenantId == batch.TenantId
+                && item.IdempotencyKey == batch.IdempotencyKey
+                && item.SourceModule == SourceModuleFx
+                && item.SourceDocumentType == "FxRevaluationBatch"
+                && item.SourceDocumentId == batch.Id
+                && item.PostingAction == "UnrealizedRevaluation"
+                && item.PostingStatus == PostedStatus
+                && item.JournalEntryId.HasValue)
+            .Select(item => new { PostingEventId = item.Id, JournalEntryId = item.JournalEntryId!.Value })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return posting == null ? null : (posting.PostingEventId, posting.JournalEntryId);
+    }
+
+    private void ApplyCommittedPostingEvidence(
+        FxRevaluationBatch batch,
+        Guid postingEventId,
+        Guid journalEntryId)
+    {
+        batch.JournalEntryId = journalEntryId;
+        batch.PostingEventId = postingEventId;
+        batch.PostedAt ??= DateTime.UtcNow;
+        batch.UpdatedAt = DateTime.UtcNow;
+        batch.UpdatedBy = _currentUserService.UserName;
+        foreach (var line in batch.Lines)
+        {
+            line.JournalEntryId = journalEntryId;
+            line.PostingEventId = postingEventId;
+        }
+    }
+
+    private async Task RecordRevaluationPostingEvidenceAsync(
+        FxRevaluationBatch batch,
+        Guid postingEventId,
+        Guid journalEntryId,
+        object postedAuditSnapshot,
+        CancellationToken cancellationToken)
+    {
+        await RecordFxAuditAsync(
+            FinanceAuditEvents.UnrealizedRevaluationPosted,
+            batch.TenantId,
+            SourceModuleFx,
+            "FxRevaluationBatch",
+            batch.Id,
+            postingEventId: postingEventId,
+            journalEntryId: journalEntryId,
+            afterValues: postedAuditSnapshot,
+            cancellationToken: cancellationToken);
+
+        foreach (var rateId in batch.Lines.Select(line => line.ClosingExchangeRateId).Distinct())
+        {
+            await RecordFxAuditAsync(
+                FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+                batch.TenantId,
+                SourceModuleFx,
+                "ExchangeRate",
+                rateId,
+                postingEventId: postingEventId,
+                journalEntryId: journalEntryId,
+                afterValues: new { batch.Id, rateId, batch.RevaluationDate, batch.FunctionalCurrencyCode },
+                cancellationToken: cancellationToken);
+        }
+
+        if (batch.Lines.Any(line => line.SourceModule == "BankCash"))
+        {
+            await RecordFxAuditAsync(
+                FinanceAuditEvents.ForeignBankRevaluationPosted,
+                batch.TenantId,
+                SourceModuleFx,
+                "FxRevaluationBatch",
+                batch.Id,
+                postingEventId: postingEventId,
+                journalEntryId: journalEntryId,
+                afterValues: postedAuditSnapshot,
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private FinancePostingRequestV2Dto BuildRevaluationPostingRequest(FxRevaluationBatch batch)
     {
         var lines = new List<FinancePostingLineDto>();
         var lineNumber = 1;
@@ -1655,11 +1753,11 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             if (line.GainLossType == "Gain")
             {
                 lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation gain - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Revaluation-Control"));
-                lines.Add(BuildFunctionalPostingLine(unrealizedGainAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
+                lines.Add(BuildFunctionalPostingLine(line.GainLossAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
             }
             else
             {
-                lines.Add(BuildFunctionalPostingLine(unrealizedLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
+                lines.Add(BuildFunctionalPostingLine(line.GainLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
                 lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation loss - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Revaluation-Control"));
             }
         }
@@ -1985,17 +2083,26 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
     private static string BuildPreviewFingerprint(FxRevaluationBatch batch)
     {
         var evidence = new StringBuilder()
+            .Append("RHEMA:FX-REVALUATION-PREVIEW:V1|")
             .Append(batch.TenantId.ToString("N")).Append('|')
             .Append(batch.AccountingBookId.ToString("N")).Append('|')
             .Append(batch.AccountingBookCode).Append('|')
             .Append(batch.RevaluationDate.ToString("yyyyMMdd")).Append('|')
+            .Append(batch.FiscalPeriodId.ToString("N")).Append('|')
             .Append(batch.Scope).Append('|')
-            .Append(batch.FunctionalCurrencyCode);
+            .Append(batch.FunctionalCurrencyCode).Append('|')
+            .Append(batch.AutoReverseNextPeriod);
         foreach (var line in batch.Lines
                      .OrderBy(line => line.AccountId)
-                     .ThenBy(line => line.TransactionCurrency))
+                     .ThenBy(line => line.TransactionCurrency)
+                     .ThenBy(line => line.SourceModule)
+                     .ThenBy(line => line.SourceDocumentType)
+                     .ThenBy(line => line.SourceDocumentId))
         {
             evidence.Append('|').Append(line.AccountId.ToString("N"))
+                .Append(':').Append(line.SourceModule)
+                .Append(':').Append(line.SourceDocumentType)
+                .Append(':').Append(line.SourceDocumentId?.ToString("N") ?? "NONE")
                 .Append(':').Append(line.AccountAccountingBookId.ToString("N"))
                 .Append(':').Append(line.AccountBookCurrencyPolicyId?.ToString("N") ?? "INHERITED")
                 .Append(':').Append(line.AccountClassificationId.ToString("N"))
@@ -2004,9 +2111,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 .Append(':').Append(line.CoreAccountType)
                 .Append(':').Append(line.ClassificationDefault)
                 .Append(':').Append(line.RevaluationOverride?.ToString() ?? "NULL")
+                .Append(':').Append(line.EffectiveRevaluationRequired)
                 .Append(':').Append(line.EffectivePolicySource)
                 .Append(':').Append(line.HasGovernanceWarning)
+                .Append(':').Append(line.GovernanceWarning ?? "NONE")
                 .Append(':').Append(line.TransactionCurrency)
+                .Append(':').Append(line.FunctionalCurrencyCode)
                 .Append(':').Append(CanonicalDecimal(line.ForeignCurrencyBalance))
                 .Append(':').Append(CanonicalDecimal(line.CarryingFunctionalAmount))
                 .Append(':').Append(CanonicalDecimal(line.PriorUnreversedAdjustment))
@@ -2015,12 +2125,56 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 .Append(':').Append(line.ClosingRateDate.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture))
                 .Append(':').Append(line.ClosingRateType)
                 .Append(':').Append(line.ClosingQuoteSide)
-                .Append(':').Append(CanonicalDecimal(line.GainLossAmount));
+                .Append(':').Append(CanonicalDecimal(line.RevaluedFunctionalAmount))
+                .Append(':').Append(CanonicalDecimal(line.GainLossAmount))
+                .Append(':').Append(line.GainLossType)
+                .Append(':').Append(line.GainLossAccountId.ToString("N"))
+                .Append(':').Append(line.Notes ?? "NONE");
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence.ToString())))
             .ToLowerInvariant();
     }
+
+    private static string RequireCanonicalPreviewFingerprint(string? value)
+    {
+        var fingerprint = value?.Trim();
+        if (string.IsNullOrWhiteSpace(fingerprint))
+        {
+            throw new InvalidOperationException(
+                "A preview fingerprint is required before posting an FX revaluation. Run preview and submit its 64-character fingerprint.");
+        }
+
+        if (fingerprint.Length != 64 || fingerprint.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new InvalidOperationException(
+                "The FX revaluation preview fingerprint is malformed. Run preview again and submit the canonical 64-character SHA-256 fingerprint.");
+        }
+
+        return fingerprint.ToLowerInvariant();
+    }
+
+    private static void ValidateFrozenPreviewFingerprint(FxRevaluationBatch batch, string expectedFingerprint)
+    {
+        var storedFingerprint = RequireCanonicalPreviewFingerprint(batch.PreviewFingerprint);
+        var recomputedFingerprint = BuildPreviewFingerprint(batch);
+        if (!FingerprintsMatch(storedFingerprint, recomputedFingerprint))
+        {
+            throw new InvalidOperationException(
+                "Stored FX revaluation evidence no longer matches its preview fingerprint. Posting is blocked; investigate possible evidence tampering.");
+        }
+
+        if (!FingerprintsMatch(storedFingerprint, expectedFingerprint))
+        {
+            throw new InvalidOperationException(
+                "The supplied preview fingerprint does not match the persisted FX revaluation plan. Reload preview before retrying.");
+        }
+    }
+
+    private static bool FingerprintsMatch(string first, string second) =>
+        CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(first.ToLowerInvariant()),
+            Encoding.ASCII.GetBytes(second.ToLowerInvariant()));
 
     private static string CanonicalDecimal(decimal value) =>
         value.ToString("0.############################", CultureInfo.InvariantCulture);

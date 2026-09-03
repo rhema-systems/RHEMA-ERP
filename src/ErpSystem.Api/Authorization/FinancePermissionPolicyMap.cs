@@ -371,8 +371,8 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "PostJournalEntry" => One(FinancePermissions.PostJournalEntries),
-            "RunRevaluation" => One(FinancePermissions.RunFxRevaluation),
-            "ReverseRevaluation" => One(FinancePermissions.RunFxRevaluation),
+            "RunRevaluation" => new[] { FinancePermissions.ViewFinance, FinancePermissions.RunFxRevaluation },
+            "ReverseRevaluation" => new[] { FinancePermissions.ViewFinance, FinancePermissions.RunFxRevaluation },
             _ when ReportActions.Contains(action) => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
         };
