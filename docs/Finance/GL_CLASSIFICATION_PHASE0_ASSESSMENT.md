@@ -1,6 +1,6 @@
 # Finance GL Classification Refactor — Phase 0 Assessment
 
-Status: proposed architecture and integration gate for Finance-owner approval
+Status: architecture approved; Phase 1 blocked only on named producer owners and integration window
 
 Assessment base: `4034bfc8f0e95a99de9f53f7c2d776735826ae3d`
 
@@ -19,7 +19,7 @@ Proceed in controlled phases. The handoff's direction is sound, with these corre
 3. Published layouts must own immutable, resolved account-membership snapshots. Retaining only a live `ClassificationId` is not reproducible.
 4. An inactive-book/account exception is permitted only through a trusted, server-built exact reversal of a posted event. A request DTO must not grant the exception.
 5. `SystemRole` is a small, controlled behavioural vocabulary. Report captions and ordinary presentation groupings remain configurable classifications/layout rows.
-6. Rename `BookClassification` in one coordinated V2 cutover, not through an indefinite dual property. Persisted historical columns can be renamed separately from the public-contract cutover.
+6. Rename `BookClassification` through the short-lived stacked V2 integration sequence recorded below, not through an indefinite dual property or one giant cross-module edit. Persisted historical columns can be renamed separately from the public-contract cutover.
 7. Phase 1 must include the central posting guard and startup SQL removal/reconciliation. UI filtering is not an accounting control.
 8. No Phase 0 production code or schema change is justified. Existing tests already characterize much of the posting boundary; desired behaviours that currently fail belong in the matrix below, not as skipped tests.
 
@@ -425,6 +425,16 @@ Reset utility safeguards: require Development environment, explicit database nam
 - Other owners: Procurement, Inventory, Sales, HR producer updates in coordinated commits.
 - Tests/docs: posting engine, external evidence golden vectors, adapters, account service, consumer-contract tests and catalogue.
 
+The V2 contract cutover must use this short-lived stacked integration sequence:
+
+1. Finance publishes the V2 `AccountingBookCode` contract and golden evidence vectors.
+2. Finance updates Finance-owned request builders and adapters.
+3. Procurement, Inventory, Sales, and HR owners update their producers against V2.
+4. Contract tests prove that no active V1 producer remains.
+5. Finance removes `BookClassification` and increments the final contract version.
+
+Temporary V1/V2 coexistence is allowed only on the coordinated integration branches. The final target branch must contain no permanent dual contract.
+
 ### Phase 2 — configurable classifications
 
 - New entity/configuration/DTO/service/controller/permissions/audit/frontend administration.
@@ -541,35 +551,52 @@ Phase 1 cannot merge until Finance plus every compile-time producer owner is gre
 3. **Freeze resolved membership.** Publish an immutable mapping snapshot with resolved account IDs, frozen explanatory fields, classification code, hierarchy fingerprint, resolution fingerprint, actor and time. Published execution reads it; drafts read live hierarchy.
 4. **Only exact trusted reversals.** The server derives all lines from an immutable posted event, permits historical disabled mappings solely for that path, compares lineage atomically, preserves the original book and posts into an allowed period. No client flag or arbitrary compensating entry receives the exception.
 5. **Roles are behavioural families only.** Use the limited Cash/Bank/control/inventory/fixed-asset/tax roles listed above. Cost of Sales, Other Expenses, Rental Income and similar labels remain classifications/layout configuration. Exact control-account choice remains governed settings.
-6. **One coordinated V2.** Rename to `AccountingBookCode`, bump catalogue major versions, domain-separate and update evidence hashing/golden fixtures, update all Finance and producer consumers in one integration train, then remove V1. Do not retain dual DTO properties.
+6. **One coordinated V2 train.** Use the approved stacked integration sequence: publish V2 and golden vectors; update Finance-owned builders/adapters; accept owner producer commits; prove no active V1 producer remains; then remove `BookClassification` and increment the final version. Temporary coexistence is branch-local only; do not retain dual DTO properties in the merged architecture.
 7. **Minimum gate.** Compile Core/Data/API and all producers; run central posting, external contract/evidence, full Finance-filter, affected producer consumer and frontend tests; prove existing/empty DB migration and repeatable seed; execute ordinary and reversal E2E at one exact revision.
 8. **Overlooked dependencies.** Active startup repair SQL writes legacy Account fields and creates books/joins; HR Payroll writes Accounts directly; Procurement test seeding creates Finance accounts; Inventory still recognizes `ALL_ACTIVE_BOOKS`; report screens and batch UI contain hardcoded fallbacks; FX posting hardcodes IFRS; reversal lines are not yet proven exact; external evidence hashes the misleading field. `full_database.sql` itself appears reference/generated rather than authoritative.
 
-## Decisions requiring Finance-owner approval
+## Approved Finance-owner decisions
 
-1. Approve `DefaultRevaluationTreatment = Exclude` as the safe default for newly created classifications, with explicit seed values for known monetary leaves.
-2. Approve whether only non-standard inclusion for Equity/Revenue/Expense needs elevated approval, or every explicit override (including exclusion) does. Recommendation: permission and reason for every override; extra visible amber warning for non-standard P&L/equity inclusion.
-3. Approve whether account-book memberships need effective dates in Phase 1 or whether audited current state plus published layout snapshots is enough pre-live.
-4. Approve SystemRole vocabulary/cardinality and the exact control-account boundary.
-5. Approve that `ALL_ACTIVE_BOOKS` is expanded only by source orchestration and rejected by the central single-book engine.
-6. Approve that server-generated exact reversal is the sole historical-mapping exception.
-7. Confirm whether Unit Journal Entries should copy the previous line description in Phase 6.
-8. Confirm ownership/process for regenerating or retiring the three large SQL snapshots; they should not block the runtime migration.
-9. Name owners and integration window for Procurement, Inventory, Sales, and HR consumer commits.
+Recorded 2026-09-03:
+
+1. `DefaultRevaluationTreatment = Exclude`. Known monetary classifications are explicitly seeded as `Include`; Asset or Liability type alone never implies monetary treatment.
+2. Every explicit revaluation override requires a dedicated permission, reason, and audit event. Inclusion of Equity, Revenue, or Expense additionally requires maker-checker approval and prominent UI warnings; ordinary authorized overrides do not require that heavier workflow.
+3. Effective dates for account/book membership are deferred. Audited current state, immutable posting evidence, exact-reversal lineage, and published-layout snapshots are sufficient pre-live. Keep the schema extensible for later effective dating.
+4. The controlled behavioural `SystemRole` vocabulary is Cash, Bank, ReceivableControl, PayableControl, InventoryControl, FixedAssetCost, AccumulatedDepreciation, AssetUnderConstruction, InputTax, OutputTax, WhtReceivable, and WhtPayable. Exact control accounts remain governed Finance settings.
+5. A source orchestrator may expand `ALL_ACTIVE_BOOKS` to concrete books. The central posting engine always rejects it as a single-book posting code.
+6. Only a server-derived, mathematically exact reversal of immutable original posting evidence may use a subsequently disabled book/account mapping.
+7. In Phase 6, adding a Unit Journal line may copy only the immediately preceding description—never account, dimensions, currency, or amounts.
+8. The three large SQL snapshots are non-authoritative generated/reference artifacts. Do not manually evolve them in Phase 1. Identify their generation process and regenerate or formally retire them after schema stabilization. Reconcile active `Program.cs` schema-repair SQL in Phase 1.
+9. Finance owns the V2 contract and adapters. Procurement, Inventory, Sales, and HR owners update their producer calls. V1 removal requires the approved stacked integration sequence and a green no-active-V1 contract gate.
+10. Reset remains approved only after Phase 1 migration, producer, and deterministic-seed work passes both forward migration from an existing development database and migration/reseed from an empty database. Each developer then recreates their independent local database at the agreed integration commit. No purge script or permanent legacy schema is required.
+
+## Remaining producer coordination gate
+
+The lead developer must replace each `TBD` before Phase 1 implementation begins; names and dates were not supplied with the approval and must not be inferred.
+
+| Producer | Named owner | Integration branch/commit window | Required delivery |
+|---|---|---|---|
+| Procurement | TBD | TBD | V2 producer calls and contract tests |
+| Inventory | TBD | TBD | V2 producer calls, including source-side `ALL_ACTIVE_BOOKS` expansion, and contract tests |
+| Sales | TBD | TBD | V2 producer calls and contract tests |
+| HR/Payroll | TBD | TBD | V2 producer calls plus migration from direct category/subcategory writes and contract tests |
+
+The lead developer must also nominate the Finance integration owner who will publish V2/golden vectors, accept the stacked producer commits, run the no-active-V1 gate, remove V1, and identify the SQL-snapshot generation or retirement owner.
 
 ## Phase 0 verification record
 
 - `git diff --check`: passed.
 - `dotnet build src/ErpSystem.Api/ErpSystem.Api.csproj --nologo`: passed with 0 errors and 1,089 existing compiler/analyzer warnings across Core, Data, and API.
 - Focused contract command: `dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj --filter "FullyQualifiedName~FinanceIntegrationContractFoundationTests|FullyQualifiedName~ExternalFinanceDimensionAdapterContractTests"`.
-- Focused result: 22 passed, 1 failed, 0 skipped, 23 total.
-- The failure is the current-base assertion `FinanceIntegrationContractFoundationTests.DimensionRouteCatalogueShouldKeepTrustedIdentityAndOwnershipBoundariesCodeOwned`: it forbids a `CustomerPayment` route while `FinanceDimensionRouteCatalog` currently registers the Finance-owned AR customer-payment route. Phase 0 did not alter or weaken either side. Reconcile that catalogue/test expectation before using this test group as a required green Phase 1 gate.
+- Original focused result: 22 passed, 1 failed, 0 skipped, 23 total. The failure was the stale assertion that forbade every `CustomerPayment` route even though `PaymentService` uses the registered Finance-owned AR route.
+- Prerequisite correction: the contract now permits exactly one `CustomerPayment` route and pins its trusted Finance/AR identity, source route, and owner. Any additional external or untrusted route fails the assertion.
+- Corrected focused result: 23 passed, 0 failed, 0 skipped, 23 total.
 - No database was connected, migrated, seeded, reset, or otherwise mutated.
 - No production source, frontend, migration, model snapshot, or other module file was changed.
 
 ## Recommended exact Phase 1 scope
 
-After explicit approval, Phase 1 should be limited to:
+After the remaining owner/window gate is completed, Phase 1 should be limited to:
 
 - publish and cut over `AccountingBookCode` V2, contract catalogue versions, evidence canonicalization and all in-repository producers;
 - make account create/update consume `AccountingBooks` mappings as authoritative and remove the three Boolean runtime flags/aliases;
@@ -580,4 +607,4 @@ After explicit approval, Phase 1 should be limited to:
 - remove/reconcile active startup SQL for the migrated legacy fields;
 - coordinate HR/Procurement seed ownership but defer configurable classification hierarchy, layout mappings, revaluation policy, segment enforcement and inquiry UI to their later approved phases.
 
-Phase 1 should not begin until these decisions and producer owners are recorded. It should not include the Phase 2 classification tables merely to make the branch appear complete; if classification is required on enabled assignments immediately, combine Phases 1 and the minimal classification foundation explicitly and review that changed scope before implementation.
+Phase 1 should not begin until the producer owners and integration window are recorded. It should not include the Phase 2 classification tables merely to make the branch appear complete; if classification is required on enabled assignments immediately, combine Phases 1 and the minimal classification foundation explicitly and review that changed scope before implementation.
