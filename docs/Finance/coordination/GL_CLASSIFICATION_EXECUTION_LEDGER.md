@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 1A — Finance book authority and V2 foundation |
-| Status | `CORRECTIONS_REQUIRED` |
+| Status | `INTEGRATED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `2e883ecdcac53d995f6c0262bf8d57c56b3381a0` |
 | Branch | `codex/finance-book-authority-phase1a` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `2e883ecdcac53d995f6c0262bf8d57c56b3381a0` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | `CHANGES_REQUIRED`; corrections sent directly to implementer |
+| Review status | Independent re-review `APPROVED`; integrated locally |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -43,26 +43,27 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 ## Phase 1A review checklist
 
-- [ ] Handoff supplies exact base, branch, worktree, ordered commits, changed files, tests, migration state, dependencies, and unresolved findings.
-- [ ] Work remains inside the authorized Finance-only Phase 1A boundary.
-- [ ] V1 external producer compatibility is preserved.
-- [ ] Accounting-book authority and V2 contracts match the approved Phase 0 decisions.
-- [ ] Central posting enforcement fails closed and exact reversal behavior is preserved or strengthened.
-- [ ] Startup SQL, deterministic seeding, migrations, and model snapshot are mutually consistent.
-- [ ] Relevant backend, contract, migration, and frontend tests pass or all baseline failures are evidenced.
-- [ ] No migration or database mutation was performed without authorization.
-- [ ] Integration conflicts and dependencies are known before cherry-picking.
+- [x] Handoff supplies exact base, branch, worktree, ordered commits, changed files, tests, migration state, dependencies, and unresolved findings.
+- [x] Work remains inside the authorized Finance-only Phase 1A boundary.
+- [x] V1 external producer compatibility is preserved.
+- [x] Accounting-book authority and V2 contracts match the approved Phase 0 decisions.
+- [x] Central posting enforcement fails closed and exact reversal behavior is preserved or strengthened.
+- [x] Startup SQL, deterministic seeding, migrations, and model snapshot are mutually consistent.
+- [x] Relevant backend, contract, migration, and frontend tests pass or all baseline failures are evidenced.
+- [x] No migration or database mutation was performed without authorization.
+- [x] Integration conflicts and dependencies were checked before cherry-picking; no dirty-file path overlapped.
 
 ## Review cycles
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
 | 1 | `f50f460612bd301e9082b85b5efd228f44a636a7` | `CHANGES_REQUIRED` | P1: exact-reversal validation bypass for ordinary V1/V2 requests; recurring-reversal test fake no longer compiles; migration snapshot has pending model changes; used classifications can be retired/demoted and invalidate live mappings. P2: account-book rowversion is not round-tripped, so stale web edits can overwrite assignments. Corrections and required tests were sent directly to the implementer. | Not integrated |
+| 2 | `d282be9c3a39a35d1d24ca0c8c85823ce415233b` | `APPROVED` | All five findings closed. Independent verification: 68 focused tests, EF no-pending-model check and diff check passed; worktree clean. Primary tree matches the reviewed task tree for every task-owned file. | Fourteen commits cherry-picked without conflict as `8c78c3a6` through `5a6d55f3`. Primary isolated-output build passed with 0 errors and 78 focused tests passed. Migration remains unapplied. |
 
 ## Connectivity checkpoint
 
-Last verified durable point: independent review of `2e883ecdcac53d995f6c0262bf8d57c56b3381a0..f50f460612bd301e9082b85b5efd228f44a636a7` returned `CHANGES_REQUIRED`, and all five findings were sent directly to the implementer. No commits were integrated and the migration remains unapplied. If task communication is interrupted, retain both worktrees and resume from the correction request without repeating the original implementation.
+Last verified durable point: Phase 1A is independently approved and integrated into primary through `5a6d55f3e1a5071fc00fead81bd026b8ff18a065`. The task-owned primary files are byte-identical to reviewed HEAD `d282be9c3a39a35d1d24ca0c8c85823ce415233b`; primary build and 78 focused tests passed. The FinanceBookClassificationFoundation migration remains unapplied. The default-output EF command is not authoritative while the running API retains stale binaries; the same source tree passed the exact EF no-pending-model check in the isolated worktree.
 
 ## Next action
 
-Wait for the corrected Phase 1A handoff. Re-review the original range plus correction commits, require the compile, reversal, lifecycle, concurrency, migration-pending-model and migration-operation gates to pass, and integrate only after approval.
+Begin the already-approved Finance-only Phase 2 configurable-classification completion on the resulting primary commit. Do not modify Procurement, Inventory, Sales, HR/Payroll or other module implementations; document their owner actions against the published V2/provisioning contracts. Keep V1 until the external producer-owner gate is completed.
