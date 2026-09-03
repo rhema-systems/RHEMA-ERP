@@ -10,17 +10,17 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Phase 2 — configurable classifications completion |
-| Status | `PHASE_2_COMPLETE` |
+| Phase | Phase 3 — classification-driven report layouts |
+| Status | `IMPLEMENTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `30565ea50194559611616946fcfc2f53cbd3eab1` |
-| Branch | `codex/finance-configurable-classifications-phase2` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-configurable-classifications-phase2` |
+| Exact base | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
+| Branch | `codex/finance-report-layout-classifications-phase3` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-report-layout-classifications-phase3` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `30565ea50194559611616946fcfc2f53cbd3eab1` |
+| Primary HEAD at activation | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | `APPROVED`; corrected six-commit stack independently verified and integrated |
+| Recovery heartbeat | Inactive; manual coordinator monitoring |
+| Review status | Phase 3 implementation in progress; independent review required before integration |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -67,10 +67,16 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | 1 | `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2` | `CHANGES_REQUIRED` | P1: deterministic v1-to-v2 seed upgrades are incomplete for existing tenants; dashboard aggregation is not bound to one authoritative book; classification mutation/audit and relationship checks are not atomic; singleton system-role cardinality is unenforced. P2: ad-hoc Chart of Accounts book/tenant selection is nondeterministic; mutation controls lack permission-aware UI gating; parent retirement readiness disagrees with backend lifecycle rules. Corrections and required regression gates were sent directly. | Not integrated |
 | 2 | `62f1a138efaaef78b5bcf2f7e4a1e3776ffb518b` | `APPROVED` | All seven findings closed. Independent verification passed 58 backend tests, 9 frontend tests, targeted ESLint, EF no-pending-model and diff checks. The worktree was clean and no persistent database was mutated. | Six commits cherry-picked without conflict as `ff6e35b6`, `e8a31156`, `b11099a3`, `81426b0a`, `81f28b26`, and `8a026995`. Primary verification passed: test-project build with 0 errors, 137 focused backend tests, 9 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Migration remains unapplied. |
 
+## Phase 3 review cycles
+
+| Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
+|---|---|---|---|---|
+| 1 | Pending | Implementation active | Classification-driven layouts, immutable publication snapshots, exact-book execution, import/export compatibility, protected standards, where-used evidence and legacy-runtime replacement are assigned. | Pending |
+
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 2 is independently approved and integrated through primary commit `8a026995`. Dependency restore was refreshed for the new SQLite relational tests; primary build and focused backend/frontend/EF gates are green. Migration `20260903120000_EnforceFinanceClassificationSystemRoleCardinality` remains unapplied, and no persistent database was mutated.
+Last verified durable point: Phase 2 is independently approved and recorded through primary commit `d7bf1767`. The user authorized Phase 3, and the existing implementing task was reactivated with exact base `d7bf1767`, a new isolated worktree/branch, immutable published-classification snapshot requirements, Finance-only boundaries, and unapplied-migration policy. Earlier migrations, including `20260903120000_EnforceFinanceClassificationSystemRoleCardinality`, remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Stop before Phase 3 pending separate authorization. Before any future database application, inspect singleton-role duplicates and run the agreed migration/reset gates; do not apply the Phase 2 migration automatically.
+Monitor the Phase 3 implementation handoff. Independently review publication reproducibility, transactionality, permissions, concurrency, import compatibility and migration metadata; send corrections directly until approved. Integrate only a clean approved stack and do not apply migrations or begin Phase 4 without authorization.
