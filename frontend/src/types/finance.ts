@@ -239,12 +239,26 @@ export interface AccountClassificationUsage {
     isEnabled: boolean;
 }
 
+export interface AccountClassificationLayoutUsage {
+    layoutId: string;
+    layoutCode: string;
+    layoutName: string;
+    versionId: string;
+    versionNumber: number;
+    versionStatus: string;
+    rowCode: string;
+    isHistoricalSnapshot: boolean;
+}
+
 export interface AccountClassificationWhereUsed {
     classificationId: string;
     classificationCode: string;
     totalMappings: number;
     enabledMappings: number;
     mappings: AccountClassificationUsage[];
+    draftLayoutReferences: number;
+    publishedLayoutReferences: number;
+    layoutReferences: AccountClassificationLayoutUsage[];
 }
 
 export interface Account {
@@ -2088,7 +2102,7 @@ export interface BalanceSheetCategoryDto {
 export type FinancialStatementType = 'BalanceSheet' | 'IncomeStatement';
 export type FinancialStatementLayoutVersionStatus = 'Draft' | 'Published' | 'Retired';
 export type FinancialStatementRowType = 'Header' | 'Account' | 'Formula' | 'Total' | 'Spacer';
-export type FinancialStatementRowMappingType = 'Account' | 'AccountRange' | 'AccountHierarchy';
+export type FinancialStatementRowMappingType = 'Account' | 'AccountRange' | 'AccountHierarchy' | 'Classification';
 
 export interface FinancialStatementLayoutSummaryDto {
     id: string;
@@ -2104,6 +2118,8 @@ export interface FinancialStatementLayoutSummaryDto {
     revision: number;
     latestVersionNumber: number;
     publishedVersionNumber?: number;
+    isProtectedStandard: boolean;
+    standardSourceLayoutId?: string;
 }
 
 export interface FinancialStatementLayoutDto extends FinancialStatementLayoutSummaryDto {
@@ -2120,6 +2136,13 @@ export interface FinancialStatementLayoutVersionDto {
     publishedAt?: string;
     publishedById?: string;
     publishedByName?: string;
+    publicationSnapshotSchemaVersion?: string;
+    publishedAccountingBookId?: string;
+    publishedAccountingBookCode?: string;
+    publishedAccountingBookName?: string;
+    hierarchyFingerprint?: string;
+    resolutionFingerprint?: string;
+    publicationAccountCount: number;
     notes?: string;
     revision: number;
     rows: FinancialStatementRowDto[];
@@ -2152,6 +2175,10 @@ export interface FinancialStatementRowMappingDto {
     accountName?: string;
     fromAccountNumber?: string;
     toAccountNumber?: string;
+    accountClassificationId?: string;
+    accountClassificationCode?: string;
+    accountClassificationName?: string;
+    includeClassificationDescendants: boolean;
 }
 
 export interface UpdateFinancialStatementLayoutDto {
@@ -2169,6 +2196,12 @@ export interface CreateFinancialStatementLayoutVersionDto {
     notes?: string;
 }
 
+export interface CloneFinancialStatementLayoutDto {
+    code: string;
+    name: string;
+    accountingBookId: string;
+}
+
 export interface PublishFinancialStatementLayoutVersionDto {
     expectedVersionRevision: number;
     effectiveFrom?: string;
@@ -2183,8 +2216,12 @@ export interface FinancialStatementLayoutValidationResultDto {
 export interface FinancialStatementRowMappingInputDto {
     mappingType: FinancialStatementRowMappingType;
     accountId?: string;
+    accountNumber?: string;
     fromAccountNumber?: string;
     toAccountNumber?: string;
+    accountClassificationId?: string;
+    accountClassificationCode?: string;
+    includeClassificationDescendants?: boolean;
 }
 
 export interface FinancialStatementRowInputDto {
