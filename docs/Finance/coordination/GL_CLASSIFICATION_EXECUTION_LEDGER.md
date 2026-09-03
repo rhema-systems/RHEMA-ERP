@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 4 — book-specific revaluation policy and execution |
-| Status | `REVIEWING` |
+| Status | `CORRECTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Branch | `codex/finance-revaluation-policy-phase4` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Clean Phase 4 stack at `1716ba43`; independent review active |
+| Review status | `CHANGES_REQUIRED`; four findings sent directly to implementer |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -80,12 +80,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | `1716ba43f18758685ef4b56c3796486e172db4f6` | Independent review active | Clean three-commit stack delivers exact-book/account/currency policy, governed override lifecycle, signed revaluation mathematics, immutable preview/batch evidence, UI, tests, documentation and migration. Review is focused on accounting direction, workflow/audit atomicity, book isolation, fingerprint completeness, seed preservation and migration preflight. | Pending |
+| 1 | `1716ba43f18758685ef4b56c3796486e172db4f6` | `CHANGES_REQUIRED` | P1: posting can omit the preview fingerprint and its domain omits governance-warning and gain/loss-account evidence. P1: an ancillary failure after central posting can downgrade an already-committed batch to failed and make retry unrecoverable. P2: revaluation UI lacks Finance.Read/Run permission parity and masks history errors as empty. P2: account policy UI performs two independent writes concurrently and can partially save while reporting a combined failure. Independent checks passed 170 focused backend and 5 frontend tests, targeted ESLint, EF no-pending-model and diff checks; 38 broader failures were confirmed as pre-existing Phase 1A fixture debt. Corrections and fault-injection/UI regression gates were sent directly. | Not integrated |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 4 recovered from the transient service interruption and returned a clean three-commit stack at `1716ba43f18758685ef4b56c3796486e172db4f6`, based exactly on `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. The coordinator verified the base, ordered commits, clean worktree, Finance-only changed-file inventory, migration metadata and diff check, then activated independent review. Migration `20260903190453_AddBookScopedFxRevaluationPolicy` and all earlier migrations remain unapplied; no persistent database was mutated.
+Last verified durable point: Phase 4 returned a clean three-commit stack at `1716ba43f18758685ef4b56c3796486e172db4f6` from exact base `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. Independent review found four correction items covering mandatory complete preview fingerprints, recovery after an already-committed central posting, revaluation UI permission/request states, and partial account-policy saves. Concrete fixes and required regression tests were sent directly to the implementer in the existing isolated worktree. Migration `20260903190453_AddBookScopedFxRevaluationPolicy` and all earlier migrations remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Complete independent Phase 4 accounting/schema/security review and send any corrections directly. Integrate only an approved clean stack, rerun primary gates, update the ledger, then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
+Monitor the Phase 4 correction cycle. Re-review the corrected clean handoff independently and integrate only after approval, then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
