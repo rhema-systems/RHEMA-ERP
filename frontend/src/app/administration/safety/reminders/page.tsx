@@ -82,7 +82,7 @@ export default function SafetyRemindersPage() {
       <PageHeader
         title="SHE Reminder Engine"
         description="Runs hourly: expires permits past their window, walks the due-date reminder ladders (180/90/60/30/14/7 on statutory reviews) and escalates overdue items by tier. Delivery is via the SafetyCompliance notification topics — retarget or mute them under notification settings."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
         actions={
           <Button onClick={runNow} disabled={running}>
             {running ? (

@@ -52,7 +52,7 @@ export default function SafetyPpeRequirementsPage() {
       <PageHeader
         title="Job-Role PPE Requirements"
         description="The matrix behind compliant issuance — what each job role must be issued, in what quantity, and how often it is replaced."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<JobRolePpeRequirement, RequirementForm>

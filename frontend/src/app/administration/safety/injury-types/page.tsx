@@ -28,7 +28,7 @@ export default function SafetyInjuryTypesPage() {
       <PageHeader
         title="Injury Types"
         description="The injury classification used on incident records."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<SheInjuryType, InjuryTypeForm>

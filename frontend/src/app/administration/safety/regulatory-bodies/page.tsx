@@ -61,7 +61,7 @@ export default function SafetyRegulatoryBodiesPage() {
       <PageHeader
         title="Regulatory Bodies"
         description="The authorities reportable incidents and compliance obligations point at."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<SheRegulatoryBody, RegulatoryBodyForm>

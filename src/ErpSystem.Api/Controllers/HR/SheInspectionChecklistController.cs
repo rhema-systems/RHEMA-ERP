@@ -36,7 +36,7 @@ public class SheInspectionChecklistController : SheApiControllerBase
         => Ok(await _service.GetByTypeAsync(type));
 
     [HttpPost]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInspectionChecklistDto>> Create([FromBody] CreateSheInspectionChecklistDto dto)
     {
         var created = await _service.CreateAsync(dto, TenantId, UserId);
@@ -44,7 +44,7 @@ public class SheInspectionChecklistController : SheApiControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInspectionChecklistDto>> Update(Guid id, [FromBody] UpdateSheInspectionChecklistDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -61,7 +61,7 @@ public class SheInspectionChecklistController : SheApiControllerBase
 
     // ── Items ──
     [HttpPost("{id:guid}/items")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInspectionChecklistItemDto>> AddItem(Guid id, [FromBody] CreateSheInspectionChecklistItemDto dto)
     {
         dto.ChecklistId = id;
@@ -69,7 +69,7 @@ public class SheInspectionChecklistController : SheApiControllerBase
     }
 
     [HttpPut("items/{itemId:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInspectionChecklistItemDto>> UpdateItem(Guid itemId, [FromBody] UpdateSheInspectionChecklistItemDto dto)
     {
         if (itemId != dto.Id) return BadRequest("ID mismatch.");

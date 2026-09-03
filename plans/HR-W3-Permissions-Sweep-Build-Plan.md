@@ -538,3 +538,15 @@ seeded roles are code-managed — the grant loop is add-only and RoleRevocations
 admin's removal from a seeded role returns on the next restart and a re-grant of a revoked one
 is deleted; tenant-specific shapes belong in custom roles.
 
+**Settings split (same day, user asked "should Safety setups be separate from HR setups?" — yes):**
+`admin.she` seeded (Administration Modules; SHE Manager + SuperAdmin/TenantAdmin/Admin — NOT
+Safety Officer, NOT HR); the SHE settings tree moved from `/administration/hr/safety` to
+`/administration/safety` (git mv, 9 pages, every link and runbook path repointed), gated
+`admin.she` in the sidebar node and the administration layout; the API's configuration writes
+(SheReferenceDataController POST/PUT ×12, SheInspectionChecklistController POST/PUT ×4, PPE
+types/requirements POST/PUT) moved from `HR.She.Write` to `HR.She.Admin` so an officer uses the
+catalogue but does not edit it. Waste types stay at Write (managed from the desk screen, not the
+settings tree). Harness: `CONFIG_WRITES` list + `w3.shemanager`/W3SHM fixture — officer and HR
+refused, manager reaches; admin.she grant assertions.
+**Verified 2026-09-03:** full ladder **964/964** on the rebuilt API (slice 12 = 178; the other ten unchanged); `admin.she` rows checked in the database — granted to SHE Manager, SuperAdmin, TenantAdmin only.
+

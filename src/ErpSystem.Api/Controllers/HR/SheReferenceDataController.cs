@@ -38,12 +38,12 @@ public class SheReferenceDataController : SheApiControllerBase
         => Ok(await _service.GetIncidentTypeAsync(id));
 
     [HttpPost("incident-types")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheIncidentTypeDto>> CreateIncidentType([FromBody] CreateSheIncidentTypeDto dto)
         => Ok(await _service.CreateIncidentTypeAsync(dto, TenantId, UserId));
 
     [HttpPut("incident-types/{id:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheIncidentTypeDto>> UpdateIncidentType(Guid id, [FromBody] UpdateSheIncidentTypeDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -60,7 +60,7 @@ public class SheReferenceDataController : SheApiControllerBase
 
     // ── Default corrective actions on an incident type (auto-populate onto new incidents) ──
     [HttpPost("incident-types/{id:guid}/corrective-actions")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheIncidentTypeCorrectiveActionDto>> AddIncidentTypeCorrectiveAction(Guid id, [FromBody] CreateSheIncidentTypeCorrectiveActionDto dto)
     {
         dto.IncidentTypeId = id;
@@ -68,7 +68,7 @@ public class SheReferenceDataController : SheApiControllerBase
     }
 
     [HttpPut("incident-types/corrective-actions/{linkId:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheIncidentTypeCorrectiveActionDto>> UpdateIncidentTypeCorrectiveAction(Guid linkId, [FromBody] UpdateSheIncidentTypeCorrectiveActionDto dto)
     {
         if (linkId != dto.Id) return BadRequest("ID mismatch.");
@@ -90,12 +90,12 @@ public class SheReferenceDataController : SheApiControllerBase
         => Ok(await _service.GetInjuryTypesAsync(activeOnly));
 
     [HttpPost("injury-types")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInjuryTypeDto>> CreateInjuryType([FromBody] CreateSheInjuryTypeDto dto)
         => Ok(await _service.CreateInjuryTypeAsync(dto, TenantId, UserId));
 
     [HttpPut("injury-types/{id:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInjuryTypeDto>> UpdateInjuryType(Guid id, [FromBody] UpdateSheInjuryTypeDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -117,12 +117,12 @@ public class SheReferenceDataController : SheApiControllerBase
         => Ok(await _service.GetBodyPartsAsync(activeOnly));
 
     [HttpPost("body-parts")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheBodyPartDto>> CreateBodyPart([FromBody] CreateSheBodyPartDto dto)
         => Ok(await _service.CreateBodyPartAsync(dto, TenantId, UserId));
 
     [HttpPut("body-parts/{id:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheBodyPartDto>> UpdateBodyPart(Guid id, [FromBody] UpdateSheBodyPartDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -144,12 +144,12 @@ public class SheReferenceDataController : SheApiControllerBase
         => Ok(await _service.GetCorrectiveActionTemplatesAsync(activeOnly));
 
     [HttpPost("corrective-action-templates")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheCorrectiveActionTemplateDto>> CreateCorrectiveActionTemplate([FromBody] CreateSheCorrectiveActionTemplateDto dto)
         => Ok(await _service.CreateCorrectiveActionTemplateAsync(dto, TenantId, UserId));
 
     [HttpPut("corrective-action-templates/{id:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheCorrectiveActionTemplateDto>> UpdateCorrectiveActionTemplate(Guid id, [FromBody] UpdateSheCorrectiveActionTemplateDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -171,12 +171,12 @@ public class SheReferenceDataController : SheApiControllerBase
         => Ok(await _service.GetRegulatoryBodiesAsync(activeOnly));
 
     [HttpPost("regulatory-bodies")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheRegulatoryBodyDto>> CreateRegulatoryBody([FromBody] CreateSheRegulatoryBodyDto dto)
         => Ok(await _service.CreateRegulatoryBodyAsync(dto, TenantId, UserId));
 
     [HttpPut("regulatory-bodies/{id:guid}")]
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheRegulatoryBodyDto>> UpdateRegulatoryBody(Guid id, [FromBody] UpdateSheRegulatoryBodyDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");

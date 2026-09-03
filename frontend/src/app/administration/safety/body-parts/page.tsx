@@ -28,7 +28,7 @@ export default function SafetyBodyPartsPage() {
       <PageHeader
         title="Body Parts"
         description="What an injury record can point at, grouped by body region."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<SheBodyPart, BodyPartForm>

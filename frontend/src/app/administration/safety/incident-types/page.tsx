@@ -250,7 +250,7 @@ export default function SafetyIncidentTypesPage() {
       <PageHeader
         title="Incident Types"
         description="The classification behind incident capture. Reportable types carry the authority and the statutory reporting window."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<SheIncidentType, IncidentTypeForm>

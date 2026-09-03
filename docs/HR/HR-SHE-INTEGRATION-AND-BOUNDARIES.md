@@ -70,7 +70,11 @@ any new many-include read in this area needs it too.
   edit none (`HrPermissions.RoleRevocations` deletes the old Write grant on existing tenants).
   The SHE menu and the `/hr/safety` layout gate on the module's own `she.access` (held by the
   two SHE roles, HR and the administrators — not by Employee/Manager; staff report from
-  `/me/safety`). SHE reminder topics are addressed to the two SHE roles, with the seeded HR
+  `/me/safety`). **SHE configuration is its own settings tree**, Administration → Safety (SHE)
+  at `/administration/safety`, gated on `admin.she` (SHE Manager + administrators only), and
+  the matching API writes — reference catalogues, corrective-action templates, regulatory
+  bodies, inspection checklists, PPE types and requirements — are `HR.She.Admin`: a Safety
+  Officer uses the catalogue but does not edit it. SHE reminder topics are addressed to the two SHE roles, with the seeded HR
   recipient re-addressed on existing tenants. The permission category label on the roles
   screen is now "Safety (SHE)"; the permission NAMES stay `HR.She.*`. The demo persona
   `she.officer` carries Safety Officer + Employee. Proven by `run-slice12-she.mjs`.

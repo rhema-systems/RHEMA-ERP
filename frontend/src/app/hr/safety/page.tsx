@@ -389,7 +389,7 @@ export default function SafetyHomePage() {
               title: 'Reference Data',
               description:
                 'Incident types, injury types, body parts, corrective-action templates and regulatory bodies.',
-              href: '/administration/hr/safety',
+              href: '/administration/safety',
               icon: ListChecks,
             },
           ]}

@@ -52,7 +52,7 @@ export default function SafetyChecklistsPage() {
       <PageHeader
         title="Inspection Checklists"
         description="Reusable checklist templates that inspections are conducted against. Open a checklist to author its items."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<SheInspectionChecklist, ChecklistForm>
@@ -91,7 +91,7 @@ export default function SafetyChecklistsPage() {
             header: 'Number',
             cell: (c) => (
               <Link
-                href={`/administration/hr/safety/checklists/${c.id}`}
+                href={`/administration/safety/checklists/${c.id}`}
                 className="font-mono hover:underline"
               >
                 {c.checklistNumber}
@@ -102,7 +102,7 @@ export default function SafetyChecklistsPage() {
             header: 'Name',
             cell: (c) => (
               <Link
-                href={`/administration/hr/safety/checklists/${c.id}`}
+                href={`/administration/safety/checklists/${c.id}`}
                 className="font-medium hover:underline"
               >
                 {c.name}
@@ -119,7 +119,7 @@ export default function SafetyChecklistsPage() {
             header: '',
             cell: (c) => (
               <Button asChild variant="outline" size="sm">
-                <Link href={`/administration/hr/safety/checklists/${c.id}`}>Items</Link>
+                <Link href={`/administration/safety/checklists/${c.id}`}>Items</Link>
               </Button>
             ),
           },

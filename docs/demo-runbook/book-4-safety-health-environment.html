@@ -86,7 +86,7 @@
 <p class="path"><b>Safety (SHE) → Inspections &amp; Audits → Inspections</b> · <code>/hr/safety/inspections</code></p>
 <div class="box ok">Two inspections against checklists, with items passed and failed, hazards found and the actions raised from them.</div>
 <table class="steps">
-  <tr><td>1</td><td>Checklists</td><td><code>/administration/hr/safety/checklists</code>: the inspection checklists (site, office, vehicle, fire) and their items.</td></tr>
+  <tr><td>1</td><td>Checklists</td><td><code>/administration/safety/checklists</code>: the inspection checklists (site, office, vehicle, fire) and their items.</td></tr>
   <tr><td>2</td><td>Schedule one</td><td><code>/hr/safety/inspections/new</code>: a site inspection at Community 25 next week, the site checklist, the inspector. Say: "The dashboard's inspections-due tile is this list."</td></tr>
 </table>
 
@@ -104,7 +104,7 @@
 <p class="path"><b>Safety (SHE) → PPE &amp; Equipment → PPE Stock</b> · <code>/hr/safety/ppe</code> · <b>PPE Issuance</b> · <code>/hr/safety/ppe/issuances</code></p>
 <div class="box ok">Stock by PPE type (helmets, boots, high-visibility vests, gloves, eye protection, harnesses) with quantities, re-order levels and what is below them; issuances to named employees with sizes, issue dates and replacement due dates.</div>
 <table class="steps">
-  <tr><td>1</td><td>Requirements</td><td><code>/administration/hr/safety/ppe-requirements</code>: which positions require which PPE — a Draughtsman none, a Building Inspector helmet, boots, vest.</td></tr>
+  <tr><td>1</td><td>Requirements</td><td><code>/administration/safety/ppe-requirements</code>: which positions require which PPE — a Draughtsman none, a Building Inspector helmet, boots, vest.</td></tr>
   <tr><td>2</td><td>Issue live</td><td>Issue a helmet and boots to <b>Kojo Ansah</b> (Supervising Architect, size 43). Stock drops; the issuance carries his signature line.</td></tr>
   <tr><td>3</td><td>His side</td><td><span class="who">new.hire</span> or <span class="who">staff</span>: <code>/me/safety/ppe</code>: what they hold and when it is due for replacement.</td></tr>
 </table>
@@ -166,10 +166,10 @@
 
 <h2>14. Configuration</h2>
 <div class="who">admin</div>
-<p class="path"><b>Administration → Safety (SHE)</b> <span style="color:var(--muted)">(its own entry since 2026-09-03; the SHE roles reach it without HR administration rights)</span> · <code>/administration/hr/safety</code></p>
+<p class="path"><b>Administration → Safety (SHE)</b> <span style="color:var(--muted)">(its own settings tree since 2026-09-03 — SHE Manager and administrators; a Safety Officer uses the catalogue but does not edit it)</span> · <code>/administration/safety</code></p>
 <table class="steps">
   <tr><td>1</td><td>Reference data</td><td>Incident types, injury types, body parts, corrective-action templates, regulatory bodies, PPE types, PPE requirements by position, inspection checklists.</td></tr>
-  <tr><td>2</td><td>Reminder engine</td><td><code>/administration/hr/safety/reminders</code>: what is chased (permit expiry, equipment inspection, certificate expiry, statutory returns, action due dates), to whom, how far ahead; the run log. Show the preview; do not run it.</td></tr>
+  <tr><td>2</td><td>Reminder engine</td><td><code>/administration/safety/reminders</code>: what is chased (permit expiry, equipment inspection, certificate expiry, statutory returns, action due dates), to whom, how far ahead; the run log. Show the preview; do not run it.</td></tr>
 </table>
 <div class="box aside">Any step here that attaches a file — evidence on a corrective action, a permit document, a controlled document, a contractor's insurance — goes through the same gate as the rest of HR, and a clean malware scan is mandatory. If an attach is refused with <code>FILE_VIRUS_SCAN_INCOMPLETE</code>, the document scanner is not running: Book 0 §3.2.
 <br><br>The SHE reference catalogues and the seeded sample dataset were shaped so that every dashboard tile reports a non-zero count on a fresh database; the tiles are the acceptance test. Occupational-health screens are gated by the medical policies; everything else by the SHE policies; and the two reporting routes an ordinary employee uses are open to the Employee role only.</div>

@@ -67,7 +67,7 @@ export default function SafetyPpeTypesPage() {
       <PageHeader
         title="PPE Types"
         description="The catalogue behind PPE stock, issuance and the job-role matrix — categories, conformance standards, lifespans and tracking flags."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<PpeType, PpeTypeForm>

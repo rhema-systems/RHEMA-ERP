@@ -3053,7 +3053,7 @@ export const navigationItems: NavItem[] = [
     roles: ADMINISTRATION_ROLES,
     // admin.hr (W3): an HR practitioner holding the seeded admin.hr grant must see the parent
     // node, or the HR child below would be filtered out with it.
-    permissions: ['Finance.Admin', 'admin.hr', 'HR.She.Write'],
+    permissions: ['Finance.Admin', 'admin.hr', 'admin.she'],
     accessMode: 'any',
     children: [
       {
@@ -3187,54 +3187,56 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
-        // DR-10 (2026-09-03): SHE reference data is the safety desk's own configuration, so it
-        // sits beside HR rather than under it and opens to HR.She.Write holders (Safety Officer,
-        // SHE Manager) who hold no admin.hr. Matches the administration layout's route branch.
+        // DR-10 (2026-09-03): SHE configuration is the safety function's own settings tree, beside
+        // HR and gated on its own admin.she (SHE Manager + administrators — not officers, not
+        // HR), the platform's one-admin-gate-per-module convention. Matches the administration
+        // layout's /administration/safety route branch; the API's configuration writes are
+        // HR.She.Admin to agree with it.
         title: 'Safety (SHE)',
-        href: '/administration/hr/safety',
+        href: '/administration/safety',
         icon: HardHat,
         roles: ADMINISTRATION_ROLES,
-        permissions: ['admin.hr', 'HR.She.Write'],
+        permissions: ['admin.she'],
         accessMode: 'any',
         children: [
           {
             title: 'Incident Types',
-            href: '/administration/hr/safety/incident-types',
+            href: '/administration/safety/incident-types',
             icon: AlertTriangle,
           },
           {
             title: 'Injury Types',
-            href: '/administration/hr/safety/injury-types',
+            href: '/administration/safety/injury-types',
             icon: Bandage,
           },
           {
             title: 'Body Parts',
-            href: '/administration/hr/safety/body-parts',
+            href: '/administration/safety/body-parts',
             icon: PersonStanding,
           },
           {
             title: 'CA Templates',
-            href: '/administration/hr/safety/corrective-action-templates',
+            href: '/administration/safety/corrective-action-templates',
             icon: ClipboardList,
           },
           {
             title: 'Regulatory Bodies',
-            href: '/administration/hr/safety/regulatory-bodies',
+            href: '/administration/safety/regulatory-bodies',
             icon: Landmark,
           },
           {
             title: 'PPE Types',
-            href: '/administration/hr/safety/ppe-types',
+            href: '/administration/safety/ppe-types',
             icon: HardHat,
           },
           {
             title: 'PPE Requirements',
-            href: '/administration/hr/safety/ppe-requirements',
+            href: '/administration/safety/ppe-requirements',
             icon: ClipboardCheck,
           },
           {
             title: 'Reminder Engine',
-            href: '/administration/hr/safety/reminders',
+            href: '/administration/safety/reminders',
             icon: AlarmClock,
           },
         ],

@@ -68,7 +68,7 @@ export default function ChecklistDetailPage() {
       <PageHeader
         title={`${checklist.checklistNumber} — ${checklist.name}`}
         description={checklist.description ?? undefined}
-        backHref="/administration/hr/safety/checklists"
+        backHref="/administration/safety/checklists"
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="outline">{checklist.typeName}</Badge>

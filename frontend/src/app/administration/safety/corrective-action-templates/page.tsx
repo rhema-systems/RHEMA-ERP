@@ -56,7 +56,7 @@ export default function SafetyCorrectiveActionTemplatesPage() {
       <PageHeader
         title="Corrective Action Templates"
         description="Standard remediations, attachable as defaults to incident types."
-        backHref="/administration/hr/safety"
+        backHref="/administration/safety"
       />
 
       <ResourceListPanel<SheCorrectiveActionTemplate, TemplateForm>

@@ -39,12 +39,12 @@ public class PpeManagementController : SheApiControllerBase
     public async Task<ActionResult<PpeTypeDto>> GetType(Guid id)
         => Ok(await _service.GetTypeAsync(id));
 
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpPost("types")]
     public async Task<ActionResult<PpeTypeDto>> CreateType([FromBody] CreatePpeTypeDto dto)
         => Ok(await _service.CreateTypeAsync(dto, TenantId, UserId));
 
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpPut("types/{id:guid}")]
     public async Task<ActionResult<PpeTypeDto>> UpdateType(Guid id, [FromBody] UpdatePpeTypeDto dto)
     {
@@ -159,12 +159,12 @@ public class PpeManagementController : SheApiControllerBase
     public async Task<ActionResult<IEnumerable<JobRolePpeRequirementDto>>> GetRequirementsByJobRole(string jobRoleCode)
         => Ok(await _service.GetRequirementsByJobRoleAsync(jobRoleCode));
 
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpPost("requirements")]
     public async Task<ActionResult<JobRolePpeRequirementDto>> AddRequirement([FromBody] CreateJobRolePpeRequirementDto dto)
         => Ok(await _service.AddRequirementAsync(dto, TenantId, UserId));
 
-    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpPut("requirements/{id:guid}")]
     public async Task<ActionResult<JobRolePpeRequirementDto>> UpdateRequirement(Guid id, [FromBody] UpdateJobRolePpeRequirementDto dto)
     {

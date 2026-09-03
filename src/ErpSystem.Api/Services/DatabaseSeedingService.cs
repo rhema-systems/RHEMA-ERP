@@ -8133,6 +8133,13 @@ namespace ErpSystem.Web.Services
         /// The /hr layout still requires hr.access, so the SHE roles hold both.
         /// </summary>
         private static readonly string[] SheModuleAccessGrants = { SheModuleAccessPermission };
+        private const string SheModuleAdminPermission = "admin.she";
+        /// <summary>
+        /// The SHE settings tree (reference data, checklists, PPE catalogue, reminder engine).
+        /// Configuration is the SHE Manager's, not every officer's and not HR's: SHE Manager and
+        /// the administrators only. The API agrees — those writes are HR.She.Admin.
+        /// </summary>
+        private static readonly string[] SheModuleAdminGrants = { SheModuleAdminPermission };
 
         private async Task SeedRolePermissionAssignmentsAsync()
         {
@@ -8493,6 +8500,13 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Access Safety (SHE)",
                     Description = "Access the Safety, Health & Environment module desk menu and screens",
                     Category = "Module Access"
+                },
+                new
+                {
+                    Name = SheModuleAdminPermission,
+                    DisplayName = "Admin Safety (SHE)",
+                    Description = "Manage SHE configuration: incident, injury and body-part catalogues, corrective-action templates, regulatory bodies, inspection checklists, PPE types and requirements, and the reminder engine",
+                    Category = "Administration Modules"
                 }
             })
             .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
@@ -8511,7 +8525,8 @@ namespace ErpSystem.Web.Services
                     // must reach tenants seeded under the old label. Scoped to HR.* and its module
                     // gates so no other team's rows are touched.
                     var hrOwned = permissionInfo.Name.StartsWith(HrPermissions.Prefix, StringComparison.Ordinal)
-                        || string.Equals(permissionInfo.Name, SheModuleAccessPermission, StringComparison.OrdinalIgnoreCase);
+                        || string.Equals(permissionInfo.Name, SheModuleAccessPermission, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(permissionInfo.Name, SheModuleAdminPermission, StringComparison.OrdinalIgnoreCase);
                     if (hrOwned && !string.IsNullOrWhiteSpace(permissionInfo.Category)
                         && !string.Equals(existingPermission.Category, permissionInfo.Category, StringComparison.Ordinal))
                     {
@@ -8556,11 +8571,13 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
-                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
+                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
-                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
+                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
                 [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
                 [PropertyManagementRoles.Manager] = PropertyManagementPermissions.ManagerNames,
@@ -8900,7 +8917,7 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.SafetyOfficer] = HrPermissions.GrantsFor(Constants.Roles.SafetyOfficer)
                     .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).ToArray(),
                 [Constants.Roles.SheManager] = HrPermissions.GrantsFor(Constants.Roles.SheManager)
-                    .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).ToArray(),
+                    .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
 
                 // hr.access for the broad internal roles (W3). The /hr layout was previously
                 // ungated, and non-HR staff legitimately use surfaces under it (peer evaluations,
@@ -8913,7 +8930,7 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.Manager] = HrModuleAccessGrants,
                 [Constants.Roles.Employee] = HrModuleAccessGrants,
                 [Constants.Roles.ReadOnly] = HrModuleAccessGrants,
-                ["Admin"] = HrModuleAccessGrants.Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
+                ["Admin"] = HrModuleAccessGrants.Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
 
                 // The two approval authorities, who hold READ on the HR records they decide:
                 // the Managing Director signs separations (FR-HR-092) and Internal Audit reviews
