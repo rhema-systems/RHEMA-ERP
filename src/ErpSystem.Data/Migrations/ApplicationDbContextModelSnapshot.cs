@@ -282,6 +282,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<string>("IpAddress")
                         .IsRequired()
                         .HasMaxLength(45)
@@ -336,11 +340,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Resource");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("Timestamp");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IdempotencyKey] IS NOT NULL");
 
                     b.ToTable("AuditLogs", null, t =>
                         {
@@ -20179,6 +20185,71 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "AccountId", "TransactionCurrency");
 
                     b.ToTable("FxRevaluationLines", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FxRevaluationRateUsage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FxRevaluationBatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("UsageCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExchangeRateId");
+
+                    b.HasIndex("FxRevaluationBatchId");
+
+                    b.HasIndex("PostingEventId");
+
+                    b.HasIndex("TenantId", "FxRevaluationBatchId", "PostingEventId", "ExchangeRateId")
+                        .IsUnique();
+
+                    b.ToTable("FxRevaluationRateUsages", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.Invoice", b =>
@@ -171220,6 +171291,41 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("GainLossAccount");
 
                     b.Navigation("JournalEntry");
+
+                    b.Navigation("PostingEvent");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FxRevaluationRateUsage", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", "ExchangeRate")
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FxRevaluationBatch", "Batch")
+                        .WithMany()
+                        .HasForeignKey("FxRevaluationBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", "PostingEvent")
+                        .WithMany()
+                        .HasForeignKey("PostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+
+                    b.Navigation("ExchangeRate");
 
                     b.Navigation("PostingEvent");
 

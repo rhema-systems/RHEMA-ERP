@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Api.Services.Finance.MultiCurrency;
 using ErpSystem.Core.DTOs.Finance;
@@ -12,6 +13,7 @@ using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
@@ -997,6 +999,72 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             item.EventType == FinanceAuditEvents.UnrealizedRevaluationPosted).Should().Be(1);
     }
 
+    [Theory]
+    [InlineData(AncillaryFaultPoint.AfterRateUsage)]
+    [InlineData(AncillaryFaultPoint.AfterPostedAudit)]
+    [InlineData(AncillaryFaultPoint.AfterRateAudit)]
+    [InlineData(AncillaryFaultPoint.AfterBankAudit)]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task RetryAfterPartialAncillaryFinalizationRecordsEverySideEffectExactlyOnce(
+        AncillaryFaultPoint faultPoint)
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostForeignBankBalanceAsync(rate: 10m, foreignAmount: 100m);
+        var closingRate = fixture.SeedExchangeRate(
+            12m,
+            new DateTime(2026, 7, 31),
+            ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+        var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS"
+        });
+        var request = new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS",
+            ExpectedPreviewFingerprint = preview.PreviewFingerprint
+        };
+
+        var faultingService = fixture.CreateAncillaryFaultService(faultPoint);
+        await faultingService.Invoking(service => service.RunUnrealizedRevaluationAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*simulated ancillary finalization interruption*");
+
+        var interrupted = await fixture.Db.FxRevaluationBatches.SingleAsync();
+        interrupted.Status.Should().Be("PostingRecoveryRequired");
+        var recovered = await fixture.CreateDurableAuditService().RunUnrealizedRevaluationAsync(request);
+
+        recovered.Status.Should().Be("Posted");
+        recovered.JournalEntryId.Should().NotBeNull();
+        recovered.PostingEventId.Should().NotBeNull();
+        recovered.Lines.Should().OnlyContain(line =>
+            line.JournalEntryId == recovered.JournalEntryId
+            && line.PostingEventId == recovered.PostingEventId);
+        (await fixture.Db.JournalEntries.CountAsync(item => item.Id == recovered.JournalEntryId)).Should().Be(1);
+        (await fixture.Db.FinancePostingEvents.CountAsync(item =>
+            item.SourceModule == "FX" && item.PostingAction == "UnrealizedRevaluation")).Should().Be(1);
+
+        var usage = await fixture.Db.FxRevaluationRateUsages.AsNoTracking().SingleAsync();
+        usage.FxRevaluationBatchId.Should().Be(recovered.Id);
+        usage.PostingEventId.Should().Be(recovered.PostingEventId!.Value);
+        usage.ExchangeRateId.Should().Be(closingRate.Id);
+        usage.UsageCount.Should().Be(1);
+        var storedRate = await fixture.Db.ExchangeRates.AsNoTracking().SingleAsync(item => item.Id == closingRate.Id);
+        storedRate.TransactionCount.Should().Be(1);
+
+        (await fixture.Db.AuditLogs.CountAsync(item =>
+            item.Action == FinanceAuditEvents.UnrealizedRevaluationPosted)).Should().Be(1);
+        (await fixture.Db.AuditLogs.CountAsync(item =>
+            item.Action == FinanceAuditEvents.ExchangeRateUsedForRevaluation)).Should().Be(1);
+        (await fixture.Db.AuditLogs.CountAsync(item =>
+            item.Action == FinanceAuditEvents.ForeignBankRevaluationPosted)).Should().Be(1);
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
     [Trait("Category", "FX")]
@@ -1277,6 +1345,31 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 new ThrowAfterSuccessfulRevaluationPostingEngine(_postingEngine),
                 Mock.Of<ILogger<CurrencyRevaluationService>>(),
                 Audit);
+        }
+
+        public CurrencyRevaluationService CreateAncillaryFaultService(AncillaryFaultPoint faultPoint)
+        {
+            var currentUser = CreateCurrentUser(TenantId).Object;
+            var durableAudit = new FinanceAuditService(Db, currentUser, new HttpContextAccessor());
+            return new CurrencyRevaluationService(
+                Db,
+                currentUser,
+                new TenantSettingsService(Db, currentUser),
+                _postingEngine,
+                Mock.Of<ILogger<CurrencyRevaluationService>>(),
+                new ThrowAtAncillaryAuditBoundary(durableAudit, faultPoint));
+        }
+
+        public CurrencyRevaluationService CreateDurableAuditService()
+        {
+            var currentUser = CreateCurrentUser(TenantId).Object;
+            return new CurrencyRevaluationService(
+                Db,
+                currentUser,
+                new TenantSettingsService(Db, currentUser),
+                _postingEngine,
+                Mock.Of<ILogger<CurrencyRevaluationService>>(),
+                new FinanceAuditService(Db, currentUser, new HttpContextAccessor()));
         }
 
         public async Task MakeControlLinesFunctionalAsync(
@@ -2011,6 +2104,60 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             inner.ReverseAsync(postingEventId, reason, reversalDate, cancellationToken);
     }
 
+    public enum AncillaryFaultPoint
+    {
+        AfterRateUsage,
+        AfterPostedAudit,
+        AfterRateAudit,
+        AfterBankAudit
+    }
+
+    private sealed class ThrowAtAncillaryAuditBoundary(
+        IFinanceAuditService inner,
+        AncillaryFaultPoint faultPoint) : IFinanceAuditService
+    {
+        private bool _hasThrown;
+
+        public async Task<AuditLog> RecordAsync(
+            FinanceAuditEventDto auditEvent,
+            CancellationToken cancellationToken = default)
+        {
+            var targetEvent = faultPoint switch
+            {
+                AncillaryFaultPoint.AfterRateUsage => FinanceAuditEvents.UnrealizedRevaluationPosted,
+                AncillaryFaultPoint.AfterPostedAudit => FinanceAuditEvents.UnrealizedRevaluationPosted,
+                AncillaryFaultPoint.AfterRateAudit => FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+                AncillaryFaultPoint.AfterBankAudit => FinanceAuditEvents.ForeignBankRevaluationPosted,
+                _ => throw new ArgumentOutOfRangeException(nameof(faultPoint))
+            };
+
+            if (!_hasThrown
+                && faultPoint == AncillaryFaultPoint.AfterRateUsage
+                && auditEvent.EventType == targetEvent)
+            {
+                _hasThrown = true;
+                throw new InvalidOperationException("simulated ancillary finalization interruption after rate usage");
+            }
+
+            var result = await inner.RecordAsync(auditEvent, cancellationToken);
+            if (!_hasThrown && auditEvent.EventType == targetEvent)
+            {
+                _hasThrown = true;
+                throw new InvalidOperationException("simulated ancillary finalization interruption after audit stage");
+            }
+
+            return result;
+        }
+
+        public Task<IReadOnlyList<AuditLog>> GetAuditTrailAsync(
+            Guid tenantId,
+            string resource,
+            string resourceId,
+            int limit = 100,
+            CancellationToken cancellationToken = default) =>
+            inner.GetAuditTrailAsync(tenantId, resource, resourceId, limit, cancellationToken);
+    }
+
     private sealed class FxScenario
     {
         public VendorInvoice? ApInvoice { get; init; }
@@ -2136,6 +2283,25 @@ public sealed class FxRealizedUnrealizedRevaluationTests
 
         public Task<AuditLog> RecordAsync(FinanceAuditEventDto auditEvent, CancellationToken cancellationToken = default)
         {
+            if (!string.IsNullOrWhiteSpace(auditEvent.IdempotencyKey))
+            {
+                var existing = Events.FirstOrDefault(item =>
+                    string.Equals(item.IdempotencyKey, auditEvent.IdempotencyKey, StringComparison.Ordinal));
+                if (existing != null)
+                {
+                    return Task.FromResult(new AuditLog
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = existing.TenantId,
+                        Action = existing.EventType,
+                        Resource = existing.Resource ?? "Finance",
+                        ResourceId = existing.ResourceId,
+                        IdempotencyKey = existing.IdempotencyKey,
+                        Timestamp = DateTime.UtcNow
+                    });
+                }
+            }
+
             Events.Add(auditEvent);
             return Task.FromResult(new AuditLog
             {
@@ -2144,6 +2310,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 Action = auditEvent.EventType,
                 Resource = auditEvent.Resource ?? "Finance",
                 ResourceId = auditEvent.ResourceId,
+                IdempotencyKey = auditEvent.IdempotencyKey,
                 Timestamp = DateTime.UtcNow
             });
         }

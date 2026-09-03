@@ -43,6 +43,17 @@ namespace ErpSystem.Data.Migrations
                     THROW 51001, 'Phase 4 preflight failed: legacy currency-link revaluation flags do not have an unambiguous classification-default equivalent. Reset/reseed or perform a separately reviewed policy backfill before retrying.', 1;
                 """);
 
+            migrationBuilder.DropIndex(
+                name: "IX_AuditLogs_TenantId",
+                table: "AuditLogs");
+
+            migrationBuilder.AddColumn<string>(
+                name: "IdempotencyKey",
+                table: "AuditLogs",
+                type: "nvarchar(450)",
+                maxLength: 450,
+                nullable: true);
+
             migrationBuilder.DropColumn(
                 name: "RevaluationRequired",
                 table: "AccountCurrencyLinks");
@@ -243,6 +254,63 @@ namespace ErpSystem.Data.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "FxRevaluationRateUsages",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    FxRevaluationBatchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    PostingEventId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    ExchangeRateId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    UsageCount = table.Column<int>(type: "int", nullable: false),
+                    RecordedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    UpdatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CreatedById = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    LastModifiedById = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    IsDeleted = table.Column<bool>(type: "bit", nullable: false),
+                    DeletedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    DeletedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_FxRevaluationRateUsages", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_FxRevaluationRateUsages_ExchangeRates_ExchangeRateId",
+                        column: x => x.ExchangeRateId,
+                        principalTable: "ExchangeRates",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_FxRevaluationRateUsages_FinancePostingEvents_PostingEventId",
+                        column: x => x.PostingEventId,
+                        principalTable: "FinancePostingEvents",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_FxRevaluationRateUsages_FxRevaluationBatches_FxRevaluationBatchId",
+                        column: x => x.FxRevaluationBatchId,
+                        principalTable: "FxRevaluationBatches",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_FxRevaluationRateUsages_Tenants_TenantId",
+                        column: x => x.TenantId,
+                        principalTable: "Tenants",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AuditLogs_TenantId_IdempotencyKey",
+                table: "AuditLogs",
+                columns: new[] { "TenantId", "IdempotencyKey" },
+                unique: true,
+                filter: "[IdempotencyKey] IS NOT NULL");
+
             migrationBuilder.CreateIndex(
                 name: "IX_FxRevaluationLines_AccountAccountingBookId",
                 table: "FxRevaluationLines",
@@ -287,6 +355,27 @@ namespace ErpSystem.Data.Migrations
                 unique: true,
                 filter: "[IsDeleted] = 0");
 
+            migrationBuilder.CreateIndex(
+                name: "IX_FxRevaluationRateUsages_ExchangeRateId",
+                table: "FxRevaluationRateUsages",
+                column: "ExchangeRateId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FxRevaluationRateUsages_FxRevaluationBatchId",
+                table: "FxRevaluationRateUsages",
+                column: "FxRevaluationBatchId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FxRevaluationRateUsages_PostingEventId",
+                table: "FxRevaluationRateUsages",
+                column: "PostingEventId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FxRevaluationRateUsages_TenantId_FxRevaluationBatchId_PostingEventId_ExchangeRateId",
+                table: "FxRevaluationRateUsages",
+                columns: new[] { "TenantId", "FxRevaluationBatchId", "PostingEventId", "ExchangeRateId" },
+                unique: true);
+
             migrationBuilder.AddForeignKey(
                 name: "FK_FxRevaluationBatches_AccountingBooks_AccountingBookId",
                 table: "FxRevaluationBatches",
@@ -323,6 +412,22 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "FxRevaluationRateUsages");
+
+            migrationBuilder.DropIndex(
+                name: "IX_AuditLogs_TenantId_IdempotencyKey",
+                table: "AuditLogs");
+
+            migrationBuilder.DropColumn(
+                name: "IdempotencyKey",
+                table: "AuditLogs");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AuditLogs_TenantId",
+                table: "AuditLogs",
+                column: "TenantId");
+
             migrationBuilder.AddColumn<bool>(
                 name: "RevaluationRequired",
                 table: "AccountCurrencyLinks",

@@ -320,3 +320,25 @@ public class FxRevaluationLine : TenantEntity
     [ForeignKey(nameof(PostingEventId))]
     public virtual FinancePostingEvent? PostingEvent { get; set; }
 }
+
+/// <summary>
+/// Durable proof that a closing rate's usage statistics were applied for one committed
+/// revaluation posting. The unique batch/posting/rate identity makes recovery retry-safe.
+/// </summary>
+public sealed class FxRevaluationRateUsage : TenantEntity
+{
+    public Guid FxRevaluationBatchId { get; set; }
+    public Guid PostingEventId { get; set; }
+    public Guid ExchangeRateId { get; set; }
+    public int UsageCount { get; set; }
+    public DateTime RecordedAtUtc { get; set; }
+
+    [ForeignKey(nameof(FxRevaluationBatchId))]
+    public FxRevaluationBatch Batch { get; set; } = null!;
+
+    [ForeignKey(nameof(PostingEventId))]
+    public FinancePostingEvent PostingEvent { get; set; } = null!;
+
+    [ForeignKey(nameof(ExchangeRateId))]
+    public ExchangeRate ExchangeRate { get; set; } = null!;
+}

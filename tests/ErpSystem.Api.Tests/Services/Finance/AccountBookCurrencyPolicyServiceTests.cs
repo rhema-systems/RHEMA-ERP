@@ -314,12 +314,22 @@ public sealed class AccountBookCurrencyPolicyServiceTests
         var operations = new PhaseFourMigration().BuildUpOperations();
 
         operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "AccountBookCurrencyPolicies");
+        operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "FxRevaluationRateUsages");
         operations.OfType<DropColumnOperation>().Should().ContainSingle(item =>
             item.Table == "AccountCurrencyLinks" && item.Name == "RevaluationRequired");
         operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "FxRevaluationBatches" && item.Name == "AccountingBookId");
         operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "FxRevaluationLines" && item.Name == "AccountClassificationCode");
         operations.OfType<CreateIndexOperation>().Should().Contain(item =>
             item.Table == "AccountBookCurrencyPolicies" && item.IsUnique && item.Filter!.Contains("[IsDeleted] = 0"));
+        operations.OfType<CreateIndexOperation>().Should().Contain(item =>
+            item.Table == "FxRevaluationRateUsages" && item.IsUnique
+            && item.Columns.Contains("PostingEventId") && item.Columns.Contains("ExchangeRateId")
+            && item.Filter == null);
+        operations.OfType<AddColumnOperation>().Should().Contain(item =>
+            item.Table == "AuditLogs" && item.Name == "IdempotencyKey" && item.MaxLength == 450);
+        operations.OfType<CreateIndexOperation>().Should().Contain(item =>
+            item.Table == "AuditLogs" && item.IsUnique && item.Columns.Contains("IdempotencyKey")
+            && item.Filter == "[IdempotencyKey] IS NOT NULL");
         operations.OfType<SqlOperation>().Select(item => item.Sql).Should().Contain(item =>
             item.Contains("Phase 4 preflight failed", StringComparison.Ordinal)
             && item.Contains("RevaluationRequired", StringComparison.Ordinal));

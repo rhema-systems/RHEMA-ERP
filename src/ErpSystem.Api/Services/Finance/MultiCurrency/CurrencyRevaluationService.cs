@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -1580,10 +1581,20 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             committedPostingEventId = postingResult.PostingEventId;
             committedJournalEntryId = postingResult.JournalEntryId;
 
+            // A concurrent recovery request may have completed ancillary finalization while
+            // this request was waiting on the central idempotent posting result. Refresh the
+            // workflow row before applying any side effects.
+            await _context.Entry(batch).ReloadAsync(cancellationToken);
+            if (batch.Status == PostedStatus)
+            {
+                EnsureCommittedPostingIdentity(batch, postingResult.PostingEventId, postingResult.JournalEntryId);
+                return batch;
+            }
+
+            EnsureCommittedPostingIdentity(batch, postingResult.PostingEventId, postingResult.JournalEntryId);
             ApplyCommittedPostingEvidence(batch, postingResult.PostingEventId, postingResult.JournalEntryId);
             batch.Status = PostingRecoveryRequiredStatus;
             await MarkClosingRatesUsedAsync(batch, postingResult.PostingEventId, cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
 
             // Build audit evidence for the intended terminal state without exposing that state
             // to an audit service SaveChanges call before all ancillary evidence succeeds.
@@ -1696,6 +1707,19 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         }
     }
 
+    private static void EnsureCommittedPostingIdentity(
+        FxRevaluationBatch batch,
+        Guid postingEventId,
+        Guid journalEntryId)
+    {
+        if ((batch.PostingEventId.HasValue && batch.PostingEventId != postingEventId)
+            || (batch.JournalEntryId.HasValue && batch.JournalEntryId != journalEntryId))
+        {
+            throw new InvalidOperationException(
+                "The persisted revaluation evidence references a different committed posting. Manual review is required.");
+        }
+    }
+
     private async Task RecordRevaluationPostingEvidenceAsync(
         FxRevaluationBatch batch,
         Guid postingEventId,
@@ -1703,6 +1727,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         object postedAuditSnapshot,
         CancellationToken cancellationToken)
     {
+        if (_financeAuditService == null)
+        {
+            throw new InvalidOperationException(
+                "Finance audit service is required to finalize a committed FX revaluation posting.");
+        }
+
         await RecordFxAuditAsync(
             FinanceAuditEvents.UnrealizedRevaluationPosted,
             batch.TenantId,
@@ -1712,6 +1742,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             postingEventId: postingEventId,
             journalEntryId: journalEntryId,
             afterValues: postedAuditSnapshot,
+            idempotencyKey: BuildPostingAuditIdempotencyKey(batch.Id, postingEventId, "POSTED"),
             cancellationToken: cancellationToken);
 
         foreach (var rateId in batch.Lines.Select(line => line.ClosingExchangeRateId).Distinct())
@@ -1725,6 +1756,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 postingEventId: postingEventId,
                 journalEntryId: journalEntryId,
                 afterValues: new { batch.Id, rateId, batch.RevaluationDate, batch.FunctionalCurrencyCode },
+                idempotencyKey: BuildPostingAuditIdempotencyKey(batch.Id, postingEventId, $"RATE:{rateId:N}"),
                 cancellationToken: cancellationToken);
         }
 
@@ -1739,9 +1771,13 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 postingEventId: postingEventId,
                 journalEntryId: journalEntryId,
                 afterValues: postedAuditSnapshot,
+                idempotencyKey: BuildPostingAuditIdempotencyKey(batch.Id, postingEventId, "BANK"),
                 cancellationToken: cancellationToken);
         }
     }
+
+    private static string BuildPostingAuditIdempotencyKey(Guid batchId, Guid postingEventId, string stage) =>
+        $"FXR:{batchId:N}:{postingEventId:N}:{stage}";
 
     private FinancePostingRequestV2Dto BuildRevaluationPostingRequest(FxRevaluationBatch batch)
     {
@@ -2014,23 +2050,85 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         Guid postingEventId,
         CancellationToken cancellationToken)
     {
-        var rateIds = batch.Lines
-            .Select(l => l.ClosingExchangeRateId)
-            .Distinct()
-            .ToList();
+        var intendedUsages = batch.Lines
+            .GroupBy(line => line.ClosingExchangeRateId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var rateIds = intendedUsages.Keys.ToList();
+
+        // Serializable range locking over the unique identity prevents two recovery workers
+        // from both incrementing a rate before either can observe the other's evidence.
+        await using var transaction = _context.Database.CurrentTransaction == null
+            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
+
+        var existingUsages = await _context.FxRevaluationRateUsages
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == batch.TenantId
+                && item.FxRevaluationBatchId == batch.Id
+                && item.PostingEventId == postingEventId
+                && rateIds.Contains(item.ExchangeRateId))
+            .ToDictionaryAsync(item => item.ExchangeRateId, cancellationToken);
+
+        foreach (var existing in existingUsages.Values)
+        {
+            if (existing.IsDeleted
+                || !intendedUsages.TryGetValue(existing.ExchangeRateId, out var intendedCount)
+                || existing.UsageCount != intendedCount)
+            {
+                throw new InvalidOperationException(
+                    $"Closing-rate usage evidence for rate {existing.ExchangeRateId} does not match the frozen revaluation lines.");
+            }
+        }
+
+        var missingRateIds = rateIds.Where(rateId => !existingUsages.ContainsKey(rateId)).ToList();
+        if (missingRateIds.Count == 0)
+        {
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+            return;
+        }
 
         var rates = await _context.ExchangeRates
-            .Where(r => r.TenantId == batch.TenantId && rateIds.Contains(r.Id) && !r.IsDeleted)
+            .Where(rate => rate.TenantId == batch.TenantId
+                && missingRateIds.Contains(rate.Id)
+                && !rate.IsDeleted)
             .ToListAsync(cancellationToken);
+        if (rates.Count != missingRateIds.Count)
+        {
+            throw new InvalidOperationException("One or more frozen closing rates are no longer available for usage evidence.");
+        }
 
+        var now = DateTime.UtcNow;
         foreach (var rate in rates)
         {
+            var usageCount = intendedUsages[rate.Id];
             rate.HasBeenUsedInTransactions = true;
-            rate.TransactionCount += batch.Lines.Count(l => l.ClosingExchangeRateId == rate.Id);
-            rate.FirstUsedDate ??= DateTime.UtcNow;
-            rate.LastUsedDate = DateTime.UtcNow;
-            rate.ModifiedDate = DateTime.UtcNow;
+            rate.TransactionCount += usageCount;
+            rate.FirstUsedDate ??= now;
+            rate.LastUsedDate = now;
+            rate.ModifiedDate = now;
             rate.ModifiedByUserId = GetCurrentUserGuid();
+            _context.FxRevaluationRateUsages.Add(new FxRevaluationRateUsage
+            {
+                Id = Guid.NewGuid(),
+                TenantId = batch.TenantId,
+                FxRevaluationBatchId = batch.Id,
+                PostingEventId = postingEventId,
+                ExchangeRateId = rate.Id,
+                UsageCount = usageCount,
+                RecordedAtUtc = now,
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName,
+                CreatedById = GetCurrentUserGuid()
+            });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        if (transaction != null)
+        {
+            await transaction.CommitAsync(cancellationToken);
         }
     }
 
@@ -2047,6 +2145,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         object? context = null,
         string? reason = null,
         string? comment = null,
+        string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
     {
         if (_financeAuditService == null)
@@ -2069,7 +2168,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Reason = reason,
             Comment = comment,
             Resource = sourceDocumentType,
-            ResourceId = sourceDocumentId?.ToString()
+            ResourceId = sourceDocumentId?.ToString(),
+            IdempotencyKey = idempotencyKey
         }, cancellationToken);
     }
 

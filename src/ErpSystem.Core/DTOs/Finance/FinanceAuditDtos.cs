@@ -19,4 +19,5 @@ public sealed class FinanceAuditEventDto
     public string? CorrelationId { get; set; }
     public string? Resource { get; set; }
     public string? ResourceId { get; set; }
+    public string? IdempotencyKey { get; set; }
 }

@@ -186,6 +186,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FxRealizedSettlement> FxRealizedSettlements { get; set; }
     public DbSet<FxRevaluationBatch> FxRevaluationBatches { get; set; }
     public DbSet<FxRevaluationLine> FxRevaluationLines { get; set; }
+    public DbSet<FxRevaluationRateUsage> FxRevaluationRateUsages { get; set; }
     public DbSet<SubledgerSettlementBalance> SubledgerSettlementBalances { get; set; }
     public DbSet<SubledgerSettlementApplication> SubledgerSettlementApplications { get; set; }
     public DbSet<SubledgerUnappliedSettlementBalance> SubledgerUnappliedSettlementBalances { get; set; }
@@ -3508,6 +3509,37 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FxRevaluationRateUsage>(entity =>
+        {
+            entity.ToTable("FxRevaluationRateUsages");
+            entity.HasIndex(item => new
+                {
+                    item.TenantId,
+                    item.FxRevaluationBatchId,
+                    item.PostingEventId,
+                    item.ExchangeRateId
+                })
+                .IsUnique();
+            entity.HasIndex(item => item.PostingEventId);
+            entity.HasIndex(item => item.ExchangeRateId);
+            entity.HasOne(item => item.Batch)
+                .WithMany()
+                .HasForeignKey(item => item.FxRevaluationBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PostingEvent)
+                .WithMany()
+                .HasForeignKey(item => item.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ExchangeRate)
+                .WithMany()
+                .HasForeignKey(item => item.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant)
+                .WithMany()
+                .HasForeignKey(item => item.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<SubledgerSettlementBalance>(entity =>
         {
             entity.ToTable("SubledgerSettlementBalances");
@@ -5308,6 +5340,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(a => a.Timestamp);
             entity.HasIndex(a => a.UserId);
             entity.HasIndex(a => a.Resource);
+            entity.Property(a => a.IdempotencyKey).HasMaxLength(450);
+            entity.HasIndex(a => new { a.TenantId, a.IdempotencyKey })
+                .IsUnique()
+                .HasFilter("[IdempotencyKey] IS NOT NULL");
         });
 
         // Configure SecurityLog entity

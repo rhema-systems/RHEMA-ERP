@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -161,6 +162,97 @@ public sealed class FinanceAuditFoundationTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Finance audit event tenant does not match the current tenant context.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceAuditFoundation")]
+    [Trait("Category", "AuditTrail")]
+    public async Task FinanceAuditRecord_WithIdempotencyKey_ShouldReturnTheDurableOriginal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        await db.SaveChangesAsync();
+        var auditService = CreateFinanceAuditService(db, tenantId);
+        var idempotencyKey = $"FXR:{Guid.NewGuid():N}:{Guid.NewGuid():N}:POSTED";
+        var first = new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.UnrealizedRevaluationPosted,
+            TenantId = tenantId,
+            Resource = "FxRevaluationBatch",
+            ResourceId = Guid.NewGuid().ToString(),
+            IdempotencyKey = idempotencyKey,
+            AfterValues = new { attempt = 1 }
+        };
+
+        var original = await auditService.RecordAsync(first);
+        var retried = await auditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = first.EventType,
+            TenantId = tenantId,
+            Resource = first.Resource,
+            ResourceId = first.ResourceId,
+            IdempotencyKey = idempotencyKey,
+            AfterValues = new { attempt = 2 }
+        });
+
+        retried.Id.Should().Be(original.Id);
+        (await db.AuditLogs.CountAsync(item => item.IdempotencyKey == idempotencyKey)).Should().Be(1);
+        (await db.AuditLogs.SingleAsync(item => item.IdempotencyKey == idempotencyKey))
+            .NewValues.Should().Contain("\"attempt\":1");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceAuditFoundation")]
+    [Trait("Category", "AuditTrail")]
+    public async Task FinanceAuditRecord_ConcurrentRetriesShouldResolveToOneDurableAudit()
+    {
+        var tenantId = Guid.NewGuid();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"finance-audit-concurrent-retry-{Guid.NewGuid()}", databaseRoot)
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        var idempotencyKey = $"FXR:{Guid.NewGuid():N}:{Guid.NewGuid():N}:RATE";
+        var resourceId = Guid.NewGuid().ToString();
+
+        await using (var initialDb = new ApplicationDbContext(options))
+        {
+            SeedTenant(initialDb, tenantId);
+            await initialDb.SaveChangesAsync();
+            await CreateFinanceAuditService(initialDb, tenantId).RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+                TenantId = tenantId,
+                Resource = "FxRevaluationBatch",
+                ResourceId = resourceId,
+                IdempotencyKey = idempotencyKey
+            });
+        }
+
+        await using var firstDb = new ApplicationDbContext(options);
+        await using var secondDb = new ApplicationDbContext(options);
+        var firstRetry = CreateFinanceAuditService(firstDb, tenantId).RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+            TenantId = tenantId,
+            Resource = "FxRevaluationBatch",
+            ResourceId = resourceId,
+            IdempotencyKey = idempotencyKey
+        });
+        var secondRetry = CreateFinanceAuditService(secondDb, tenantId).RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+            TenantId = tenantId,
+            Resource = "FxRevaluationBatch",
+            ResourceId = resourceId,
+            IdempotencyKey = idempotencyKey
+        });
+
+        var results = await Task.WhenAll(firstRetry, secondRetry);
+        results[0].Id.Should().Be(results[1].Id);
+        await using var verifier = new ApplicationDbContext(options);
+        (await verifier.AuditLogs.CountAsync(item => item.IdempotencyKey == idempotencyKey)).Should().Be(1);
     }
 
     [Fact]
