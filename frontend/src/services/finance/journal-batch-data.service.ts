@@ -2,6 +2,7 @@ import { apiService } from '@/services/api.service';
 import type {
     CreateJournalBatch,
     CreateJournalBatchEntry,
+    EligibleJournalBatchDraft,
     JournalBatchDetail,
     JournalBatchImportPreview,
     JournalBatchListResult,
@@ -62,6 +63,13 @@ class JournalBatchDataService {
 
     attachJournal(id: string, journalEntryId: string) {
         return apiService.post<JournalBatchDetail>(`/finance/journal-batches/${id}/entries/attach`, { journalEntryId });
+    }
+
+    getEligibleDraftJournals(id: string, search?: string) {
+        return apiService.get<EligibleJournalBatchDraft[]>(`/finance/journal-batches/${id}/eligible-draft-journals`, {
+            search: search || undefined,
+            take: 50,
+        });
     }
 
     removeJournal(id: string, journalEntryId: string) {

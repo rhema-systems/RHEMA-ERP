@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -20,6 +21,65 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class JournalBatchServiceTests
 {
+    [Fact]
+    [Trait("Batch", "GeneralLedger")]
+    [Trait("Category", "Controls")]
+    public async Task GetEligibleDraftJournalsAsync_ShouldReturnOnlyAttachableDraftsForBatch()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenantId);
+        var journals = SeedJournals(db, tenantId, period.Id);
+        var activeWorkflowJournal = NewDraftJournal(tenantId, period.Id, "JE-2026-000003", "Workflow draft", "GL");
+        var subledgerJournal = NewDraftJournal(tenantId, period.Id, "JE-2026-000004", "AP generated draft", "AP");
+        var otherBookJournal = NewDraftJournal(tenantId, period.Id, "JE-2026-000005", "Tax book draft", "GL", "TAX");
+        db.JournalEntries.AddRange(activeWorkflowJournal, subledgerJournal, otherBookJournal);
+
+        var entityType = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "JournalEntry",
+            Name = "Journal Entry"
+        };
+        db.WorkflowEntityTypes.Add(entityType);
+        db.WorkflowInstances.Add(new WorkflowInstance
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            WorkflowDefinitionId = Guid.NewGuid(),
+            EntityTypeId = entityType.Id,
+            EntityType = entityType,
+            EntityId = activeWorkflowJournal.Id,
+            InitiatedById = Guid.NewGuid(),
+            Status = WorkflowInstanceStatus.InProgress
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var batch = await service.CreateAsync(new CreateJournalBatchDto
+        {
+            Description = "Eligible draft selector",
+            FiscalPeriodId = period.Id,
+            BookClassification = "IFRS",
+            ControlCurrencyCode = "GHS",
+            ExpectedDebitTotal = 100m
+        });
+        await service.AddExistingJournalAsync(batch.Id, journals[1].Id);
+
+        var result = await service.GetEligibleDraftJournalsAsync(batch.Id, null);
+        result.Should().ContainSingle();
+        result[0].Id.Should().Be(journals[0].Id);
+        result[0].JournalEntryNumber.Should().Be("JE-2026-000001");
+        result[0].TotalDebit.Should().Be(100m);
+        result[0].LineCount.Should().Be(2);
+
+        (await service.GetEligibleDraftJournalsAsync(batch.Id, "REF-1"))
+            .Should().ContainSingle(item => item.Id == journals[0].Id);
+        (await service.GetEligibleDraftJournalsAsync(batch.Id, "does-not-exist"))
+            .Should().BeEmpty();
+    }
+
     [Fact]
     [Trait("Batch", "GeneralLedger")]
     [Trait("Category", "Controls")]
@@ -881,4 +941,32 @@ public sealed class JournalBatchServiceTests
         db.JournalEntries.AddRange(journals);
         return journals;
     }
+
+    private static JournalEntry NewDraftJournal(
+        Guid tenantId,
+        Guid periodId,
+        string number,
+        string description,
+        string sourceModule,
+        string bookClassification = "IFRS")
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryNumber = number,
+            JournalType = "General",
+            EntryDate = new DateTime(2026, 7, 16),
+            Description = description,
+            ReferenceNumber = $"REF-{number[^1]}",
+            SourceModule = sourceModule,
+            TotalDebitAmount = 50m,
+            TotalCreditAmount = 50m,
+            IsBalanced = true,
+            BalanceDifference = 0m,
+            FiscalPeriodId = periodId,
+            BookClassification = bookClassification,
+            PostingStatus = "Draft",
+            ApprovalStatus = "Draft",
+            Transactions = []
+        };
 }
