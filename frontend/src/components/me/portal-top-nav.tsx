@@ -123,7 +123,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Career Timeline', href: '/me/movements/career-path' },
       { label: 'My Probation', href: '/me/probation' },
       { label: 'My Oath of Secrecy', href: '/me/oath' },
-      { label: 'My Competencies', href: '/hr/competencies/me' },
+      // 2026-09-03: the page itself moved into the portal (it was the one self screen left on the HR menu).
+      { label: 'My Competencies', href: '/me/competencies' },
       // Slice 13b: recruitment self-service lives in the portal.
       { label: 'Internal Job Board', href: '/me/jobs' },
       { label: 'My Applications', href: '/me/jobs/applications' },

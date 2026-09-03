@@ -51,7 +51,7 @@
   <div class="sub">From a near-miss reported on a phone to a closed corrective action, a signed permit to work, a PPE issue, a contractor induction, an environmental permit and the monthly report. Roughly 50 minutes performed in full.</div>
   <table>
     <tr><th style="width:32%">Sections</th><td>1 Dashboard · 2 Incidents · 3 Hazards &amp; risk assessments · 4 Inspections · 5 Permits to work · 6 PPE · 7 Safety equipment &amp; emergency · 8 Safety training · 9 Contractors · 10 Occupational health &amp; return to work · 11 Environmental · 12 Committees, regulatory, audits, stop-work, documents, performance · 13 The employee's side · 14 Configuration</td></tr>
-    <tr><th>Logins used</th><td><b>she.officer</b> throughout · <b>staff</b> (reports a hazard and a stop-work) · <b>head.dev</b> (closes a corrective action) · <b>admin</b> (configuration)</td></tr>
+    <tr><th>Logins used</th><td><b>she.officer</b> throughout (the <b>Safety Officer</b> role since 2026-09-03 — no HR role; <b>hr.head</b> can open every SHE register read-only but every edit, close or approve button refuses) · <b>staff</b> (reports a hazard and a stop-work) · <b>head.dev</b> (closes a corrective action) · <b>admin</b> (configuration)</td></tr>
     <tr><th>A note on the sample data</th><td>The seeded incidents and hazards use <b>generic industrial narratives</b> (a conveyor pinch point, a forklift, welding fumes). Present them as illustrative: "these are sample records; TDC's own will read like a building site and an estate." Everything you create live will be TDC's.</td></tr>
   </table>
 </div>
@@ -166,7 +166,7 @@
 
 <h2>14. Configuration</h2>
 <div class="who">admin</div>
-<p class="path"><b>Administration → HR → Safety (SHE)</b> · <code>/administration/hr/safety</code></p>
+<p class="path"><b>Administration → Safety (SHE)</b> <span style="color:var(--muted)">(its own entry since 2026-09-03; the SHE roles reach it without HR administration rights)</span> · <code>/administration/hr/safety</code></p>
 <table class="steps">
   <tr><td>1</td><td>Reference data</td><td>Incident types, injury types, body parts, corrective-action templates, regulatory bodies, PPE types, PPE requirements by position, inspection checklists.</td></tr>
   <tr><td>2</td><td>Reminder engine</td><td><code>/administration/hr/safety/reminders</code>: what is chased (permit expiry, equipment inspection, certificate expiry, statutory returns, action due dates), to whom, how far ahead; the run log. Show the preview; do not run it.</td></tr>

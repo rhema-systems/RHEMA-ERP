@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceListPanel } from '@/components/hr/common/ResourceListPanel';
+import { useAuth } from '@/hooks/use-auth';
 import {
   TextField,
   TextareaField,
@@ -60,6 +61,9 @@ const emptyPhysician: PhysicianForm = {
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
 
 export default function MedicalPhysiciansPage() {
+  const { hasAnyPermission } = useAuth();
+  const canWrite = hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']);
+  const canAdmin = hasAnyPermission(['HR.Medical.Admin']);
   const queryClient = useQueryClient();
 
   const { data: facilities = [] } = useQuery({
@@ -119,7 +123,10 @@ export default function MedicalPhysiciansPage() {
             notes: blank(v.notes),
           });
         }}
-        remove={(id) => medicalFacilityService.removePhysician(id)}
+        // 2026-09-03: reads are open by design; create/edit are HR.Medical.Write, delete is Admin.
+        allowCreate={canWrite}
+        allowUpdate={canWrite}
+        remove={canAdmin ? (id) => medicalFacilityService.removePhysician(id) : undefined}
         getId={(p) => p.id}
         actions={[
           {

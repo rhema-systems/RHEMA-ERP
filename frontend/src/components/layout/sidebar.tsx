@@ -875,9 +875,14 @@ export const navigationItems: NavItem[] = [
         icon: HandCoins,
         children: [
           {
+            // 2026-09-03: menu gate only. PayrollController is the payroll developer's file and
+            // still bare [Authorize] (cross-module #11), so this hides the desk from staff who
+            // could otherwise open every screen; it does not protect the API. Compensation Read
+            // is the nearest HR family until payroll seeds its own.
             title: 'Payroll',
             href: '/hr/payroll',
             icon: CreditCard,
+            permissions: ['HR.Compensation.Read'],
             children: [
               { title: 'Run Desk', href: '/hr/payroll#runs', icon: CalendarClock },
               {
@@ -975,6 +980,7 @@ export const navigationItems: NavItem[] = [
             title: 'Manpower Recruitment Budgets',
             href: '/hr/manpower-budgets',
             icon: Banknote,
+            permissions: ['HR.ManpowerBudget.Read'],
           },
         ],
       },
@@ -1096,16 +1102,16 @@ export const navigationItems: NavItem[] = [
             href: '/hr/travel',
             icon: Plane,
             children: [
-              { title: 'Register', href: '/hr/travel', icon: Plane },
+              { title: 'Register', href: '/hr/travel', icon: Plane, permissions: ['HR.Travel.Read'] },
               // Area 25 slice 7: My Travel re-homed to the portal (/me/travel).
               // Claims get their own entry because the finance desk works a queue ACROSS trips —
               // "approved and unpaid" — which no single travel request can show.
-              { title: 'Group Travel', href: '/hr/travel/groups', icon: Users2 },
-              { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
+              { title: 'Group Travel', href: '/hr/travel/groups', icon: Users2, permissions: ['HR.Travel.Read'] },
+              { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt, permissions: ['HR.Travel.Read'] },
               // Lane 5b: the visa register had a client and no screen, so eleven fields on its DTOs
               // were unreachable. Reference data rather than day-to-day work, so it sits last.
-              { title: 'Visa Requirements', href: '/hr/travel/visa-requirements', icon: Globe2 },
-              { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard },
+              { title: 'Visa Requirements', href: '/hr/travel/visa-requirements', icon: Globe2, permissions: ['HR.Travel.Read'] },
+              { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard, permissions: ['HR.Travel.Read'] },
             ],
           },
         ],
@@ -1188,11 +1194,11 @@ export const navigationItems: NavItem[] = [
               { title: 'Training Activities', href: '/hr/training/activities', icon: Activity, permissions: ['HR.Training.Read'] },
               { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp, permissions: ['HR.Training.Read'] },
               { title: 'Schedules', href: '/hr/training/schedules', icon: CalendarClock },
-              { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList },
+              { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList, permissions: ['HR.Training.Read'] },
               { title: 'Nomination Approvals', href: '/hr/training/approvals', icon: UserCheck },
               { title: 'Completions', href: '/hr/training/completions', icon: Award, permissions: ['HR.Training.Read'] },
-              { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp },
-              { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard },
+              { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp, permissions: ['HR.Training.Read'] },
+              { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard, permissions: ['HR.Training.Read'] },
               { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert, permissions: ['HR.Training.Read'] },
             ],
           },
@@ -1217,11 +1223,10 @@ export const navigationItems: NavItem[] = [
             href: '/hr/competencies',
             icon: GraduationCap,
             children: [
-              { title: 'Organisation Gaps', href: '/hr/competencies', icon: TrendingDown },
-              { title: 'Assess Competencies', href: '/hr/competencies/assess', icon: ClipboardCheck },
-              // The only screen in this area most employees will ever open. It reads `me/*`, because
-              // the client User object carries no employee link to address the by-employee routes with.
-              { title: 'My Competencies', href: '/hr/competencies/me', icon: UserCheck },
+              { title: 'Organisation Gaps', href: '/hr/competencies', icon: TrendingDown, permissions: ['HR.Competency.Read'] },
+              { title: 'Assess Competencies', href: '/hr/competencies/assess', icon: ClipboardCheck, permissions: ['HR.Competency.Write'] },
+              // "My Competencies" moved to My Self-Service → Career & Jobs (/me/competencies) on
+              // 2026-09-03: a self-only screen has no place on the desk menu.
             ],
           },
           {
@@ -1233,8 +1238,8 @@ export const navigationItems: NavItem[] = [
             href: '/hr/job-descriptions',
             icon: FileText,
             children: [
-              { title: 'Register', href: '/hr/job-descriptions', icon: FileText },
-              { title: 'Coverage Gaps', href: '/hr/job-descriptions/gaps', icon: ClipboardList },
+              { title: 'Register', href: '/hr/job-descriptions', icon: FileText, permissions: ['HR.JobArchitecture.Read'] },
+              { title: 'Coverage Gaps', href: '/hr/job-descriptions/gaps', icon: ClipboardList, permissions: ['HR.JobArchitecture.Read'] },
             ],
           },
           {
@@ -1245,18 +1250,18 @@ export const navigationItems: NavItem[] = [
             href: '/hr/succession',
             icon: Network,
             children: [
-              { title: 'Plans', href: '/hr/succession', icon: Network },
+              { title: 'Plans', href: '/hr/succession', icon: Network, permissions: ['HR.Succession.Read'] },
               // Pools are NOT tied to a post, which is what separates them from a plan — so they get
               // their own entry rather than living inside one. Note that area 5 writes into the
               // "Appraisal Nominations" pool on its own, without anyone opening this screen.
-              { title: 'Talent Pools', href: '/hr/succession/pools', icon: Users2 },
+              { title: 'Talent Pools', href: '/hr/succession/pools', icon: Users2, permissions: ['HR.Succession.Read'] },
               // Calibration sessions and the nine box. Separate from plans and pools because a session
               // is an EVENT with a close, not a register: finalizing freezes it for good.
-              { title: 'Talent Reviews', href: '/hr/succession/reviews', icon: Grid3x3 },
+              { title: 'Talent Reviews', href: '/hr/succession/reviews', icon: Grid3x3, permissions: ['HR.Succession.Read'] },
               // Finish-plan lane 4: the criteria search had an endpoint and a client method since
               // area 13 and no screen. Also hosted inside a plan's Candidates tab.
-              { title: 'Find Candidates', href: '/hr/succession/candidate-search', icon: Search },
-              { title: 'Dashboard', href: '/hr/succession/dashboard', icon: LayoutDashboard },
+              { title: 'Find Candidates', href: '/hr/succession/candidate-search', icon: Search, permissions: ['HR.Succession.Read'] },
+              { title: 'Dashboard', href: '/hr/succession/dashboard', icon: LayoutDashboard, permissions: ['HR.Succession.Read'] },
             ],
             // No "my succession" entry, and there must never be one: readiness, retention risk and
             // nine-box placement are assessments made ABOUT a candidate, not records belonging to them.
@@ -1274,12 +1279,12 @@ export const navigationItems: NavItem[] = [
             href: '/hr/awards',
             icon: Medal,
             children: [
-              { title: 'Register', href: '/hr/awards', icon: Medal },
+              { title: 'Register', href: '/hr/awards', icon: Medal, permissions: ['HR.Awards.Read'] },
               // Area 25 slice 9: the self surface (My Awards, Nominate, Vote, Score) moved to the
               // portal under /me/awards — reachable via "My Self-Service". Only the desk stays here.
-              { title: 'Who Qualifies', href: '/hr/awards/eligibility', icon: Users },
-              { title: 'Results', href: '/hr/awards/results', icon: Trophy },
-              { title: 'Long Service', href: '/hr/awards/long-service', icon: Medal },
+              { title: 'Who Qualifies', href: '/hr/awards/eligibility', icon: Users, permissions: ['HR.Awards.Read'] },
+              { title: 'Results', href: '/hr/awards/results', icon: Trophy, permissions: ['HR.Awards.Read'] },
+              { title: 'Long Service', href: '/hr/awards/long-service', icon: Medal, permissions: ['HR.Awards.Read'] },
             ],
           },
         ],
@@ -1305,7 +1310,7 @@ export const navigationItems: NavItem[] = [
             icon: UserPlus,
             children: [
               { title: 'Establishment', href: '/hr/recruitment/establishment', icon: Building2, permissions: ['HR.Recruitment.Read'] },
-              { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList },
+              { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList, permissions: ['HR.Recruitment.Read'] },
               { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase, permissions: ['HR.Recruitment.Read'] },
               { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone, permissions: ['HR.Recruitment.Read'] },
               { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users, permissions: ['HR.Recruitment.Read'] },
@@ -1353,7 +1358,7 @@ export const navigationItems: NavItem[] = [
             href: '/hr/probation',
             icon: UserCheck,
             children: [
-              { title: 'Register', href: '/hr/probation', icon: UserCheck },
+              { title: 'Register', href: '/hr/probation', icon: UserCheck, permissions: ['HR.Probation.Read'] },
               // The reviewer queue is deliberately its own entry: probation reviews are conducted by
               // LINE MANAGERS, who hold no HR permission at all, so this is the one screen in the area
               // most of its users will ever open. (Area 25 slice 7: the employee's own reviews and
@@ -1361,7 +1366,7 @@ export const navigationItems: NavItem[] = [
               { title: 'Reviews to Conduct', href: '/hr/probation/reviews', icon: ClipboardCheck },
               // FR-HR-030. Not probation, but the same FRD section (onboarding), and it is the only
               // other place an oath would sensibly live.
-              { title: 'Oaths of Secrecy', href: '/hr/probation/oaths', icon: ScrollText },
+              { title: 'Oaths of Secrecy', href: '/hr/probation/oaths', icon: ScrollText, permissions: ['HR.Probation.Read'] },
             ],
           },
           {
@@ -1386,8 +1391,8 @@ export const navigationItems: NavItem[] = [
             href: '/hr/separations',
             icon: DoorOpen,
             children: [
-              { title: 'Register', href: '/hr/separations', icon: DoorOpen },
-              { title: 'Raise a separation', href: '/hr/separations/new', icon: Plus },
+              { title: 'Register', href: '/hr/separations', icon: DoorOpen, permissions: ['HR.Separation.Read'] },
+              { title: 'Raise a separation', href: '/hr/separations/new', icon: Plus, permissions: ['HR.Separation.Write'] },
             ],
           },
         ],
@@ -1499,16 +1504,16 @@ export const navigationItems: NavItem[] = [
         href: '/hr/medical',
         icon: HeartPulse,
         children: [
-          { title: 'Dashboard', href: '/hr/medical/dashboard', icon: LayoutDashboard },
-          { title: 'Medical Claims', href: '/hr/medical/claims', icon: Receipt },
+          { title: 'Dashboard', href: '/hr/medical/dashboard', icon: LayoutDashboard, permissions: ['HR.Medical.Read'] },
+          { title: 'Medical Claims', href: '/hr/medical/claims', icon: Receipt, permissions: ['HR.Medical.Read'] },
           // Area 25 slice 8: "My Medical Claims" moved to the portal (/me/medical/claims).
-          { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark },
-          { title: 'Clinical', href: '/hr/medical/clinical', icon: ClipboardCheck },
-          { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart },
-          { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital },
-          { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope },
-          { title: 'Insurance Providers', href: '/hr/medical/insurance', icon: ShieldPlus },
-          { title: 'Benefit Schemes', href: '/hr/medical/schemes', icon: Layers },
+          { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark, permissions: ['HR.Medical.Read'] },
+          { title: 'Clinical', href: '/hr/medical/clinical', icon: ClipboardCheck, permissions: ['HR.Medical.Read'] },
+          { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart, permissions: ['HR.Medical.Read'] },
+          { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital, permissions: ['HR.Medical.Read'] },
+          { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope, permissions: ['HR.Medical.Read'] },
+          { title: 'Insurance Providers', href: '/hr/medical/insurance', icon: ShieldPlus, permissions: ['HR.Medical.Read'] },
+          { title: 'Benefit Schemes', href: '/hr/medical/schemes', icon: Layers, permissions: ['HR.Medical.Read'] },
         ],
       },
     ],
@@ -1516,13 +1521,16 @@ export const navigationItems: NavItem[] = [
   {
     // Safety (SHE) is its own top-level module in the sidebar (moved out of Human Resources on
     // 2026-09-02 — 31 registers made the HR flyout unusable). The routes still live under
-    // /hr/safety and the /hr layout's AuthGuard, so the same hr.access gate applies here;
-    // every register below carries its own HR.She.* / HR.Medical.* permission.
+    // /hr/safety (so the /hr layout's hr.access applies too), but since 2026-09-03 (DR-10) the
+    // menu and the /hr/safety layout gate on the SHE module's OWN permission, she.access — held by
+    // Safety Officer, SHE Manager, HR (read-only in SHE) and the administrators, not by every
+    // employee. Staff report incidents, hazards and stop-work from My Self-Service → My Safety.
+    // Every register below carries its own HR.She.* / HR.Medical.* permission.
     // Reference data lives under Administration → HR → Safety.
     title: 'Safety (SHE)',
     href: '/hr/safety',
     icon: HardHat,
-    permissions: ['hr.access'],
+    permissions: ['she.access'],
     children: [
       { title: 'Dashboard', href: '/hr/safety/dashboard', icon: LayoutDashboard, permissions: ['HR.She.Read'] },
       // 2026-09-03: 31 registers grouped one level down, like Human Resources. A group's href is
@@ -3045,7 +3053,7 @@ export const navigationItems: NavItem[] = [
     roles: ADMINISTRATION_ROLES,
     // admin.hr (W3): an HR practitioner holding the seeded admin.hr grant must see the parent
     // node, or the HR child below would be filtered out with it.
-    permissions: ['Finance.Admin', 'admin.hr'],
+    permissions: ['Finance.Admin', 'admin.hr', 'HR.She.Write'],
     accessMode: 'any',
     children: [
       {
@@ -3175,6 +3183,59 @@ export const navigationItems: NavItem[] = [
                 icon: BarChart3,
               },
             ],
+          },
+        ],
+      },
+      {
+        // DR-10 (2026-09-03): SHE reference data is the safety desk's own configuration, so it
+        // sits beside HR rather than under it and opens to HR.She.Write holders (Safety Officer,
+        // SHE Manager) who hold no admin.hr. Matches the administration layout's route branch.
+        title: 'Safety (SHE)',
+        href: '/administration/hr/safety',
+        icon: HardHat,
+        roles: ADMINISTRATION_ROLES,
+        permissions: ['admin.hr', 'HR.She.Write'],
+        accessMode: 'any',
+        children: [
+          {
+            title: 'Incident Types',
+            href: '/administration/hr/safety/incident-types',
+            icon: AlertTriangle,
+          },
+          {
+            title: 'Injury Types',
+            href: '/administration/hr/safety/injury-types',
+            icon: Bandage,
+          },
+          {
+            title: 'Body Parts',
+            href: '/administration/hr/safety/body-parts',
+            icon: PersonStanding,
+          },
+          {
+            title: 'CA Templates',
+            href: '/administration/hr/safety/corrective-action-templates',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Regulatory Bodies',
+            href: '/administration/hr/safety/regulatory-bodies',
+            icon: Landmark,
+          },
+          {
+            title: 'PPE Types',
+            href: '/administration/hr/safety/ppe-types',
+            icon: HardHat,
+          },
+          {
+            title: 'PPE Requirements',
+            href: '/administration/hr/safety/ppe-requirements',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'Reminder Engine',
+            href: '/administration/hr/safety/reminders',
+            icon: AlarmClock,
           },
         ],
       },
@@ -3464,53 +3525,6 @@ export const navigationItems: NavItem[] = [
               // ⚠ The retirement and contract-expiry sweeps RAISE separations. They run nightly on
               // their own; this is the manual run, and the only screen either endpoint has ever had.
               { title: 'Reminders & Sweeps', href: '/administration/hr/separation/reminders', icon: AlarmClock },
-            ],
-          },
-          {
-            title: 'Safety (SHE)',
-            href: '/administration/hr/safety',
-            icon: HardHat,
-            children: [
-              {
-                title: 'Incident Types',
-                href: '/administration/hr/safety/incident-types',
-                icon: AlertTriangle,
-              },
-              {
-                title: 'Injury Types',
-                href: '/administration/hr/safety/injury-types',
-                icon: Bandage,
-              },
-              {
-                title: 'Body Parts',
-                href: '/administration/hr/safety/body-parts',
-                icon: PersonStanding,
-              },
-              {
-                title: 'CA Templates',
-                href: '/administration/hr/safety/corrective-action-templates',
-                icon: ClipboardList,
-              },
-              {
-                title: 'Regulatory Bodies',
-                href: '/administration/hr/safety/regulatory-bodies',
-                icon: Landmark,
-              },
-              {
-                title: 'PPE Types',
-                href: '/administration/hr/safety/ppe-types',
-                icon: HardHat,
-              },
-              {
-                title: 'PPE Requirements',
-                href: '/administration/hr/safety/ppe-requirements',
-                icon: ClipboardCheck,
-              },
-              {
-                title: 'Reminder Engine',
-                href: '/administration/hr/safety/reminders',
-                icon: AlarmClock,
-              },
             ],
           },
           // Employee Categories has no backing controller at all, so it stays dropped.

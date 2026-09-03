@@ -24,6 +24,10 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
     requiredPermissions = ['admin.fleet-management'];
   } else if (pathname.startsWith('/administration/maintenance')) {
     requiredPermissions = ['admin.maintenance'];
+  } else if (pathname.startsWith('/administration/hr/safety')) {
+    // DR-10 (2026-09-03): SHE reference data is the safety desk's own configuration. The SHE
+    // roles hold HR.She.Write and no admin.hr, so this branch must come before the HR one.
+    requiredPermissions = ['admin.hr', 'HR.She.Write'];
   } else if (pathname.startsWith('/administration/hr')) {
     // W3: seeded to SuperAdmin/TenantAdmin/Admin and to HR (+ legacy "HR User") — HR
     // practitioners maintain their own reference data (leave types, org structures).

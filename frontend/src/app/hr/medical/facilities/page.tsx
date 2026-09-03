@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceListPanel } from '@/components/hr/common/ResourceListPanel';
+import { useAuth } from '@/hooks/use-auth';
 import {
   FacilityFormFields,
   facilitySchema,
@@ -38,6 +39,9 @@ const typeLabel = (v: string) =>
   HEALTH_FACILITY_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
 
 export default function HealthcareFacilitiesPage() {
+  const { hasAnyPermission } = useAuth();
+  const canWrite = hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']);
+  const canAdmin = hasAnyPermission(['HR.Medical.Admin']);
   return (
     <div className="space-y-6 p-6">
       <PageHeader
@@ -60,7 +64,11 @@ export default function HealthcareFacilitiesPage() {
           medicalFacilityService.updateFacility(id, { id, ...facilityFormToRequest(values) })
         }
         allowUpdate={false}
-        remove={(id) => medicalFacilityService.removeFacility(id)}
+        // 2026-09-03: the reads are open to every internal user by design (a claimant must be able
+        // to name a facility), so the write affordances follow the API's tiers instead of
+        // rendering for everyone and refusing on click: create is HR.Medical.Write, delete is Admin.
+        allowCreate={canWrite}
+        remove={canAdmin ? (id) => medicalFacilityService.removeFacility(id) : undefined}
         getId={(f) => f.id}
         columns={[
           {

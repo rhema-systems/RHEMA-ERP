@@ -72,7 +72,7 @@ export default function CompetencyGapsPage() {
             <Link href="/hr/competencies/assess">
               <Button>Assess somebody</Button>
             </Link>
-            <Link href="/hr/competencies/me">
+            <Link href="/me/competencies">
               <Button variant="outline">My competencies</Button>
             </Link>
           </div>

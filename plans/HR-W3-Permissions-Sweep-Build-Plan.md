@@ -487,3 +487,54 @@ area base classes — `SheApiControllerBase`, `AttendanceControllerBase`, `Medic
 `HrControllerBase` — that a naive `ControllerBase` match misses, which is how a first pass
 under-counted by 76 controllers). Outputs `hr-actions.json` / `hr-classes.json`. Kept in the
 session scratchpad; cheap to regenerate — the regexes are in this plan's git history.
+
+## Slice 15 — the 2026-09-03 permissions review: menu gates, DR-10 SHE roles, self-service split
+
+**Trigger:** the stakeholder demo showed HR menu items other modules would have hidden. A
+solution-wide review found one mechanism (Permission/RolePermission rows → `PermissionAuthorizationHandler`;
+sidebar `filterNavItems`) in four dialects, and that HR was the most complete backend but had
+**79 sidebar leaves with no gate of their own** while `hr.access` is granted to every internal role.
+
+**Built and VERIFIED 2026-09-03** — full ladder **915/915** on the rebuilt API (39/129/23/47/27/90/66/167/142/100/85; slice 12 grew from 82 to 129 with the Safety Officer fixture and the HR-refused-on-write lines). Database checked after the startup seed: both roles present, `she.access` seeded and granted to Safety Officer/SHE Manager/HR only, `HR.She.*` relabelled "Safety (SHE)", `HR.She.Write` revoked from HR (log line "Revoked 1 permission grant(s)"), 13 SafetyCompliance topics re-addressed (HR system rows soft-deleted, both SHE roles added). ⚠ The `she.officer` persona re-cast only applies where the persona exists (UAT database via `seed-hr-demo`); the dev database has no persona to check.
+
+**Built:**
+- Sidebar: 36 leaves + the Payroll group gated on their family's Read (Payroll on
+  `HR.Compensation.Read`, menu-only — #11 still owns the API); My Competencies moved to
+  `/me/competencies`; Training Certificates defaults to the desk view and is gated. The 14 leaves
+  that stay open (confirmed by the user) are pinned by `sidebar-hr-gates.test.ts` — a new leaf
+  without a permission fails the test unless it is added to KEEP_OPEN with a reason.
+- Three defects from the page trace: `training-requests` "All" tab called a route that does not
+  exist (now the paged read); facilities/physicians write buttons now follow Medical Write/Admin;
+  Leave Requests opens on the caller's own history. Unit Goals reads are OPEN BY DESIGN
+  (controller remarks: the cascade must be visible) — left open, listed in KEEP_OPEN.
+- DR-10: `Constants.Roles.SafetyOfficer` / `SheManager`; `HrPermissions` grants them She R/W
+  (+Admin for the manager) and Medical R/W; **HR drops to `HR.She.Read`** via the new
+  `HrPermissions.RoleRevocations` map, applied by a delete pass after the add-only grant loop;
+  `she.access` module gate (SHE roles, HR, admins) + `/hr/safety/layout.tsx`; SHE reminder topics
+  re-addressed to the SHE roles (system rows only); permission Category relabelled "Safety (SHE)"
+  in place (HR-owned rows only); `she.officer` persona re-cast (RetiredRoles removes HR).
+- Harness: `resolveFixtureEmployees()` + `ensureUser`/`tenantIdFromToken` shared in `api.mjs`;
+  slice 12 extended with a `w3.sheofficer` fixture (W3SHE employee), the seed/grant assertions,
+  and HR-refused-on-write.
+
+**Verification order after the build:** start in Staging → startup seeds roles/grants/revocation →
+`run-w3.mjs` then `run-slice12-she.mjs`, then the rest of the ladder; `npx vitest run
+src/components/layout/sidebar-hr-gates.test.ts`.
+
+**Administration follow-up (same day, after the user asked whether the Roles/Users screens needed
+restructuring):** the Roles screen needs no restructuring — it renders the database permission
+rows grouped by Category, so the 21 HR families, the "Safety (SHE)" family and the two module
+gates appear on their own; the Users screen's role picker reads `/api/role`, so the SHE roles
+appear on their own. Three real gaps were closed: (1) the SHE reference-data settings sat under
+Administration → HR behind `admin.hr`, which the SHE roles do not hold — moved beside HR as
+Administration → Safety (SHE), gated `admin.hr` OR `HR.She.Write` in both the sidebar and the
+administration layout (a `/administration/hr/safety` branch placed BEFORE the `/administration/hr`
+one); (2) `HR`, `Safety Officer` and `SHE Manager` were plain roles an admin could rename or
+delete although the seed map, the fallback handler and the role-anchored attributes key on the
+exact names — added to `Constants.Roles.IsProtectedSystemRole` (the seeder promotes existing rows
+to `IsSystemRole` on the next start; the row and name are protected, the permissions stay
+editable) and to the Roles screen's protected list; (3) documented for the user, NOT changed:
+seeded roles are code-managed — the grant loop is add-only and RoleRevocations deletes, so an
+admin's removal from a seeded role returns on the next restart and a re-grant of a revoked one
+is deleted; tenant-specific shapes belong in custom roles.
+

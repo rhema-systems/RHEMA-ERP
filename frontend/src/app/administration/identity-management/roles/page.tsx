@@ -44,6 +44,11 @@ const PROTECTED_SYSTEM_ROLE_NAMES = new Set([
   'helpdeskagent',
   'helpdesksupervisor',
   'helpdeskmanager',
+  // 2026-09-03: the HR-family roles are code-anchored (see Constants.Roles.IsProtectedSystemRole);
+  // the name and the row are protected, the permissions stay editable.
+  'hr',
+  'safety officer',
+  'she manager',
 ]);
 
 const normalizeRoleName = (roleName?: string | null) => roleName?.trim().toLowerCase() ?? '';

@@ -66,15 +66,28 @@ public class TdcDemoPersonaSeeder
     // The cast. Every role name here is a Constants.Roles member so a rename cannot strand a persona
     // with a role that no longer exists. Employee is on all of them: the self-service portal is
     // gated on it, and even the Managing Director has a payslip.
+    /// <summary>
+    /// Roles a persona used to carry and must no longer hold. The role loop below only ADDS, so a
+    /// persona re-cast on an existing demo database keeps its old roles unless they are listed
+    /// here. she.officer carried HR until DR-10 gave the safety desk its own role (2026-09-03).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string[]> RetiredRoles =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["she.officer"] = new[] { Constants.Roles.Hr },
+        };
+
     private static readonly Persona[] Cast =
     {
         new("hr.head", "Head of HR & Administration",
             "Drives every HR register and admin screen; also a line manager and an employee",
             Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.Employee),
 
+        // DR-10 (2026-09-03): the safety desk is its own role. No HR role here — the point of the
+        // persona is that SHE runs without one, and that hr.head can read SHE but not edit it.
         new("she.officer", "HSE Supervisor",
             "Drives the whole SHE module — incidents, permits, PPE, audits, environmental",
-            Constants.Roles.Hr, Constants.Roles.Employee),
+            Constants.Roles.SafetyOfficer, Constants.Roles.Employee),
 
         // Not "md": the login request validates usernames at 3-100 characters, and a two-letter
         // persona fails before it reaches the password check. Not "managing.director" either: the
@@ -197,6 +210,20 @@ public class TdcDemoPersonaSeeder
                 {
                     _logger.LogError("Could not add '{Username}' to role '{Role}': {Errors}",
                         persona.Username, roleName, string.Join("; ", roleResult.Errors.Select(e => e.Description)));
+                }
+            }
+
+            if (RetiredRoles.TryGetValue(persona.Username, out var retired))
+            {
+                foreach (var roleName in retired)
+                {
+                    if (!await _userManager.IsInRoleAsync(user, roleName)) continue;
+                    var removal = await _userManager.RemoveFromRoleAsync(user, roleName);
+                    if (removal.Succeeded)
+                        _logger.LogInformation("Persona {Username} no longer carries the retired role '{Role}'", persona.Username, roleName);
+                    else
+                        _logger.LogError("Could not remove retired role '{Role}' from '{Username}': {Errors}",
+                            roleName, persona.Username, string.Join("; ", removal.Errors.Select(e => e.Description)));
                 }
             }
 

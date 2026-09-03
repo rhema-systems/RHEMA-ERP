@@ -7902,6 +7902,8 @@ namespace ErpSystem.Web.Services
                 new { Name = "Managing Director", Description = "Restricted executive approval role for exceptional and high-value finance transactions" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
                 new { Name = Constants.Roles.Hr, Description = "User with access to HR module" },
+                new { Name = Constants.Roles.SafetyOfficer, Description = "Safety, Health & Environment desk: works every SHE register and the occupational-health registers without the HR role (DR-10)" },
+                new { Name = Constants.Roles.SheManager, Description = "SHE desk administrator: everything the Safety Officer holds plus deletion of SHE records (DR-10)" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
                 new { Name = "Procurement User", Description = "User with access to procurement module" },
@@ -8123,6 +8125,14 @@ namespace ErpSystem.Web.Services
         /// </summary>
         private static readonly string[] HrModuleAccessGrants = { "hr.access" };
         private static readonly string[] HrModuleAdminGrants = { "admin.hr" };
+        private const string SheModuleAccessPermission = "she.access";
+        /// <summary>
+        /// The SHE desk menu gate. Held by the two SHE roles, by HR (read-only in SHE since
+        /// 2026-09-03) and by the administrators; NOT by Employee/Manager/ReadOnly - staff report
+        /// incidents, hazards and stop-work from My Self-Service, which needs no module gate.
+        /// The /hr layout still requires hr.access, so the SHE roles hold both.
+        /// </summary>
+        private static readonly string[] SheModuleAccessGrants = { SheModuleAccessPermission };
 
         private async Task SeedRolePermissionAssignmentsAsync()
         {
@@ -8473,6 +8483,16 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Admin Human Resources",
                     Description = "Manage HR administration and reference-data settings",
                     Category = "Administration Modules"
+                },
+                // 2026-09-03 (DR-10): SHE gets its own module gate so a tenant can show or hide the
+                // Safety (SHE) menu and /hr/safety routes per role without touching hr.access.
+                // Frontend-only, like hr.access: the API authorizes on HR.She.* / HR.Medical.*.
+                new
+                {
+                    Name = SheModuleAccessPermission,
+                    DisplayName = "Access Safety (SHE)",
+                    Description = "Access the Safety, Health & Environment module desk menu and screens",
+                    Category = "Module Access"
                 }
             })
             .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
@@ -8486,6 +8506,20 @@ namespace ErpSystem.Web.Services
 
                 if (existingPermission != null)
                 {
+                    // HR-owned rows follow their code definition's display metadata: the roles
+                    // screen groups by Category, and a re-label (SHE -> "Safety (SHE)", 2026-09-03)
+                    // must reach tenants seeded under the old label. Scoped to HR.* and its module
+                    // gates so no other team's rows are touched.
+                    var hrOwned = permissionInfo.Name.StartsWith(HrPermissions.Prefix, StringComparison.Ordinal)
+                        || string.Equals(permissionInfo.Name, SheModuleAccessPermission, StringComparison.OrdinalIgnoreCase);
+                    if (hrOwned && !string.IsNullOrWhiteSpace(permissionInfo.Category)
+                        && !string.Equals(existingPermission.Category, permissionInfo.Category, StringComparison.Ordinal))
+                    {
+                        existingPermission.Category = permissionInfo.Category;
+                        existingPermission.DisplayName = permissionInfo.DisplayName;
+                        existingPermission.Description = permissionInfo.Description;
+                        existingPermission.UpdatedAt = DateTime.UtcNow;
+                    }
                     continue;
                 }
 
@@ -8857,9 +8891,16 @@ namespace ErpSystem.Web.Services
                 // handler standing in for the seed, and the seeder loop skips roles that do not
                 // exist, so listing it costs nothing on a migrated tenant.
                 [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr)
-                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
                 [Constants.Roles.LegacyHrUser] = HrPermissions.GrantsFor(Constants.Roles.Hr)
-                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
+
+                // DR-10 (2026-09-03): the safety function's own roles. hr.access because the SHE
+                // routes live under the /hr layout; she.access for the SHE menu itself.
+                [Constants.Roles.SafetyOfficer] = HrPermissions.GrantsFor(Constants.Roles.SafetyOfficer)
+                    .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).ToArray(),
+                [Constants.Roles.SheManager] = HrPermissions.GrantsFor(Constants.Roles.SheManager)
+                    .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).ToArray(),
 
                 // hr.access for the broad internal roles (W3). The /hr layout was previously
                 // ungated, and non-HR staff legitimately use surfaces under it (peer evaluations,
@@ -8872,7 +8913,7 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.Manager] = HrModuleAccessGrants,
                 [Constants.Roles.Employee] = HrModuleAccessGrants,
                 [Constants.Roles.ReadOnly] = HrModuleAccessGrants,
-                ["Admin"] = HrModuleAccessGrants.Concat(HrModuleAdminGrants).ToArray(),
+                ["Admin"] = HrModuleAccessGrants.Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
 
                 // The two approval authorities, who hold READ on the HR records they decide:
                 // the Managing Director signs separations (FR-HR-092) and Internal Audit reviews
@@ -8925,6 +8966,42 @@ namespace ErpSystem.Web.Services
                 }
 
                 _context.RolePermissions.AddRange(missingPermissions);
+            }
+
+            // The loop above is add-only, so a role that SHRINKS in HrPermissions.RoleGrants keeps
+            // its old rows on an already-seeded tenant. HrPermissions.RoleRevocations lists what a
+            // role must not hold; delete those rows so the seed, the fallback handler and the
+            // database agree (2026-09-03: HR loses HR.She.Write, DR-10).
+            foreach (var (roleName, revokedNames) in HrPermissions.RoleRevocations)
+            {
+                var role = await _roleManager.FindByNameAsync(roleName);
+                if (role == null)
+                {
+                    continue;
+                }
+
+                var revokedSet = revokedNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var revokedIds = permissions
+                    .Where(permission => revokedSet.Contains(permission.Name))
+                    .Select(permission => permission.Id)
+                    .ToList();
+                if (revokedIds.Count == 0)
+                {
+                    continue;
+                }
+
+                var rows = await _context.RolePermissions
+                    .Where(rp => rp.RoleId == role.Id && revokedIds.Contains(rp.PermissionId))
+                    .ToListAsync();
+                if (rows.Count == 0)
+                {
+                    continue;
+                }
+
+                _context.RolePermissions.RemoveRange(rows);
+                _logger.LogInformation(
+                    "Revoked {Count} permission grant(s) from role {Role} per HrPermissions.RoleRevocations: {Permissions}",
+                    rows.Count, roleName, string.Join(", ", revokedNames));
             }
 
             await _context.SaveChangesAsync();

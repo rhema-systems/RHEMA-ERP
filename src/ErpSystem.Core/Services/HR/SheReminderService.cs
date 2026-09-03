@@ -1075,16 +1075,21 @@ public class SheReminderService : ISheReminderService
             await topicRepo.AddAsync(topic);
 
             var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
-            await recipientRepo.AddAsync(new NotificationTopicRecipient
+            // DR-10 (2026-09-03): SHE reminders go to the safety function's own roles, not to HR
+            // (which is read-only in SHE now). Existing tenants are reconciled below.
+            foreach (var roleName in SheDeskRoles)
             {
-                TenantId = tenantId,
-                TopicId = topic.Id,
-                RecipientKind = "Role",
-                RecipientValue = Constants.Roles.Hr,
-                IsSystem = true,
-                SendInApp = true,
-                CreatedBy = "System",
-            });
+                await recipientRepo.AddAsync(new NotificationTopicRecipient
+                {
+                    TenantId = tenantId,
+                    TopicId = topic.Id,
+                    RecipientKind = "Role",
+                    RecipientValue = roleName,
+                    IsSystem = true,
+                    SendInApp = true,
+                    CreatedBy = "System",
+                });
+            }
             if (seed.EscalatesToAdmins)
             {
                 await recipientRepo.AddAsync(new NotificationTopicRecipient
@@ -1105,6 +1110,69 @@ public class SheReminderService : ISheReminderService
         {
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Seeded missing SafetyCompliance notification topics for tenant {TenantId}", tenantId);
+        }
+
+        await ReconcileSystemRecipientsAsync(tenantId, keys, cancellationToken);
+    }
+
+    /// <summary>The roles that work the SHE desk and therefore receive its reminders (DR-10).</summary>
+    private static readonly string[] SheDeskRoles = { Constants.Roles.SafetyOfficer, Constants.Roles.SheManager };
+
+    /// <summary>
+    /// Before 2026-09-03 every SafetyCompliance topic was seeded with a single system recipient,
+    /// the HR role. HR is read-only in SHE now, so on each existing topic the SYSTEM HR row is
+    /// replaced by the two SHE desk roles. Only rows the seeder itself wrote (<c>IsSystem</c>) are
+    /// touched: recipients an administrator added stay exactly as configured.
+    /// </summary>
+    private async Task ReconcileSystemRecipientsAsync(Guid tenantId, string[] keys, CancellationToken cancellationToken)
+    {
+        var topicRepo = _unitOfWork.Repository<NotificationTopic>();
+        var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
+        var topicIds = await topicRepo
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && keys.Contains(t.Key))
+            .Select(t => t.Id)
+            .ToListAsync(cancellationToken);
+        if (topicIds.Count == 0) return;
+
+        var systemRoleRows = await recipientRepo
+            .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted && r.IsSystem
+                && r.RecipientKind == "Role" && topicIds.Contains(r.TopicId))
+            .ToListAsync(cancellationToken);
+
+        var changed = false;
+        foreach (var topicId in topicIds)
+        {
+            var rows = systemRoleRows.Where(r => r.TopicId == topicId).ToList();
+            var legacyHr = rows.Where(r => string.Equals(r.RecipientValue, Constants.Roles.Hr, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (legacyHr.Count == 0) continue;
+
+            foreach (var row in legacyHr)
+            {
+                row.IsDeleted = true;
+                row.UpdatedBy = "System";
+                changed = true;
+            }
+            foreach (var roleName in SheDeskRoles)
+            {
+                if (rows.Any(r => string.Equals(r.RecipientValue, roleName, StringComparison.OrdinalIgnoreCase))) continue;
+                await recipientRepo.AddAsync(new NotificationTopicRecipient
+                {
+                    TenantId = tenantId,
+                    TopicId = topicId,
+                    RecipientKind = "Role",
+                    RecipientValue = roleName,
+                    IsSystem = true,
+                    SendInApp = true,
+                    CreatedBy = "System",
+                });
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Re-addressed SafetyCompliance reminder recipients from HR to the SHE desk roles for tenant {TenantId}", tenantId);
         }
     }
 }

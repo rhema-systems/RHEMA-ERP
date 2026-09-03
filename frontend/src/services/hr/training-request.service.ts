@@ -19,8 +19,16 @@ import type {
 class TrainingRequestService {
   private readonly baseUrl = '/training-requests';
 
-  getAll(): Promise<TrainingRequestSummary[]> {
-    return apiService.get<TrainingRequestSummary[]>(this.baseUrl);
+  /**
+   * The desk register. The API has no bare GET on this route (only paged/mine/employee/status/
+   * pending-approval), so until 2026-09-03 this returned 404 for every role and the requests
+   * page's "All" tab was dead. Rides the paged read at a size that covers a register.
+   */
+  async getAll(): Promise<TrainingRequestSummary[]> {
+    const page = await apiService.get<{ items?: TrainingRequestSummary[]; data?: { items?: TrainingRequestSummary[] } }>(
+      `${this.baseUrl}/paged?pageNumber=1&pageSize=500`
+    );
+    return page.items ?? page.data?.items ?? [];
   }
 
   getById(id: string): Promise<TrainingRequest> {

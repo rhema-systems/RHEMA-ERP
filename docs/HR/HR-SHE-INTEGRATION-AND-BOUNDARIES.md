@@ -63,9 +63,17 @@ any new many-include read in this area needs it too.
   unclassified (W3 slice 12 defect).
 - **The first layer:** `ExternalUserAccessMiddleware` refuses external-user tokens on every path
   outside a prefix allowlist; SHE is not on it.
-- **DR-10 (SHE roles) is deferred.** Today SHE is worked by holders of the HR role or the
-  `HR.She.*` family; there is no SHE-officer role. The demo persona `she.officer` is resolved by
-  position title, not by a role.
+- **DR-10 (SHE roles) — DELIVERED 2026-09-03.** Two seeded roles: **Safety Officer**
+  (`HR.She.Read/Write` + `HR.Medical.Read/Write`, because the occupational-health registers SHE
+  owns are gated on the medical family — §3.1) and **SHE Manager** (the same plus `HR.She.Admin`).
+  Neither holds the HR role. **HR dropped to `HR.She.Read`**: it sees every SHE register and can
+  edit none (`HrPermissions.RoleRevocations` deletes the old Write grant on existing tenants).
+  The SHE menu and the `/hr/safety` layout gate on the module's own `she.access` (held by the
+  two SHE roles, HR and the administrators — not by Employee/Manager; staff report from
+  `/me/safety`). SHE reminder topics are addressed to the two SHE roles, with the seeded HR
+  recipient re-addressed on existing tenants. The permission category label on the roles
+  screen is now "Safety (SHE)"; the permission NAMES stay `HR.She.*`. The demo persona
+  `she.officer` carries Safety Officer + Employee. Proven by `run-slice12-she.mjs`.
 
 ---
 
@@ -178,7 +186,7 @@ control is real (v1.0 → v1.1 → v1.2, byte-exact per-version downloads, FR-SH
 | **No `RowVersion` on any of the 88 entities** | Including approval-bearing `ShePermitToWork`, `SheRiskAssessment`, `SheEnvironmentalReview` — two officers editing the same permit overwrite each other silently | Patterns sweep §3.2 |
 | **No workflow-engine adapter** | No `HrShe*WorkflowStatusAdapter`; permit, RA and environmental-review approvals are bare `ApprovedById`/`ApprovedDate` pairs with service-level state rules. Same fix as Medical/Benefits; SHE's statutory ladders are the strongest case for the engine's audit trail | Patterns sweep §3.3; `HR-WORKFLOW-ENGINE-INTEGRATION.md` |
 | **No file import or export** | Zero CSV/XLSX in any SHE controller, service or screen; the one `window.print()` is on the environmental review detail. Registers exist; getting one into a file does not | Import/export §3.10; reports §3.17 |
-| **No SHE-officer role** (DR-10) | SHE desk work rides the HR role or `HR.She.*` grants | §2 |
+| ~~**No SHE-officer role** (DR-10)~~ | **Delivered 2026-09-03** — Safety Officer + SHE Manager roles, HR read-only in SHE, `she.access` module gate | §2 |
 | **No SMS channel** | Recorded residue of area 10 | — |
 | **Money unposted** | Incident insurance claims (row 60), equipment/PPE cost (61); sustainability savings are reporting figures (62); contractor fines do not exist (63) | Finance sweep; backlog has a placeholder row only |
 | **Duplicate registers** | PPE stock vs Inventory; safety equipment vs company assets vs inventory; incidents vs fleet incidents; contractor vs supplier | Integration map rows 9, 10, 14, 15 |

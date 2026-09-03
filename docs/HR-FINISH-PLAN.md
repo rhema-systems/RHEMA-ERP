@@ -1035,7 +1035,7 @@ Each was a deliberate deferral with a trigger, not an oversight.
       (FR-ENV-008/010/012/013): needs the Projects module and TDC's DR-09.
 - [ ] **10 — FR-SHE-114/201 procurement routing.**
 - [ ] **10 — SMS alerts** (FR-SHE-161): no gateway exists.
-- [ ] **10 — SHE-specific roles** (DR-10).
+- [x] **10 — SHE-specific roles** (DR-10) — ✅ **DONE 2026-09-03** with the permissions review: Safety Officer + SHE Manager roles seeded, HR dropped to `HR.She.Read` (revocation pass), `she.access` module gate + `/hr/safety` layout guard, reminders re-addressed, category relabelled; `she.officer` persona re-cast. See `docs/HR/HR-SHE-INTEGRATION-AND-BOUNDARIES.md` §2.
 
 ### Owed to ops, not to engineering
 

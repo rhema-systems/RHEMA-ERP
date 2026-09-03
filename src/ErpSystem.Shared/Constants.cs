@@ -55,6 +55,19 @@ public static class Constants
         /// TDC_ spelling exists (checked 2026-08-20).
         /// </summary>
         public const string InternalAudit = "TDC_INTERNAL_AUDIT";
+        /// <summary>
+        /// The Safety, Health &amp; Environment desk (SRS DR-10, delivered 2026-09-03). Holds
+        /// <c>HR.She.Read</c>/<c>Write</c> and the occupational-health pair so it can work every
+        /// SHE register without holding the <see cref="Hr"/> role. HR itself keeps only
+        /// <c>HR.She.Read</c> — separation of duties between the people function and the safety
+        /// function. See <c>HrPermissions.RoleGrants</c>.
+        /// </summary>
+        public const string SafetyOfficer = "Safety Officer";
+        /// <summary>
+        /// The SHE desk's administrator: everything <see cref="SafetyOfficer"/> holds plus
+        /// <c>HR.She.Admin</c> (deletion, the only act above the desk).
+        /// </summary>
+        public const string SheManager = "SHE Manager";
 
         // External users (customer/vendor/partner/citizen portal accounts)
         public const string ExternalUser = "ExternalUser";
@@ -102,7 +115,15 @@ public static class Constants
                 || string.Equals(normalizedRoleName, ConsultantClient, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskAgent, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskSupervisor, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(normalizedRoleName, HelpdeskManager, StringComparison.OrdinalIgnoreCase);
+                || string.Equals(normalizedRoleName, HelpdeskManager, StringComparison.OrdinalIgnoreCase)
+                // 2026-09-03: the HR-family roles are code-anchored — HrPermissions.RoleGrants,
+                // the fallback handler, the role-anchored PIP/separation attributes and the demo
+                // persona cast all key on these exact names — so renaming or deleting one from
+                // the Roles screen would silently strand every holder. Their PERMISSIONS stay
+                // editable there; only the name and the row are protected.
+                || string.Equals(normalizedRoleName, Hr, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, SafetyOfficer, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, SheManager, StringComparison.OrdinalIgnoreCase);
         }
     }
 

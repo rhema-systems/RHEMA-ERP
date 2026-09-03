@@ -447,7 +447,7 @@ export default function MeLandingPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href="/hr/competencies/me" className="group">
+          <Link href="/me/competencies" className="group">
             <Card className="h-full transition-colors group-hover:border-primary/50 group-hover:bg-accent/40">
               <CardContent className="flex items-start gap-3 p-4">
                 <div className="rounded-lg bg-primary/10 p-2 text-primary">

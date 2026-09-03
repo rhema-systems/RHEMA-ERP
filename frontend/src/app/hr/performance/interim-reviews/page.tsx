@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { CalendarCheck, ClipboardList, Users } from 'lucide-react';
@@ -31,7 +32,11 @@ import type { AppraisalReviewEvent } from '@/types/hr/interim-reviews';
  * not that anything is broken. Only `Custom` expects HR to add them by hand.
  */
 export default function InterimReviewsPage() {
-  const [scope, setScope] = useState<'mine' | 'team'>('mine');
+  // One page, two doors (2026-09-03): under /hr it is the manager's team queue (open to every
+  // manager, no HR permission — the API keys it on the token); under /me it is the employee's
+  // own list and the team tab is hidden. The self entry lives in My Self-Service.
+  const selfService = (usePathname() ?? '').startsWith('/me');
+  const [scope, setScope] = useState<'mine' | 'team'>(selfService ? 'mine' : 'team');
   const [cycleId, setCycleId] = useState('');
 
   const { data, isLoading, isError, error } = useQuery({
@@ -62,10 +67,12 @@ export default function InterimReviewsPage() {
             <ClipboardList className="mr-2 h-4 w-4" />
             My checkpoints
           </TabsTrigger>
-          <TabsTrigger value="team">
-            <Users className="mr-2 h-4 w-4" />
-            My team
-          </TabsTrigger>
+          {!selfService && (
+            <TabsTrigger value="team">
+              <Users className="mr-2 h-4 w-4" />
+              My team
+            </TabsTrigger>
+          )}
         </TabsList>
       </Tabs>
 

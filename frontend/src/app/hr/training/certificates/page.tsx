@@ -71,7 +71,9 @@ export default function TrainingCertificatesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const [view, setView] = useState<'mine' | 'expiring' | 'employee'>('mine');
+  // Desk-first since 2026-09-03: the menu leaf is HR.Training.Read, and an employee's own
+  // certificates live under My Self-Service → My Training. 'mine' stays as a tab.
+  const [view, setView] = useState<'mine' | 'expiring' | 'employee'>('expiring');
   const [search, setSearch] = useState('');
   const [revokeTarget, setRevokeTarget] = useState<TrainingCertificateSummary | null>(null);
   const [busy, setBusy] = useState(false);

@@ -38,7 +38,13 @@ public static class HrPermissions
     public const string CategoryAwards = "HR - Staff Awards & Recognition";
     public const string CategoryPerformance = "HR - Performance";
     public const string CategoryEmployee = "HR - Employee Records & Foundation";
-    public const string CategoryShe = "HR - Safety, Health & Environment";
+    /// <summary>
+    /// Renamed 2026-09-03 from "HR - Safety, Health &amp; Environment": the roles screen groups
+    /// permissions by this label, and SHE is its own function with its own roles (DR-10). The
+    /// permission NAMES stay <c>HR.She.*</c> — 314 attributes, seeded rows and the harness ride
+    /// on them. The seeder re-labels existing rows in place.
+    /// </summary>
+    public const string CategoryShe = "Safety (SHE)";
     public const string CategoryOrientation = "HR - Orientation & Onboarding";
     public const string CategoryAssets = "HR - Staff Assets";
     public const string CategoryMovements = "HR - Staff Movements";
@@ -532,13 +538,51 @@ public static class HrPermissions
         ViewAwards, MaintainAwards,
         ViewPerformance, MaintainPerformance,
         ViewEmployees, MaintainEmployees,
-        ViewShe, MaintainShe,
+        // SHE: READ ONLY since 2026-09-03 (DR-10). The safety function has its own roles below;
+        // HR sees the registers but no longer investigates, closes, decides or edits in them.
+        // RoleRevocations removes the Write grant from tenants seeded before this change.
+        ViewShe,
         ViewOrientation, MaintainOrientation,
         ViewAssets, MaintainAssets,
         ViewMovements, MaintainMovements,
         ViewDiscipline, MaintainDiscipline,
         ViewCompany, MaintainCompany
     };
+
+    /// <summary>
+    /// The Safety, Health &amp; Environment desk (DR-10). Every SHE register at Read + Write, plus
+    /// the occupational-health pair because the surveillance, first-aid, wellness and
+    /// return-to-work registers SHE owns are gated on <c>HR.Medical.*</c> (area-11 boundary
+    /// decision, 2026-08-14). No employee-master PII, no other HR family: the lean directory and
+    /// the employee picker are open reads, which is all the SHE screens need.
+    /// </summary>
+    private static readonly string[] SafetyOfficerGrants =
+    {
+        ViewShe, MaintainShe,
+        ViewMedicalRecords, MaintainMedicalRecords
+    };
+
+    /// <summary>Everything the officer holds, plus deletion — the one act above the SHE desk.</summary>
+    private static readonly string[] SheManagerGrants =
+    {
+        ViewShe, MaintainShe, AdministerShe,
+        ViewMedicalRecords, MaintainMedicalRecords
+    };
+
+    /// <summary>
+    /// Grants a role must NOT hold, applied by the seeder AFTER <see cref="RoleGrants"/>. The
+    /// grant loop is add-only (it never removes a row it did not just add), so shrinking a role in
+    /// <see cref="RoleGrants"/> alone changes nothing on a tenant seeded before the shrink. List
+    /// the revocation here and the seeder deletes the row on every startup. The fallback handler
+    /// reads <see cref="RoleGrants"/>, which no longer contains the grant, so both sides agree.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> RoleRevocations =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            // 2026-09-03: HR drops SHE Write; the safety function is its own desk (DR-10).
+            [Constants.Roles.Hr] = new[] { MaintainShe },
+            [Constants.Roles.LegacyHrUser] = new[] { MaintainShe }
+        };
 
     /// <summary>
     /// What the two approval authorities hold: the ability to <b>see</b> a separation, and nothing
@@ -599,6 +643,11 @@ public static class HrPermissions
             ["Admin"] = AllNames,
             [Constants.Roles.Hr] = HrStaffGrants,
             [Constants.Roles.LegacyHrUser] = HrStaffGrants,
+
+            // DR-10 (2026-09-03): the safety function's own roles. Neither holds the HR role, and
+            // the HR role no longer holds SHE Write — see RoleRevocations.
+            [Constants.Roles.SafetyOfficer] = SafetyOfficerGrants,
+            [Constants.Roles.SheManager] = SheManagerGrants,
 
             // The Managing Director signs separations (FR-HR-092) and Internal Audit reviews their
             // settlements (FR-HR-185). Both need to READ the record they are deciding on — and
