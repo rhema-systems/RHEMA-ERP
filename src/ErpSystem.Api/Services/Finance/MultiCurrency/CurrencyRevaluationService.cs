@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -83,6 +84,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         {
             RevaluationDate = request.RevaluationDate,
             RevaluationType = request.RevaluationType,
+            AccountingBookCode = request.AccountingBookCode,
             CurrencyCode = request.CurrencyCode,
             UnrealizedGainLossAccountId = request.UnrealizedGainLossAccountId,
             ExpectedPreviewFingerprint = null,
@@ -101,6 +103,9 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             BatchNumber = batch.BatchNumber,
             RevaluationDate = batch.RevaluationDate,
             FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
+            AccountingBookId = batch.AccountingBookId,
+            AccountingBookCode = batch.AccountingBookCode,
+            AccountingBookName = batch.AccountingBook?.Name ?? batch.AccountingBookCode,
             TotalGainAmount = batch.TotalGainAmount,
             TotalLossAmount = batch.TotalLossAmount,
             NetGainLossAmount = batch.NetGainLossAmount,
@@ -118,11 +123,25 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                         AccountId = line.AccountId,
                         AccountNumber = account?.AccountNumber ?? line.AccountId.ToString("N")[..8],
                         AccountName = account?.AccountName ?? line.SourceModule,
+                        AccountAccountingBookId = line.AccountAccountingBookId,
+                        AccountBookCurrencyPolicyId = line.AccountBookCurrencyPolicyId,
+                        AccountClassificationId = line.AccountClassificationId,
+                        AccountClassificationCode = line.AccountClassificationCode,
+                        AccountClassificationName = line.AccountClassificationName,
+                        CoreAccountType = line.CoreAccountType,
+                        NormalBalanceLabel = line.CoreAccountType is "Liability" or "Equity" or "Revenue" ? "Credit" : "Debit",
+                        ClassificationDefault = line.ClassificationDefault,
+                        RevaluationOverride = line.RevaluationOverride,
+                        EffectiveRevaluationRequired = line.EffectiveRevaluationRequired,
+                        EffectivePolicySource = line.EffectivePolicySource,
+                        HasGovernanceWarning = line.HasGovernanceWarning,
+                        GovernanceWarning = line.GovernanceWarning,
                         SourceModule = line.SourceModule,
                         TransactionCurrency = line.TransactionCurrency,
                         FunctionalCurrencyCode = line.FunctionalCurrencyCode,
                         ForeignCurrencyBalance = line.ForeignCurrencyBalance,
                         CarryingFunctionalAmount = line.CarryingFunctionalAmount,
+                        PriorUnreversedAdjustment = line.PriorUnreversedAdjustment,
                         PreviousRate = line.ForeignCurrencyBalance == 0m
                             ? 0m
                             : decimal.Round(line.CarryingFunctionalAmount / line.ForeignCurrencyBalance, 6, MidpointRounding.AwayFromZero),
@@ -131,8 +150,10 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                         GainLossAmount = line.GainLossAmount,
                         GainLossType = line.GainLossType,
                         RevaluationFrequency = line.Notes?.Split('|').ElementAtOrDefault(1)?.Trim() ?? string.Empty,
-                        RateType = line.ClosingExchangeRateRecord?.RateType.ToString() ?? string.Empty,
-                        QuoteSide = line.ClosingExchangeRateRecord?.QuoteSide.ToString() ?? string.Empty
+                        RateType = line.ClosingRateType,
+                        QuoteSide = line.ClosingQuoteSide,
+                        ClosingExchangeRateId = line.ClosingExchangeRateId,
+                        ClosingRateDate = line.ClosingRateDate
                     };
                 })
                 .ToList()
@@ -213,8 +234,11 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             RevaluationDate = batch.RevaluationDate,
             Status = batch.Status,
             FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
+            AccountingBookId = batch.AccountingBookId,
+            AccountingBookCode = batch.AccountingBookCode,
             Currencies = batch.Lines.Select(line => line.TransactionCurrency).Distinct().OrderBy(code => code).ToList(),
             ExposureCount = batch.Lines.Count,
+            NonstandardPolicyCount = batch.Lines.Count(line => line.HasGovernanceWarning),
             TotalGainAmount = batch.TotalGainAmount,
             TotalLossAmount = batch.TotalLossAmount,
             NetGainLossAmount = batch.NetGainLossAmount,
@@ -433,6 +457,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, await _tenantSettingsService.GetBaseCurrencyAsync());
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, revaluationDate, cancellationToken);
         var scope = ResolveRevaluationScope(request);
+        var accountingBook = await ResolveRevaluationBookAsync(tenantId, request.AccountingBookCode, cancellationToken);
 
         if (!request.PreviewOnly)
         {
@@ -441,6 +466,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 .FirstOrDefaultAsync(
                     b => b.TenantId == tenantId
                         && !b.IsDeleted
+                        && b.AccountingBookId == accountingBook.Id
                         && b.Scope == scope
                         && b.RevaluationDate.Date == revaluationDate
                         && b.FiscalPeriodId == fiscalPeriod.Id,
@@ -471,6 +497,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             request.CurrencyCode,
             revaluationDate,
             request.RevaluationType,
+            accountingBook,
             settings,
             cancellationToken);
 
@@ -481,10 +508,13 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             BatchNumber = $"FXR-{revaluationDate:yyyyMMdd}-{DateTime.UtcNow:HHmmssfff}",
             RevaluationDate = revaluationDate,
             FiscalPeriodId = fiscalPeriod.Id,
+            AccountingBookId = accountingBook.Id,
+            AccountingBookCode = accountingBook.Code,
+            AccountingBook = accountingBook,
             Scope = scope,
             FunctionalCurrencyCode = functionalCurrency,
             Status = request.PreviewOnly ? "Preview" : "Calculated",
-            IdempotencyKey = $"FX:Revaluation:{tenantId:N}:{scope}:{revaluationDate:yyyyMMdd}:{fiscalPeriod.Id:N}",
+            IdempotencyKey = $"FX:Revaluation:{tenantId:N}:{accountingBook.Id:N}:{scope}:{revaluationDate:yyyyMMdd}:{fiscalPeriod.Id:N}",
             AutoReverseNextPeriod = true,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUserService.UserName
@@ -501,14 +531,19 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 exposure.QuoteSide,
                 cancellationToken);
 
-            var revaluedFunctionalAmount = RoundMoney(exposure.ForeignCurrencyBalance * closingRate.Rate);
-            var gainLossAmount = RoundMoney(revaluedFunctionalAmount - exposure.CarryingFunctionalAmount);
+            var calculation = FxRevaluationMath.Calculate(
+                exposure.ForeignCurrencyBalance,
+                exposure.CarryingFunctionalAmount,
+                closingRate.Rate,
+                exposure.PriorUnreversedAdjustment);
+            var revaluedFunctionalAmount = calculation.TargetFunctionalValue;
+            var gainLossAmount = calculation.Delta;
             if (gainLossAmount == 0m)
             {
                 continue;
             }
 
-            var gainLossType = ResolveUnrealizedGainLossType(exposure.Kind, gainLossAmount);
+            var gainLossType = calculation.GainLossType;
             var gainLossAccountId = gainLossType == "Gain"
                 ? unrealizedGainAccount.Id
                 : unrealizedLossAccount.Id;
@@ -521,12 +556,28 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 SourceDocumentType = exposure.SourceDocumentType,
                 SourceDocumentId = exposure.SourceDocumentId,
                 AccountId = exposure.AccountId,
+                AccountAccountingBookId = exposure.AccountAccountingBookId,
+                AccountBookCurrencyPolicyId = exposure.AccountBookCurrencyPolicyId,
+                AccountClassificationId = exposure.AccountClassificationId,
+                AccountClassificationCode = exposure.AccountClassificationCode,
+                AccountClassificationName = exposure.AccountClassificationName,
+                CoreAccountType = exposure.CoreAccountType.ToString(),
+                ClassificationDefault = exposure.ClassificationDefault.ToString(),
+                RevaluationOverride = exposure.RevaluationOverride,
+                EffectiveRevaluationRequired = true,
+                EffectivePolicySource = exposure.EffectivePolicySource,
+                HasGovernanceWarning = exposure.HasGovernanceWarning,
+                GovernanceWarning = exposure.GovernanceWarning,
                 TransactionCurrency = exposure.TransactionCurrency,
                 FunctionalCurrencyCode = functionalCurrency,
                 ForeignCurrencyBalance = exposure.ForeignCurrencyBalance,
                 CarryingFunctionalAmount = exposure.CarryingFunctionalAmount,
+                PriorUnreversedAdjustment = exposure.PriorUnreversedAdjustment,
                 ClosingExchangeRateId = closingRate.Id,
                 ClosingExchangeRate = closingRate.Rate,
+                ClosingRateDate = closingRate.EffectiveDate,
+                ClosingRateType = closingRate.RateType.ToString(),
+                ClosingQuoteSide = closingRate.QuoteSide.ToString(),
                 RevaluedFunctionalAmount = revaluedFunctionalAmount,
                 GainLossAmount = gainLossAmount,
                 GainLossType = gainLossType,
@@ -541,11 +592,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         UpdateBatchTotals(batch);
 
         var previewFingerprint = BuildPreviewFingerprint(batch);
+        batch.PreviewFingerprint = previewFingerprint;
         if (!request.PreviewOnly
             && !string.IsNullOrWhiteSpace(request.ExpectedPreviewFingerprint)
             && !CryptographicOperations.FixedTimeEquals(
                 Encoding.UTF8.GetBytes(previewFingerprint),
-                Encoding.UTF8.GetBytes(request.ExpectedPreviewFingerprint.Trim().ToLowerInvariant())))
+                Encoding.UTF8.GetBytes(request.ExpectedPreviewFingerprint!.Trim().ToLowerInvariant())))
         {
             throw new InvalidOperationException("Revaluation exposures or closing rates changed after preview. Run preview again before posting.");
         }
@@ -603,8 +655,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 line.JournalEntryId = postingResult.JournalEntryId;
                 line.PostingEventId = postingResult.PostingEventId;
             }
-
-            await UpdateCurrencyLinkRevaluationStateAsync(batch, cancellationToken);
 
             await MarkClosingRatesUsedAsync(batch, postingResult.PostingEventId, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
@@ -727,7 +777,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"Reverse FX revaluation {batch.BatchNumber}",
             PostingDate = reversalDate.Date,
             JournalType = "FX Revaluation Reversal",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = batch.AccountingBookCode,
             FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
             ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
             ReversalReason = reason.Trim(),
@@ -744,7 +794,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         batch.Status = "Reversed";
         batch.UpdatedAt = DateTime.UtcNow;
         batch.UpdatedBy = _currentUserService.UserName;
-        await RefreshCurrencyLinkRevaluationStateAfterReversalAsync(batch, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         await RecordFxAuditAsync(
@@ -767,49 +816,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             cancellationToken: cancellationToken);
 
         return batch;
-    }
-
-    private async Task RefreshCurrencyLinkRevaluationStateAfterReversalAsync(
-        FxRevaluationBatch reversedBatch,
-        CancellationToken cancellationToken)
-    {
-        var keys = reversedBatch.Lines.Select(line => new { line.AccountId, Currency = line.TransactionCurrency }).Distinct().ToList();
-        var accountIds = keys.Select(key => key.AccountId).Distinct().ToArray();
-        var currencies = keys.Select(key => key.Currency).Distinct().ToArray();
-        var links = await _context.AccountCurrencyLinks
-            .Where(link => link.TenantId == reversedBatch.TenantId
-                && accountIds.Contains(link.AccountId)
-                && currencies.Contains(link.LinkedCurrencyCode)
-                && !link.IsDeleted)
-            .ToListAsync(cancellationToken);
-
-        var priorLines = await _context.FxRevaluationLines
-            .AsNoTracking()
-            .Include(line => line.Batch)
-            .Where(line => line.TenantId == reversedBatch.TenantId
-                && accountIds.Contains(line.AccountId)
-                && currencies.Contains(line.TransactionCurrency)
-                && line.FxRevaluationBatchId != reversedBatch.Id
-                && line.Batch.Status == PostedStatus
-                && !line.Batch.IsDeleted)
-            .ToListAsync(cancellationToken);
-
-        foreach (var link in links)
-        {
-            var matching = priorLines
-                .Where(line => line.AccountId == link.AccountId && line.TransactionCurrency == link.LinkedCurrencyCode)
-                .OrderByDescending(line => line.Batch.RevaluationDate)
-                .ThenByDescending(line => line.Batch.PostedAt)
-                .ToList();
-            var latest = matching.FirstOrDefault();
-            link.LastRevaluationDate = latest?.Batch.RevaluationDate;
-            link.CurrentExchangeRate = latest?.ClosingExchangeRate ?? 0m;
-            link.RateEffectiveDate = latest?.Batch.RevaluationDate;
-            link.LastRevaluationAdjustment = latest?.GainLossAmount ?? 0m;
-            link.CumulativeRevaluationAdjustment = matching.Sum(line => line.GainLossAmount);
-            link.UpdatedAt = DateTime.UtcNow;
-            link.UpdatedBy = _currentUserService.UserName;
-        }
     }
 
     private async Task<FxRealizedSettlement?> PostApAllocationRealizedFxAsync(
@@ -937,6 +943,9 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             },
             cancellationToken: cancellationToken);
 
+        var accountingBookCode = await ResolvePostedJournalBookCodeAsync(
+            tenantId, allocation.VendorInvoice.JournalEntryId.Value, cancellationToken);
+
         var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModuleFx,
@@ -948,7 +957,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"AP realized FX {gainLossType.ToLowerInvariant()} for {payment.PaymentNumber}",
             PostingDate = payment.PaymentDate,
             JournalType = "Realized FX",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = accountingBookCode,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FX:Realized:AP:{tenantId:N}:{allocation.Id:N}",
             ReturnExistingOnDuplicate = true,
@@ -1141,6 +1150,9 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             },
             cancellationToken: cancellationToken);
 
+        var accountingBookCode = await ResolvePostedJournalBookCodeAsync(
+            tenantId, allocation.Invoice.JournalEntryId.Value, cancellationToken);
+
         var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModuleFx,
@@ -1152,7 +1164,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"AR realized FX {gainLossType.ToLowerInvariant()} for {payment.PaymentNumber}",
             PostingDate = payment.PaymentDate,
             JournalType = "Realized FX",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = accountingBookCode,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FX:Realized:AR:{tenantId:N}:{allocation.Id:N}",
             ReturnExistingOnDuplicate = true,
@@ -1414,78 +1426,91 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         string? currencyFilter,
         DateTime revaluationDate,
         string revaluationType,
+        AccountingBook accountingBook,
         FinanceSettings settings,
         CancellationToken cancellationToken)
     {
         var normalizedCurrencyFilter = NormalizeOptionalCurrency(currencyFilter);
-
-        var foreignBankAccounts = await _context.BankAccounts
+        var mappings = await _context.AccountAccountingBooks
             .AsNoTracking()
-            .Where(b => b.TenantId == tenantId
-                && !b.IsDeleted
-                && b.GLAccountId.HasValue
-                && b.IsActive
-                && b.Currency != functionalCurrency)
+            .Include(mapping => mapping.Account)
+            .Include(mapping => mapping.AccountClassification)
+            .Where(mapping => mapping.TenantId == tenantId
+                && mapping.AccountingBookId == accountingBook.Id
+                && mapping.IsEnabled && !mapping.IsDeleted
+                && !mapping.Account.IsDeleted && mapping.Account.Status == AccountStatus.Active
+                && mapping.AccountClassificationId.HasValue
+                && mapping.AccountClassification!.TenantId == tenantId
+                && mapping.AccountClassification.AccountingBookId == accountingBook.Id
+                && mapping.AccountClassification.Status == AccountClassificationStatus.Active
+                && mapping.AccountClassification.IsPostingClassification
+                && !mapping.AccountClassification.IsDeleted)
             .ToListAsync(cancellationToken);
-
-        var bankByAccount = foreignBankAccounts
-            .GroupBy(bank => bank.GLAccountId!.Value)
-            .ToDictionary(group => group.Key, group => group.First());
-        var links = await _context.AccountCurrencyLinks
-            .AsNoTracking()
-            .Include(link => link.Account)
-            .Where(link => link.TenantId == tenantId
-                && !link.IsDeleted
-                && link.IsActive
-                && link.RevaluationRequired
+        var accountIds = mappings.Select(mapping => mapping.AccountId).Distinct().ToArray();
+        var links = await _context.AccountCurrencyLinks.AsNoTracking()
+            .Where(link => link.TenantId == tenantId && accountIds.Contains(link.AccountId)
+                && !link.IsDeleted && link.IsActive
                 && link.RevaluationFrequency != RevaluationFrequency.None
                 && link.EffectiveDate.Date <= revaluationDate.Date
-                && (link.EffectiveEndDate == null || link.EffectiveEndDate.Value.Date >= revaluationDate.Date)
-                && !link.Account.IsDeleted
-                && link.Account.Status == AccountStatus.Active
-                && (link.Account.AccountType == AccountType.Asset || link.Account.AccountType == AccountType.Liability))
+                && (link.EffectiveEndDate == null || link.EffectiveEndDate.Value.Date >= revaluationDate.Date))
             .ToListAsync(cancellationToken);
-
+        var mappingIds = mappings.Select(mapping => mapping.Id).ToArray();
+        var linkIds = links.Select(link => link.Id).ToArray();
+        var overrides = await _context.AccountBookCurrencyPolicies.AsNoTracking()
+            .Where(policy => policy.TenantId == tenantId && !policy.IsDeleted
+                && mappingIds.Contains(policy.AccountAccountingBookId)
+                && linkIds.Contains(policy.AccountCurrencyLinkId))
+            .ToDictionaryAsync(policy => (policy.AccountAccountingBookId, policy.AccountCurrencyLinkId), cancellationToken);
+        var bankByAccount = await _context.BankAccounts.AsNoTracking()
+            .Where(bank => bank.TenantId == tenantId && !bank.IsDeleted && bank.IsActive
+                && bank.GLAccountId.HasValue && accountIds.Contains(bank.GLAccountId.Value))
+            .GroupBy(bank => bank.GLAccountId!.Value)
+            .Select(group => group.OrderBy(bank => bank.Id).First())
+            .ToDictionaryAsync(bank => bank.GLAccountId!.Value, cancellationToken);
         var policyMap = new Dictionary<(Guid AccountId, string Currency), ExposurePolicy>();
-        foreach (var link in links.Where(link => IsFrequencyEligible(link.RevaluationFrequency, revaluationType)))
+        foreach (var mapping in mappings)
         {
-            var currency = NormalizeCurrency(link.LinkedCurrencyCode, "Currency");
-            if (IsFunctionalCurrency(currency, functionalCurrency) ||
-                (!string.IsNullOrWhiteSpace(normalizedCurrencyFilter) && currency != normalizedCurrencyFilter))
+            foreach (var link in links.Where(link => link.AccountId == mapping.AccountId
+                         && IsFrequencyEligible(link.RevaluationFrequency, revaluationType)))
             {
-                continue;
+                var currency = NormalizeCurrency(link.LinkedCurrencyCode, "Currency");
+                if (IsFunctionalCurrency(currency, functionalCurrency)
+                    || (!string.IsNullOrWhiteSpace(normalizedCurrencyFilter) && currency != normalizedCurrencyFilter))
+                    continue;
+                overrides.TryGetValue((mapping.Id, link.Id), out var policy);
+                var inherited = mapping.AccountClassification!.DefaultRevaluationTreatment == RevaluationTreatment.Include;
+                var effective = policy?.RevaluationOverride ?? inherited;
+                if (!effective) continue;
+                var coreType = mapping.AccountClassification.CoreAccountType;
+                var nonstandard = coreType is AccountType.Equity or AccountType.Revenue or AccountType.Expense;
+                var role = mapping.AccountClassification.SystemRole;
+                var sourceModule = mapping.AccountId == settings.ControlAccountArId
+                        || role == AccountClassificationSystemRole.ReceivableControl ? "AR"
+                    : mapping.AccountId == settings.ControlAccountApId
+                        || role == AccountClassificationSystemRole.PayableControl ? "AP"
+                    : bankByAccount.ContainsKey(mapping.AccountId)
+                        || role is AccountClassificationSystemRole.Cash or AccountClassificationSystemRole.Bank ? "BankCash"
+                    : "GL";
+                var bank = bankByAccount.GetValueOrDefault(mapping.AccountId);
+                policyMap[(mapping.AccountId, currency)] = new ExposurePolicy(
+                    mapping.Id,
+                    policy?.Id,
+                    mapping.AccountClassification.Id,
+                    mapping.AccountClassification.Code,
+                    mapping.AccountClassification.Name,
+                    coreType,
+                    mapping.AccountClassification.DefaultRevaluationTreatment,
+                    policy?.RevaluationOverride,
+                    policy?.RevaluationOverride.HasValue == true ? "CurrencyOverride" : "Classification",
+                    nonstandard,
+                    nonstandard ? "Non-standard revaluation policy: this Equity, Revenue or Expense exposure is included in closing revaluation." : null,
+                    sourceModule,
+                    ResolveRevaluationRateType(link.RevaluationRateType),
+                    link.RevaluationQuoteSide,
+                    link.RevaluationFrequency,
+                    bank == null ? null : "BankAccount",
+                    bank?.Id);
             }
-
-            var sourceModule = settings.ControlAccountArId == link.AccountId
-                ? "AR"
-                : settings.ControlAccountApId == link.AccountId
-                    ? "AP"
-                    : bankByAccount.ContainsKey(link.AccountId) ? "BankCash" : "GL";
-            var bank = bankByAccount.GetValueOrDefault(link.AccountId);
-            policyMap[(link.AccountId, currency)] = new ExposurePolicy(
-                sourceModule,
-                link.Account.AccountType == AccountType.Liability ? MonetaryExposureKind.Liability : MonetaryExposureKind.Asset,
-                ResolveRevaluationRateType(link.RevaluationRateType),
-                link.RevaluationQuoteSide,
-                link.RevaluationFrequency,
-                bank == null ? null : "BankAccount",
-                bank?.Id);
-        }
-
-        // Foreign bank accounts are inherently monetary. Preserve their implicit
-        // primary-currency policy even though primary currencies are not stored as links.
-        foreach (var bank in foreignBankAccounts)
-        {
-            var currency = NormalizeCurrency(bank.Currency, "Currency");
-            if (!string.IsNullOrWhiteSpace(normalizedCurrencyFilter) && currency != normalizedCurrencyFilter)
-            {
-                continue;
-            }
-            policyMap.TryAdd(
-                (bank.GLAccountId!.Value, currency),
-                new ExposurePolicy("BankCash", MonetaryExposureKind.Asset,
-                    ResolveRevaluationRateType(revaluationType), settings.ClosingQuoteSide,
-                    RevaluationFrequency.Monthly, "BankAccount", bank.Id));
         }
 
         if (policyMap.Count == 0)
@@ -1493,14 +1518,15 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             return new List<PostedExposure>();
         }
 
-        var accountIds = policyMap.Keys.Select(key => key.AccountId).Distinct().ToList();
+        var policyAccountIds = policyMap.Keys.Select(key => key.AccountId).Distinct().ToList();
         var transactions = await _context.AccountTransactions
             .AsNoTracking()
             .Where(t => t.TenantId == tenantId
                 && !t.IsDeleted
                 && t.PostingStatus == PostedStatus
+                && t.BookClassification == accountingBook.Code
                 && t.TransactionDate.Date <= revaluationDate.Date
-                && accountIds.Contains(t.AccountId)
+                && policyAccountIds.Contains(t.AccountId)
                 && t.TransactionCurrency != null
                 && t.TransactionCurrency != functionalCurrency)
             .ToListAsync(cancellationToken);
@@ -1516,9 +1542,11 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             .AsNoTracking()
             .Where(l => l.TenantId == tenantId
                 && !l.IsDeleted
+                && l.Batch.AccountingBookId == accountingBook.Id
                 && l.Batch.Status == PostedStatus
+                && !l.Batch.ReversalPostingEventId.HasValue
                 && l.Batch.RevaluationDate.Date <= revaluationDate.Date
-                && accountIds.Contains(l.AccountId))
+                && policyAccountIds.Contains(l.AccountId))
             .ToListAsync(cancellationToken);
 
         var exposures = new List<PostedExposure>();
@@ -1528,17 +1556,14 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             {
                 continue;
             }
-            var foreignBalance = exposureAccount.Kind == MonetaryExposureKind.Liability
-                ? group.Sum(t => t.TransactionCreditAmount.GetValueOrDefault() - t.TransactionDebitAmount.GetValueOrDefault())
-                : group.Sum(t => t.TransactionDebitAmount.GetValueOrDefault() - t.TransactionCreditAmount.GetValueOrDefault());
-            var carryingFunctional = exposureAccount.Kind == MonetaryExposureKind.Liability
-                ? group.Sum(t => t.CreditAmount - t.DebitAmount)
-                : group.Sum(t => t.DebitAmount - t.CreditAmount);
+            var foreignBalance = group.Sum(t =>
+                t.TransactionDebitAmount.GetValueOrDefault() - t.TransactionCreditAmount.GetValueOrDefault());
+            var carryingFunctional = group.Sum(t => t.DebitAmount - t.CreditAmount);
 
             var priorAdjustment = priorRevaluations
                 .Where(l => l.AccountId == group.Key.AccountId && l.TransactionCurrency == group.Key.Currency)
                 .Sum(l => l.GainLossAmount);
-            carryingFunctional = RoundMoney(carryingFunctional + priorAdjustment);
+            carryingFunctional = RoundMoney(carryingFunctional);
             foreignBalance = RoundMoney(foreignBalance);
 
             if (foreignBalance == 0m)
@@ -1546,19 +1571,26 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 continue;
             }
 
-            var effectiveKind = foreignBalance < 0m
-                ? exposureAccount.Kind == MonetaryExposureKind.Asset ? MonetaryExposureKind.Liability : MonetaryExposureKind.Asset
-                : exposureAccount.Kind;
-
             exposures.Add(new PostedExposure(
                 group.Key.AccountId,
+                exposureAccount.AccountAccountingBookId,
+                exposureAccount.AccountBookCurrencyPolicyId,
+                exposureAccount.AccountClassificationId,
+                exposureAccount.AccountClassificationCode,
+                exposureAccount.AccountClassificationName,
+                exposureAccount.CoreAccountType,
+                exposureAccount.ClassificationDefault,
+                exposureAccount.RevaluationOverride,
+                exposureAccount.EffectivePolicySource,
+                exposureAccount.HasGovernanceWarning,
+                exposureAccount.GovernanceWarning,
                 exposureAccount.SourceModule,
                 exposureAccount.SourceDocumentType,
                 exposureAccount.SourceDocumentId,
-                effectiveKind,
                 group.Key.Currency,
                 foreignBalance,
                 carryingFunctional,
+                priorAdjustment,
                 exposureAccount.RateType,
                 exposureAccount.QuoteSide,
                 exposureAccount.Frequency));
@@ -1620,32 +1652,15 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         foreach (var line in batch.Lines.OrderBy(l => l.SourceModule).ThenBy(l => l.AccountId).ThenBy(l => l.TransactionCurrency))
         {
             var amount = Math.Abs(line.GainLossAmount);
-            var isAssetExposure = line.SourceModule is "AR" or "BankCash";
             if (line.GainLossType == "Gain")
             {
-                if (isAssetExposure)
-                {
-                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation gain - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Revaluation-Control"));
-                    lines.Add(BuildFunctionalPostingLine(unrealizedGainAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
-                }
-                else
-                {
-                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation gain - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Revaluation-Control"));
-                    lines.Add(BuildFunctionalPostingLine(unrealizedGainAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
-                }
+                lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation gain - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Revaluation-Control"));
+                lines.Add(BuildFunctionalPostingLine(unrealizedGainAccountId, $"FX revaluation gain - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Unrealized-Gain"));
             }
             else
             {
-                if (isAssetExposure)
-                {
-                    lines.Add(BuildFunctionalPostingLine(unrealizedLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
-                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation loss - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Revaluation-Control"));
-                }
-                else
-                {
-                    lines.Add(BuildFunctionalPostingLine(unrealizedLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
-                    lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation loss - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Revaluation-Control"));
-                }
+                lines.Add(BuildFunctionalPostingLine(unrealizedLossAccountId, $"FX revaluation loss - {line.TransactionCurrency}", amount, 0m, lineNumber++, "FX-Unrealized-Loss"));
+                lines.Add(BuildFunctionalPostingLine(line.AccountId, $"FX revaluation loss - {line.TransactionCurrency}", 0m, amount, lineNumber++, "FX-Revaluation-Control"));
             }
         }
 
@@ -1661,7 +1676,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             PostingDate = batch.RevaluationDate,
             FiscalPeriodId = batch.FiscalPeriodId,
             JournalType = "FX Revaluation",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = batch.AccountingBookCode,
             FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
             IdempotencyKey = batch.IdempotencyKey,
             ReturnExistingOnDuplicate = true,
@@ -1866,6 +1881,36 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         return period;
     }
 
+    private async Task<AccountingBook> ResolveRevaluationBookAsync(
+        Guid tenantId, string? accountingBookCode, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(accountingBookCode))
+            throw new InvalidOperationException("AccountingBookCode is required for revaluation; Finance will not guess a default book.");
+        var code = accountingBookCode.Trim().ToUpperInvariant();
+        var books = await _context.AccountingBooks
+            .Where(book => book.TenantId == tenantId && book.Code == code && !book.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (books.Count != 1)
+            throw new InvalidOperationException($"Accounting book '{code}' is unavailable or ambiguous for this tenant.");
+        var book = books[0];
+        if (!book.IsActive || !book.AllowsPosting)
+            throw new InvalidOperationException($"Accounting book '{code}' is inactive or does not allow posting.");
+        return book;
+    }
+
+    private async Task<string> ResolvePostedJournalBookCodeAsync(
+        Guid tenantId, Guid journalEntryId, CancellationToken cancellationToken)
+    {
+        var code = await _context.JournalEntries.AsNoTracking()
+            .Where(journal => journal.TenantId == tenantId && journal.Id == journalEntryId
+                && journal.PostingStatus == PostedStatus && !journal.IsDeleted)
+            .Select(journal => journal.BookClassification)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(code))
+            throw new InvalidOperationException("The original posted journal has no accounting-book authority.");
+        return (await ResolveRevaluationBookAsync(tenantId, code, cancellationToken)).Code;
+    }
+
     private async Task MarkClosingRatesUsedAsync(
         FxRevaluationBatch batch,
         Guid postingEventId,
@@ -1888,44 +1933,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             rate.LastUsedDate = DateTime.UtcNow;
             rate.ModifiedDate = DateTime.UtcNow;
             rate.ModifiedByUserId = GetCurrentUserGuid();
-        }
-    }
-
-    private async Task UpdateCurrencyLinkRevaluationStateAsync(
-        FxRevaluationBatch batch,
-        CancellationToken cancellationToken)
-    {
-        var accountIds = batch.Lines.Select(line => line.AccountId).Distinct().ToArray();
-        var currencies = batch.Lines.Select(line => line.TransactionCurrency).Distinct().ToArray();
-        var links = await _context.AccountCurrencyLinks
-            .Where(link => link.TenantId == batch.TenantId
-                && accountIds.Contains(link.AccountId)
-                && currencies.Contains(link.LinkedCurrencyCode)
-                && !link.IsDeleted)
-            .ToListAsync(cancellationToken);
-
-        foreach (var link in links)
-        {
-            var line = batch.Lines.FirstOrDefault(candidate =>
-                candidate.AccountId == link.AccountId
-                && candidate.TransactionCurrency == link.LinkedCurrencyCode);
-            if (line == null)
-            {
-                continue;
-            }
-
-            var economicAdjustment = line.GainLossType == "Gain"
-                ? Math.Abs(line.GainLossAmount)
-                : -Math.Abs(line.GainLossAmount);
-            link.ForeignCurrencyBalance = line.ForeignCurrencyBalance;
-            link.BaseCurrencyEquivalent = line.RevaluedFunctionalAmount;
-            link.CurrentExchangeRate = line.ClosingExchangeRate;
-            link.RateEffectiveDate = batch.RevaluationDate;
-            link.LastRevaluationDate = batch.RevaluationDate;
-            link.LastRevaluationAdjustment = economicAdjustment;
-            link.CumulativeRevaluationAdjustment = RoundMoney(link.CumulativeRevaluationAdjustment + economicAdjustment);
-            link.UpdatedAt = DateTime.UtcNow;
-            link.UpdatedBy = _currentUserService.UserName;
         }
     }
 
@@ -1979,6 +1986,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
     {
         var evidence = new StringBuilder()
             .Append(batch.TenantId.ToString("N")).Append('|')
+            .Append(batch.AccountingBookId.ToString("N")).Append('|')
+            .Append(batch.AccountingBookCode).Append('|')
             .Append(batch.RevaluationDate.ToString("yyyyMMdd")).Append('|')
             .Append(batch.Scope).Append('|')
             .Append(batch.FunctionalCurrencyCode);
@@ -1987,27 +1996,34 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                      .ThenBy(line => line.TransactionCurrency))
         {
             evidence.Append('|').Append(line.AccountId.ToString("N"))
+                .Append(':').Append(line.AccountAccountingBookId.ToString("N"))
+                .Append(':').Append(line.AccountBookCurrencyPolicyId?.ToString("N") ?? "INHERITED")
+                .Append(':').Append(line.AccountClassificationId.ToString("N"))
+                .Append(':').Append(line.AccountClassificationCode)
+                .Append(':').Append(line.AccountClassificationName)
+                .Append(':').Append(line.CoreAccountType)
+                .Append(':').Append(line.ClassificationDefault)
+                .Append(':').Append(line.RevaluationOverride?.ToString() ?? "NULL")
+                .Append(':').Append(line.EffectivePolicySource)
+                .Append(':').Append(line.HasGovernanceWarning)
                 .Append(':').Append(line.TransactionCurrency)
-                .Append(':').Append(line.ForeignCurrencyBalance)
-                .Append(':').Append(line.CarryingFunctionalAmount)
+                .Append(':').Append(CanonicalDecimal(line.ForeignCurrencyBalance))
+                .Append(':').Append(CanonicalDecimal(line.CarryingFunctionalAmount))
+                .Append(':').Append(CanonicalDecimal(line.PriorUnreversedAdjustment))
                 .Append(':').Append(line.ClosingExchangeRateId.ToString("N"))
-                .Append(':').Append(line.ClosingExchangeRate)
-                .Append(':').Append(line.GainLossAmount);
+                .Append(':').Append(CanonicalDecimal(line.ClosingExchangeRate))
+                .Append(':').Append(line.ClosingRateDate.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture))
+                .Append(':').Append(line.ClosingRateType)
+                .Append(':').Append(line.ClosingQuoteSide)
+                .Append(':').Append(CanonicalDecimal(line.GainLossAmount));
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence.ToString())))
             .ToLowerInvariant();
     }
 
-    private static string ResolveUnrealizedGainLossType(MonetaryExposureKind kind, decimal gainLossAmount)
-    {
-        if (kind == MonetaryExposureKind.Asset)
-        {
-            return gainLossAmount > 0m ? "Gain" : "Loss";
-        }
-
-        return gainLossAmount > 0m ? "Loss" : "Gain";
-    }
+    private static string CanonicalDecimal(decimal value) =>
+        value.ToString("0.############################", CultureInfo.InvariantCulture);
 
     private static ExchangeRateType ResolveRevaluationRateType(string? revaluationType)
     {
@@ -2128,6 +2144,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             batch.BatchNumber,
             batch.RevaluationDate,
             batch.FiscalPeriodId,
+            batch.AccountingBookId,
+            batch.AccountingBookCode,
             batch.Status,
             batch.Scope,
             batch.FunctionalCurrencyCode,
@@ -2136,6 +2154,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             batch.NetGainLossAmount,
             batch.JournalEntryId,
             batch.PostingEventId,
+            batch.PreviewFingerprint,
+            NonstandardPolicyCount = batch.Lines.Count(line => line.HasGovernanceWarning),
             LineCount = batch.Lines.Count
         };
     }
@@ -2151,7 +2171,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"FX revaluation {request.RevaluationType} {batch.RevaluationDate:yyyy-MM-dd}",
             ReferenceNumber = batch.BatchNumber,
             PostingStatus = request.PreviewOnly ? "Draft" : batch.Status,
-            BookClassification = "IFRS",
+            BookClassification = batch.AccountingBookCode,
             PrimaryCurrency = batch.FunctionalCurrencyCode,
             IsMultiCurrency = batch.Lines.Any(),
             FiscalPeriodId = batch.FiscalPeriodId,
@@ -2170,8 +2190,18 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         Guid? SettlementRateId);
 
     private sealed record ExposurePolicy(
+        Guid AccountAccountingBookId,
+        Guid? AccountBookCurrencyPolicyId,
+        Guid AccountClassificationId,
+        string AccountClassificationCode,
+        string AccountClassificationName,
+        AccountType CoreAccountType,
+        RevaluationTreatment ClassificationDefault,
+        bool? RevaluationOverride,
+        string EffectivePolicySource,
+        bool HasGovernanceWarning,
+        string? GovernanceWarning,
         string SourceModule,
-        MonetaryExposureKind Kind,
         ExchangeRateType RateType,
         ExchangeRateQuoteSide QuoteSide,
         RevaluationFrequency Frequency,
@@ -2180,20 +2210,26 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
 
     private sealed record PostedExposure(
         Guid AccountId,
+        Guid AccountAccountingBookId,
+        Guid? AccountBookCurrencyPolicyId,
+        Guid AccountClassificationId,
+        string AccountClassificationCode,
+        string AccountClassificationName,
+        AccountType CoreAccountType,
+        RevaluationTreatment ClassificationDefault,
+        bool? RevaluationOverride,
+        string EffectivePolicySource,
+        bool HasGovernanceWarning,
+        string? GovernanceWarning,
         string SourceModule,
         string? SourceDocumentType,
         Guid? SourceDocumentId,
-        MonetaryExposureKind Kind,
         string TransactionCurrency,
         decimal ForeignCurrencyBalance,
         decimal CarryingFunctionalAmount,
+        decimal PriorUnreversedAdjustment,
         ExchangeRateType RateType,
         ExchangeRateQuoteSide QuoteSide,
         RevaluationFrequency Frequency);
 
-    private enum MonetaryExposureKind
-    {
-        Asset,
-        Liability
-    }
 }

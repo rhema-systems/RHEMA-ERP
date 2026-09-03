@@ -53,7 +53,6 @@ public class AccountCurrencyLinkPersistenceTests
         {
             AccountId = account.Id,
             LinkedCurrencyCode = "USD",
-            RevaluationRequired = true,
             RevaluationFrequency = "Monthly",
             TransactionRateType = "Daily",
             TransactionQuoteSide = "Mid",

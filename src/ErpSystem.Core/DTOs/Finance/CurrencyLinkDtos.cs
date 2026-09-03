@@ -22,7 +22,6 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? OpeningBalance { get; set; }
         public decimal? OpeningBalanceBaseCurrency { get; set; }
         public DateTime? OpeningBalanceDate { get; set; }
-        public bool RevaluationRequired { get; set; } = true;
         public string? RevaluationFrequency { get; set; } = "Monthly";
         public string? TransactionRateType { get; set; } = "Daily";
         public string? TransactionQuoteSide { get; set; } = "Mid";
@@ -52,7 +51,6 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? OpeningBalance { get; set; }
         public decimal? OpeningBalanceBaseCurrency { get; set; }
         public DateTime? OpeningBalanceDate { get; set; }
-        public bool RevaluationRequired { get; set; }
         public string RevaluationFrequency { get; set; } = string.Empty;
         public string TransactionRateType { get; set; } = string.Empty;
         public string TransactionQuoteSide { get; set; } = "Mid";
@@ -72,6 +70,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime CreatedDate { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        public List<AccountBookCurrencyPolicyDto> BookPolicies { get; set; } = new();
     }
 
     /// <summary>
@@ -79,7 +78,6 @@ namespace ErpSystem.Core.DTOs.Finance
     /// </summary>
     public class UpdateCurrencyLinkRatePolicyDto
     {
-        public bool RevaluationRequired { get; set; } = true;
         public string? RevaluationFrequency { get; set; } = "Monthly";
         public string? TransactionRateType { get; set; } = "Daily";
         public string? TransactionQuoteSide { get; set; } = "Mid";
@@ -88,6 +86,58 @@ namespace ErpSystem.Core.DTOs.Finance
 
         [MaxLength(1000)]
         public string? Notes { get; set; }
+    }
+
+    public sealed class AccountBookCurrencyPolicyDto
+    {
+        public Guid? Id { get; set; }
+        public Guid AccountId { get; set; }
+        public Guid AccountAccountingBookId { get; set; }
+        public Guid AccountCurrencyLinkId { get; set; }
+        public Guid AccountingBookId { get; set; }
+        public string AccountingBookCode { get; set; } = string.Empty;
+        public string AccountingBookName { get; set; } = string.Empty;
+        public string CurrencyCode { get; set; } = string.Empty;
+        public Guid AccountClassificationId { get; set; }
+        public string AccountClassificationCode { get; set; } = string.Empty;
+        public string AccountClassificationName { get; set; } = string.Empty;
+        public string CoreAccountType { get; set; } = string.Empty;
+        public string ClassificationDefault { get; set; } = string.Empty;
+        public bool? RevaluationOverride { get; set; }
+        public bool EffectiveRevaluationRequired { get; set; }
+        public string EffectiveSource { get; set; } = "Classification";
+        public bool IsNonstandardInclusion { get; set; }
+        public string? Warning { get; set; }
+        public string LifecycleStatus { get; set; } = "Active";
+        public bool? PendingRevaluationOverride { get; set; }
+        public string? PendingReason { get; set; }
+        public Guid? WorkflowInstanceId { get; set; }
+        public Guid? RequestedByUserId { get; set; }
+        public DateTime? RequestedAtUtc { get; set; }
+        public Guid? DecidedByUserId { get; set; }
+        public DateTime? DecidedAtUtc { get; set; }
+        public string? DecisionReason { get; set; }
+        public string? RowVersion { get; set; }
+    }
+
+    public sealed class SaveAccountBookCurrencyPolicyDto
+    {
+        public bool? RevaluationOverride { get; set; }
+
+        [Required, MinLength(5), MaxLength(500)]
+        public string Reason { get; set; } = string.Empty;
+
+        public bool ConfirmNonstandardInclusion { get; set; }
+        public string? RowVersion { get; set; }
+    }
+
+    public sealed class DecideAccountBookCurrencyPolicyDto
+    {
+        [Required, MinLength(5), MaxLength(500)]
+        public string Reason { get; set; } = string.Empty;
+
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
     }
 
     /// <summary>

@@ -602,7 +602,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                 BaseCurrencyEquivalent = RoundMoney(dto.OpeningBalanceBaseCurrency ?? 0m),
                 CurrentExchangeRate = CalculateOpeningRate(dto.OpeningBalance, dto.OpeningBalanceBaseCurrency),
                 RateEffectiveDate = dto.OpeningBalanceDate?.Date,
-                RevaluationRequired = dto.RevaluationRequired,
                 RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency),
                 TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType),
                 TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide),
@@ -739,7 +738,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (!link.IsActive)
                 throw new InvalidOperationException("Inactive currency-link policies are locked. Reactivate the link before changing its rate policy.");
 
-            link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
             link.TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType);
             link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
@@ -804,7 +802,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ForeignCurrencyBalance = link.ForeignCurrencyBalance,
                 BaseCurrencyBalance = link.BaseCurrencyEquivalent,
                 CurrentExchangeRate = currentExchangeRate,
-                RevaluationRequired = link.RevaluationRequired,
                 RevaluationFrequency = link.RevaluationFrequency.ToString(),
                 TransactionRateType = link.TransactionRateType,
                 TransactionQuoteSide = link.TransactionQuoteSide.ToString(),
@@ -904,7 +901,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             DateTime now,
             Guid? currentUserId)
         {
-            link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
             link.TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType);
             link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);

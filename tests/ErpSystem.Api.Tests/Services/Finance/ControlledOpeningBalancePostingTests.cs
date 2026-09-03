@@ -1191,7 +1191,7 @@ public sealed class ControlledOpeningBalancePostingTests
         {
             Id = Guid.NewGuid(), TenantId = tenantId, AccountId = fixture.SupplierAdvance.Id,
             LinkedCurrencyCode = "USD", IsActive = true, EffectiveDate = new DateTime(2026, 1, 1),
-            RevaluationRequired = true, TransactionRateType = "Daily", RevaluationRateType = "Month-End"
+            TransactionRateType = "Daily", RevaluationRateType = "Month-End"
         });
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);

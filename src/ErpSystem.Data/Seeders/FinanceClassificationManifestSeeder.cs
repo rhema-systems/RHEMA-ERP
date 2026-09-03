@@ -11,7 +11,7 @@ namespace ErpSystem.Data.Seeders;
 /// </summary>
 public sealed class FinanceClassificationManifestSeeder
 {
-    public const string ManifestVersion = "FIN-CLASSIFICATION-2.0";
+    public const string ManifestVersion = "FIN-CLASSIFICATION-3.0";
     private static readonly string[] BookCodes = ["IFRS", "LOCAL_STATUTORY", "MANAGEMENT"];
 
     private sealed record Definition(string Code, string Name, AccountType Type, string? ParentCode = null,
@@ -109,6 +109,14 @@ public sealed class FinanceClassificationManifestSeeder
                 else if (classification.CoreAccountType != definition.Type)
                 {
                     throw new InvalidOperationException($"Classification {book.Code}/{definition.Code} has an incompatible core account type.");
+                }
+                else if (classification.CreatedBy?.Contains("FIN-CLASSIFICATION-", StringComparison.Ordinal) == true
+                    && classification.UpdatedBy == null)
+                {
+                    // Phase 4 owns the reviewed monetary defaults. Upgrade only untouched
+                    // system rows; an administrator decision is authoritative even when it
+                    // differs from this manifest.
+                    classification.DefaultRevaluationTreatment = definition.Treatment;
                 }
             }
             await _db.SaveChangesAsync(cancellationToken);

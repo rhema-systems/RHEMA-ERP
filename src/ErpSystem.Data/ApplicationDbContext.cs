@@ -123,6 +123,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
+    public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
     public DbSet<AccountClassification> AccountClassifications { get; set; }
     public DbSet<FinancialStatementLayout> FinancialStatementLayouts { get; set; }
     public DbSet<FinancialStatementLayoutVersion> FinancialStatementLayoutVersions { get; set; }
@@ -2872,6 +2873,29 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(item => item.ParentClassificationId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<AccountBookCurrencyPolicy>(entity =>
+        {
+            entity.ToTable("AccountBookCurrencyPolicies");
+            entity.HasIndex(item => new { item.TenantId, item.AccountAccountingBookId, item.AccountCurrencyLinkId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.Property(item => item.OverrideReason).HasMaxLength(500);
+            entity.Property(item => item.PendingReason).HasMaxLength(500);
+            entity.Property(item => item.DecisionReason).HasMaxLength(500);
+            entity.Property(item => item.LifecycleStatus).HasMaxLength(30).IsRequired();
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountAccountingBook)
+                .WithMany(mapping => mapping.CurrencyPolicies)
+                .HasForeignKey(item => item.AccountAccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountCurrencyLink)
+                .WithMany(link => link.BookPolicies)
+                .HasForeignKey(item => item.AccountCurrencyLinkId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<FinancialStatementLayout>(entity =>
         {
             entity.ToTable("FinancialStatementLayouts");
@@ -3386,7 +3410,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("FxRevaluationBatches");
             entity.HasIndex(e => e.TenantId);
-            entity.HasIndex(e => new { e.TenantId, e.Scope, e.RevaluationDate, e.FiscalPeriodId })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.Scope, e.RevaluationDate, e.FiscalPeriodId })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.IdempotencyKey })
@@ -3394,9 +3418,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => e.JournalEntryId);
             entity.HasIndex(e => e.PostingEventId);
+            entity.Property(e => e.AccountingBookCode).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.PreviewFingerprint).HasMaxLength(64);
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany()
                 .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => e.AccountingBookId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
@@ -3436,6 +3466,26 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountAccountingBook)
+                .WithMany()
+                .HasForeignKey(e => e.AccountAccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountBookCurrencyPolicy)
+                .WithMany()
+                .HasForeignKey(e => e.AccountBookCurrencyPolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountClassification)
+                .WithMany()
+                .HasForeignKey(e => e.AccountClassificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Property(e => e.AccountClassificationCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AccountClassificationName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.CoreAccountType).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ClassificationDefault).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.EffectivePolicySource).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.GovernanceWarning).HasMaxLength(500);
+            entity.Property(e => e.ClosingRateType).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ClosingQuoteSide).HasMaxLength(20).IsRequired();
             entity.HasOne(e => e.ClosingExchangeRateRecord)
                 .WithMany()
                 .HasForeignKey(e => e.ClosingExchangeRateId)

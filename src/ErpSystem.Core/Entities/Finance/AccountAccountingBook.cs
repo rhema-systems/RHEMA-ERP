@@ -29,6 +29,8 @@ namespace ErpSystem.Core.Entities.Finance
 
         public virtual AccountClassification? AccountClassification { get; set; }
 
+        public virtual ICollection<AccountBookCurrencyPolicy> CurrencyPolicies { get; set; } = new List<AccountBookCurrencyPolicy>();
+
         [Timestamp]
         public byte[] RowVersion { get; set; } = Array.Empty<byte>();
     }

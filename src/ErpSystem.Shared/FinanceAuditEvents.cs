@@ -5,6 +5,11 @@ public static class FinanceAuditEvents
     public const string AccountClassificationCreated = "Finance.GL.AccountClassification.Created";
     public const string AccountClassificationUpdated = "Finance.GL.AccountClassification.Updated";
     public const string AccountClassificationRetired = "Finance.GL.AccountClassification.Retired";
+    public const string FxPolicyOverrideChanged = "Finance.FX.Policy.OverrideChanged";
+    public const string FxPolicyOverrideRequested = "Finance.FX.Policy.OverrideRequested";
+    public const string FxPolicyOverrideApproved = "Finance.FX.Policy.OverrideApproved";
+    public const string FxPolicyOverrideApprovalStepCompleted = "Finance.FX.Policy.OverrideApprovalStepCompleted";
+    public const string FxPolicyOverrideRejected = "Finance.FX.Policy.OverrideRejected";
     public const string JournalCreated = "Finance.JournalEntry.Created";
     public const string JournalUpdated = "Finance.JournalEntry.Updated";
     public const string JournalDeleted = "Finance.JournalEntry.Deleted";

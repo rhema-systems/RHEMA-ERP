@@ -111,6 +111,8 @@ public static class FinancePermissions
 
     public const string ManageFxRates = "Finance.FX.Rates.Manage";
     public const string RunFxRevaluation = "Finance.FX.Revaluation.Run";
+    public const string OverrideFxRevaluationPolicy = "Finance.FX.Policy.Override";
+    public const string ApproveFxRevaluationPolicy = "Finance.FX.Policy.Approve";
 
     public const string ManageFixedAssets = "Finance.FixedAssets.Manage";
     public const string RunDepreciation = "Finance.FixedAssets.Depreciation.Run";
@@ -250,6 +252,8 @@ public static class FinancePermissions
 
         new(ManageFxRates, "Manage FX Rates", "Maintain tenant exchange rates and currency setup.", CategoryFx),
         new(RunFxRevaluation, "Run FX Revaluation", "Run foreign currency revaluation and related journals.", CategoryFx),
+        new(OverrideFxRevaluationPolicy, "Override FX Revaluation Policy", "Request or apply a reasoned book-specific GL revaluation override.", CategoryFx),
+        new(ApproveFxRevaluationPolicy, "Approve FX Revaluation Policy", "Independently approve or reject non-standard Equity, Revenue, or Expense revaluation inclusion.", CategoryFx),
 
         new(ManageFixedAssets, "Manage Fixed Assets", "Create, update, transfer, verify, value, import, and administer fixed assets.", CategoryFixedAssets),
         new(RunDepreciation, "Run Depreciation", "Run fixed asset depreciation.", CategoryFixedAssets),

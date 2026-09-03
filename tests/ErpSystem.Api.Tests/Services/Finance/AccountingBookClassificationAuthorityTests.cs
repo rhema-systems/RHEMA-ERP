@@ -45,6 +45,32 @@ public sealed class AccountingBookClassificationAuthorityTests
         result.DefaultRevaluationTreatment.Should().Be(nameof(RevaluationTreatment.Exclude));
     }
 
+    [Theory]
+    [InlineData(AccountType.Equity)]
+    [InlineData(AccountType.Revenue)]
+    [InlineData(AccountType.Expense)]
+    public async Task NonstandardCoreTypes_CannotBypassMakerCheckerThroughClassificationDefault(AccountType accountType)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        await service.Invoking(item => item.CreateAsync(new SaveAccountClassificationDto
+            {
+                AccountingBookId = book.Id,
+                Code = $"NONSTANDARD_{accountType}",
+                Name = $"Nonstandard {accountType}",
+                CoreAccountType = accountType.ToString(),
+                DefaultRevaluationTreatment = nameof(RevaluationTreatment.Include),
+                IsPostingClassification = true,
+                Status = nameof(AccountClassificationStatus.Active)
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*governed per account, book and currency*");
+    }
+
     [Fact]
     public async Task SyncAccountMappingsAsync_RequiresCompatibleActivePostingClassification()
     {
@@ -272,6 +298,9 @@ public sealed class AccountingBookClassificationAuthorityTests
         await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var firstClassifications = await db.AccountClassifications.CountAsync();
         var firstMappings = await db.AccountAccountingBooks.CountAsync();
+        var adminCash = await db.AccountClassifications.SingleAsync(item => item.Code == "CASH" && item.AccountingBook!.Code == "IFRS");
+        adminCash.DefaultRevaluationTreatment = RevaluationTreatment.Exclude;
+        adminCash.UpdatedBy = "finance.admin";
         var cashAccountId = await db.Accounts.Where(item => item.AccountCode == "1000").Select(item => item.Id).SingleAsync();
         var reviewedMapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
             .SingleAsync(item => item.AccountId == cashAccountId && item.AccountingBook.Code == "IFRS");
@@ -285,9 +314,10 @@ public sealed class AccountingBookClassificationAuthorityTests
 
         (await db.AccountClassifications.CountAsync()).Should().Be(firstClassifications);
         (await db.AccountAccountingBooks.CountAsync()).Should().Be(firstMappings);
-        (await db.AccountClassifications.Where(item => item.Code == "CASH")
-            .Select(item => item.DefaultRevaluationTreatment).Distinct().SingleAsync())
-            .Should().Be(RevaluationTreatment.Include);
+        adminCash.DefaultRevaluationTreatment.Should().Be(RevaluationTreatment.Exclude,
+            "the manifest must preserve an explicit administrator decision");
+        (await db.AccountClassifications.Where(item => item.Code == "CASH" && item.AccountingBook!.Code != "IFRS")
+            .AllAsync(item => item.DefaultRevaluationTreatment == RevaluationTreatment.Include)).Should().BeTrue();
         (await db.AccountClassifications.Where(item => item.Code == "EXPENSE")
             .Select(item => item.DefaultRevaluationTreatment).Distinct().SingleAsync())
             .Should().Be(RevaluationTreatment.Exclude);

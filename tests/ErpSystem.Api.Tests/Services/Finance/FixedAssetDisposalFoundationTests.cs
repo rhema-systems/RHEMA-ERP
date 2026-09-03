@@ -1427,7 +1427,6 @@ public sealed class FixedAssetDisposalFoundationTests
             TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
             RevaluationRateType = "Month-End",
             RevaluationQuoteSide = ExchangeRateQuoteSide.Mid,
-            RevaluationRequired = true,
             IsActive = true,
             EffectiveDate = new DateTime(2026, 7, 1),
             CreatedAt = DateTime.UtcNow,

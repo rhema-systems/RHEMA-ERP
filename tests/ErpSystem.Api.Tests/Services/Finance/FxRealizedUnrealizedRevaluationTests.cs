@@ -8,11 +8,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -230,7 +232,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.Service.Invoking(s => s.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
             {
                 RevaluationDate = new DateTime(2026, 7, 31),
-                RevaluationType = "Month-End"
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
@@ -267,7 +270,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.Service.Invoking(s => s.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
             {
                 RevaluationDate = new DateTime(2026, 7, 31),
-                RevaluationType = "Month-End"
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
@@ -310,7 +314,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.Service.Invoking(s => s.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
             {
                 RevaluationDate = new DateTime(2026, 7, 31),
-                RevaluationType = "Month-End"
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
@@ -488,12 +493,13 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Status.Should().Be("Posted");
         batch.Lines.Should().Contain(l => l.SourceModule == "AR" && l.GainLossType == "Gain" && l.GainLossAmount == 200m);
-        batch.Lines.Should().Contain(l => l.SourceModule == "AP" && l.GainLossType == "Loss" && l.GainLossAmount == 200m);
+        batch.Lines.Should().Contain(l => l.SourceModule == "AP" && l.GainLossType == "Loss" && l.GainLossAmount == -200m);
         batch.Lines.Should().Contain(l => l.SourceModule == "BankCash" && l.GainLossType == "Gain" && l.GainLossAmount == 200m);
         var journalLines = await fixture.Db.AccountTransactions
             .Where(t => t.JournalEntryId == batch.JournalEntryId)
@@ -522,7 +528,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Lines.Should().ContainSingle(l => l.SourceModule == "BankCash" && l.GainLossType == "Gain" && l.GainLossAmount == 200m);
@@ -544,7 +551,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Lines.Should().ContainSingle(l => l.SourceModule == "BankCash" && l.GainLossType == "Loss" && l.GainLossAmount == -200m);
@@ -568,7 +576,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Lines.Should().ContainSingle(l => l.SourceModule == "BankCash" && l.ForeignCurrencyBalance == 100m && l.GainLossAmount == 200m);
@@ -585,7 +594,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.Service.Invoking(s => s.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
             {
                 RevaluationDate = new DateTime(2026, 7, 31),
-                RevaluationType = "Month-End"
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
@@ -606,12 +616,14 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var first = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
         var second = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         second.Id.Should().Be(first.Id);
@@ -676,7 +688,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         closingRate.Rate = 99m;
@@ -704,7 +717,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 6, 30),
-            RevaluationType = "Quarter-End"
+            RevaluationType = "Quarter-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Lines.Should().ContainSingle(l => l.ClosingExchangeRate == 13m && l.GainLossAmount == 300m);
@@ -726,7 +740,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Lines.Should().OnlyContain(line => line.ClosingExchangeRateId == buying.Id);
@@ -747,11 +762,68 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var batch = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         batch.Lines.Should().ContainSingle(line => line.AccountId == marked.Id && line.SourceModule == "GL" && line.GainLossAmount == 200m);
         batch.Lines.Should().NotContain(line => line.AccountId == unmarked.Id);
+    }
+
+    [Theory]
+    [InlineData(AccountType.Asset, 200, "Gain")]
+    [InlineData(AccountType.Liability, -200, "Loss")]
+    [InlineData(AccountType.Equity, -200, "Loss")]
+    [InlineData(AccountType.Revenue, -200, "Loss")]
+    [InlineData(AccountType.Expense, 200, "Gain")]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task ExplicitPolicyCanRevalueEveryCoreAccountTypeUsingSignedBalances(
+        AccountType accountType, decimal expectedAdjustment, string expectedGainLossType)
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        var account = await fixture.PostGeneralFxExposureAsync(
+            $"CORE-{accountType}", accountType, revaluationRequired: true, 10m, 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+
+        var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS"
+        });
+        var shouldWarn = accountType == AccountType.Equity
+            || accountType == AccountType.Revenue
+            || accountType == AccountType.Expense;
+
+        preview.Lines.Should().ContainSingle(line => line.AccountId == account.Id
+            && line.GainLossAmount == expectedAdjustment
+            && line.GainLossType == expectedGainLossType
+            && line.HasGovernanceWarning == shouldWarn);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task PostedHistoryRetainsNonstandardPolicyWarningCount()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        await fixture.PostGeneralFxExposureAsync("CORE-EQUITY-HISTORY", AccountType.Equity, true, 10m, 100m);
+        fixture.SeedExchangeRate(12m, new DateTime(2026, 7, 31), ExchangeRateType.MonthEnd);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
+        {
+            RevaluationDate = new DateTime(2026, 7, 31),
+            RevaluationType = "Month-End",
+            AccountingBookCode = "IFRS"
+        });
+        var history = await fixture.Service.GetRevaluationBatchesAsync(
+            new DateTime(2026, 7, 1), new DateTime(2026, 7, 31));
+
+        history.Should().ContainSingle(item => item.AccountingBookCode == "IFRS"
+            && item.ExposureCount == 1 && item.NonstandardPolicyCount == 1);
     }
 
     [Fact]
@@ -766,7 +838,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var preview = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         closingRate.Rate = 13m;
@@ -776,6 +849,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             {
                 RevaluationDate = new DateTime(2026, 7, 31),
                 RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS",
                 ExpectedPreviewFingerprint = preview.PreviewFingerprint
             }))
             .Should().ThrowAsync<InvalidOperationException>()
@@ -798,12 +872,14 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var monthEnd = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 6, 30),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
         var quarterEnd = await fixture.Service.PreviewCurrencyRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 6, 30),
-            RevaluationType = "Quarter-End"
+            RevaluationType = "Quarter-End",
+                AccountingBookCode = "IFRS"
         });
 
         monthEnd.Lines.Should().BeEmpty();
@@ -823,13 +899,15 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         var second = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 8, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         second.Lines.Should().ContainSingle(l => l.SourceModule == "AR" && l.GainLossAmount == 100m);
@@ -848,14 +926,16 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         var first = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 7, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
         await fixture.Service.ReverseRevaluationBatchAsync(first.Id, new DateTime(2026, 8, 1), "Auto reversal", CancellationToken.None);
 
         var second = await fixture.Service.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
         {
             RevaluationDate = new DateTime(2026, 8, 31),
-            RevaluationType = "Month-End"
+            RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
         });
 
         second.Lines.Should().ContainSingle(l => l.SourceModule == "AR" && l.GainLossAmount == 300m);
@@ -880,7 +960,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         await fixture.Service.Invoking(s => s.RunUnrealizedRevaluationAsync(new RevaluationRequestDto
             {
                 RevaluationDate = new DateTime(2026, 7, 31),
-                RevaluationType = "Month-End"
+                RevaluationType = "Month-End",
+                AccountingBookCode = "IFRS"
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
@@ -969,13 +1050,16 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                     LinkedCurrencyCode = "USD",
                     IsActive = true,
                     EffectiveDate = new DateTime(2026, 1, 1),
-                    RevaluationRequired = account.Id == ap.Id || account.Id == ar.Id || account.Id == bank.Id,
                     TransactionRateType = "Daily",
                     RevaluationRateType = "Month-End",
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = "Tests"
                 });
             }
+            await new FinanceClassificationManifestSeeder(
+                    db,
+                    NullLogger<FinanceClassificationManifestSeeder>.Instance)
+                .SeedAsync(tenantId, new DateTime(2026, 1, 1));
             db.BankAccounts.Add(new BankAccount
             {
                 Id = Guid.NewGuid(),
@@ -1504,7 +1588,30 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             decimal foreignAmount)
         {
             var account = SeedAccount(Db, TenantId, accountNumber, accountType, true);
-            Db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            var book = await Db.AccountingBooks.SingleAsync(item => item.TenantId == TenantId && item.Code == "IFRS");
+            var classificationCode = accountType switch
+            {
+                AccountType.Asset => "ASSET_OTHER",
+                AccountType.Liability => "LIABILITY_OTHER",
+                AccountType.Equity => "EQUITY",
+                AccountType.Revenue => "REVENUE",
+                AccountType.Expense => "EXPENSE",
+                _ => throw new ArgumentOutOfRangeException(nameof(accountType))
+            };
+            var classification = await Db.AccountClassifications.SingleAsync(item =>
+                item.TenantId == TenantId && item.AccountingBookId == book.Id && item.Code == classificationCode);
+            var mapping = new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                AccountId = account.Id,
+                AccountingBookId = book.Id,
+                AccountClassificationId = classification.Id,
+                IsEnabled = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Tests"
+            };
+            var link = new AccountCurrencyLink
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
@@ -1512,14 +1619,35 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 LinkedCurrencyCode = "USD",
                 IsActive = true,
                 EffectiveDate = new DateTime(2026, 1, 1),
-                RevaluationRequired = revaluationRequired,
                 RevaluationFrequency = RevaluationFrequency.Monthly,
                 TransactionRateType = "Daily",
                 RevaluationRateType = "Month-End",
                 RevaluationQuoteSide = ExchangeRateQuoteSide.Mid,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "Tests"
-            });
+            };
+            Db.AccountAccountingBooks.Add(mapping);
+            Db.AccountCurrencyLinks.Add(link);
+            if (revaluationRequired)
+            {
+                Db.AccountBookCurrencyPolicies.Add(new AccountBookCurrencyPolicy
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    AccountAccountingBookId = mapping.Id,
+                    AccountCurrencyLinkId = link.Id,
+                    RevaluationOverride = true,
+                    OverrideReason = "Approved test policy",
+                    LifecycleStatus = "Active",
+                    RequestedByUserId = Guid.NewGuid(),
+                    RequestedAtUtc = DateTime.UtcNow,
+                    DecidedByUserId = Guid.NewGuid(),
+                    DecidedAtUtc = DateTime.UtcNow,
+                    DecisionReason = "Approved test policy",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "Tests"
+                });
+            }
             SeedExchangeRate(rate, new DateTime(2026, 7, 1));
             await Db.SaveChangesAsync();
 
@@ -1529,8 +1657,8 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 Guid.NewGuid(),
                 $"{accountNumber}-FX-BAL",
                 new DateTime(2026, 7, 1),
-                debitAccountId: accountType == AccountType.Asset ? account.Id : Expense.Id,
-                creditAccountId: accountType == AccountType.Liability ? account.Id : Revenue.Id,
+                debitAccountId: accountType is AccountType.Asset or AccountType.Expense ? account.Id : Expense.Id,
+                creditAccountId: accountType is AccountType.Liability or AccountType.Equity or AccountType.Revenue ? account.Id : Revenue.Id,
                 foreignAmount: foreignAmount,
                 rate: rate));
             return account;

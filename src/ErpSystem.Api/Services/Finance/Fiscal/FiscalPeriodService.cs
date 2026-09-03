@@ -3657,13 +3657,57 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     item.PostingDate < period.EndDate.Date.AddDays(1))
                 .AnyAsync(cancellationToken);
 
+            var postedBatches = await _unitOfWork.Repository<FxRevaluationBatch>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    item.FiscalPeriodId == period.Id && item.Status == "Posted" &&
+                    !item.ReversalPostingEventId.HasValue)
+                .OrderBy(item => item.AccountingBookCode)
+                .ThenBy(item => item.RevaluationDate)
+                .Select(item => new
+                {
+                    item.Id,
+                    item.BatchNumber,
+                    item.AccountingBookId,
+                    item.AccountingBookCode,
+                    item.RevaluationDate,
+                    item.PreviewFingerprint,
+                    item.PostingEventId,
+                    item.JournalEntryId
+                })
+                .ToListAsync(cancellationToken);
+            var postedBatchIds = postedBatches.Select(item => item.Id).ToArray();
+            var nonstandardEvidence = await _unitOfWork.Repository<FxRevaluationLine>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    postedBatchIds.Contains(item.FxRevaluationBatchId) && item.HasGovernanceWarning)
+                .OrderBy(item => item.AccountClassificationCode)
+                .ThenBy(item => item.AccountId)
+                .ThenBy(item => item.TransactionCurrency)
+                .Select(item => new
+                {
+                    item.FxRevaluationBatchId,
+                    item.AccountId,
+                    item.AccountClassificationId,
+                    item.AccountClassificationCode,
+                    item.AccountClassificationName,
+                    item.CoreAccountType,
+                    item.TransactionCurrency,
+                    item.EffectivePolicySource,
+                    item.GovernanceWarning
+                })
+                .ToListAsync(cancellationToken);
+
             if (!hasForeignCurrencyActivity)
             {
                 return new CloseCheckResult(
                     "FX_REVALUATION", "Foreign-currency revaluation", "Foreign Exchange",
                     FinanceCloseCheckSeverities.Mandatory, FinanceCloseCheckStatuses.NotApplicable,
                     "No posted foreign-currency activity requires period-end revaluation.", 0, null,
-                    new { HasForeignCurrencyActivity = false });
+                    new
+                    {
+                        HasForeignCurrencyActivity = false,
+                        PostedBookBatches = postedBatches,
+                        NonstandardPolicyWarnings = nonstandardEvidence
+                    });
             }
 
             return period.CurrencyRevaluationComplete
@@ -3671,12 +3715,26 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     "FX_REVALUATION", "Foreign-currency revaluation", "Foreign Exchange",
                     FinanceCloseCheckSeverities.Mandatory, FinanceCloseCheckStatuses.Passed,
                     "Foreign-currency revaluation is marked complete for this period.", 0, null,
-                    new { HasForeignCurrencyActivity = true, period.CurrencyRevaluationComplete, period.CurrencyRevaluationDate })
+                    new
+                    {
+                        HasForeignCurrencyActivity = true,
+                        period.CurrencyRevaluationComplete,
+                        period.CurrencyRevaluationDate,
+                        PostedBookBatches = postedBatches,
+                        NonstandardPolicyWarnings = nonstandardEvidence
+                    })
                 : new CloseCheckResult(
                     "FX_REVALUATION", "Foreign-currency revaluation", "Foreign Exchange",
                     FinanceCloseCheckSeverities.Mandatory, FinanceCloseCheckStatuses.Failed,
                     "Foreign-currency activity exists but period-end revaluation is not complete.", 1, null,
-                    new { HasForeignCurrencyActivity = true, period.CurrencyRevaluationComplete, period.CurrencyRevaluationDate });
+                    new
+                    {
+                        HasForeignCurrencyActivity = true,
+                        period.CurrencyRevaluationComplete,
+                        period.CurrencyRevaluationDate,
+                        PostedBookBatches = postedBatches,
+                        NonstandardPolicyWarnings = nonstandardEvidence
+                    });
         }
 
         private static CloseCheckResult BuildMessageCheck(

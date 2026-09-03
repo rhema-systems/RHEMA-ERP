@@ -249,6 +249,10 @@ public sealed class AccountClassificationService : IAccountClassificationService
         if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name)) throw new InvalidOperationException("Classification code and name are required.");
         if (!Enum.TryParse<AccountType>(request.CoreAccountType, true, out var accountType)) throw new InvalidOperationException("Core account type is invalid.");
         if (!Enum.TryParse<RevaluationTreatment>(request.DefaultRevaluationTreatment, true, out var treatment)) throw new InvalidOperationException("Default revaluation treatment is invalid.");
+        if (treatment == RevaluationTreatment.Include
+            && accountType is AccountType.Equity or AccountType.Revenue or AccountType.Expense)
+            throw new InvalidOperationException(
+                "Equity, Revenue and Expense classifications must default to Exclude; inclusion is governed per account, book and currency through maker-checker approval.");
         if (!Enum.TryParse<AccountClassificationStatus>(request.Status, true, out var status)) throw new InvalidOperationException("Classification status is invalid.");
         AccountClassificationSystemRole? role = null;
         if (!string.IsNullOrWhiteSpace(request.SystemRole))

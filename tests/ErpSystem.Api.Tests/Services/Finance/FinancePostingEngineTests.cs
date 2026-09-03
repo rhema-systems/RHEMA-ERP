@@ -591,7 +591,6 @@ public sealed class FinancePostingEngineTests
             LinkedCurrencyCode = "USD",
             IsActive = true,
             EffectiveDate = new DateTime(2026, 1, 1),
-            RevaluationRequired = true,
             TransactionRateType = "Daily",
             RevaluationRateType = "Month-End"
         };
@@ -1314,7 +1313,6 @@ public sealed class FinancePostingEngineTests
                     LinkedCurrencyCode = currency,
                     IsActive = true,
                     EffectiveDate = new DateTime(2026, 1, 1),
-                    RevaluationRequired = true,
                     TransactionRateType = "Daily",
                     RevaluationRateType = "Month-End"
                 });
