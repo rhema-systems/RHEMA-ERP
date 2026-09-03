@@ -10,17 +10,17 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Phase 1A — Finance book authority and V2 foundation |
-| Status | `INTEGRATED` |
+| Phase | Phase 2 — configurable classifications completion |
+| Status | `IMPLEMENTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `2e883ecdcac53d995f6c0262bf8d57c56b3381a0` |
-| Branch | `codex/finance-book-authority-phase1a` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-authority-phase1a` |
+| Exact base | `30565ea50194559611616946fcfc2f53cbd3eab1` |
+| Branch | `codex/finance-configurable-classifications-phase2` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-configurable-classifications-phase2` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `2e883ecdcac53d995f6c0262bf8d57c56b3381a0` |
+| Primary HEAD at activation | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Independent re-review `APPROVED`; integrated locally |
+| Review status | Phase 1A approved and integrated; Phase 2 review pending |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -62,8 +62,8 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 1A is independently approved and integrated into primary through `5a6d55f3e1a5071fc00fead81bd026b8ff18a065`. The task-owned primary files are byte-identical to reviewed HEAD `d282be9c3a39a35d1d24ca0c8c85823ce415233b`; primary build and 78 focused tests passed. The FinanceBookClassificationFoundation migration remains unapplied. The default-output EF command is not authoritative while the running API retains stale binaries; the same source tree passed the exact EF no-pending-model check in the isolated worktree.
+Last verified durable point: Phase 1A is independently approved and integrated, with its completion recorded at `30565ea50194559611616946fcfc2f53cbd3eab1`. Phase 2 instructions were sent directly to the implementing task with that exact base and a new isolated branch/worktree. The FinanceBookClassificationFoundation migration remains unapplied; no database was mutated.
 
 ## Next action
 
-Begin the already-approved Finance-only Phase 2 configurable-classification completion on the resulting primary commit. Do not modify Procurement, Inventory, Sales, HR/Payroll or other module implementations; document their owner actions against the published V2/provisioning contracts. Keep V1 until the external producer-owner gate is completed.
+Wait for the Phase 2 implementer to reach a review or decision boundary. Review Finance-owned classification hierarchy, lifecycle, where-used, stable-role replacement, UI, tests and any unapplied migration; preserve V1 and all external-module implementation boundaries.
