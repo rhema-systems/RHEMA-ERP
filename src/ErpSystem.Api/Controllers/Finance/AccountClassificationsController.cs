@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,18 +15,22 @@ public sealed class AccountClassificationsController : ControllerBase
     public AccountClassificationsController(IAccountClassificationService service) => _service = service;
 
     [HttpGet]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<IActionResult> Get([FromQuery] Guid? accountingBookId, [FromQuery] bool includeInactive = false, CancellationToken cancellationToken = default) =>
         Ok(await _service.GetAsync(accountingBookId, includeInactive, cancellationToken));
 
     [HttpPost]
+    [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
     public async Task<IActionResult> Create([FromBody] SaveAccountClassificationDto request, CancellationToken cancellationToken) =>
         Ok(await _service.CreateAsync(request, cancellationToken));
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] SaveAccountClassificationDto request, CancellationToken cancellationToken) =>
         Ok(await _service.UpdateAsync(id, request, cancellationToken));
 
     [HttpPost("{id:guid}/retire")]
+    [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
     public async Task<IActionResult> Retire(Guid id, [FromBody] RetireAccountClassificationDto request, CancellationToken cancellationToken) =>
         Ok(await _service.RetireAsync(id, request, cancellationToken));
 }

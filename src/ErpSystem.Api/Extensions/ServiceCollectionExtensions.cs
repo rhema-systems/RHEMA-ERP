@@ -813,6 +813,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceBudgetCommitmentService, ErpSystem.Api.Services.Finance.Budget.FinanceBudgetCommitmentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountClassificationService, ErpSystem.Api.Services.Finance.Settings.AccountClassificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService, ErpSystem.Api.Services.Finance.GL.FinanceAccountProvisioningService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutExecutionService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutExecutionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutImportService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutImportService>();
