@@ -217,3 +217,7 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813063001_INVREQFU002MaintenanceReservationLifecycle")] partial class INVREQFU002MaintenanceReservationLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813103157_INVREQFU003IssueFinanceAssetLifecycle")] partial class INVREQFU003IssueFinanceAssetLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903044911_FinanceBookClassificationFoundation")] partial class FinanceBookClassificationFoundation { }
+
+// 20260903120000_EnforceFinanceClassificationSystemRoleCardinality deliberately carries its
+// DbContext/Migration attributes on the executable migration class. It is therefore already
+// discoverable when fast builds remove every *.Designer.cs and must not be redeclared here.

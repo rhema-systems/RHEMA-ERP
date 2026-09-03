@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ErpSystem.Api.Services.Finance.Settings;
 
@@ -73,6 +74,9 @@ public sealed class AccountClassificationService : IAccountClassificationService
     }
 
     public async Task<AccountClassificationDto> CreateAsync(SaveAccountClassificationDto request, CancellationToken cancellationToken = default)
+        => await ExecuteAtomicAsync(() => CreateCoreAsync(request, cancellationToken), cancellationToken);
+
+    private async Task<AccountClassificationDto> CreateCoreAsync(SaveAccountClassificationDto request, CancellationToken cancellationToken)
     {
         var parsed = await ValidateAsync(request, null, cancellationToken);
         if (parsed.Status == AccountClassificationStatus.Retired)
@@ -91,10 +95,14 @@ public sealed class AccountClassificationService : IAccountClassificationService
         _db.AccountClassifications.Add(entity);
         await _db.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync(FinanceAuditEvents.AccountClassificationCreated, entity, null, Snapshot(entity), null, cancellationToken);
-        return Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        var result = Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        return result;
     }
 
     public async Task<AccountClassificationDto> UpdateAsync(Guid id, SaveAccountClassificationDto request, CancellationToken cancellationToken = default)
+        => await ExecuteAtomicAsync(() => UpdateCoreAsync(id, request, cancellationToken), cancellationToken);
+
+    private async Task<AccountClassificationDto> UpdateCoreAsync(Guid id, SaveAccountClassificationDto request, CancellationToken cancellationToken)
     {
         var entity = await _db.AccountClassifications.Include(item => item.AccountingBook)
             .SingleOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
@@ -136,10 +144,14 @@ public sealed class AccountClassificationService : IAccountClassificationService
         entity.UpdatedBy = _currentUser.UserName ?? "system";
         await _db.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync(FinanceAuditEvents.AccountClassificationUpdated, entity, before, Snapshot(entity), null, cancellationToken);
-        return Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        var result = Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        return result;
     }
 
     public async Task<AccountClassificationDto> RetireAsync(Guid id, RetireAccountClassificationDto request, CancellationToken cancellationToken = default)
+        => await ExecuteAtomicAsync(() => RetireCoreAsync(id, request, cancellationToken), cancellationToken);
+
+    private async Task<AccountClassificationDto> RetireCoreAsync(Guid id, RetireAccountClassificationDto request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("A retirement reason is required.");
         var entity = await _db.AccountClassifications.Include(item => item.AccountingBook)
@@ -170,7 +182,8 @@ public sealed class AccountClassificationService : IAccountClassificationService
         entity.UpdatedBy = _currentUser.UserName ?? "system";
         await _db.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync(FinanceAuditEvents.AccountClassificationRetired, entity, before, Snapshot(entity), request.Reason.Trim(), cancellationToken);
-        return Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        var result = Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        return result;
     }
 
     private async Task<(AccountType AccountType, RevaluationTreatment Treatment, AccountClassificationSystemRole? Role, AccountClassificationStatus Status)> ValidateAsync(SaveAccountClassificationDto request, Guid? currentId, CancellationToken cancellationToken)
@@ -191,6 +204,11 @@ public sealed class AccountClassificationService : IAccountClassificationService
         var code = NormalizeCode(request.Code);
         if (await _db.AccountClassifications.AnyAsync(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && item.Code == code && !item.IsDeleted && item.Id != currentId, cancellationToken))
             throw new InvalidOperationException("Classification code already exists in this accounting book.");
+        if (role.HasValue && !IsRepeatableSystemRole(role.Value)
+            && await _db.AccountClassifications.AnyAsync(item => item.TenantId == TenantId
+                && item.AccountingBookId == book.Id && item.SystemRole == role && !item.IsDeleted
+                && item.Id != currentId, cancellationToken))
+            throw new InvalidOperationException($"System role {role} may be assigned only once in an accounting book.");
         if (request.ParentClassificationId.HasValue)
         {
             if (request.ParentClassificationId == currentId) throw new InvalidOperationException("A classification cannot be its own parent.");
@@ -228,6 +246,32 @@ public sealed class AccountClassificationService : IAccountClassificationService
             _ => accountType == AccountType.Asset
         };
         if (!valid) throw new InvalidOperationException($"System role {role} is incompatible with core account type {accountType}.");
+    }
+
+    private static bool IsRepeatableSystemRole(AccountClassificationSystemRole role) =>
+        role is AccountClassificationSystemRole.Cash or AccountClassificationSystemRole.Bank;
+
+    private async Task<T> ExecuteAtomicAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+    {
+        if (!_db.Database.IsRelational()) return await operation();
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            _db.ChangeTracker.Clear();
+            await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await operation();
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     private async Task<bool> IsDescendantAsync(Guid candidateId, Guid ancestorId, CancellationToken cancellationToken)
@@ -304,6 +348,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
         DefaultRevaluationTreatment = item.DefaultRevaluationTreatment.ToString(), SystemRole = item.SystemRole?.ToString(),
         IsPostingClassification = item.IsPostingClassification, Status = item.Status.ToString(), DisplayOrder = item.DisplayOrder,
         ChildCount = item.Children.Count(child => !child.IsDeleted),
+        NonRetiredChildCount = item.Children.Count(child => !child.IsDeleted && child.Status != AccountClassificationStatus.Retired),
         TotalAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted),
         EnabledAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted && mapping.IsEnabled),
         RowVersion = item.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(item.RowVersion)

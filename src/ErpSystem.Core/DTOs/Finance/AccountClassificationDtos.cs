@@ -20,10 +20,11 @@ public sealed class AccountClassificationDto
     public string Status { get; set; } = "Draft";
     public int DisplayOrder { get; set; }
     public int ChildCount { get; set; }
+    public int NonRetiredChildCount { get; set; }
     public int TotalAccountCount { get; set; }
     public int EnabledAccountCount { get; set; }
     public bool IsLeaf => ChildCount == 0;
-    public bool CanRetire => EnabledAccountCount == 0 && ChildCount == 0 && Status != "Retired";
+    public bool CanRetire => EnabledAccountCount == 0 && NonRetiredChildCount == 0 && Status != "Retired";
     public string RowVersion { get; set; } = string.Empty;
 }
 

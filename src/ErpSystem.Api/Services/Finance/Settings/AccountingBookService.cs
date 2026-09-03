@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ErpSystem.Api.Services.Finance.Settings
 {
@@ -57,6 +58,30 @@ namespace ErpSystem.Api.Services.Finance.Settings
         }
 
         public async Task SyncAccountMappingsAsync(Account account, IReadOnlyCollection<AccountAccountingBookUpdateDto> requestedMappings, CancellationToken cancellationToken = default)
+        {
+            if (!_context.Database.IsRelational())
+            {
+                await SyncAccountMappingsCoreAsync(account, requestedMappings, cancellationToken);
+                return;
+            }
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    await SyncAccountMappingsCoreAsync(account, requestedMappings, cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
+        }
+
+        private async Task SyncAccountMappingsCoreAsync(Account account, IReadOnlyCollection<AccountAccountingBookUpdateDto> requestedMappings, CancellationToken cancellationToken)
         {
             var tenantId = account.TenantId;
             if (requestedMappings == null || requestedMappings.Count == 0 || !requestedMappings.Any(item => item.IsEnabled))

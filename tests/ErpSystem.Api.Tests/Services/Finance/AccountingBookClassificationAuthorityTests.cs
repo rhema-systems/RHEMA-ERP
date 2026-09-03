@@ -12,6 +12,8 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -299,6 +301,223 @@ public sealed class AccountingBookClassificationAuthorityTests
     }
 
     [Fact]
+    public async Task ManifestSeeder_UpgradesUntouchedV1BroadMappingsAcrossTenants_AndPreservesAdminRows()
+    {
+        await using var db = CreateContext();
+        var tenants = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var expected = new Dictionary<Guid, (Guid RevenueDeduction, Guid CostOfSales)>();
+        foreach (var tenantId in tenants)
+        {
+            var book = SeedBook(db, tenantId);
+            var revenue = SeedClassification(db, tenantId, book.Id, "REVENUE", AccountType.Revenue);
+            var expense = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+            revenue.CreatedBy = expense.CreatedBy = "System (FIN-CLASSIFICATION-1.0)";
+            var deduction = SeedAccount(db, tenantId, "4210", AccountType.Revenue);
+            var cost = SeedAccount(db, tenantId, "5000", AccountType.Expense);
+            var admin = SeedAccount(db, tenantId, "7110", AccountType.Expense);
+            var disabled = SeedAccount(db, tenantId, "7210", AccountType.Expense);
+            db.AccountAccountingBooks.AddRange(
+                new AccountAccountingBook { TenantId = tenantId, AccountId = deduction.Id, AccountingBookId = book.Id, AccountClassificationId = revenue.Id, IsEnabled = true },
+                new AccountAccountingBook { TenantId = tenantId, AccountId = cost.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = true },
+                new AccountAccountingBook { TenantId = tenantId, AccountId = admin.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = true, UpdatedBy = "finance.admin" },
+                new AccountAccountingBook { TenantId = tenantId, AccountId = disabled.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = false });
+        }
+        await db.SaveChangesAsync();
+        var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);
+
+        foreach (var tenantId in tenants) await seeder.SeedAsync(tenantId, DateTime.UtcNow);
+        var countAfterUpgrade = await db.AccountAccountingBooks.CountAsync();
+        foreach (var tenantId in tenants) await seeder.SeedAsync(tenantId, DateTime.UtcNow);
+
+        (await db.AccountAccountingBooks.CountAsync()).Should().Be(countAfterUpgrade);
+        foreach (var tenantId in tenants)
+        {
+            var rows = await db.AccountAccountingBooks.Include(item => item.Account).Include(item => item.AccountClassification)
+                .Where(item => item.TenantId == tenantId && item.AccountingBook.Code == "IFRS").ToListAsync();
+            rows.Single(item => item.Account.AccountCode == "4210").AccountClassification!.Code.Should().Be("REVENUE_DEDUCTIONS");
+            rows.Single(item => item.Account.AccountCode == "5000").AccountClassification!.Code.Should().Be("COST_OF_SALES");
+            rows.Single(item => item.Account.AccountCode == "7110").AccountClassification!.Code.Should().Be("EXPENSE");
+            rows.Single(item => item.Account.AccountCode == "7210").AccountClassification!.Code.Should().Be("EXPENSE");
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsDuplicateSingletonRole_ButAllowsRepeatedCash()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var existing = SeedClassification(db, tenantId, book.Id, "AR_ONE", AccountType.Asset);
+        existing.SystemRole = AccountClassificationSystemRole.ReceivableControl;
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        var duplicate = () => service.CreateAsync(new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id, Code = "AR_TWO", Name = "AR two", CoreAccountType = nameof(AccountType.Asset),
+            SystemRole = nameof(AccountClassificationSystemRole.ReceivableControl), IsPostingClassification = true,
+            Status = nameof(AccountClassificationStatus.Active)
+        });
+        await duplicate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*only once*");
+
+        existing.SystemRole = AccountClassificationSystemRole.Cash;
+        await db.SaveChangesAsync();
+        var repeatedCash = await service.CreateAsync(new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id, Code = "CASH_TWO", Name = "Cash two", CoreAccountType = nameof(AccountType.Asset),
+            SystemRole = nameof(AccountClassificationSystemRole.Cash), IsPostingClassification = true,
+            Status = nameof(AccountClassificationStatus.Active)
+        });
+        repeatedCash.SystemRole.Should().Be(nameof(AccountClassificationSystemRole.Cash));
+    }
+
+    [Fact]
+    public async Task CreateAsync_RollsBackMutationWhenAuditFails_InRelationalTransaction()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
+        await CreateSqliteClassificationSchemaAsync(db);
+        var tenantId = Guid.NewGuid();
+        var book = SeedBook(db, tenantId);
+        await db.SaveChangesAsync();
+        var audit = Audit();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .Callback(() => db.Database.CurrentTransaction!.GetDbTransaction().IsolationLevel
+                .Should().Be(System.Data.IsolationLevel.Serializable))
+            .ThrowsAsync(new InvalidOperationException("audit unavailable"));
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, audit.Object);
+
+        var action = () => service.CreateAsync(new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id, Code = "ROLLBACK", Name = "Rollback", CoreAccountType = nameof(AccountType.Asset),
+            IsPostingClassification = true, Status = nameof(AccountClassificationStatus.Active)
+        });
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("audit unavailable");
+        db.ChangeTracker.Clear();
+        (await db.AccountClassifications.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SingletonRoleConstraint_RejectsTwoWritersThatBothObservedNoExistingRole()
+    {
+        var databaseName = $"role-cardinality-{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(connectionString);
+        await keeper.OpenAsync();
+        await using var first = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(keeper).Options);
+        await CreateSqliteClassificationSchemaAsync(first, includeRoleIndex: true);
+        await using var secondConnection = new SqliteConnection(connectionString);
+        await secondConnection.OpenAsync();
+        await using var second = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(secondConnection).Options);
+        await second.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        var tenantId = Guid.NewGuid();
+        var book = SeedBook(first, tenantId);
+        await first.SaveChangesAsync();
+
+        (await first.AccountClassifications.AnyAsync(item => item.TenantId == tenantId
+            && item.AccountingBookId == book.Id && item.SystemRole == AccountClassificationSystemRole.ReceivableControl)).Should().BeFalse();
+        (await second.AccountClassifications.AnyAsync(item => item.TenantId == tenantId
+            && item.AccountingBookId == book.Id && item.SystemRole == AccountClassificationSystemRole.ReceivableControl)).Should().BeFalse();
+        var one = SeedClassification(first, tenantId, book.Id, "AR_ONE", AccountType.Asset);
+        var two = SeedClassification(second, tenantId, book.Id, "AR_TWO", AccountType.Asset);
+        one.SystemRole = two.SystemRole = AccountClassificationSystemRole.ReceivableControl;
+
+        await first.SaveChangesAsync();
+        var staleWriter = () => second.SaveChangesAsync();
+        await staleWriter.Should().ThrowAsync<DbUpdateException>();
+    }
+
+    [Fact]
+    public async Task RetirementTransaction_PreventsConcurrentChildAndMappingWritersFromPassingStaleChecks()
+    {
+        var databaseName = $"lifecycle-race-{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared;Default Timeout=1";
+        await using var keeper = new SqliteConnection(connectionString);
+        await keeper.OpenAsync();
+        await using var retiringDb = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(keeper).Options);
+        await CreateSqliteClassificationSchemaAsync(retiringDb, includeMappings: true);
+        await using var writerConnection = new SqliteConnection(connectionString);
+        await writerConnection.OpenAsync();
+        await using var writerDb = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(writerConnection).Options);
+        await writerDb.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        var tenantId = Guid.NewGuid();
+        var book = SeedBook(retiringDb, tenantId);
+        var classification = SeedClassification(retiringDb, tenantId, book.Id, "OTHER_ASSET", AccountType.Asset);
+        var account = SeedAccount(retiringDb, tenantId, "1990", AccountType.Asset);
+        await retiringDb.SaveChangesAsync();
+        await retiringDb.Database.ExecuteSqlRawAsync(
+            "UPDATE \"AccountClassifications\" SET \"RowVersion\" = X'01' WHERE \"Id\" = {0}", classification.Id);
+        retiringDb.ChangeTracker.Clear();
+
+        var auditEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAudit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var audit = Audit();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                auditEntered.TrySetResult();
+                await releaseAudit.Task;
+                return new ErpSystem.Core.Entities.AuditLog();
+            });
+        var retiringService = new AccountClassificationService(retiringDb, CurrentUser(tenantId).Object, audit.Object);
+        var retirement = retiringService.RetireAsync(classification.Id, new RetireAccountClassificationDto
+        {
+            Reason = "Superseded", RowVersion = Convert.ToBase64String([1])
+        });
+        await auditEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            var childWriter = new AccountClassificationService(writerDb, CurrentUser(tenantId).Object, Audit().Object);
+            var childAttempt = () => childWriter.CreateAsync(new SaveAccountClassificationDto
+            {
+                AccountingBookId = book.Id, ParentClassificationId = classification.Id,
+                Code = "LATE_CHILD", Name = "Late child", CoreAccountType = nameof(AccountType.Asset),
+                IsPostingClassification = true, Status = nameof(AccountClassificationStatus.Active)
+            });
+            var childFailure = await childAttempt.Should().ThrowAsync<Exception>();
+            (childFailure.Which is SqliteException || childFailure.Which is DbUpdateException).Should().BeTrue();
+
+            var mappingWriter = new AccountingBookService(writerDb, CurrentUser(tenantId).Object);
+            var mappingAttempt = () => mappingWriter.SyncAccountMappingsAsync(account,
+            [
+                new AccountAccountingBookUpdateDto
+                {
+                    AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = true
+                }
+            ]);
+            var mappingFailure = await mappingAttempt.Should().ThrowAsync<Exception>();
+            (mappingFailure.Which is SqliteException || mappingFailure.Which is DbUpdateException).Should().BeTrue();
+        }
+        finally
+        {
+            releaseAudit.TrySetResult();
+        }
+        (await retirement).Status.Should().Be(nameof(AccountClassificationStatus.Retired));
+    }
+
+    [Fact]
+    public async Task RetiredChildren_DoNotBlockParentRetirementContract()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var parent = SeedClassification(db, tenantId, book.Id, "ROOT", AccountType.Asset);
+        parent.IsPostingClassification = false;
+        var child = SeedClassification(db, tenantId, book.Id, "CHILD", AccountType.Asset);
+        child.ParentClassificationId = parent.Id;
+        child.Status = AccountClassificationStatus.Retired;
+        await db.SaveChangesAsync();
+
+        var dto = (await new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object)
+            .GetAsync(book.Id, true)).Single(item => item.Id == parent.Id);
+        dto.ChildCount.Should().Be(1);
+        dto.NonRetiredChildCount.Should().Be(0);
+        dto.CanRetire.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Hierarchy_RejectsCrossTypeParentCyclesAndNonLeafAssignments()
     {
         var tenantId = Guid.NewGuid();
@@ -483,6 +702,23 @@ public sealed class AccountingBookClassificationAuthorityTests
             .UseInMemoryDatabase($"account-book-classification-{Guid.NewGuid():N}")
             .Options);
 
+    private static async Task CreateSqliteClassificationSchemaAsync(
+        ApplicationDbContext db, bool includeRoleIndex = false, bool includeMappings = false)
+    {
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        var createScript = db.Database.GenerateCreateScript();
+        var statements = createScript.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(statement => statement.Contains("CREATE TABLE \"AccountingBooks\"", StringComparison.Ordinal)
+                || statement.Contains("CREATE TABLE \"AccountClassifications\"", StringComparison.Ordinal)
+                || (includeMappings && statement.Contains("CREATE TABLE \"Accounts\"", StringComparison.Ordinal))
+                || (includeMappings && statement.Contains("CREATE TABLE \"AccountAccountingBooks\"", StringComparison.Ordinal))
+                || (includeRoleIndex && statement.Contains(
+                    "IX_AccountClassifications_TenantId_AccountingBookId_SystemRole", StringComparison.Ordinal)));
+        foreach (var statement in statements)
+            await db.Database.ExecuteSqlRawAsync(statement.Replace(
+                "\"RowVersion\" BLOB NOT NULL", "\"RowVersion\" BLOB NOT NULL DEFAULT X''", StringComparison.Ordinal));
+    }
+
     private static Mock<ICurrentUserService> CurrentUser(Guid tenantId)
     {
         var currentUser = new Mock<ICurrentUserService>();
@@ -546,5 +782,23 @@ public sealed class AccountingBookClassificationAuthorityTests
             Up(builder);
             return builder.Operations;
         }
+    }
+
+    private sealed class CardinalityMigration : EnforceFinanceClassificationSystemRoleCardinality
+    {
+        public IReadOnlyList<MigrationOperation> BuildUpOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
+    }
+
+    [Fact]
+    public void CardinalityMigration_AddsFilteredSingletonRoleConstraint()
+    {
+        var index = new CardinalityMigration().BuildUpOperations().OfType<CreateIndexOperation>().Single();
+        index.IsUnique.Should().BeTrue();
+        index.Filter.Should().Contain("[SystemRole] NOT IN (1, 2)");
     }
 }

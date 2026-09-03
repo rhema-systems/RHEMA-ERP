@@ -8216,6 +8216,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "AccountingBookId", "ParentClassificationId", "DisplayOrder");
 
+                    b.HasIndex("TenantId", "AccountingBookId", "SystemRole")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] NOT IN (1, 2)");
+
                     b.ToTable("AccountClassifications", (string)null);
                 });
 

@@ -149,7 +149,7 @@ public sealed class FinanceClassificationManifestSeeder
                     _db.AccountAccountingBooks.Add(mapping);
                     existingMappings.Add(mapping);
                 }
-                else if (mapping.AccountClassificationId == null && mapping.UpdatedBy == null)
+                else if (ShouldApplyManifestClassification(mapping, classifications, classificationCode))
                 {
                     mapping.AccountClassificationId = classification.Id;
                 }
@@ -185,6 +185,22 @@ public sealed class FinanceClassificationManifestSeeder
             AccountType.Expense when naturalCode is "6000" or "6020" or "6100" or "6200" or "6300" or "6400" or "6500" or "6600" => "EXPENSE",
             _ => null
         };
+    }
+
+    private static bool ShouldApplyManifestClassification(
+        AccountAccountingBook mapping,
+        IReadOnlyCollection<AccountClassification> classifications,
+        string desiredCode)
+    {
+        if (!mapping.IsEnabled || mapping.UpdatedBy != null) return false;
+        if (mapping.AccountClassificationId == null) return true;
+
+        var current = classifications.SingleOrDefault(item => item.Id == mapping.AccountClassificationId);
+        if (current == null || current.CreatedBy?.Contains("FIN-CLASSIFICATION-1.0", StringComparison.Ordinal) != true)
+            return false;
+
+        return (current.Code == "REVENUE" && desiredCode is "REVENUE_DEDUCTIONS" or "OTHER_INCOME")
+            || (current.Code == "EXPENSE" && desiredCode is "COST_OF_SALES" or "OTHER_EXPENSE" or "TAX_EXPENSE");
     }
 
     private static void EnsureUnique(IEnumerable<string> values, string kind)

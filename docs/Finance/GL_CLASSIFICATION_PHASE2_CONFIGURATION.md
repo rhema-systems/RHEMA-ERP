@@ -24,7 +24,11 @@ compatible posting leaf for every enabled book.
 - A node used by an enabled mapping cannot become Draft, Retired or non-posting.
 - Retirement requires a reason and is blocked by enabled mappings or non-retired children.
 - Existing edits require the original row version. Create, update and retirement emit Finance audit
-  evidence with before/after values and the actor context.
+  evidence with before/after values and the actor context. Classification mutations and their audit
+  row commit atomically; hierarchy and account-assignment writers use serializable transactions so
+  a concurrent child or mapping cannot invalidate a lifecycle check.
+- `Cash` and `Bank` roles may repeat. Every control role is limited to one classification per
+  tenant/book by service validation and a filtered unique database index.
 - Where-used returns both enabled and historical account/book mappings; historical usage remains
   visible after a mapping is disabled.
 
@@ -42,14 +46,24 @@ Bank, ReceivableControl, PayableControl, accrued liabilities and debt are seeded
 roles are validated by the service. It is not a substitute for report headings or exact control-account
 settings.
 
+For existing tenants, manifest 2.0 deterministically upgrades only enabled, untouched mappings that
+still point at the system-managed Phase 1 broad `REVENUE` or `EXPENSE` leaves. Disabled mappings and
+rows carrying administrator update evidence are preserved. Re-running the manifest is idempotent.
+
 ## Finance consumers
 
 - Balance-sheet presentation uses the configured parent and leaf names for the selected book.
 - Income-statement grouping uses stable classification codes, never editable display captions.
 - Cash-flow and cash-account selection use bank-master evidence or configured `Cash`/`Bank` roles;
   account-name and legacy-category guessing is prohibited.
-- Dashboard labels use the default enabled book mapping.
-- The chart-of-accounts ad-hoc dataset reads the default book classification mapping.
+- Dashboard calculations first resolve exactly one active default canonical book, then filter journal
+  evidence and account mappings to that same book. Missing or ambiguous authority is shown as an
+  unavailable state rather than guessed.
+- The chart-of-accounts ad-hoc dataset similarly requires exactly one active, posting-enabled default
+  book and constrains book, classification and parent lineage to the account tenant.
+
+Users with Finance read authority can browse the hierarchy and where-used evidence. Create, edit and
+retire controls require the canonical `Finance.ChartOfAccounts.Manage` permission.
 
 The legacy `AccountCategory` and `AccountSubCategory` columns remain only because V1 and external
 producer conversion is deliberately deferred. New Finance UI writes do not populate them and no
