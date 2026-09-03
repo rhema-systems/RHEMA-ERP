@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 1A — Finance book authority and V2 foundation |
-| Status | `REVIEWING` |
+| Status | `CORRECTIONS_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `2e883ecdcac53d995f6c0262bf8d57c56b3381a0` |
 | Branch | `codex/finance-book-authority-phase1a` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `2e883ecdcac53d995f6c0262bf8d57c56b3381a0` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Independent review in progress for `2e883ecd..f50f4606` |
+| Review status | `CHANGES_REQUIRED`; corrections sent directly to implementer |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -57,12 +57,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | `f50f460612bd301e9082b85b5efd228f44a636a7` | Independent review pending | Implementer reports clean worktree; API build and targeted lint passed; core authority 6/6, posting engine 28/28, V2 adapter/evidence 15/15, and contract catalogue 10/10 passed. One unrelated stale Fixed Assets fixture failed before changed logic. Migration source remains unapplied. | Pending |
+| 1 | `f50f460612bd301e9082b85b5efd228f44a636a7` | `CHANGES_REQUIRED` | P1: exact-reversal validation bypass for ordinary V1/V2 requests; recurring-reversal test fake no longer compiles; migration snapshot has pending model changes; used classifications can be retired/demoted and invalidate live mappings. P2: account-book rowversion is not round-tripped, so stale web edits can overwrite assignments. Corrections and required tests were sent directly to the implementer. | Not integrated |
 
 ## Connectivity checkpoint
 
-Last verified durable point: the implementer completed a clean ten-commit Phase 1A range at `f50f460612bd301e9082b85b5efd228f44a636a7` and returned `REVIEW_REQUIRED`. The independent review is the next unverified action. If task communication is interrupted, retain both worktrees and resume review from exact range `2e883ecdcac53d995f6c0262bf8d57c56b3381a0..f50f460612bd301e9082b85b5efd228f44a636a7` without repeating implementation.
+Last verified durable point: independent review of `2e883ecdcac53d995f6c0262bf8d57c56b3381a0..f50f460612bd301e9082b85b5efd228f44a636a7` returned `CHANGES_REQUIRED`, and all five findings were sent directly to the implementer. No commits were integrated and the migration remains unapplied. If task communication is interrupted, retain both worktrees and resume from the correction request without repeating the original implementation.
 
 ## Next action
 
-Complete independent review of the Phase 1A commit range. Send concrete corrections directly if required; otherwise integrate the ten clean commits in order, verify the resulting primary state, update this ledger, and issue the next already-approved phase.
+Wait for the corrected Phase 1A handoff. Re-review the original range plus correction commits, require the compile, reversal, lifecycle, concurrency, migration-pending-model and migration-operation gates to pass, and integrate only after approval.
