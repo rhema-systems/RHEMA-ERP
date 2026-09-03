@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/reference/**/*.ts",
+    "src/services/reference/**/*.ts",
+    "src/app/administration/reference/**/*.tsx",
+    "src/app/administration/layout.tsx",
+    "src/components/hr/common/**/*.tsx",
+    "src/components/hr/employee/tabs/fields.tsx",
+    "src/components/layout/sidebar.tsx"
+  ]
+}

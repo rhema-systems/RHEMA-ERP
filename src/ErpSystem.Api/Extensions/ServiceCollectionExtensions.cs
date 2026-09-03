@@ -1020,6 +1020,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
                                ErpSystem.Core.Services.HR.ReferenceDimensionService>();
 
+            // Shared cross-module reference data: administrative geography (Region / District /
+            // Town and their equivalents in any country). Registered here for now because this is
+            // where the HR module's services are wired and HR is its first consumer; it belongs to
+            // no module. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.
+            services.AddScoped<ErpSystem.Core.Services.Reference.IGeographyService,
+                               ErpSystem.Core.Services.Reference.GeographyService>();
+
             // Lane 3a-ii. The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
                                ErpSystem.Core.Services.HR.CompanySealAssetService>();
@@ -1872,6 +1879,25 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         HrPermissions.AdministerCompany)));
 
             foreach (var permission in HrPermissions.All)
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            // Shared cross-module reference data (administrative geography). Its own family
+            // because the data is not HR's — see ReferenceDataPermissions. There is no Read
+            // policy on purpose: every module's address form lists regions, so reads are
+            // InternalOnly.
+            authorizationBuilder
+                .AddPolicy(ReferenceDataPermissions.GeographyWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        ReferenceDataPermissions.MaintainGeography,
+                        ReferenceDataPermissions.AdministerGeography)))
+                .AddPolicy(ReferenceDataPermissions.GeographyAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        ReferenceDataPermissions.AdministerGeography)));
+
+            foreach (var permission in ReferenceDataPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));

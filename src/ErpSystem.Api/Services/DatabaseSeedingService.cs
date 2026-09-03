@@ -8468,6 +8468,15 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            // Shared cross-module reference data (administrative geography). Read is InternalOnly
+            // by design, so only the write and delete tiers appear here.
+            .Concat(ReferenceDataPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             // HR module-access permissions (W3). These are the platform's lowercase dotted
             // module gates (like project.access / admin.maintenance in ApplicationDbContext's
             // HasData block), NOT HR.* policy permissions — the HR role-fallback handler
@@ -8571,11 +8580,13 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
                     .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
                     .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
@@ -8908,8 +8919,10 @@ namespace ErpSystem.Web.Services
                 // handler standing in for the seed, and the seeder loop skips roles that do not
                 // exist, so listing it costs nothing on a migrated tenant.
                 [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.Hr))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
                 [Constants.Roles.LegacyHrUser] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.Hr))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
 
                 // DR-10 (2026-09-03): the safety function's own roles. hr.access because the SHE

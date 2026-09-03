@@ -28,6 +28,12 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
     // DR-10 (2026-09-03): the SHE settings tree has its own admin gate (SHE Manager and the
     // administrators), separate from admin.hr — the one-admin-gate-per-module convention.
     requiredPermissions = ['admin.she'];
+  } else if (pathname.startsWith('/administration/reference')) {
+    // Shared cross-module reference data (administrative geography). Gated on the reference-data
+    // family rather than admin.hr: the tree is not HR's, and an Estate or Sales administrator
+    // curating districts should not need an HR grant. Either tier admits — admins hold both,
+    // the HR role holds Write.
+    requiredPermissions = ['Reference.Geography.Write', 'Reference.Geography.Admin'];
   } else if (pathname.startsWith('/administration/hr')) {
     // W3: seeded to SuperAdmin/TenantAdmin/Admin and to HR (+ legacy "HR User") — HR
     // practitioners maintain their own reference data (leave types, org structures).

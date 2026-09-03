@@ -3053,7 +3053,15 @@ export const navigationItems: NavItem[] = [
     roles: ADMINISTRATION_ROLES,
     // admin.hr (W3): an HR practitioner holding the seeded admin.hr grant must see the parent
     // node, or the HR child below would be filtered out with it.
-    permissions: ['Finance.Admin', 'admin.hr', 'admin.she'],
+    // Reference.Geography.* is listed too: a reference-data curator from another module holds no
+    // admin.hr, and without this the parent node would hide the child they do have.
+    permissions: [
+      'Finance.Admin',
+      'admin.hr',
+      'admin.she',
+      'Reference.Geography.Write',
+      'Reference.Geography.Admin',
+    ],
     accessMode: 'any',
     children: [
       {
@@ -3238,6 +3246,26 @@ export const navigationItems: NavItem[] = [
             title: 'Reminder Engine',
             href: '/administration/safety/reminders',
             icon: AlarmClock,
+          },
+        ],
+      },
+      {
+        // Shared cross-module reference data. Deliberately NOT under Administration → HR: the
+        // geography tree is consumed by Estate, Sales, Procurement and Inventory too, and an
+        // administrator of any of those should not need an HR grant to curate a list of districts.
+        title: 'Reference Data',
+        href: '/administration/reference/geography',
+        icon: Globe2,
+        roles: ADMINISTRATION_ROLES,
+        // Either tier admits — administrators hold both, the HR role holds Write. Matches the
+        // /administration/reference route gate in the administration layout.
+        permissions: ['Reference.Geography.Write', 'Reference.Geography.Admin'],
+        accessMode: 'any',
+        children: [
+          {
+            title: 'Geography',
+            href: '/administration/reference/geography',
+            icon: Globe2,
           },
         ],
       },

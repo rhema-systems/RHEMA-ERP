@@ -272,3 +272,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260902074117_AddEmployeePayrollMembership")] partial class AddEmployeePayrollMembership { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903081606_AddEmployeeImportSessionsAndOptionalEmail")] partial class AddEmployeeImportSessionsAndOptionalEmail { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903091650_AddEmployeeImportUpdateMode")] partial class AddEmployeeImportUpdateMode { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260903223232_AddAdministrativeGeography")] partial class AddAdministrativeGeography { }

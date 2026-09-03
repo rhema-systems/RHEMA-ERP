@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -116,6 +117,18 @@ public class HrSeedOrchestrator
             "Countries",
             ct => _context.Set<Country>().AnyAsync(x => x.TenantId == tenantId, ct),
             ct => new CountrySeeder(_context, Log<CountrySeeder>()).SeedAsync(tenantId)),
+
+        // Depends on Countries above, to resolve Ghana. Shared reference data rather than HR's, but
+        // it seeds here because this is the only orchestrator that runs — see
+        // docs/GEOGRAPHY-REFERENCE-DESIGN.md. The probe asks for the scheme THIS seed creates, not
+        // for "any scheme exists": a tenant that had added a scheme of its own would otherwise
+        // silently never receive Ghana's, which is the trap the job-architecture step below records.
+        new SeedStep(
+            "Ghana administrative geography (Region → District → Town → Community)",
+            ct => _context.Set<GeoScheme>()
+                          .AnyAsync(s => s.TenantId == tenantId
+                                      && s.Code == GhanaGeographySeeder.SchemeCode && !s.IsDeleted, ct),
+            ct => new GhanaGeographySeeder(_context, Log<GhanaGeographySeeder>()).SeedAsync(tenantId, ct)),
 
         new SeedStep(
             "Identification types",
