@@ -91,7 +91,7 @@ public sealed class RecurringJournalAutomaticReversalTests
         result.PostedCount.Should().Be(1);
         posting.LastRequest.Should().NotBeNull();
         posting.LastRequest!.PostingDate.Should().Be(new DateTime(2026, 9, 2));
-        posting.LastRequest.BookClassification.Should().Be("MANAGEMENT");
+        posting.LastRequest.AccountingBookCode.Should().Be("MANAGEMENT");
         posting.LastRequest.ReversalOfJournalEntryId.Should().Be(fixture.JournalId);
         posting.LastRequest.Lines[0].ExchangeRateId.Should().Be(exchangeRateId);
         posting.LastRequest.Lines[0].FinanceDimensionSetId.Should().Be(dimensionSetId);
@@ -218,7 +218,7 @@ public sealed class RecurringJournalAutomaticReversalTests
 
     private sealed class FakeSystemPostingEngine(Guid originalJournalId, IReadOnlyList<FinancePostingLineDto>? lines = null) : IFinanceSystemPostingEngine
     {
-        public FinancePostingRequestDto? LastRequest { get; private set; }
+        public FinancePostingRequestV2Dto? LastRequest { get; private set; }
         public int PostCount { get; private set; }
         public bool ReturnDuplicate { get; set; }
         public Exception? Failure { get; set; }
@@ -232,7 +232,7 @@ public sealed class RecurringJournalAutomaticReversalTests
                 ReversalLines = lines ?? [new() { AccountId = Guid.NewGuid(), CreditAmount = 100m }, new() { AccountId = Guid.NewGuid(), DebitAmount = 100m }]
             });
 
-        public Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestDto request, string systemActor,
+        public Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestV2Dto request, string systemActor,
             CancellationToken cancellationToken = default)
         {
             PostCount++;
