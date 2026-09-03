@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 3 — classification-driven report layouts |
-| Status | `REVIEWING` |
+| Status | `PHASE_3_COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
 | Branch | `codex/finance-report-layout-classifications-phase3` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Corrected Phase 3 stack at `534fa896`; independent re-review in progress |
+| Review status | Approved and integrated through primary commit `48610595` |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -74,12 +74,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
 | 1 | `ab53f09e503efd6fee9205129f841b1f5de4bce2` | `CHANGES_REQUIRED` | P2: V2 JSON imports accept classification ID without the required portable stable code; UI view access treats action permissions as substitutes for the API's Finance.Read prerequisite; publication fingerprints omit the frozen book name and per-row book ID/code. Corrections and targeted regression requirements were sent directly. The unrelated Supplier Returns lockdown baseline was independently confirmed unchanged. | Not integrated |
-| 2 | `534fa89696bed17cfe4e6f456b02df760ff98ed7` | Independent re-review pending | Correction commit requires portable stable classification codes for V2 JSON import, aligns UI prerequisites with `Finance.Read`, and upgrades the publication fingerprint to v2 covering all frozen book evidence. Implementer reports 48 backend and 15 frontend tests passing, targeted lint and EF no-pending-model green. | Pending |
+| 2 | `534fa89696bed17cfe4e6f456b02df760ff98ed7` | `APPROVED` | All three findings closed. Independent verification passed 24 backend and 15 frontend tests, targeted ESLint, EF no-pending-model and diff checks. V2 imports require portable stable classification codes; UI/API read authority is aligned; publication fingerprint v2 covers all frozen book evidence and fails closed on tampering. | Four commits cherry-picked without conflict as `b4af3e4d`, `657cc5d4`, `b6dd0611`, and `48610595`. Primary task-owned blobs match the reviewed tree. Primary verification passed: test-project build with 0 errors, 24 focused backend tests, 15 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Migration remains unapplied. |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 3 returned a clean corrected four-commit stack at `534fa89696bed17cfe4e6f456b02df760ff98ed7` from exact base `d7bf1767`. Independent re-review is active. The publication-snapshot migration and all earlier migrations remain unapplied; no persistent database was mutated.
+Last verified durable point: Phase 3 is independently approved and integrated through primary HEAD `48610595fc226f597c51536ac55db494a90b375c`. The primary test-project build passed with 0 errors after an initial environmental Roslyn `csc.dll` exit-code `-1` was cleared by rerunning the implementer's exact build command. Twenty-four focused backend tests, fifteen frontend tests, targeted ESLint, EF no-pending-model and diff checks passed. The publication-snapshot migration and all earlier migrations remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Complete independent Phase 3 re-review and rerun the required gates. Integrate only after approval, then immediately activate Phase 4 and continue through Phase 6. Do not apply migrations or cross any other escalation gate without user authorization.
+Commit this Phase 3 integration checkpoint, then immediately activate Phase 4 — book-specific revaluation policy and execution — from that exact primary commit. Continue through Phase 6 after independent review and clean integration. Do not apply migrations or cross any other escalation gate without user authorization.
