@@ -107,7 +107,9 @@ export default function FinanceDashboardPage() {
                     const amount = debit - credit;
                     expenses += amount;
                     monthly[month].expenses += amount;
-                    const groupName = account?.accountCategory || account?.accountSubCategory || account?.accountName || 'Other Expenses';
+                    const defaultMapping = account?.accountingBooks?.find(mapping => mapping.isEnabled && mapping.accountingBookIsDefault)
+                        ?? account?.accountingBooks?.find(mapping => mapping.isEnabled);
+                    const groupName = defaultMapping?.accountClassificationName || account?.accountName || 'Unclassified expenses';
                     expenseBreakdown.set(groupName, (expenseBreakdown.get(groupName) || 0) + amount);
                 }
             }
@@ -116,8 +118,10 @@ export default function FinanceDashboardPage() {
         for (const entry of postedEntries) {
             for (const line of entry.transactions) {
                 const account = accountsById.get(line.accountId);
-                const name = `${account?.accountName || line.accountName || ''} ${account?.accountNumber || line.accountNumber || ''}`.toLowerCase();
-                if (getAccountType(account) === 'Asset' && (name.includes('cash') || name.includes('bank'))) {
+                const isCash = account?.accountingBooks?.some(mapping => mapping.isEnabled
+                    && (mapping.accountClassificationSystemRole === 'Cash'
+                        || mapping.accountClassificationSystemRole === 'Bank'));
+                if (getAccountType(account) === 'Asset' && isCash) {
                     cashOnHand += (line.debitAmount || 0) - (line.creditAmount || 0);
                 }
             }

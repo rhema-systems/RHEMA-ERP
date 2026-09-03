@@ -11,14 +11,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, ArrowLeft, Save, Loader2, Eye, Layers, Wand2, Check, ChevronsUpDown } from 'lucide-react';
+import { Plus, ArrowLeft, Save, Loader2, Eye, Layers, Wand2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructure, SegmentLookupValue, FinanceSettings, AccountBookAssignmentInput } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
 import { AccountBookAssignments } from '@/components/finance/accounts/account-book-assignments';
 
 interface SegmentValue {
@@ -27,76 +24,6 @@ interface SegmentValue {
     value: string;
     isValid: boolean;
 }
-
-// IFRS/IAS/GAAP Standard Account Types
-const DETAILED_ACCOUNT_TYPES: { group: string; types: { label: string; value: string; type: AccountType }[] }[] = [
-    {
-        group: 'Assets',
-        types: [
-            { label: 'Cash and Cash Equivalents', value: 'Cash and Cash Equivalents', type: 'Asset' },
-            { label: 'Short-Term Investments', value: 'Short-Term Investments', type: 'Asset' },
-            { label: 'Accounts Receivable (Trade Debtors)', value: 'Accounts Receivable', type: 'Asset' },
-            { label: 'Inventory (Stock)', value: 'Inventory', type: 'Asset' },
-            { label: 'Prepaid Expenses', value: 'Prepaid Expenses', type: 'Asset' },
-            { label: 'Property, Plant & Equipment (PPE)', value: 'Property, Plant & Equipment', type: 'Asset' },
-            { label: 'Intangible Assets', value: 'Intangible Assets', type: 'Asset' },
-            { label: 'Goodwill', value: 'Goodwill', type: 'Asset' },
-            { label: 'Long-Term Investments', value: 'Long-Term Investments', type: 'Asset' },
-            { label: 'Deferred Tax Assets', value: 'Deferred Tax Assets', type: 'Asset' },
-            { label: 'Other Assets', value: 'Other Assets', type: 'Asset' },
-        ]
-    },
-    {
-        group: 'Liabilities',
-        types: [
-            { label: 'Accounts Payable (Trade Creditors)', value: 'Accounts Payable', type: 'Liability' },
-            { label: 'Accrued Liabilities', value: 'Accrued Liabilities', type: 'Liability' },
-            { label: 'Short-Term Debt / Bank Overdrafts', value: 'Short-Term Debt', type: 'Liability' },
-            { label: 'Deferred Revenue (Unearned Income)', value: 'Deferred Revenue', type: 'Liability' },
-            { label: 'Tax Payable', value: 'Tax Payable', type: 'Liability' },
-            { label: 'Long-Term Debt', value: 'Long-Term Debt', type: 'Liability' },
-            { label: 'Lease Liabilities', value: 'Lease Liabilities', type: 'Liability' },
-            { label: 'Provisions', value: 'Provisions', type: 'Liability' },
-            { label: 'Deferred Tax Liabilities', value: 'Deferred Tax Liabilities', type: 'Liability' },
-            { label: 'Other Liabilities', value: 'Other Liabilities', type: 'Liability' },
-        ]
-    },
-    {
-        group: 'Equity',
-        types: [
-            { label: 'Share Capital (Common/Preferred)', value: 'Share Capital', type: 'Equity' },
-            { label: 'Retained Earnings', value: 'Retained Earnings', type: 'Equity' },
-            { label: 'Additional Paid-In Capital', value: 'Additional Paid-In Capital', type: 'Equity' },
-            { label: 'Revaluation Surplus', value: 'Revaluation Surplus', type: 'Equity' },
-            { label: 'Other Comprehensive Income', value: 'Other Comprehensive Income', type: 'Equity' },
-            { label: 'Dividends Declared', value: 'Dividends Declared', type: 'Equity' },
-        ]
-    },
-    {
-        group: 'Revenue',
-        types: [
-            { label: 'Operating Revenue (Sales)', value: 'Operating Revenue', type: 'Revenue' },
-            { label: 'Service Revenue', value: 'Service Revenue', type: 'Revenue' },
-            { label: 'Interest Income', value: 'Interest Income', type: 'Revenue' },
-            { label: 'Dividend Income', value: 'Dividend Income', type: 'Revenue' },
-            { label: 'Rental Income', value: 'Rental Income', type: 'Revenue' },
-            { label: 'Other Income', value: 'Other Income', type: 'Revenue' },
-        ]
-    },
-    {
-        group: 'Expenses',
-        types: [
-            { label: 'Cost of Goods Sold (COGS)', value: 'Cost of Goods Sold', type: 'Expense' },
-            { label: 'Selling, General & Admin (SG&A)', value: 'Operating Expense', type: 'Expense' },
-            { label: 'Personnel / Payroll Expenses', value: 'Personnel Expense', type: 'Expense' },
-            { label: 'Rent & Utilities', value: 'Rent and Utilities', type: 'Expense' },
-            { label: 'Depreciation & Amortization', value: 'Depreciation and Amortization', type: 'Expense' },
-            { label: 'Finance Costs (Interest Expense)', value: 'Interest Expense', type: 'Expense' },
-            { label: 'Income Tax Expense', value: 'Tax Expense', type: 'Expense' },
-            { label: 'Other Expenses', value: 'Other Expenses', type: 'Expense' },
-        ]
-    }
-];
 
 export default function NewAccountPage() {
     const router = useRouter();
@@ -107,23 +34,6 @@ export default function NewAccountPage() {
     const [segments, setSegments] = useState<SegmentStructure[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-
-    const [openAccountType, setOpenAccountType] = useState(false);
-    const [accountTypeSearch, setAccountTypeSearch] = useState('');
-
-    // Filter account types based on search
-    const filteredAccountTypes = useMemo(() => {
-        if (!accountTypeSearch) return DETAILED_ACCOUNT_TYPES;
-        const search = accountTypeSearch.toLowerCase();
-        return DETAILED_ACCOUNT_TYPES.map(group => ({
-            ...group,
-            types: group.types.filter(type =>
-                type.label.toLowerCase().includes(search) ||
-                type.value.toLowerCase().includes(search) ||
-                group.group.toLowerCase().includes(search)
-            )
-        })).filter(group => group.types.length > 0);
-    }, [accountTypeSearch]);
 
     // Segment values for segmented COA
     const [segmentValues, setSegmentValues] = useState<Record<string, string>>({});
@@ -146,66 +56,6 @@ export default function NewAccountPage() {
         budgetTrackingEnabled: false,
         status: 'Active' as AccountStatus,
     });
-    // ... (skip lines until render)
-    // ...
-    <div className="space-y-2">
-        <Label htmlFor="accountType">Account Classification (IFRS/GAAP)</Label>
-        <Popover open={openAccountType} onOpenChange={setOpenAccountType}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={openAccountType}
-                    className="w-full justify-between font-normal"
-                >
-                    {formData.accountSubCategory
-                        ? DETAILED_ACCOUNT_TYPES.flatMap(g => g.types).find(t => t.value === formData.accountSubCategory)?.label
-                        : "Select detailed account type..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[400px] p-0" align="start">
-                <Command>
-                    <CommandInput placeholder="Search account types..." />
-                    <CommandList>
-                        <CommandEmpty>No account type found.</CommandEmpty>
-                        {DETAILED_ACCOUNT_TYPES.map((group) => (
-                            <CommandGroup key={group.group} heading={group.group}>
-                                {group.types.map((type) => (
-                                    <CommandItem
-                                        key={type.value}
-                                        value={type.label} // Searching by label is better
-                                        onSelect={() => {
-                                            setFormData({
-                                                ...formData,
-                                                accountType: type.type,
-                                                accountSubCategory: type.value,
-                                                accountName: formData.accountName ? formData.accountName : type.label
-                                            });
-                                            setOpenAccountType(false);
-                                        }}
-                                    >
-                                        <Check
-                                            className={cn(
-                                                "mr-2 h-4 w-4",
-                                                formData.accountSubCategory === type.value ? "opacity-100" : "opacity-0"
-                                            )}
-                                        />
-                                        {type.label}
-                                    </CommandItem>
-                                ))}
-                            </CommandGroup>
-                        ))}
-                    </CommandList>
-                </Command>
-            </PopoverContent>
-        </Popover>
-
-        <div className="text-xs text-muted-foreground mt-1">
-            Core Type: <Badge variant="outline" className="ml-1">{formData.accountType}</Badge>
-        </div>
-    </div>
-
     // Load settings and segments
     useEffect(() => {
         const loadData = async () => {
@@ -374,8 +224,8 @@ export default function NewAccountPage() {
                 accountNumber: formData.accountNumber,
                 accountName: formData.accountName,
                 accountType: formData.accountType,
-                accountCategory: formData.accountSubCategory || undefined,
-                accountSubCategory: formData.accountSubCategory || undefined,
+                accountCategory: undefined,
+                accountSubCategory: undefined,
                 cashFlowClassification: formData.cashFlowClassification || null,
                 currencyCode: formData.currencyCode,
                 isMultiCurrency: formData.isMultiCurrency,
@@ -655,69 +505,15 @@ export default function NewAccountPage() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="accountType">Account Classification (IFRS/GAAP)</Label>
-                                    <Popover open={openAccountType} onOpenChange={setOpenAccountType}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                aria-expanded={openAccountType}
-                                                className="w-full justify-between font-normal"
-                                            >
-                                                {formData.accountSubCategory
-                                                    ? DETAILED_ACCOUNT_TYPES.flatMap(g => g.types).find(t => t.value === formData.accountSubCategory)?.label
-                                                    : "Select detailed account type..."}
-                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[500px] p-0" align="start">
-                                            <Command shouldFilter={false}>
-                                                <CommandInput
-                                                    placeholder="Search account types..."
-                                                    value={accountTypeSearch}
-                                                    onValueChange={setAccountTypeSearch}
-                                                />
-                                                <CommandList>
-                                                    <CommandEmpty>No account type found.</CommandEmpty>
-                                                    {filteredAccountTypes.map((group) => (
-                                                        <CommandGroup key={group.group} heading={group.group}>
-                                                            {group.types.map((type) => {
-                                                                const handleSelect = () => {
-                                                                    setFormData(prev => ({
-                                                                        ...prev,
-                                                                        accountType: type.type,
-                                                                        accountSubCategory: type.value,
-                                                                        accountName: prev.accountName ? prev.accountName : type.label
-                                                                    }));
-                                                                    setOpenAccountType(false);
-                                                                    setAccountTypeSearch('');
-                                                                };
-                                                                return (
-                                                                    <div
-                                                                        key={`${group.group}-${type.value}`}
-                                                                        onClick={handleSelect}
-                                                                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                                                                    >
-                                                                        <Check
-                                                                            className={cn(
-                                                                                "mr-2 h-4 w-4",
-                                                                                formData.accountSubCategory === type.value ? "opacity-100" : "opacity-0"
-                                                                            )}
-                                                                        />
-                                                                        {type.label}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </CommandGroup>
-                                                    ))}
-                                                </CommandList>
-                                            </Command>
-                                        </PopoverContent>
-                                    </Popover>
-
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                        Core Type: <Badge variant="outline" className="ml-1">{formData.accountType}</Badge>
-                                    </div>
+                                    <Label htmlFor="accountType">Core Account Type *</Label>
+                                    <Select value={formData.accountType} onValueChange={(value) => {
+                                        setFormData({ ...formData, accountType: value as AccountType, accountSubCategory: '' });
+                                        setAccountingBooks(current => current.map(mapping => ({ ...mapping, accountClassificationId: null })));
+                                    }}>
+                                        <SelectTrigger id="accountType"><SelectValue /></SelectTrigger>
+                                        <SelectContent>{(['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as AccountType[]).map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">Choose the book-specific classification below. Options are loaded from Finance configuration.</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="description">Description</Label>

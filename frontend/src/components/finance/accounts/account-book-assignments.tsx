@@ -79,7 +79,8 @@ export function AccountBookAssignments({ accountType, value, onChange, historica
             const options = classifications.filter(item => item.accountingBookId === book.id
                 && item.coreAccountType === accountType
                 && item.status === 'Active'
-                && item.isPostingClassification);
+                && item.isPostingClassification
+                && item.isLeaf);
             const historicalClassification = historical?.accountClassificationId
                 ? classifications.find(item => item.id === historical.accountClassificationId)
                 : undefined;

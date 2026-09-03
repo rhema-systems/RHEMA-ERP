@@ -169,9 +169,11 @@ export interface AccountAccountingBook {
     accountingBookId: string;
     accountingBookCode: string;
     accountingBookName: string;
+    accountingBookIsDefault: boolean;
     accountClassificationId?: string | null;
     accountClassificationCode?: string | null;
     accountClassificationName?: string | null;
+    accountClassificationSystemRole?: string | null;
     accountClassificationStatus?: 'Draft' | 'Active' | 'Retired' | null;
     isEnabled: boolean;
     isMigrationReady: boolean;
@@ -192,6 +194,8 @@ export interface AccountClassification {
     accountingBookId: string;
     accountingBookCode: string;
     parentClassificationId?: string | null;
+    parentClassificationCode?: string | null;
+    parentClassificationName?: string | null;
     code: string;
     name: string;
     description?: string;
@@ -201,7 +205,45 @@ export interface AccountClassification {
     isPostingClassification: boolean;
     status: 'Draft' | 'Active' | 'Retired';
     displayOrder: number;
+    childCount: number;
+    totalAccountCount: number;
+    enabledAccountCount: number;
+    isLeaf: boolean;
+    canRetire: boolean;
     rowVersion: string;
+}
+
+export interface SaveAccountClassification {
+    accountingBookId: string;
+    parentClassificationId?: string | null;
+    code: string;
+    name: string;
+    description?: string | null;
+    coreAccountType: AccountType;
+    defaultRevaluationTreatment: 'Exclude' | 'Include';
+    systemRole?: string | null;
+    isPostingClassification: boolean;
+    status: 'Draft' | 'Active' | 'Retired';
+    displayOrder: number;
+    rowVersion?: string;
+}
+
+export interface AccountClassificationUsage {
+    accountAccountingBookId: string;
+    accountId: string;
+    accountCode: string;
+    accountName: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    isEnabled: boolean;
+}
+
+export interface AccountClassificationWhereUsed {
+    classificationId: string;
+    classificationCode: string;
+    totalMappings: number;
+    enabledMappings: number;
+    mappings: AccountClassificationUsage[];
 }
 
 export interface Account {

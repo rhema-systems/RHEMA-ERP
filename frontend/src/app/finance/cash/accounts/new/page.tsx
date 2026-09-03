@@ -69,23 +69,13 @@ export default function NewBankAccountPage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                // Fetch Asset accounts for the GL selector
                 const accountsData = await financeDataService.getAccounts({ accountType: 'Asset', status: 'Active' });
-                // Filter for Cash and Cash Equivalents
                 const cashAccounts = accountsData.filter(a =>
-                    a.accountSubCategory === 'Cash and Cash Equivalents' ||
-                    a.accountCategory === 'Cash and Cash Equivalents' ||
-                    a.accountName.toLowerCase().includes('cash') ||
-                    a.accountName.toLowerCase().includes('bank')
+                    a.accountingBooks?.some(mapping => mapping.isEnabled
+                        && (mapping.accountClassificationSystemRole === 'Cash'
+                            || mapping.accountClassificationSystemRole === 'Bank'))
                 );
-                setGlAccounts(cashAccounts.length > 0 ? cashAccounts : accountsData); // Fallback to all assets if no specific cash accounts found, or just show filtered? User asked for filtering. Let's prioritize filtered but maybe keep assets if empty logic is risky. User explicitly asked "let's filter", so showing only cash accounts is safer.
-
-                if (cashAccounts.length > 0) {
-                    setGlAccounts(cashAccounts);
-                } else {
-                    // If no specific "Cash" category found, fallback to Assets but sorted by code
-                    setGlAccounts(accountsData.sort((a, b) => a.accountCode.localeCompare(b.accountCode)));
-                }
+                setGlAccounts(cashAccounts.sort((a, b) => a.accountCode.localeCompare(b.accountCode)));
 
                 // Fetch Currencies
                 const currenciesData = await financeDataService.getCurrencies({ isActive: true });

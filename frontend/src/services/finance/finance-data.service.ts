@@ -7,6 +7,8 @@ import type {
     Account,
     AccountingBook,
     AccountClassification,
+    AccountClassificationWhereUsed,
+    SaveAccountClassification,
     Currency,
     ExchangeRate,
     FiscalYear,
@@ -144,6 +146,22 @@ class FinanceDataService {
         if (includeInactive) queryParams.append('includeInactive', 'true');
         const suffix = queryParams.toString() ? `?${queryParams}` : '';
         return apiService.get<AccountClassification[]>(`/finance/account-classifications${suffix}`);
+    }
+
+    async getAccountClassificationWhereUsed(id: string): Promise<AccountClassificationWhereUsed> {
+        return apiService.get<AccountClassificationWhereUsed>(`/finance/account-classifications/${id}/where-used`);
+    }
+
+    async createAccountClassification(dto: SaveAccountClassification): Promise<AccountClassification> {
+        return apiService.post<AccountClassification>('/finance/account-classifications', dto);
+    }
+
+    async updateAccountClassification(id: string, dto: SaveAccountClassification): Promise<AccountClassification> {
+        return apiService.put<AccountClassification>(`/finance/account-classifications/${id}`, dto);
+    }
+
+    async retireAccountClassification(id: string, reason: string, rowVersion: string): Promise<AccountClassification> {
+        return apiService.post<AccountClassification>(`/finance/account-classifications/${id}/retire`, { reason, rowVersion });
     }
 
     async getAccounts(filters?: {

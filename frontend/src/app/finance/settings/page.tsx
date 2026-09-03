@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote, ShieldCheck, Undo2 } from 'lucide-react';
+import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote, ShieldCheck, Undo2, Tags } from 'lucide-react';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
@@ -325,6 +325,12 @@ export default function FinanceSettingsPage() {
                                 </Button>
                             </Link>
                         )}
+                        <Link href="/finance/settings/account-classifications">
+                            <Button variant="outline" size="sm">
+                                <Tags className="mr-2 h-4 w-4" />
+                                Account Classifications
+                            </Button>
+                        </Link>
                         <Link href="/finance/accounts">
                             <Button variant="outline" size="sm">
                                 <DollarSign className="mr-2 h-4 w-4" />
