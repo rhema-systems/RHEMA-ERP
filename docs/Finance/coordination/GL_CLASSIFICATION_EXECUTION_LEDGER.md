@@ -19,7 +19,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | Inactive; manual coordinator monitoring |
+| Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
 | Review status | Phase 3 implementation in progress; independent review required before integration |
 | Connectivity state | Online at activation |
 
@@ -36,8 +36,10 @@ The user authorized the coordinator to:
 
 - communicate with and manage the active implementing task directly;
 - review results and issue corrections without user relaying;
-- authorize the next already-approved phase after satisfactory review;
+- continue automatically through Phases 3–6, issuing each next phase immediately after satisfactory independent review and integration;
 - cherry-pick clean, reviewed Finance commits into the primary Finance branch.
+
+The implementing task should not be left idle between these approved phases. User intervention is reserved for the escalation gates below or an unrecoverable blocker.
 
 The coordinator must stop at the escalation gates in the coordination protocol, including migrations/database mutations, cross-module implementation changes, destructive actions, conflicts with concurrent work, pushes, and PR operations.
 
@@ -79,4 +81,4 @@ Last verified durable point: Phase 2 is independently approved and recorded thro
 
 ## Next action
 
-Monitor the Phase 3 implementation handoff. Independently review publication reproducibility, transactionality, permissions, concurrency, import compatibility and migration metadata; send corrections directly until approved. Integrate only a clean approved stack and do not apply migrations or begin Phase 4 without authorization.
+Monitor the Phase 3 implementation handoff. Independently review publication reproducibility, transactionality, permissions, concurrency, import compatibility and migration metadata; send corrections directly until approved. Integrate only a clean approved stack, then immediately activate Phase 4 and continue through Phase 6. Do not apply migrations or cross any other escalation gate without user authorization.
