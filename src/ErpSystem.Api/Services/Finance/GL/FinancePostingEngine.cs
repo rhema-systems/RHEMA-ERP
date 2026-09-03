@@ -587,8 +587,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             throw new InvalidOperationException("Reversal journal entries cannot be reversed from this action.");
         }
 
-        if (validation.AllowsHistoricalMappingException)
-            EnsureExactReversalLines(original, validation);
+        // Every reversal entry point must reproduce immutable posting evidence exactly. The
+        // trusted server path's historical exception relaxes only current book/account-mapping
+        // availability; it never relaxes account, amount, currency, rate, lineage, or dimension
+        // equality for caller-supplied V1/V2 reversal metadata.
+        EnsureExactReversalLines(original, validation);
 
         return original;
     }

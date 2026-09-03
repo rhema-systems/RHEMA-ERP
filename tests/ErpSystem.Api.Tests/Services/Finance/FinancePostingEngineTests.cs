@@ -918,6 +918,119 @@ public sealed class FinancePostingEngineTests
         (await db.JournalEntries.CountAsync()).Should().Be(2);
     }
 
+    public static TheoryData<bool, string> ExactReversalMutationCases => new()
+    {
+        { false, "account" },
+        { false, "side" },
+        { false, "amount" },
+        { false, "currency" },
+        { false, "rate" },
+        { false, "source-line" },
+        { false, "dimensions" },
+        { true, "account" },
+        { true, "side" },
+        { true, "amount" },
+        { true, "currency" },
+        { true, "rate" },
+        { true, "source-line" },
+        { true, "dimensions" }
+    };
+
+    [Theory]
+    [MemberData(nameof(ExactReversalMutationCases))]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task PostAsync_ShouldRejectAlteredExactReversalEvidence_ForV1AndV2(
+        bool useV2,
+        string mutation)
+    {
+        var fixture = await CreateExactReversalFixtureAsync();
+        await using var db = fixture.Db;
+        var service = CreateService(db, fixture.TenantId);
+        var original = await service.PostAsync(fixture.OriginalRequest);
+        var plan = await service.GetReversalPlanAsync(
+            original.PostingEventId,
+            "Reject altered immutable evidence",
+            new DateTime(2026, 7, 5));
+        var lines = plan.ReversalLines.ToList();
+
+        switch (mutation)
+        {
+            case "account":
+                lines[0].AccountId = fixture.AlternateAccountId;
+                break;
+            case "side":
+                foreach (var line in lines)
+                {
+                    (line.DebitAmount, line.CreditAmount) = (line.CreditAmount, line.DebitAmount);
+                    (line.TransactionDebitAmount, line.TransactionCreditAmount) =
+                        (line.TransactionCreditAmount, line.TransactionDebitAmount);
+                }
+                break;
+            case "amount":
+                lines[0].CreditAmount = 3000m;
+                lines[0].TransactionCreditAmount = 200m;
+                lines[0].ForeignCurrencyAmount = 200m;
+                lines[1].DebitAmount = 3000m;
+                lines[1].TransactionDebitAmount = 3000m;
+                break;
+            case "currency":
+                lines[0].TransactionCurrency = "EUR";
+                lines[0].ExchangeRateId = fixture.EurRateId;
+                break;
+            case "rate":
+                lines[0].ExchangeRateId = fixture.AlternateUsdRateId;
+                break;
+            case "source-line":
+                lines[0].SourceDocumentLineId = Guid.NewGuid();
+                break;
+            case "dimensions":
+                lines[0].FinanceDimensionSetId = null;
+                lines[0].Dimensions = new[]
+                {
+                    new FinancePostingDimensionValueDto { DimensionCode = "PROJECT", ValueCode = "ALT" }
+                };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mutation), mutation, null);
+        }
+
+        var action = () => PostDirectReversalAsync(
+            service,
+            fixture.TenantId,
+            plan,
+            lines,
+            useV2);
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task PostAsync_ShouldAcceptUnchangedExactReversalPlan_ForV1AndV2(bool useV2)
+    {
+        var fixture = await CreateExactReversalFixtureAsync();
+        await using var db = fixture.Db;
+        var service = CreateService(db, fixture.TenantId);
+        var original = await service.PostAsync(fixture.OriginalRequest);
+        var plan = await service.GetReversalPlanAsync(
+            original.PostingEventId,
+            "Preserve immutable evidence",
+            new DateTime(2026, 7, 5));
+
+        var reversal = await PostDirectReversalAsync(
+            service,
+            fixture.TenantId,
+            plan,
+            plan.ReversalLines,
+            useV2);
+
+        reversal.PostingStatus.Should().Be("Posted");
+        (await db.JournalEntries.CountAsync()).Should().Be(2);
+    }
+
     [Fact]
     [Trait("Category", "FinanceDimensions")]
     public void Migration_ShouldAddDimensionFoundationAndNullablePostedLineLinkage()
@@ -1173,6 +1286,119 @@ public sealed class FinancePostingEngineTests
         db.ExchangeRates.Add(exchangeRate);
         return exchangeRate;
     }
+
+    private static async Task<ExactReversalFixture> CreateExactReversalFixtureAsync()
+    {
+        var tenantId = Guid.NewGuid();
+        var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, "1000", AccountType.Asset, isMultiCurrency: true);
+        var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var alternateCash = SeedAccount(db, tenantId, "1010", AccountType.Asset, isMultiCurrency: true);
+        var usdRate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        var alternateUsdRate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        alternateUsdRate.RateSource = "Alternative unit-test source";
+        var eurRate = SeedExchangeRate(db, tenantId, "EUR", 15m);
+        SeedDimensionValue(db, tenantId, "DEPARTMENT", "Department", "SALES", "Sales", 1);
+        SeedDimensionValue(db, tenantId, "PROJECT", "Project", "ALT", "Alternative", 2);
+        foreach (var accountId in new[] { cash.Id, alternateCash.Id })
+        {
+            foreach (var currency in new[] { "USD", "EUR" })
+            {
+                db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    AccountId = accountId,
+                    LinkedCurrencyCode = currency,
+                    IsActive = true,
+                    EffectiveDate = new DateTime(2026, 1, 1),
+                    RevaluationRequired = true,
+                    TransactionRateType = "Daily",
+                    RevaluationRateType = "Month-End"
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+
+        var request = CreateForeignCurrencyRequest(tenantId, cash.Id, revenue.Id);
+        request.Lines[0].ExchangeRateId = usdRate.Id;
+        request.Lines[0].SourceDocumentLineId = Guid.NewGuid();
+        request.Lines[1].SourceDocumentLineId = Guid.NewGuid();
+        foreach (var line in request.Lines)
+        {
+            line.Dimensions = new[]
+            {
+                new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "SALES" }
+            };
+        }
+
+        return new ExactReversalFixture(
+            db,
+            tenantId,
+            alternateCash.Id,
+            alternateUsdRate.Id,
+            eurRate.Id,
+            request);
+    }
+
+    private static Task<FinancePostingResultDto> PostDirectReversalAsync(
+        FinancePostingEngine service,
+        Guid tenantId,
+        FinanceReversalPlanDto plan,
+        IReadOnlyList<FinancePostingLineDto> lines,
+        bool useV2)
+    {
+        if (useV2)
+        {
+            return service.PostAsync(new FinancePostingRequestV2Dto
+            {
+                SourceModule = "TEST",
+                SourceDocumentType = "DirectReversalV2",
+                SourceDocumentId = Guid.NewGuid(),
+                SourceDocumentTenantId = tenantId,
+                ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+                ReversalReason = plan.Reason,
+                ReversalType = "Exact",
+                PostingAction = "Reverse",
+                Description = "Direct V2 exact reversal",
+                PostingDate = plan.ReversalDate,
+                JournalType = "System Generated",
+                AccountingBookCode = "IFRS",
+                FunctionalCurrencyCode = "GHS",
+                Lines = lines
+            });
+        }
+
+#pragma warning disable CS0618 // V1 remains supported during the coordinated producer cutover.
+        return service.PostAsync(new FinancePostingRequestDto
+        {
+            SourceModule = "TEST",
+            SourceDocumentType = "DirectReversalV1",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentTenantId = tenantId,
+            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+            ReversalReason = plan.Reason,
+            ReversalType = "Exact",
+            PostingAction = "Reverse",
+            Description = "Direct V1 exact reversal",
+            PostingDate = plan.ReversalDate,
+            JournalType = "System Generated",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS",
+            Lines = lines
+        });
+#pragma warning restore CS0618
+    }
+
+    private sealed record ExactReversalFixture(
+        ApplicationDbContext Db,
+        Guid TenantId,
+        Guid AlternateAccountId,
+        Guid AlternateUsdRateId,
+        Guid EurRateId,
+        FinancePostingRequestV2Dto OriginalRequest);
 
     private static FinancePostingRequestV2Dto CreateRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
     {
