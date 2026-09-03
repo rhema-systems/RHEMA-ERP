@@ -585,6 +585,7 @@ public sealed class FinancialStatementLayoutImportService
                 !mapping.IsDeleted &&
                 mapping.Account.TenantId == TenantId &&
                 !mapping.Account.IsDeleted)
+            .OrderBy(mapping => mapping.Account.AccountNumber)
             .Select(mapping => new LegacyAccount(
                 mapping.AccountId,
                 mapping.Account.AccountNumber,
@@ -594,7 +595,6 @@ public sealed class FinancialStatementLayoutImportService
                 mapping.Account.IFRSLineItem,
                 mapping.Account.BaseLineItem,
                 mapping.Account.LocalLineItem))
-            .OrderBy(account => account.AccountNumber)
             .ToListAsync(cancellationToken);
 
         var compatible = accounts
