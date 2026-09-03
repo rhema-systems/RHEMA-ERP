@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 4 — book-specific revaluation policy and execution |
-| Status | `REVIEWING` |
+| Status | `COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Branch | `codex/finance-revaluation-policy-phase4` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Final exactly-once correction at `11783478`; independent re-review active |
+| Review status | `APPROVED`; all Phase 4 findings closed and the seven-commit stack is integrated |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -82,12 +82,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 |---|---|---|---|---|
 | 1 | `1716ba43f18758685ef4b56c3796486e172db4f6` | `CHANGES_REQUIRED` | P1: posting can omit the preview fingerprint and its domain omits governance-warning and gain/loss-account evidence. P1: an ancillary failure after central posting can downgrade an already-committed batch to failed and make retry unrecoverable. P2: revaluation UI lacks Finance.Read/Run permission parity and masks history errors as empty. P2: account policy UI performs two independent writes concurrently and can partially save while reporting a combined failure. Independent checks passed 170 focused backend and 5 frontend tests, targeted ESLint, EF no-pending-model and diff checks; 38 broader failures were confirmed as pre-existing Phase 1A fixture debt. Corrections and fault-injection/UI regression gates were sent directly. | Not integrated |
 | 2 | `d385b7f04fded7f5fc9cbd7768b006ef43a1845f` | `CHANGES_REQUIRED` | The original four findings are substantively closed, but one P1 remains: ancillary finalization after a committed central posting is not idempotent. A retry after partial rate-use/audit persistence can increment rate usage twice and duplicate audit events before reaching Posted. Independent verification passed 176 backend and 16 frontend tests, ESLint, EF no-pending-model and diff checks. A narrow concurrency-safe correction and fault injection after each ancillary stage were sent directly. | Not integrated |
-| 3 | `11783478` | Independent re-review active | Narrow correction adds durable exactly-once rate-use and audit finalization, amends the unapplied Phase 4 migration/model metadata, and adds fault-injection/idempotency coverage. | Pending |
+| 3 | `1178347853a8120836f606a3ce270069024cb7e6` | `APPROVED` | Narrow correction adds durable exactly-once rate-use and audit finalization, amends the unapplied Phase 4 migration/model metadata, and adds fault-injection/idempotency coverage. Independent verification confirmed exact recovery identity, idempotent rate-use/audit evidence, staged fault recovery, EF/model alignment, and a clean worktree. | Seven commits cherry-picked without conflict as `89db61a1`, `21acfbbe`, `5d9ce6aa`, `08f171f2`, `280104a8`, `70e4defc`, and `dda86fe0`. All 49 task-owned blobs match the reviewed tree. Primary verification passed: test-project build with 0 errors, 197 focused Phase 4 tests, 16 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Three additional FinanceAuditFoundation tests fail on the documented unrelated budget-control fixture baseline. Migration remains unapplied. |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 4 now has a clean seventh commit `11783478` on top of `d385b7f0`, addressing the remaining ancillary-finalization P1 with durable exactly-once evidence and staged failure recovery. Independent re-review is active. Migration `20260903190453_AddBookScopedFxRevaluationPolicy` was amended but remains unapplied with all earlier migrations; no persistent database was mutated.
+Last verified durable point: Phase 4 is independently approved and integrated through primary commit `dda86fe0d88f56c6c36f7fca5d0e5e5715d5e064`. The primary build, 197 focused backend tests, 16 frontend tests, ESLint, EF model-drift gate, task-owned blob comparison, and diff check passed. Three unrelated manual-journal audit fixture tests remain blocked by the existing missing budget-control setup. Migration `20260903190453_AddBookScopedFxRevaluationPolicy` and all earlier migrations remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Complete independent review of commit `11783478`, integrate the full seven-commit Phase 4 stack only after approval, rerun primary gates, then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
+Commit this Phase 4 completion checkpoint, then immediately activate Phase 5 from that exact primary commit. Do not apply migrations or cross any other escalation gate without user authorization.
