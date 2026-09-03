@@ -7,24 +7,28 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Edit, Trash2, DollarSign, Loader2, Plus, Link2, X, RefreshCcw, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { Account, AccountType, AccountStatus, AccountCurrencyLink, Currency, AddCurrencyLinkDto, ExchangeRateQuoteSide, UpdateCurrencyLinkRatePolicyDto } from '@/types/finance';
+import type { Account, AccountType, AccountStatus, AccountCurrencyLink, AccountBookCurrencyPolicy, Currency, AddCurrencyLinkDto, ExchangeRateQuoteSide, UpdateCurrencyLinkRatePolicyDto } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = React.use(params);
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canOverrideFxPolicy = hasPermission('Finance.FX.Policy.Override');
+    const canApproveFxPolicy = hasPermission('Finance.FX.Policy.Approve');
 
     const [account, setAccount] = useState<Account | null>(null);
     const [currencies, setCurrencies] = useState<Currency[]>([]);
     const [currencyLinks, setCurrencyLinks] = useState<AccountCurrencyLink[]>([]);
+    const [revaluationPolicies, setRevaluationPolicies] = useState<AccountBookCurrencyPolicy[]>([]);
     const [loading, setLoading] = useState(true);
     const [addDialogOpen, setAddDialogOpen] = useState(false);
     const [addingLink, setAddingLink] = useState(false);
@@ -32,11 +36,18 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     const [editingLink, setEditingLink] = useState<AccountCurrencyLink | null>(null);
     const [savingPolicy, setSavingPolicy] = useState(false);
     const [policyForm, setPolicyForm] = useState<UpdateCurrencyLinkRatePolicyDto | null>(null);
+    const [selectedPolicyBookId, setSelectedPolicyBookId] = useState('');
+    const [policyChoice, setPolicyChoice] = useState<'inherit' | 'include' | 'exclude'>('inherit');
+    const [policyReason, setPolicyReason] = useState('');
+    const [confirmNonstandard, setConfirmNonstandard] = useState(false);
+    const [decisionPolicy, setDecisionPolicy] = useState<AccountBookCurrencyPolicy | null>(null);
+    const [decisionAction, setDecisionAction] = useState<'approve' | 'reject'>('approve');
+    const [decisionReason, setDecisionReason] = useState('');
+    const [decidingPolicy, setDecidingPolicy] = useState(false);
 
     // New link form data
     const [newLink, setNewLink] = useState<Partial<AddCurrencyLinkDto>>({
         linkedCurrencyCode: '',
-        revaluationRequired: true,
         revaluationFrequency: 'Monthly',
         transactionRateType: 'Daily',
         transactionQuoteSide: 'Mid',
@@ -62,8 +73,12 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
 
                 // Load currency links if multi-currency enabled
                 if (accountData.isMultiCurrency) {
-                    const links = await financeDataService.getAccountCurrencyLinks(id);
+                    const [links, policies] = await Promise.all([
+                        financeDataService.getAccountCurrencyLinks(id),
+                        financeDataService.getAccountBookCurrencyPolicies(id),
+                    ]);
                     setCurrencyLinks(links);
+                    setRevaluationPolicies(policies);
                 }
             } catch (error) {
                 console.error('Error loading account:', error);
@@ -131,6 +146,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
 
             const addedLink = await financeDataService.addAccountCurrencyLink(id, newLink as AddCurrencyLinkDto);
             setCurrencyLinks([...currencyLinks, addedLink]);
+            setRevaluationPolicies(await financeDataService.getAccountBookCurrencyPolicies(id));
 
             toast({
                 title: 'Success',
@@ -140,7 +156,6 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
             setAddDialogOpen(false);
             setNewLink({
                 linkedCurrencyCode: '',
-                revaluationRequired: true,
                 revaluationFrequency: 'Monthly',
                 transactionRateType: 'Daily',
                 transactionQuoteSide: 'Mid',
@@ -182,9 +197,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     };
 
     const openRatePolicyDialog = (link: AccountCurrencyLink) => {
+        const availablePolicies = revaluationPolicies.filter(policy => policy.accountCurrencyLinkId === link.id);
+        const selected = availablePolicies[0];
         setEditingLink(link);
         setPolicyForm({
-            revaluationRequired: link.revaluationRequired,
             revaluationFrequency: link.revaluationFrequency,
             transactionRateType: link.transactionRateType,
             transactionQuoteSide: link.transactionQuoteSide || 'Mid',
@@ -192,25 +208,91 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
             revaluationQuoteSide: link.revaluationQuoteSide || 'Mid',
             notes: link.notes,
         });
+        setSelectedPolicyBookId(selected?.accountingBookId || '');
+        setPolicyChoice(selected?.revaluationOverride == null ? 'inherit' : selected.revaluationOverride ? 'include' : 'exclude');
+        setPolicyReason('');
+        setConfirmNonstandard(false);
+    };
+
+    const selectedPolicy = revaluationPolicies.find(policy =>
+        policy.accountCurrencyLinkId === editingLink?.id && policy.accountingBookId === selectedPolicyBookId);
+
+    const selectPolicyBook = (bookId: string) => {
+        const selected = revaluationPolicies.find(policy =>
+            policy.accountCurrencyLinkId === editingLink?.id && policy.accountingBookId === bookId);
+        setSelectedPolicyBookId(bookId);
+        setPolicyChoice(selected?.revaluationOverride == null ? 'inherit' : selected.revaluationOverride ? 'include' : 'exclude');
+        setPolicyReason('');
+        setConfirmNonstandard(false);
     };
 
     const handleSaveRatePolicy = async () => {
-        if (!editingLink || !policyForm) return;
+        if (!editingLink || !policyForm || !selectedPolicy) return;
+        if (policyReason.trim().length < 5) {
+            toast({ title: 'Reason required', description: 'Enter at least five characters explaining this policy decision.', variant: 'destructive' });
+            return;
+        }
+        const nonstandardRequest = policyChoice === 'include' && ['Equity', 'Revenue', 'Expense'].includes(selectedPolicy.coreAccountType);
+        if (nonstandardRequest && !confirmNonstandard) {
+            toast({ title: 'Explicit confirmation required', description: 'Confirm the prominent non-standard revaluation warning before continuing.', variant: 'destructive' });
+            return;
+        }
         try {
             setSavingPolicy(true);
-            const updated = await financeDataService.updateAccountCurrencyLinkRatePolicy(
-                id,
-                editingLink.linkedCurrencyCode,
-                policyForm
-            );
+            const [updated, savedPolicy] = await Promise.all([
+                financeDataService.updateAccountCurrencyLinkRatePolicy(id, editingLink.linkedCurrencyCode, policyForm),
+                financeDataService.saveAccountBookCurrencyPolicy(id, editingLink.id, selectedPolicy.accountingBookId, {
+                    revaluationOverride: policyChoice === 'inherit' ? null : policyChoice === 'include',
+                    reason: policyReason.trim(),
+                    confirmNonstandardInclusion: confirmNonstandard,
+                    rowVersion: selectedPolicy.rowVersion,
+                }),
+            ]);
             setCurrencyLinks(current => current.map(link => link.id === updated.id ? updated : link));
+            setRevaluationPolicies(current => current.map(policy =>
+                policy.accountCurrencyLinkId === savedPolicy.accountCurrencyLinkId && policy.accountingBookId === savedPolicy.accountingBookId
+                    ? savedPolicy : policy));
             setEditingLink(null);
             setPolicyForm(null);
-            toast({ title: 'Success', description: `${updated.linkedCurrencyCode} rate policy updated` });
+            toast({
+                title: savedPolicy.lifecycleStatus === 'PendingApproval' ? 'Approval requested' : 'Policy saved',
+                description: savedPolicy.lifecycleStatus === 'PendingApproval'
+                    ? 'The non-standard inclusion is not effective until a different authorized user approves it.'
+                    : `${updated.linkedCurrencyCode} policy updated for ${savedPolicy.accountingBookCode}.`,
+            });
         } catch (error: any) {
             toast({ title: 'Error', description: error?.message || 'Failed to update rate policy', variant: 'destructive' });
         } finally {
             setSavingPolicy(false);
+        }
+    };
+
+    const openPolicyDecision = (policy: AccountBookCurrencyPolicy, action: 'approve' | 'reject') => {
+        setDecisionPolicy(policy);
+        setDecisionAction(action);
+        setDecisionReason('');
+    };
+
+    const handlePolicyDecision = async () => {
+        if (!decisionPolicy?.id || !decisionPolicy.rowVersion || decisionReason.trim().length < 5) {
+            toast({ title: 'Decision reason required', description: 'Enter at least five characters and refresh if concurrency evidence is unavailable.', variant: 'destructive' });
+            return;
+        }
+        try {
+            setDecidingPolicy(true);
+            const updated = await financeDataService.decideAccountBookCurrencyPolicy(
+                id,
+                decisionPolicy.id,
+                decisionAction,
+                { reason: decisionReason.trim(), rowVersion: decisionPolicy.rowVersion },
+            );
+            setRevaluationPolicies(current => current.map(policy => policy.id === updated.id ? updated : policy));
+            setDecisionPolicy(null);
+            toast({ title: decisionAction === 'approve' ? 'Approval recorded' : 'Request rejected', description: `${updated.accountingBookCode}/${updated.currencyCode} policy is ${updated.lifecycleStatus}.` });
+        } catch (error: any) {
+            toast({ title: 'Decision failed', description: error?.message || 'The policy may have changed. Refresh and try again.', variant: 'destructive' });
+        } finally {
+            setDecidingPolicy(false);
         }
     };
 
@@ -377,41 +459,24 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                     </Select>
                                                 </div>
 
-                                                <div className="flex items-center space-x-2">
-                                                    <Checkbox
-                                                        id="revaluationRequired"
-                                                        checked={newLink.revaluationRequired}
-                                                        onCheckedChange={(checked) =>
-                                                            setNewLink({ ...newLink, revaluationRequired: checked as boolean })
-                                                        }
-                                                    />
-                                                    <Label htmlFor="revaluationRequired" className="cursor-pointer">
-                                                        Monetary item — include in closing revaluation
-                                                    </Label>
+                                                <Alert>
+                                                    <AlertTriangle className="h-4 w-4" />
+                                                    <AlertDescription>
+                                                        Revaluation inclusion is configured after linking, separately for each accounting book. The account classification supplies the inherited default.
+                                                    </AlertDescription>
+                                                </Alert>
+                                                <div className="space-y-2">
+                                                    <Label>Revaluation Frequency</Label>
+                                                    <Select value={newLink.revaluationFrequency} onValueChange={(v) => setNewLink({ ...newLink, revaluationFrequency: v })}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Monthly">Monthly</SelectItem>
+                                                            <SelectItem value="Quarterly">Quarterly</SelectItem>
+                                                            <SelectItem value="Annually">Annually</SelectItem>
+                                                            <SelectItem value="AdHoc">Ad hoc</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
                                                 </div>
-                                                <p className="text-xs text-muted-foreground">
-                                                    Enable for cash, receivables, payables, loans and other balances settled in a fixed amount of this currency. Leave off for non-monetary items such as historical-cost inventory, fixed assets and prepayments.
-                                                </p>
-
-                                                {newLink.revaluationRequired && (
-                                                    <div className="space-y-2">
-                                                        <Label>Revaluation Frequency</Label>
-                                                        <Select
-                                                            value={newLink.revaluationFrequency}
-                                                            onValueChange={(v) => setNewLink({ ...newLink, revaluationFrequency: v })}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="Monthly">Monthly</SelectItem>
-                                                                <SelectItem value="Quarterly">Quarterly</SelectItem>
-                                                                <SelectItem value="Annually">Annually</SelectItem>
-                                                                <SelectItem value="AdHoc">Ad hoc</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                )}
 
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="space-y-2">
@@ -527,14 +592,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                             <Badge variant={link.isActive ? 'default' : 'secondary'}>
                                                                 {link.isActive ? 'Active' : 'Inactive'}
                                                             </Badge>
-                                                            {link.revaluationRequired && (
-                                                                <Badge variant="outline" className="text-blue-600">
-                                                                    <RefreshCcw className="h-3 w-3 mr-1" />
-                                                                    {link.revaluationFrequency}
-                                                                </Badge>
-                                                            )}
-                                                            {!link.revaluationRequired && (
-                                                                <Badge variant="secondary">Non-monetary / excluded</Badge>
+                                                            <Badge variant="outline"><RefreshCcw className="h-3 w-3 mr-1" />{link.revaluationFrequency}</Badge>
+                                                            {revaluationPolicies.some(policy => policy.accountCurrencyLinkId === link.id && policy.isNonstandardInclusion) && (
+                                                                <Badge className="border-amber-500 bg-amber-100 text-amber-900">Non-standard revaluation policy</Badge>
                                                             )}
                                                         </div>
                                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2">
@@ -574,6 +634,31 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 Revaluation: {link.revaluationRateType} / {link.revaluationQuoteSide || 'Mid'}
                                                             </Badge>
                                                         </div>
+                                                        <div className="mt-3 space-y-2">
+                                                            {revaluationPolicies.filter(policy => policy.accountCurrencyLinkId === link.id).map(policy => (
+                                                                <div key={policy.accountingBookId} className={policy.isNonstandardInclusion ? 'rounded border border-amber-400 bg-amber-50 p-2' : 'rounded border p-2'}>
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        <strong>{policy.accountingBookCode}</strong>
+                                                                        <Badge variant={policy.effectiveRevaluationRequired ? 'default' : 'secondary'}>
+                                                                            {policy.effectiveRevaluationRequired ? 'Included' : 'Excluded'}
+                                                                        </Badge>
+                                                                        <Badge variant="outline">{policy.effectiveSource === 'Classification' ? 'Inherited' : 'Override'}</Badge>
+                                                                        {policy.lifecycleStatus === 'PendingApproval' && <Badge className="bg-amber-600">Pending approval</Badge>}
+                                                                    </div>
+                                                                    <p className="mt-1 text-muted-foreground">{policy.accountClassificationCode} — {policy.accountClassificationName}; default {policy.classificationDefault}</p>
+                                                                    {policy.warning && <p className="mt-1 font-semibold text-amber-900">{policy.warning}</p>}
+                                                                    {policy.lifecycleStatus === 'PendingApproval' && policy.pendingReason && (
+                                                                        <p className="mt-1 text-sm text-amber-950">Request reason: {policy.pendingReason}</p>
+                                                                    )}
+                                                                    {policy.lifecycleStatus === 'PendingApproval' && canApproveFxPolicy && policy.id && (
+                                                                        <div className="mt-2 flex gap-2">
+                                                                            <Button size="sm" onClick={() => openPolicyDecision(policy, 'approve')}>Review and approve</Button>
+                                                                            <Button size="sm" variant="outline" onClick={() => openPolicyDecision(policy, 'reject')}>Reject</Button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
                                                         {link.notes && (
                                                             <p className="text-xs text-muted-foreground mt-2">
                                                                 {link.notes}
@@ -585,7 +670,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                             variant="ghost"
                                                             size="sm"
                                                             onClick={() => openRatePolicyDialog(link)}
-                                                            disabled={!link.isActive}
+                                                            disabled={!link.isActive || !canOverrideFxPolicy}
                                                             aria-label={`Edit ${link.linkedCurrencyCode} rate policy`}
                                                         >
                                                             <Edit className="h-4 w-4" />
@@ -627,7 +712,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                     }}>
                         <DialogContent>
                             <DialogHeader>
-                                <DialogTitle>Edit {editingLink?.linkedCurrencyCode} Rate Policy</DialogTitle>
+                                <DialogTitle>Edit {editingLink?.linkedCurrencyCode} Book and Rate Policy</DialogTitle>
                                 <DialogDescription>
                                     These defaults apply to foreign-currency GL posting. AR/AP document policy remains authoritative for customer and supplier subledgers.
                                 </DialogDescription>
@@ -635,31 +720,55 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                             {policyForm && (
                                 <div className="space-y-4 py-4">
                                     <div className="rounded-md border p-4 space-y-3">
-                                        <div className="flex items-start space-x-3">
-                                            <Checkbox
-                                                id="editRevaluationRequired"
-                                                checked={policyForm.revaluationRequired}
-                                                onCheckedChange={(checked) => setPolicyForm({ ...policyForm, revaluationRequired: checked as boolean })}
-                                            />
-                                            <div className="space-y-1">
-                                                <Label htmlFor="editRevaluationRequired" className="cursor-pointer">Monetary item — include in closing revaluation</Label>
-                                                <p className="text-xs text-muted-foreground">The posting engine enforces this setting for this GL account and currency. Unmarked links remain available for foreign-currency posting but are excluded from revaluation.</p>
-                                            </div>
+                                        <div className="space-y-2">
+                                            <Label>Accounting book</Label>
+                                            <Select value={selectedPolicyBookId} onValueChange={selectPolicyBook}>
+                                                <SelectTrigger><SelectValue placeholder="Select accounting book" /></SelectTrigger>
+                                                <SelectContent>
+                                                    {revaluationPolicies.filter(policy => policy.accountCurrencyLinkId === editingLink?.id).map(policy => (
+                                                        <SelectItem key={policy.accountingBookId} value={policy.accountingBookId}>{policy.accountingBookCode} — {policy.accountingBookName}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
-                                        {policyForm.revaluationRequired && (
+                                        {selectedPolicy && <>
+                                            <div className="rounded bg-muted p-3 text-sm">
+                                                <strong>{selectedPolicy.accountClassificationCode} — {selectedPolicy.accountClassificationName}</strong>
+                                                <div>Classification default: {selectedPolicy.classificationDefault}; current effective result: {selectedPolicy.effectiveRevaluationRequired ? 'Include' : 'Exclude'} ({selectedPolicy.effectiveSource}).</div>
+                                            </div>
                                             <div className="space-y-2">
-                                                <Label>Revaluation Frequency</Label>
-                                                <Select value={policyForm.revaluationFrequency} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationFrequency: value })}>
+                                                <Label>Closing revaluation treatment</Label>
+                                                <Select value={policyChoice} onValueChange={(value: 'inherit' | 'include' | 'exclude') => { setPolicyChoice(value); setConfirmNonstandard(false); }}>
                                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="Monthly">Monthly</SelectItem>
-                                                        <SelectItem value="Quarterly">Quarterly</SelectItem>
-                                                        <SelectItem value="Annually">Annually</SelectItem>
-                                                        <SelectItem value="AdHoc">Ad hoc</SelectItem>
+                                                        <SelectItem value="inherit">Inherit classification default</SelectItem>
+                                                        <SelectItem value="include">Include in closing revaluation</SelectItem>
+                                                        <SelectItem value="exclude">Exclude from closing revaluation</SelectItem>
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                        )}
+                                            {policyChoice === 'include' && ['Equity', 'Revenue', 'Expense'].includes(selectedPolicy.coreAccountType) && (
+                                                <Alert className="border-amber-500 bg-amber-50 text-amber-950">
+                                                    <AlertTriangle className="h-5 w-5" />
+                                                    <AlertDescription className="font-semibold">
+                                                        NON-STANDARD REVALUATION POLICY. This {selectedPolicy.coreAccountType} account will enter closing revaluation. A different authorized user must approve before it becomes effective.
+                                                        <label className="mt-3 flex items-center gap-2 font-normal"><input type="checkbox" checked={confirmNonstandard} onChange={event => setConfirmNonstandard(event.target.checked)} />I understand and explicitly confirm this request.</label>
+                                                    </AlertDescription>
+                                                </Alert>
+                                            )}
+                                            <div className="space-y-2">
+                                                <Label>Mandatory reason</Label>
+                                                <Input value={policyReason} onChange={event => setPolicyReason(event.target.value)} placeholder="Explain why this book/currency treatment is required" />
+                                            </div>
+                                            {selectedPolicy.lifecycleStatus === 'PendingApproval' && <Alert className="border-amber-500"><AlertTriangle className="h-4 w-4" /><AlertDescription>Pending independent approval. The current effective treatment remains unchanged.</AlertDescription></Alert>}
+                                        </>}
+                                        <div className="space-y-2">
+                                            <Label>Revaluation Frequency</Label>
+                                            <Select value={policyForm.revaluationFrequency} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationFrequency: value })}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent><SelectItem value="Monthly">Monthly</SelectItem><SelectItem value="Quarterly">Quarterly</SelectItem><SelectItem value="Annually">Annually</SelectItem><SelectItem value="AdHoc">Ad hoc</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
@@ -714,9 +823,41 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                             )}
                             <DialogFooter>
                                 <Button variant="outline" onClick={() => setEditingLink(null)}>Cancel</Button>
-                                <Button onClick={handleSaveRatePolicy} disabled={savingPolicy}>
+                                <Button onClick={handleSaveRatePolicy} disabled={savingPolicy || !selectedPolicy || !canOverrideFxPolicy || selectedPolicy.lifecycleStatus === 'PendingApproval'}>
                                     {savingPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Save Policy
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    <Dialog open={Boolean(decisionPolicy)} onOpenChange={(open) => !open && setDecisionPolicy(null)}>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>{decisionAction === 'approve' ? 'Approve' : 'Reject'} non-standard revaluation policy</DialogTitle>
+                                <DialogDescription>
+                                    {decisionPolicy?.accountingBookCode}/{decisionPolicy?.currencyCode} — {decisionPolicy?.accountClassificationCode}. The requester cannot decide their own request.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <Alert className="border-amber-500 bg-amber-50 text-amber-950">
+                                <AlertTriangle className="h-5 w-5" />
+                                <AlertDescription className="font-semibold">
+                                    This {decisionPolicy?.coreAccountType} account will be included in closing revaluation if the approval workflow completes.
+                                </AlertDescription>
+                            </Alert>
+                            <div className="space-y-2">
+                                <Label>Mandatory independent decision reason</Label>
+                                <Input value={decisionReason} onChange={event => setDecisionReason(event.target.value)} placeholder="Record the finance review rationale" />
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setDecisionPolicy(null)}>Cancel</Button>
+                                <Button
+                                    variant={decisionAction === 'reject' ? 'destructive' : 'default'}
+                                    onClick={handlePolicyDecision}
+                                    disabled={decidingPolicy || decisionReason.trim().length < 5 || !decisionPolicy?.rowVersion}
+                                >
+                                    {decidingPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {decisionAction === 'approve' ? 'Approve request' : 'Reject request'}
                                 </Button>
                             </DialogFooter>
                         </DialogContent>

@@ -311,7 +311,6 @@ export interface AccountCurrencyLink {
     id: string;
     accountId: string;
     linkedCurrencyCode: string;
-    revaluationRequired: boolean;
     revaluationFrequency: RevaluationFrequency;
     transactionRateType: string;
     transactionQuoteSide: ExchangeRateQuoteSide;
@@ -329,6 +328,49 @@ export interface AccountCurrencyLink {
     notes?: string;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface AccountBookCurrencyPolicy {
+    id?: string;
+    accountId: string;
+    accountAccountingBookId: string;
+    accountCurrencyLinkId: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    currencyCode: string;
+    accountClassificationId: string;
+    accountClassificationCode: string;
+    accountClassificationName: string;
+    coreAccountType: AccountType;
+    classificationDefault: 'Include' | 'Exclude';
+    revaluationOverride: boolean | null;
+    effectiveRevaluationRequired: boolean;
+    effectiveSource: 'Classification' | 'CurrencyOverride';
+    isNonstandardInclusion: boolean;
+    warning?: string;
+    lifecycleStatus: 'Inherited' | 'Active' | 'PendingApproval' | 'Rejected';
+    pendingRevaluationOverride?: boolean | null;
+    pendingReason?: string;
+    workflowInstanceId?: string;
+    requestedByUserId?: string;
+    requestedAtUtc?: string;
+    decidedByUserId?: string;
+    decidedAtUtc?: string;
+    decisionReason?: string;
+    rowVersion?: string;
+}
+
+export interface SaveAccountBookCurrencyPolicyDto {
+    revaluationOverride: boolean | null;
+    reason: string;
+    confirmNonstandardInclusion: boolean;
+    rowVersion?: string;
+}
+
+export interface DecideAccountBookCurrencyPolicyDto {
+    reason: string;
+    rowVersion: string;
 }
 
 export interface SegmentStructure {
@@ -1435,7 +1477,6 @@ export interface AddCurrencyLinkDto {
     accountId: string;
     currencyCode?: string;
     linkedCurrencyCode: string;
-    revaluationRequired: boolean;
     revaluationFrequency: string;
     transactionRateType: string;
     transactionQuoteSide?: ExchangeRateQuoteSide;
@@ -1765,7 +1806,6 @@ export interface SubledgerOpeningBalanceReadiness {
 }
 
 export interface UpdateCurrencyLinkRatePolicyDto {
-    revaluationRequired: boolean;
     revaluationFrequency: string;
     transactionRateType: string;
     transactionQuoteSide: ExchangeRateQuoteSide;
@@ -2446,6 +2486,7 @@ export interface MultiCurrencyTransactionDetailDto {
 export interface RevaluationRequestDto {
     revaluationDate: string;
     revaluationType: string;
+    accountingBookCode: string;
     currencyCode?: string;
     unrealizedGainLossAccountId: string;
     previewOnly: boolean;
@@ -2465,6 +2506,9 @@ export interface CurrencyRevaluationPreviewDto {
     batchNumber: string;
     revaluationDate: string;
     functionalCurrencyCode: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
     totalGainAmount: number;
     totalLossAmount: number;
     netGainLossAmount: number;
@@ -2486,11 +2530,25 @@ export interface CurrencyRevaluationPreviewLineDto {
     accountId: string;
     accountNumber: string;
     accountName: string;
+    accountAccountingBookId: string;
+    accountBookCurrencyPolicyId?: string;
+    accountClassificationId: string;
+    accountClassificationCode: string;
+    accountClassificationName: string;
+    coreAccountType: AccountType;
+    normalBalanceLabel: 'Debit' | 'Credit';
+    classificationDefault: 'Include' | 'Exclude';
+    revaluationOverride: boolean | null;
+    effectiveRevaluationRequired: boolean;
+    effectivePolicySource: string;
+    hasGovernanceWarning: boolean;
+    governanceWarning?: string;
     sourceModule: string;
     transactionCurrency: string;
     functionalCurrencyCode: string;
     foreignCurrencyBalance: number;
     carryingFunctionalAmount: number;
+    priorUnreversedAdjustment: number;
     previousRate: number;
     closingExchangeRate: number;
     revaluedFunctionalAmount: number;
@@ -2499,6 +2557,8 @@ export interface CurrencyRevaluationPreviewLineDto {
     revaluationFrequency: string;
     rateType: string;
     quoteSide: ExchangeRateQuoteSide;
+    closingExchangeRateId: string;
+    closingRateDate: string;
 }
 
 export interface FxRevaluationBatchSummaryDto {
@@ -2507,8 +2567,11 @@ export interface FxRevaluationBatchSummaryDto {
     revaluationDate: string;
     status: string;
     functionalCurrencyCode: string;
+    accountingBookId: string;
+    accountingBookCode: string;
     currencies: string[];
-    exposureCount: number;
+  exposureCount: number;
+  nonstandardPolicyCount: number;
     totalGainAmount: number;
     totalLossAmount: number;
     netGainLossAmount: number;

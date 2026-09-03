@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { financeService } from '@/services/finance.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { Currency, CurrencyRevaluationPostingResultDto, CurrencyRevaluationPreviewDto, FinanceSettings, FxRevaluationBatchSummaryDto } from '@/types/finance';
+import type { AccountingBook, Currency, CurrencyRevaluationPostingResultDto, CurrencyRevaluationPreviewDto, FinanceSettings, FxRevaluationBatchSummaryDto } from '@/types/finance';
 
 const emptyGuid = '00000000-0000-0000-0000-000000000000';
 
@@ -29,6 +29,7 @@ export default function CurrencyRevaluationPage() {
     const [loadingSetup, setLoadingSetup] = useState(true);
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [currencies, setCurrencies] = useState<Currency[]>([]);
+    const [accountingBooks, setAccountingBooks] = useState<AccountingBook[]>([]);
     const [preview, setPreview] = useState<CurrencyRevaluationPreviewDto | null>(null);
     const [postedJournal, setPostedJournal] = useState<CurrencyRevaluationPostingResultDto | null>(null);
     const [history, setHistory] = useState<FxRevaluationBatchSummaryDto[]>([]);
@@ -39,6 +40,7 @@ export default function CurrencyRevaluationPage() {
         revaluationDate: new Date().toISOString().slice(0, 10),
         currencyCode: 'all',
         revaluationType: 'Month-End',
+        accountingBookCode: '',
     });
 
     useEffect(() => {
@@ -46,11 +48,18 @@ export default function CurrencyRevaluationPage() {
         void Promise.all([
             financeDataService.getFinanceSettings(),
             financeDataService.getCurrencies({ isActive: true }),
+            financeDataService.getAccountingBooks(false),
         ])
-            .then(([financeSettings, activeCurrencies]) => {
+            .then(([financeSettings, activeCurrencies, books]) => {
                 if (!active) return;
                 setSettings(financeSettings);
                 setCurrencies(activeCurrencies.filter(currency => !currency.isBaseCurrency));
+                const postingBooks = books.filter(book => book.isActive && book.allowsPosting);
+                setAccountingBooks(postingBooks);
+                setParameters(current => ({
+                    ...current,
+                    accountingBookCode: current.accountingBookCode || postingBooks.find(book => book.isDefault)?.code || '',
+                }));
             })
             .catch(error => toast({
                 title: 'Revaluation setup could not be loaded',
@@ -64,6 +73,7 @@ export default function CurrencyRevaluationPage() {
     const request = useMemo(() => ({
         revaluationDate: parameters.revaluationDate,
         revaluationType: parameters.revaluationType,
+        accountingBookCode: parameters.accountingBookCode,
         currencyCode: parameters.currencyCode === 'all' ? undefined : parameters.currencyCode,
         unrealizedGainLossAccountId: settings?.unrealizedFxGainAccountId || settings?.unrealizedGainLossAccountId || emptyGuid,
     }), [parameters, settings]);
@@ -185,7 +195,14 @@ export default function CurrencyRevaluationPage() {
                         <TriangleAlert className="h-4 w-4" /><AlertTitle>FX gain/loss configuration incomplete</AlertTitle>
                         <AlertDescription>Configure separate unrealized FX gain and loss accounts in Finance Settings before posting.</AlertDescription>
                     </Alert> : null}
-                    <div className="grid gap-4 md:grid-cols-3">
+                    <div className="grid gap-4 md:grid-cols-4">
+                        <div className="space-y-2">
+                            <Label>Accounting book</Label>
+                            <Select value={parameters.accountingBookCode} onValueChange={value => setParameters(current => ({ ...current, accountingBookCode: value }))}>
+                                <SelectTrigger><SelectValue placeholder="Select exact book" /></SelectTrigger>
+                                <SelectContent>{accountingBooks.map(book => <SelectItem key={book.id} value={book.code}>{book.code} — {book.name}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
                         <div className="space-y-2">
                             <Label htmlFor="revaluation-date">Revaluation date</Label>
                             <Input id="revaluation-date" type="date" value={parameters.revaluationDate} onChange={event => setParameters(current => ({ ...current, revaluationDate: event.target.value }))} />
@@ -209,7 +226,7 @@ export default function CurrencyRevaluationPage() {
                         </div>
                     </div>
                     <Alert><TriangleAlert className="h-4 w-4" /><AlertTitle>Live accounting data</AlertTitle><AlertDescription>Only posted transactions dated on or before the selected date are included. A matching approved closing rate and an open fiscal period are required.</AlertDescription></Alert>
-                    <div className="flex justify-end"><Button onClick={handlePreview} disabled={busy || loadingSetup || !parameters.revaluationDate}>
+                    <div className="flex justify-end"><Button onClick={handlePreview} disabled={busy || loadingSetup || !parameters.revaluationDate || !parameters.accountingBookCode}>
                         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Preview live exposures{!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
                     </Button></div>
                 </CardContent>
@@ -223,15 +240,15 @@ export default function CurrencyRevaluationPage() {
                     <Card><CardHeader className="pb-2"><CardDescription>Net gain/(loss)</CardDescription><CardTitle>{formatMoney(preview.netGainLossAmount, preview.functionalCurrencyCode)}</CardTitle></CardHeader></Card>
                 </div>
                 <Card>
-                    <CardHeader><CardTitle>Live revaluation preview</CardTitle><CardDescription>{preview.batchNumber} · As at {new Date(preview.revaluationDate).toLocaleDateString()}</CardDescription></CardHeader>
+                    <CardHeader><CardTitle>Live revaluation preview</CardTitle><CardDescription>{preview.batchNumber} · {preview.accountingBookCode} — {preview.accountingBookName} · As at {new Date(preview.revaluationDate).toLocaleDateString()}</CardDescription></CardHeader>
                     <CardContent className="space-y-5">
                         {preview.lines.length === 0 ? <Alert><CheckCircle className="h-4 w-4" /><AlertTitle>No adjustment required</AlertTitle><AlertDescription>No eligible posted foreign-currency exposure produced a gain or loss at the selected closing rate.</AlertDescription></Alert> :
                             <div className="overflow-x-auto rounded-md border"><table className="w-full text-sm">
                                 <thead className="bg-muted/50"><tr><th className="p-3 text-left">Account</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Currency</th><th className="p-3 text-left">Policy</th><th className="p-3 text-right">Foreign balance</th><th className="p-3 text-right">Carrying value</th><th className="p-3 text-right">Previous rate</th><th className="p-3 text-right">Closing rate</th><th className="p-3 text-right">Revalued value</th><th className="p-3 text-right">Adjustment</th></tr></thead>
-                                <tbody>{preview.lines.map(line => <tr key={`${line.accountId}-${line.transactionCurrency}-${line.sourceModule}`} className="border-t">
+                                <tbody>{preview.lines.map(line => <tr key={`${line.accountId}-${line.transactionCurrency}-${line.sourceModule}`} className={line.hasGovernanceWarning ? 'border-t bg-amber-50' : 'border-t'}>
                                     <td className="p-3"><div className="font-mono font-semibold">{line.accountNumber}</div><div className="text-xs text-muted-foreground">{line.accountName}</div></td>
                                     <td className="p-3"><Badge variant="outline">{line.sourceModule}</Badge></td><td className="p-3 font-medium">{line.transactionCurrency}</td>
-                                    <td className="p-3"><div className="whitespace-nowrap">{line.revaluationFrequency}</div><div className="text-xs text-muted-foreground whitespace-nowrap">{line.rateType} / {line.quoteSide}</div></td>
+                                    <td className="p-3"><div className="whitespace-nowrap">{line.accountClassificationCode} · {line.effectivePolicySource}</div><div className="text-xs text-muted-foreground whitespace-nowrap">{line.rateType} / {line.quoteSide}</div>{line.hasGovernanceWarning && <div className="mt-1 max-w-xs font-semibold text-amber-900">{line.governanceWarning || 'Non-standard revaluation policy'}</div>}</td>
                                     <td className="p-3 text-right font-mono">{line.foreignCurrencyBalance.toLocaleString()}</td><td className="p-3 text-right font-mono">{line.carryingFunctionalAmount.toLocaleString()}</td>
                                     <td className="p-3 text-right font-mono">{line.previousRate.toFixed(6)}</td><td className="p-3 text-right font-mono">{line.closingExchangeRate.toFixed(6)}</td><td className="p-3 text-right font-mono">{line.revaluedFunctionalAmount.toLocaleString()}</td>
                                     <td className="p-3 text-right"><span className={line.gainLossType === 'Gain' ? 'font-semibold text-green-600' : 'font-semibold text-red-600'}>{formatMoney(Math.abs(line.gainLossAmount), line.functionalCurrencyCode)}</span><Badge variant="outline" className="ml-2">{line.gainLossType}</Badge></td>
@@ -259,7 +276,7 @@ export default function CurrencyRevaluationPage() {
                                 <td className="p-3 font-mono font-semibold">{batch.batchNumber}</td>
                                 <td className="p-3">{new Date(batch.revaluationDate).toLocaleDateString()}</td>
                                 <td className="p-3">{batch.currencies.join(', ')}</td>
-                                <td className="p-3 text-right">{batch.exposureCount}</td>
+                                <td className="p-3 text-right">{batch.exposureCount}{batch.nonstandardPolicyCount > 0 && <Badge className="ml-2 border-amber-500 bg-amber-100 text-amber-900">{batch.nonstandardPolicyCount} non-standard</Badge>}</td>
                                 <td className="p-3 text-right font-mono">{formatMoney(batch.netGainLossAmount, batch.functionalCurrencyCode)}</td>
                                 <td className="p-3"><Badge variant={batch.status === 'Reversed' ? 'secondary' : 'default'}>{batch.status}</Badge></td>
                                 <td className="p-3"><div className="flex justify-end gap-2">

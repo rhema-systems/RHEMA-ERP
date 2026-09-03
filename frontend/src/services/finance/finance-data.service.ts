@@ -27,6 +27,9 @@ import type {
     SegmentLookupValue,
     ReportingSegmentOptionsResponse,
     AccountCurrencyLink,
+    AccountBookCurrencyPolicy,
+    SaveAccountBookCurrencyPolicyDto,
+    DecideAccountBookCurrencyPolicyDto,
     CreateAccountDto,
     UpdateAccountDto,
     CreateCurrencyDto,
@@ -1018,6 +1021,34 @@ class FinanceDataService {
         return apiService.put<AccountCurrencyLink>(
             `/finance/accounts/${accountId}/currencies/${currencyCode}/rate-policy`,
             dto
+        );
+    }
+
+    async getAccountBookCurrencyPolicies(accountId: string): Promise<AccountBookCurrencyPolicy[]> {
+        return apiService.get<AccountBookCurrencyPolicy[]>(`/finance/accounts/${accountId}/revaluation-policies`);
+    }
+
+    async saveAccountBookCurrencyPolicy(
+        accountId: string,
+        accountCurrencyLinkId: string,
+        accountingBookId: string,
+        dto: SaveAccountBookCurrencyPolicyDto
+    ): Promise<AccountBookCurrencyPolicy> {
+        return apiService.put<AccountBookCurrencyPolicy>(
+            `/finance/accounts/${accountId}/revaluation-policies/currency-links/${accountCurrencyLinkId}/books/${accountingBookId}`,
+            dto,
+        );
+    }
+
+    async decideAccountBookCurrencyPolicy(
+        accountId: string,
+        policyId: string,
+        action: 'approve' | 'reject',
+        dto: DecideAccountBookCurrencyPolicyDto
+    ): Promise<AccountBookCurrencyPolicy> {
+        return apiService.post<AccountBookCurrencyPolicy>(
+            `/finance/accounts/${accountId}/revaluation-policies/${policyId}/${action}`,
+            dto,
         );
     }
 

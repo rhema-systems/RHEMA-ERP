@@ -381,6 +381,7 @@ export interface MultiCurrencyDetailRequestDto {
 export interface RevaluationRequestDto {
   revaluationDate: string;
   revaluationType: string;
+  accountingBookCode: string;
   currencyCode?: string;
   unrealizedGainLossAccountId: string;
   previewOnly: boolean;
