@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 2 — configurable classifications completion |
-| Status | `REVIEWING` |
+| Status | `PHASE_2_COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Branch | `codex/finance-configurable-classifications-phase2` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Corrected six-commit stack at `62f1a138`; independent re-review in progress |
+| Review status | `APPROVED`; corrected six-commit stack independently verified and integrated |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -65,12 +65,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
 | 1 | `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2` | `CHANGES_REQUIRED` | P1: deterministic v1-to-v2 seed upgrades are incomplete for existing tenants; dashboard aggregation is not bound to one authoritative book; classification mutation/audit and relationship checks are not atomic; singleton system-role cardinality is unenforced. P2: ad-hoc Chart of Accounts book/tenant selection is nondeterministic; mutation controls lack permission-aware UI gating; parent retirement readiness disagrees with backend lifecycle rules. Corrections and required regression gates were sent directly. | Not integrated |
-| 2 | `62f1a138efaaef78b5bcf2f7e4a1e3776ffb518b` | Independent re-review pending | Implementer reports all seven findings corrected, 219 focused backend tests and 9 frontend tests passing, focused lint and EF no-pending-model green. Adds unapplied migration `20260903120000_EnforceFinanceClassificationSystemRoleCardinality` with duplicate preflight and filtered singleton-role index. | Pending |
+| 2 | `62f1a138efaaef78b5bcf2f7e4a1e3776ffb518b` | `APPROVED` | All seven findings closed. Independent verification passed 58 backend tests, 9 frontend tests, targeted ESLint, EF no-pending-model and diff checks. The worktree was clean and no persistent database was mutated. | Six commits cherry-picked without conflict as `ff6e35b6`, `e8a31156`, `b11099a3`, `81426b0a`, `81f28b26`, and `8a026995`. Primary verification passed: test-project build with 0 errors, 137 focused backend tests, 9 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Migration remains unapplied. |
 
 ## Connectivity checkpoint
 
-Last verified durable point: the implementing task returned a clean corrected six-commit Phase 2 stack at `62f1a138efaaef78b5bcf2f7e4a1e3776ffb518b`. Independent re-review of correction commits `4aa858dc`, `ab6e7572`, and `62f1a138` is in progress. No Phase 2 commit has been integrated, the new cardinality migration remains unapplied, and no persistent database was mutated.
+Last verified durable point: Phase 2 is independently approved and integrated through primary commit `8a026995`. Dependency restore was refreshed for the new SQLite relational tests; primary build and focused backend/frontend/EF gates are green. Migration `20260903120000_EnforceFinanceClassificationSystemRoleCardinality` remains unapplied, and no persistent database was mutated.
 
 ## Next action
 
-Complete independent re-review and rerun the required backend/frontend/EF/migration gates. Integrate the six commits only after approval, then update this ledger and stop before Phase 3 unless separately authorized.
+Stop before Phase 3 pending separate authorization. Before any future database application, inspect singleton-role duplicates and run the agreed migration/reset gates; do not apply the Phase 2 migration automatically.
