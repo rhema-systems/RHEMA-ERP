@@ -151,7 +151,8 @@ public class TdcDemoPersonaSeeder
                 user = new ApplicationUser
                 {
                     UserName = persona.Username,
-                    Email = employee.EmailAddress,
+                    // Identity requires a unique email; an employee may have none since 2026-09-03.
+                    Email = employee.EmailAddress ?? $"{persona.Username}@demo.tdc.local",
                     EmailConfirmed = true,
                     FirstName = employee.FirstName,
                     LastName = employee.LastName,

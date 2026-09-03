@@ -143,7 +143,7 @@ export interface Employee {
   displayName: string;
   title?: string | null;
   gender?: Gender | null;
-  emailAddress: string;
+  emailAddress?: string | null;
   mobileNumber?: string | null;
   departmentName: string;
   sectionName?: string | null;
@@ -265,7 +265,7 @@ export interface CreateEmployeeRequest {
   postalCode?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
-  emailAddress: string;
+  emailAddress?: string | null;
   telephoneNumber?: string | null;
   mobileNumber?: string | null;
   employmentType: EmploymentType;

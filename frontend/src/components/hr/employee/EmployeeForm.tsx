@@ -53,7 +53,8 @@ export const employeeSchema = z.object({
   disabilityDescription: opt,
   bloodType: opt,
   isExpatriate: z.boolean(),
-  emailAddress: z.string().email('Invalid email address'),
+  // Optional since 2026-09-03: a register never has an address for everyone. Format-checked when given.
+  emailAddress: z.string().email('Invalid email address').optional().or(z.literal('')),
   mobileNumber: opt,
   telephoneNumber: opt,
   address: opt,

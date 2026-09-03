@@ -39,7 +39,7 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     disabilityDescription: d.disabilityDescription ?? '',
     bloodType: d.bloodType ?? '',
     isExpatriate: d.isExpatriate,
-    emailAddress: d.emailAddress,
+    emailAddress: d.emailAddress ?? '',
     mobileNumber: d.mobileNumber ?? '',
     telephoneNumber: d.telephoneNumber ?? '',
     address: d.address ?? '',

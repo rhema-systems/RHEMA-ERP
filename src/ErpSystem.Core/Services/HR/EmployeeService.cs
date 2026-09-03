@@ -119,12 +119,13 @@ public class EmployeeService : IEmployeeService
     private async Task<EmployeeDetailDto> CreateWithNumberAsync(
         CreateEmployeeDto dto, string employeeNumber, CancellationToken cancellationToken)
     {
+        // Null when blank: email is optional, and the unique index is filtered on NOT NULL.
         var email = NormalizeEmail(dto.EmailAddress);
 
         if (!await IsEmployeeNumberUniqueAsync(employeeNumber, null, cancellationToken))
             throw new InvalidOperationException($"Employee number '{employeeNumber}' already exists.");
 
-        if (!await IsEmailUniqueAsync(email, null, cancellationToken))
+        if (email != null && !await IsEmailUniqueAsync(email, null, cancellationToken))
             throw new InvalidOperationException($"Email address '{email}' already exists.");
 
         if (!string.IsNullOrWhiteSpace(dto.BadgeNumber) &&
@@ -370,7 +371,8 @@ public class EmployeeService : IEmployeeService
         var isPositionChanging = dto.PositionId.HasValue && dto.PositionId.Value != oldPositionId;
 
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
-        if (!string.IsNullOrWhiteSpace(dto.EmailAddress))
+        // null = not supplied; "" = clear. Before 2026-09-03 an email could never be removed.
+        if (dto.EmailAddress != null)
             employee.EmailAddress = NormalizeEmail(dto.EmailAddress);
 
         await ApplyPayrollMembershipAsync(employee, dto, wasOnPayroll, willBeOnPayroll, cancellationToken);
@@ -2643,10 +2645,11 @@ public class EmployeeService : IEmployeeService
             : !await _employeeRepository.EmployeeNumberExistsAsync(num);
     }
 
-    public async Task<bool> IsEmailUniqueAsync(string email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default)
+    public async Task<bool> IsEmailUniqueAsync(string? email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeEmail(email);
-        if (string.IsNullOrWhiteSpace(normalized)) return false;
+        // No email is not a duplicate of anything (was `false`, which refused every emailless create).
+        if (normalized == null) return true;
 
         return excludeEmployeeId.HasValue
             ? !await _employeeRepository.EmailExistsAsync(normalized, excludeEmployeeId.Value)
@@ -3002,8 +3005,9 @@ public class EmployeeService : IEmployeeService
         if (employee == null) throw new ArgumentException($"Employee '{employeeId}' not found.");
     }
 
-    private static string NormalizeEmail(string? email)
-        => string.IsNullOrWhiteSpace(email) ? string.Empty : email.Trim().ToLowerInvariant();
+    /// <summary>Trimmed and lower-cased, or <c>null</c> for blank — never an empty string.</summary>
+    private static string? NormalizeEmail(string? email)
+        => string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
 
     private async Task ValidateManagerAssignmentAsync(Guid employeeId, Guid managerId, CancellationToken cancellationToken)
     {

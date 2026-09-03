@@ -36,7 +36,7 @@ export function employeeFormToRequest(values: EmployeeFormValues): CreateEmploye
     state: s(values.state),
     postalCode: s(values.postalCode),
     digitalAddress: s(values.digitalAddress),
-    emailAddress: values.emailAddress,
+    emailAddress: s(values.emailAddress),
     telephoneNumber: s(values.telephoneNumber),
     mobileNumber: s(values.mobileNumber),
     employmentType: values.employmentType as EmploymentType,

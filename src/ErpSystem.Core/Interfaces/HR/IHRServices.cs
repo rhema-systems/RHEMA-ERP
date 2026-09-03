@@ -223,7 +223,7 @@ public interface IEmployeeService
     #region 6) Validation & Business Rules
 
     Task<bool> IsEmployeeNumberUniqueAsync(string employeeNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
-    Task<bool> IsEmailUniqueAsync(string email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsEmailUniqueAsync(string? email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsBadgeNumberUniqueAsync(string badgeNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsTaxNumberUniqueAsync(string taxNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsSocialSecurityNumberUniqueAsync(string socialSecurityNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);

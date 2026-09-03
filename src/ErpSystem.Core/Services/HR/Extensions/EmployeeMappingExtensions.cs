@@ -408,7 +408,10 @@ public static class EmployeeMappingExtensions
         if (dto.DigitalAddress != null) e.DigitalAddress = dto.DigitalAddress;
         if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
 
-        if (!string.IsNullOrWhiteSpace(dto.EmailAddress)) e.EmailAddress = dto.EmailAddress.Trim();
+        // null = not supplied; blank = clear (email is optional since 2026-09-03). The service
+        // re-applies the normalised value after this; kept here so Apply stays self-consistent.
+        if (dto.EmailAddress != null)
+            e.EmailAddress = string.IsNullOrWhiteSpace(dto.EmailAddress) ? null : dto.EmailAddress.Trim();
         if (dto.TelephoneNumber != null) e.TelephoneNumber = dto.TelephoneNumber;
         if (dto.BusinessNumber != null) e.BusinessNumber = dto.BusinessNumber;
         if (dto.MobileNumber != null) e.MobileNumber = dto.MobileNumber;

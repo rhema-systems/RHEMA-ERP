@@ -113,10 +113,16 @@ public class Employee : TenantEntity
 
     public Guid? CountryId { get; set; }
 
-    [Required]
+    /// <summary>
+    /// Optional since 2026-09-03. A register never has an address for every driver, carpenter or
+    /// bill distributor, and a required column only taught data loads to invent one. Null means
+    /// "none"; the service normalises blank to null so the filtered unique index
+    /// (<c>IX_Employee_Tenant_EmailAddress</c>, <c>WHERE EmailAddress IS NOT NULL</c>) is never
+    /// asked to compare two empty strings.
+    /// </summary>
     [MaxLength(200)]
-    [EmailAddress]
-    public string EmailAddress { get; set; } = string.Empty;
+    [ErpSystem.Core.Validation.OptionalEmailAddress]
+    public string? EmailAddress { get; set; }
 
     [MaxLength(50)]
     public string? TelephoneNumber { get; set; }

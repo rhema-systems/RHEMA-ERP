@@ -1009,6 +1009,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,
                                ErpSystem.Core.Services.HR.StaffNumberService>();
 
+            // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): template, check, review,
+            // commit. Lives in Api because it reads and writes workbooks (ClosedXML) and stores the
+            // upload through the HR document gate; every employee still goes through IEmployeeService.
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeImportService,
+                               ErpSystem.Api.Services.HR.EmployeeImport.EmployeeImportService>();
+
             // Lane 3b reference dimensions: the qualification ladder, certifying bodies, and the
             // staff-numbering rules themselves.
             services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
@@ -2336,6 +2342,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // that require regular servicing with no next date at all. Sweep logic is scoped
             // (IAssetReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.AssetReminderBackgroundService>();
+
+            // Employee bulk-import committer: polls for sessions HR has confirmed and writes them
+            // in batches, one fresh scope per batch. There is no job queue in this API, so the
+            // session row IS the work item (Status = CommitRequested). Logic is scoped
+            // (IEmployeeImportService.CommitBatchAsync); the host only paces and locks.
+            services.AddHostedService<ErpSystem.Api.Services.HR.EmployeeImport.EmployeeImportCommitBackgroundService>();
 
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,

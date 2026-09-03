@@ -465,7 +465,9 @@ public class EmployeeProfileChangeService : IEmployeeProfileChangeService
             var taken = item.Field switch
             {
                 EmployeeProfileField.EmailAddress =>
-                    await employees.AnyAsync(e => e.EmailAddress == value, ct),
+                    // Blank clears the address (optional since 2026-09-03) and collides with nothing.
+                    !string.IsNullOrWhiteSpace(value)
+                    && await employees.AnyAsync(e => e.EmailAddress == value, ct),
                 EmployeeProfileField.SocialSecurityNumber =>
                     await employees.AnyAsync(e => e.SocialSecurityNumber == value, ct),
                 EmployeeProfileField.TINNumber =>
@@ -561,7 +563,10 @@ public class EmployeeProfileChangeService : IEmployeeProfileChangeService
             case EmployeeProfileField.Gender: e.Gender = Enum.Parse<Gender>(value, ignoreCase: true); break;
             case EmployeeProfileField.MaritalStatus:
                 e.MaritalStatus = Enum.Parse<MaritalStatus>(value, ignoreCase: true); break;
-            case EmployeeProfileField.EmailAddress: e.EmailAddress = value; break;
+            case EmployeeProfileField.EmailAddress:
+                // Never store "" — the unique index is filtered on NOT NULL, not on non-empty.
+                e.EmailAddress = string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
+                break;
             case EmployeeProfileField.Address: e.Address = value; break;
             case EmployeeProfileField.City: e.City = value; break;
             case EmployeeProfileField.State: e.State = value; break;

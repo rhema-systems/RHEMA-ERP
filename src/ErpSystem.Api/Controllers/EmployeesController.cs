@@ -201,8 +201,9 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest("Employee number already exists");
                 }
 
-                // Validate email uniqueness
-                if (await _employeeRepository.EmailExistsAsync(createEmployeeDto.EmailAddress))
+                // Validate email uniqueness (email is optional since 2026-09-03)
+                if (!string.IsNullOrWhiteSpace(createEmployeeDto.EmailAddress) &&
+                    await _employeeRepository.EmailExistsAsync(createEmployeeDto.EmailAddress))
                 {
                     return BadRequest("Email address already exists");
                 }

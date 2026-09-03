@@ -38,7 +38,7 @@ public class StaffDirectoryEntryDto
     public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
 
-    public string EmailAddress { get; set; } = string.Empty;
+    public string? EmailAddress { get; set; }
     public string? BusinessNumber { get; set; }
     public string? Extension { get; set; }
 

@@ -205,6 +205,17 @@ public static class ControlledFileUploadCategories
     public const string HrEmployeeDocuments = "hr-employee-documents";
 
     /// <summary>
+    /// The workbook behind an employee bulk import — the file HR uploaded, kept as the record of
+    /// what was loaded and by whom.
+    /// </summary>
+    /// <remarks>
+    /// Its own category, not a share of <see cref="HrEmployeeDocuments"/>: one file here describes
+    /// hundreds of people rather than one, and the retention question ("how long do we keep the
+    /// load file?") is a different question from "how long do we keep somebody's passport scan".
+    /// </remarks>
+    public const string HrEmployeeImportWorkbooks = "hr-employee-import-workbooks";
+
+    /// <summary>
     /// The photograph of an external associate — a panellist, assessor or adviser.
     /// </summary>
     /// <remarks>
@@ -255,6 +266,7 @@ public static class ControlledFileUploadCategories
                 QuantitySurveyDayworkEvidence,
                 QuantitySurveySubcontractEvidence,
                 HrEmployeeDocuments,
+                HrEmployeeImportWorkbooks,
                 // ⚠ Declared above AND registered here. A category that is only declared passes the
                 // upload gate unscanned and then fails DMS registration as a 500 — the trap area 11
                 // met with SystemCleanScanRequired. The seal especially: an unscanned image that

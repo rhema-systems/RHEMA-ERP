@@ -645,6 +645,10 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelHealthRequirement> StaffTravelHealthRequirements { get; set; } = null!;
     public DbSet<NumberSequence> NumberSequences { get; set; } = null!;
 
+    // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): the checked workbook and its rows.
+    public DbSet<EmployeeImportSession> EmployeeImportSessions { get; set; } = null!;
+    public DbSet<EmployeeImportRow> EmployeeImportRows { get; set; } = null!;
+
     #endregion
 
     /// <summary>Entry point: configures every HR entity. Called from OnModelCreating.</summary>
@@ -656,6 +660,40 @@ public partial class ApplicationDbContext
         ConfigureSuccessionPlanningEntities(builder);
         ConfigureStaffTravelEntities(builder);
         ConfigureHrDocumentIntake(builder);
+        ConfigureEmployeeImportEntities(builder);
+    }
+
+    /// <summary>The employee bulk-import session and its rows.</summary>
+    /// <remarks>
+    /// Indexes only towards the upload record and the DMS document (the same reasoning as
+    /// <see cref="ConfigureHrDocumentIntake"/>). The row → created employee link is a real FK with
+    /// Restrict, because the row is the audit trail of how that employee came to exist and must not
+    /// vanish with a session tidy-up; Session → Rows cascades, because rows mean nothing alone.
+    /// </remarks>
+    private void ConfigureEmployeeImportEntities(ModelBuilder builder)
+    {
+        builder.Entity<EmployeeImportSession>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Reference }).IsUnique()
+                .HasDatabaseName("IX_EmployeeImportSession_Tenant_Reference");
+            entity.HasIndex(e => new { e.TenantId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.FileHash });
+            entity.HasIndex(e => new { e.TenantId, e.SourceFileUploadRecordId });
+            entity.HasIndex(e => e.UploadedOn);
+        });
+
+        builder.Entity<EmployeeImportRow>(entity =>
+        {
+            entity.HasIndex(e => new { e.SessionId, e.RowNumber }).IsUnique()
+                .HasDatabaseName("IX_EmployeeImportRow_Session_RowNumber");
+            entity.HasIndex(e => new { e.SessionId, e.Outcome });
+            entity.HasIndex(e => e.CreatedEmployeeId);
+
+            entity.HasOne(e => e.Session).WithMany(s => s.Rows)
+                .HasForeignKey(e => e.SessionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CreatedEmployee).WithMany()
+                .HasForeignKey(e => e.CreatedEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     /// <summary>
@@ -1174,8 +1212,10 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .IsUnique()
                 .HasDatabaseName("IX_Employee_Tenant_EmployeeNumber");
 
+            // Filtered since 2026-09-03: email is optional, and NULL must not count as a value.
             entity.HasIndex(e => new { e.TenantId, e.EmailAddress })
                 .IsUnique()
+                .HasFilter("[EmailAddress] IS NOT NULL")
                 .HasDatabaseName("IX_Employee_Tenant_EmailAddress");
 
             entity.HasIndex(e => e.DepartmentId);

@@ -40,7 +40,7 @@ public sealed class MyProfileDto
     public string? PicturePath { get; set; }
 
     // ── Contact: the direct-edit set, plus the address block (change request) ──
-    public string EmailAddress { get; set; } = string.Empty;
+    public string? EmailAddress { get; set; }
     public string? MobileNumber { get; set; }
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }

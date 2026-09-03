@@ -2335,8 +2335,14 @@ public class JobApplicationService : IJobApplicationService
             throw new InvalidOperationException(
                 $"You have already applied for this vacancy (Application #{existing.ApplicationNumber}).");
 
-        // 4. Resolve or create shadow JobCandidate keyed by employee email
-        var candidate = await _candidateRepository.GetByEmailAsync(employee.EmailAddress);
+        // 4. Resolve or create shadow JobCandidate keyed by employee email. Email is optional on
+        // the employee since 2026-09-03; a candidate without one cannot be tracked, so say so.
+        var employeeEmail = employee.EmailAddress;
+        if (string.IsNullOrWhiteSpace(employeeEmail))
+            throw new InvalidOperationException(
+                "Your employee profile has no email address. Applications are tracked by email — add one to your profile before applying.");
+
+        var candidate = await _candidateRepository.GetByEmailAsync(employeeEmail);
         if (candidate == null)
         {
             // The country guard that used to stand here refused 8,072 of 8,077 live employees
@@ -2351,7 +2357,7 @@ public class JobApplicationService : IJobApplicationService
                 FirstName           = employee.FirstName,
                 MiddleName          = employee.MiddleName,
                 LastName            = employee.LastName,
-                Email               = employee.EmailAddress,
+                Email               = employeeEmail,
                 Phone               = (employee.MobileNumber ?? employee.TelephoneNumber) ?? string.Empty,
                 Gender              = employee.Gender ?? Gender.PreferNotToSay,
                 DateOfBirth         = employee.DateOfBirth.HasValue
@@ -2463,8 +2469,13 @@ public class JobApplicationService : IJobApplicationService
             return (updatedSaved ?? existing).ToDto();
         }
 
-        // Resolve or create shadow candidate
-        var candidate = await _candidateRepository.GetByEmailAsync(employee.EmailAddress);
+        // Resolve or create shadow candidate (email optional on the employee since 2026-09-03)
+        var employeeEmail = employee.EmailAddress;
+        if (string.IsNullOrWhiteSpace(employeeEmail))
+            throw new InvalidOperationException(
+                "Your employee profile has no email address. Applications are tracked by email — add one to your profile before applying.");
+
+        var candidate = await _candidateRepository.GetByEmailAsync(employeeEmail);
         if (candidate == null)
         {
             // The country guard that used to stand here refused 8,072 of 8,077 live employees
@@ -2479,7 +2490,7 @@ public class JobApplicationService : IJobApplicationService
                 FirstName          = employee.FirstName,
                 MiddleName         = employee.MiddleName,
                 LastName           = employee.LastName,
-                Email              = employee.EmailAddress,
+                Email              = employeeEmail,
                 Phone              = (employee.MobileNumber ?? employee.TelephoneNumber) ?? string.Empty,
                 Gender             = employee.Gender ?? Gender.PreferNotToSay,
                 DateOfBirth        = employee.DateOfBirth.HasValue

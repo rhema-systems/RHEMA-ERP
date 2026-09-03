@@ -837,6 +837,15 @@ export const navigationItems: NavItem[] = [
             icon: BadgeAlert,
             permissions: ['HR.Employee.Read'],
           },
+          // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md). Admin-gated like the
+          // single-record import door it wraps: staff numbers are accepted as given, which bypasses
+          // the register's numbering rule — a different privilege from adding one hire.
+          {
+            title: 'Import',
+            href: '/hr/employees/import',
+            icon: Upload,
+            permissions: ['HR.Employee.Admin'],
+          },
           // Read-only view of the org's own records. Lives here rather than under Administration
           // because it is looked at daily, not configured — and the administration tree is gated to
           // admin roles, which would hide it from the HR officers the API gate lets in.

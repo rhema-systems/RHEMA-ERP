@@ -20,7 +20,7 @@ public class EmployeeDto
     public string DisplayName { get; set; } = string.Empty;
     public string? Title { get; set; }
     public Gender? Gender { get; set; }
-    public string EmailAddress { get; set; } = string.Empty;
+    public string? EmailAddress { get; set; }
     public string? MobileNumber { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public string? SectionName { get; set; }
@@ -206,9 +206,9 @@ public class CreateEmployeeDto
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
 
-    [Required]
-    [EmailAddress]
-    public string EmailAddress { get; set; } = string.Empty;
+    /// <summary>Optional (2026-09-03). Format-checked and unique when supplied; blank means none.</summary>
+    [ErpSystem.Core.Validation.OptionalEmailAddress]
+    public string? EmailAddress { get; set; }
 
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }
@@ -2850,7 +2850,7 @@ public class MaintenanceTechnicianDto
     public string EmployeeNumber { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string EmailAddress { get; set; } = string.Empty;
+    public string? EmailAddress { get; set; }
     public string? MobileNumber { get; set; }
     public string PositionTitle { get; set; } = string.Empty;
     public bool IsActive { get; set; }
