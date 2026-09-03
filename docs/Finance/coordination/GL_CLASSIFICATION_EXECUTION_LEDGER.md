@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 3 — classification-driven report layouts |
-| Status | `IMPLEMENTING` |
+| Status | `REVIEWING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
 | Branch | `codex/finance-report-layout-classifications-phase3` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Phase 3 implementation in progress; independent review required before integration |
+| Review status | Clean Phase 3 stack at `ab53f09e`; independent review in progress |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -73,12 +73,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | Pending | Implementation active | Classification-driven layouts, immutable publication snapshots, exact-book execution, import/export compatibility, protected standards, where-used evidence and legacy-runtime replacement are assigned. | Pending |
+| 1 | `ab53f09e503efd6fee9205129f841b1f5de4bce2` | Independent review pending | Implementer reports three clean commits, 47 focused backend and 6 frontend tests passing, targeted lint and EF no-pending-model green. Adds unapplied migration `20260903130000_AddFinancialStatementClassificationSnapshots`. One unchanged broad-test baseline and unrelated frontend type-check failures are documented. | Pending |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 2 is independently approved and recorded through primary commit `d7bf1767`. The user authorized Phase 3, and the existing implementing task was reactivated with exact base `d7bf1767`, a new isolated worktree/branch, immutable published-classification snapshot requirements, Finance-only boundaries, and unapplied-migration policy. Earlier migrations, including `20260903120000_EnforceFinanceClassificationSystemRoleCardinality`, remain unapplied; no persistent database was mutated.
+Last verified durable point: Phase 3 returned a clean three-commit stack at `ab53f09e503efd6fee9205129f841b1f5de4bce2` from exact base `d7bf1767`. Independent review is active. The new publication-snapshot migration and all earlier migrations remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Monitor the Phase 3 implementation handoff. Independently review publication reproducibility, transactionality, permissions, concurrency, import compatibility and migration metadata; send corrections directly until approved. Integrate only a clean approved stack, then immediately activate Phase 4 and continue through Phase 6. Do not apply migrations or cross any other escalation gate without user authorization.
+Complete independent Phase 3 review of publication reproducibility, transactionality, permissions, concurrency, import compatibility and migration metadata. Send corrections directly if required; otherwise integrate the clean stack, rerun primary gates, immediately activate Phase 4 and continue through Phase 6. Do not apply migrations or cross any other escalation gate without user authorization.
