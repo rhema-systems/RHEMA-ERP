@@ -9,6 +9,6 @@ namespace ErpSystem.Core.Interfaces.Finance
 
         Task EnsureTenantDefaultsAsync(CancellationToken cancellationToken = default);
 
-        Task SyncAccountMappingsAsync(Account account, CancellationToken cancellationToken = default);
+        Task SyncAccountMappingsAsync(Account account, IReadOnlyCollection<AccountAccountingBookUpdateDto> requestedMappings, CancellationToken cancellationToken = default);
     }
 }

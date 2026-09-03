@@ -23,6 +23,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public string AccountingBookCode { get; set; } = string.Empty;
         public string AccountingBookName { get; set; } = string.Empty;
         public bool IsEnabled { get; set; }
+        public Guid? AccountClassificationId { get; set; }
+        public string? AccountClassificationCode { get; set; }
+        public string? AccountClassificationName { get; set; }
+        public string? AccountClassificationStatus { get; set; }
+        public bool IsMigrationReady { get; set; }
         public string? FinancialStatementLineItem { get; set; }
     }
 
@@ -31,6 +36,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? AccountingBookId { get; set; }
         public string? AccountingBookCode { get; set; }
         public bool IsEnabled { get; set; } = true;
+        /// <summary>
+        /// Required for every enabled Finance-created or edited assignment. Posting producers do
+        /// not supply this value; Finance resolves it from the account/book master data.
+        /// </summary>
+        public Guid? AccountClassificationId { get; set; }
         public string? FinancialStatementLineItem { get; set; }
     }
 }

@@ -12,6 +12,12 @@ namespace ErpSystem.Core.Entities.Finance
 
         public Guid AccountingBookId { get; set; }
 
+        /// <summary>
+        /// Finance-owned detailed classification for this account in this book. Nullable only
+        /// while pre-live legacy mappings are identified and migrated.
+        /// </summary>
+        public Guid? AccountClassificationId { get; set; }
+
         public bool IsEnabled { get; set; } = true;
 
         [MaxLength(100)]
@@ -20,5 +26,10 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual Account Account { get; set; } = null!;
 
         public virtual AccountingBook AccountingBook { get; set; } = null!;
+
+        public virtual AccountClassification? AccountClassification { get; set; }
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
     }
 }

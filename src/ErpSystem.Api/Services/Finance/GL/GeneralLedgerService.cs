@@ -107,9 +107,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                     CurrencyCode = string.IsNullOrWhiteSpace(accountDto.CurrencyCode) ? baseCurrencyCode : accountDto.CurrencyCode.Trim().ToUpperInvariant(),
                     IsMultiCurrency = accountDto.IsMultiCurrency,
                     IsSegmented = true,
-                    IsIFRSClassified = accountDto.IsIFRSClassified,
-                    IsBaseClassified = accountDto.IsBaseFrameworkClassified,
-                    IsLocalClassified = accountDto.IsLocalFrameworkClassified,
                     IsControlAccount = accountDto.IsControlAccount,
                     AllowDirectPosting = accountDto.IsPostingAllowed,
                     Status = AccountStatus.Active,
@@ -149,8 +146,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 // 5. Save to Database
                 _context.Accounts.Add(account);
-                await _context.SaveChangesAsync();
-                await _accountingBookService.SyncAccountMappingsAsync(account);
+                await _accountingBookService.SyncAccountMappingsAsync(account, accountDto.AccountingBooks);
 
                 return account;
             }

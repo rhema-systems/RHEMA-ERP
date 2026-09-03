@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -53,23 +54,67 @@ namespace ErpSystem.Api.Services.Finance.Settings
         public async Task EnsureTenantDefaultsAsync(CancellationToken cancellationToken = default)
         {
             await EnsureDefaultBooksAsync(cancellationToken);
-            await BackfillAccountMappingsAsync(cancellationToken);
         }
 
-        public async Task SyncAccountMappingsAsync(Account account, CancellationToken cancellationToken = default)
+        public async Task SyncAccountMappingsAsync(Account account, IReadOnlyCollection<AccountAccountingBookUpdateDto> requestedMappings, CancellationToken cancellationToken = default)
         {
-            await EnsureDefaultBooksAsync(cancellationToken);
-
             var tenantId = account.TenantId;
+            if (requestedMappings == null || requestedMappings.Count == 0 || !requestedMappings.Any(item => item.IsEnabled))
+                throw new InvalidOperationException("At least one enabled accounting-book assignment is required.");
             var books = await _context.AccountingBooks
                 .Where(book => book.TenantId == tenantId && !book.IsDeleted)
                 .ToListAsync(cancellationToken);
-
             var mappings = await _context.AccountAccountingBooks
                 .Where(mapping => mapping.TenantId == tenantId && mapping.AccountId == account.Id && !mapping.IsDeleted)
                 .ToListAsync(cancellationToken);
-
-            ApplyMappingsFromLegacyFlags(account, books, mappings);
+            var classifications = await _context.AccountClassifications
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                .ToListAsync(cancellationToken);
+            var resolved = new List<(AccountAccountingBookUpdateDto Request, AccountingBook Book, AccountClassification? Classification)>();
+            foreach (var request in requestedMappings)
+            {
+                var book = request.AccountingBookId.HasValue
+                    ? books.SingleOrDefault(item => item.Id == request.AccountingBookId.Value)
+                    : books.SingleOrDefault(item => string.Equals(item.Code, request.AccountingBookCode?.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (book == null || !book.IsActive || (request.IsEnabled && !book.AllowsPosting))
+                    throw new InvalidOperationException("An accounting-book assignment is invalid or inactive for this tenant.");
+                var classification = request.AccountClassificationId.HasValue
+                    ? classifications.SingleOrDefault(item => item.Id == request.AccountClassificationId.Value)
+                    : null;
+                if (request.IsEnabled && (classification == null || classification.AccountingBookId != book.Id
+                    || classification.Status != AccountClassificationStatus.Active
+                    || !classification.IsPostingClassification || classification.CoreAccountType != account.AccountType))
+                    throw new InvalidOperationException("Each enabled accounting-book assignment requires a compatible active posting classification.");
+                resolved.Add((request, book, classification));
+            }
+            if (resolved.Select(item => item.Book.Id).Distinct().Count() != resolved.Count)
+                throw new InvalidOperationException("Accounting-book assignments must be unique.");
+            var now = DateTime.UtcNow;
+            foreach (var item in resolved)
+            {
+                var mapping = mappings.SingleOrDefault(candidate => candidate.AccountingBookId == item.Book.Id);
+                if (mapping == null)
+                {
+                    mapping = new AccountAccountingBook
+                    {
+                        TenantId = tenantId, AccountId = account.Id, AccountingBookId = item.Book.Id,
+                        CreatedAt = now, CreatedBy = _currentUserService.UserName ?? "system"
+                    };
+                    _context.AccountAccountingBooks.Add(mapping);
+                }
+                mapping.IsEnabled = item.Request.IsEnabled;
+                mapping.AccountClassificationId = item.Classification?.Id;
+                mapping.FinancialStatementLineItem = item.Request.FinancialStatementLineItem;
+                mapping.UpdatedAt = now;
+                mapping.UpdatedBy = _currentUserService.UserName ?? "system";
+            }
+            var requestedBookIds = resolved.Select(item => item.Book.Id).ToHashSet();
+            foreach (var omitted in mappings.Where(item => !requestedBookIds.Contains(item.AccountingBookId)))
+            {
+                omitted.IsEnabled = false;
+                omitted.UpdatedAt = now;
+                omitted.UpdatedBy = _currentUserService.UserName ?? "system";
+            }
             await _context.SaveChangesAsync(cancellationToken);
         }
 
@@ -98,87 +143,6 @@ namespace ErpSystem.Api.Services.Finance.Settings
             }
         }
 
-        private async Task BackfillAccountMappingsAsync(CancellationToken cancellationToken)
-        {
-            var tenantId = TenantId;
-            var books = await _context.AccountingBooks
-                .Where(book => book.TenantId == tenantId && !book.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            var accounts = await _context.Accounts
-                .Where(account => account.TenantId == tenantId && !account.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            if (accounts.Count == 0 || books.Count == 0)
-            {
-                return;
-            }
-
-            var accountIds = accounts.Select(account => account.Id).ToList();
-            var mappings = await _context.AccountAccountingBooks
-                .Where(mapping => mapping.TenantId == tenantId && accountIds.Contains(mapping.AccountId) && !mapping.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            foreach (var account in accounts)
-            {
-                var accountMappings = mappings
-                    .Where(mapping => mapping.AccountId == account.Id)
-                    .ToList();
-
-                ApplyMappingsFromLegacyFlags(account, books, accountMappings);
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
-        private void ApplyMappingsFromLegacyFlags(
-            Account account,
-            IReadOnlyCollection<AccountingBook> books,
-            ICollection<AccountAccountingBook> mappings)
-        {
-            UpsertMapping(account, books, mappings, IfrsCode, account.IsIFRSClassified, account.IFRSLineItem);
-            UpsertMapping(account, books, mappings, LocalStatutoryCode, account.IsBaseClassified, account.BaseLineItem);
-            UpsertMapping(account, books, mappings, ManagementCode, account.IsLocalClassified, account.LocalLineItem);
-        }
-
-        private void UpsertMapping(
-            Account account,
-            IReadOnlyCollection<AccountingBook> books,
-            ICollection<AccountAccountingBook> mappings,
-            string bookCode,
-            bool enabled,
-            string? lineItem)
-        {
-            var book = books.FirstOrDefault(candidate =>
-                candidate.Code.Equals(bookCode, StringComparison.OrdinalIgnoreCase));
-
-            if (book == null)
-            {
-                return;
-            }
-
-            var mapping = mappings.FirstOrDefault(candidate => candidate.AccountingBookId == book.Id);
-            if (mapping == null)
-            {
-                mapping = new AccountAccountingBook
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = account.TenantId,
-                    AccountId = account.Id,
-                    AccountingBookId = book.Id,
-                    CreatedAt = DateTime.UtcNow,
-                    CreatedBy = _currentUserService.UserName ?? "system"
-                };
-
-                _context.AccountAccountingBooks.Add(mapping);
-                mappings.Add(mapping);
-            }
-
-            mapping.IsEnabled = enabled;
-            mapping.FinancialStatementLineItem = lineItem;
-            mapping.UpdatedAt = DateTime.UtcNow;
-            mapping.UpdatedBy = _currentUserService.UserName ?? "system";
-        }
 
         private static IReadOnlyList<AccountingBook> GetDefaultBooks(Guid tenantId, DateTime now, string userName)
         {

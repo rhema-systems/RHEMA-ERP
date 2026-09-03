@@ -34,5 +34,6 @@ namespace ErpSystem.Core.Entities.Finance
         public int SortOrder { get; set; }
 
         public virtual ICollection<AccountAccountingBook> AccountMappings { get; set; } = new List<AccountAccountingBook>();
+        public virtual ICollection<AccountClassification> AccountClassifications { get; set; } = new List<AccountClassification>();
     }
 }

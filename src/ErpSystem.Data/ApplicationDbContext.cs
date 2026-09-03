@@ -123,6 +123,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
+    public DbSet<AccountClassification> AccountClassifications { get; set; }
     public DbSet<FinancialStatementLayout> FinancialStatementLayouts { get; set; }
     public DbSet<FinancialStatementLayoutVersion> FinancialStatementLayoutVersions { get; set; }
     public DbSet<FinancialStatementRow> FinancialStatementRows { get; set; }
@@ -2829,6 +2830,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("AccountAccountingBooks");
             entity.HasIndex(e => new { e.TenantId, e.AccountId, e.AccountingBookId }).IsUnique();
             entity.Property(e => e.FinancialStatementLineItem).HasMaxLength(100);
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasOne(e => e.Account)
                 .WithMany(a => a.AccountingBooks)
                 .HasForeignKey(e => e.AccountId)
@@ -2837,10 +2839,33 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(book => book.AccountMappings)
                 .HasForeignKey(e => e.AccountingBookId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountClassification)
+                .WithMany(classification => classification.AccountMappings)
+                .HasForeignKey(e => e.AccountClassificationId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountClassification>(entity =>
+        {
+            entity.ToTable("AccountClassifications");
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.ParentClassificationId, item.DisplayOrder });
+            entity.Property(item => item.Code).HasMaxLength(50).IsRequired();
+            entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.Description).HasMaxLength(1000);
+            entity.Property(item => item.RetirementReason).HasMaxLength(500);
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany(book => book.AccountClassifications)
+                .HasForeignKey(item => item.AccountingBookId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ParentClassification).WithMany(parent => parent.Children)
+                .HasForeignKey(item => item.ParentClassificationId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<FinancialStatementLayout>(entity =>
@@ -2926,6 +2951,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<JournalEntry>(entity =>
         {
             entity.ToTable("JournalEntries");
+            // The reciprocal flags are useful evidence, but this database invariant is what closes
+            // the concurrent double-reversal race for every server-owned reversal path.
+            entity.HasIndex(e => new { e.TenantId, e.OriginalJournalEntryId })
+                .IsUnique()
+                .HasFilter("[OriginalJournalEntryId] IS NOT NULL AND [IsDeleted] = 0");
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany(p => p.JournalEntries)
                 .HasForeignKey(e => e.FiscalPeriodId)

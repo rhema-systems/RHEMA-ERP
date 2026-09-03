@@ -108,6 +108,7 @@ public static class FinancePermissionPolicyMap
         {
             "Account" => AccountPolicy(action, methods),
             "AccountingBooks" => One(FinancePermissions.ViewFinance),
+            "AccountClassifications" => ReadOrManage(action, methods, FinancePermissions.ManageChartOfAccounts),
             "Allocation" => AllocationPolicy(action),
             "VendorInvoice" => VendorInvoicePolicy(action),
             "VendorPayment" => VendorPaymentPolicy(action),

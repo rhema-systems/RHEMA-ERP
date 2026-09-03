@@ -48,6 +48,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .ThenInclude(v => v.SegmentStructure)
                 .Include(a => a.AccountingBooks)
                     .ThenInclude(mapping => mapping.AccountingBook)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountClassification)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (account == null)
@@ -78,6 +80,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .ThenInclude(v => v.SegmentStructure)
                 .Include(a => a.AccountingBooks)
                     .ThenInclude(mapping => mapping.AccountingBook)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountClassification)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return account == null ? null : MapToDto(account);
@@ -98,7 +102,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .GetQueryable(a => a.TenantId == TenantId)
                 .Include(a => a.SegmentValues)
                 .Include(a => a.AccountingBooks)
-                    .ThenInclude(mapping => mapping.AccountingBook);
+                    .ThenInclude(mapping => mapping.AccountingBook)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountClassification);
 
             if (!string.IsNullOrWhiteSpace(accountType) &&
                 Enum.TryParse<AccountType>(accountType.Trim(), ignoreCase: true, out var parsedAccountType))
@@ -194,10 +200,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CashFlowClassification = NormalizeCashFlowClassification(dto.CashFlowClassification),
                 CurrencyCode = dto.CurrencyCode,
                 IsMultiCurrency = dto.IsMultiCurrency,
-                // Adjust property names to match Account entity:
-                IsIFRSClassified = dto.IsIFRSClassified,
-                IsBaseClassified = dto.IsBaseFrameworkClassified,
-                IsLocalClassified = dto.IsLocalFrameworkClassified,
                 IsControlAccount = dto.IsControlAccount,
                 AllowDirectPosting = dto.IsPostingAllowed,
                 ReferenceNumber = dto.ReferenceNumber ?? string.Empty,
@@ -255,8 +257,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             // Persist via repository/UnitOfWork
             await _unitOfWork.Accounts.AddAsync(account);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _accountingBookService.SyncAccountMappingsAsync(account, cancellationToken);
+            // Mapping validation runs before the shared context commits so a rejected book or
+            // classification cannot leave a partially-created account behind.
+            await _accountingBookService.SyncAccountMappingsAsync(account, dto.AccountingBooks, cancellationToken);
 
             return MapToDto(account);
         }
@@ -311,9 +314,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             // account.AccountSubCategory = dto.AccountSubCategory; // Handled above
             account.CurrencyCode = dto.CurrencyCode;
             account.IsMultiCurrency = dto.IsMultiCurrency;
-            account.IsIFRSClassified = dto.IsIFRSClassified;
-            account.IsBaseClassified = dto.IsBaseFrameworkClassified;
-            account.IsLocalClassified = dto.IsLocalFrameworkClassified;
             account.IsControlAccount = dto.IsControlAccount;
             account.AllowDirectPosting = dto.IsPostingAllowed;
             account.ReferenceNumber = dto.ReferenceNumber ?? account.ReferenceNumber;
@@ -371,8 +371,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             await _unitOfWork.Accounts.UpdateAsync(account);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _accountingBookService.SyncAccountMappingsAsync(account, cancellationToken);
+            await _accountingBookService.SyncAccountMappingsAsync(account, dto.AccountingBooks, cancellationToken);
 
             return MapToDto(account);
         }
@@ -516,6 +515,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                     AccountingBookCode = mapping.AccountingBook.Code,
                     AccountingBookName = mapping.AccountingBook.Name,
                     IsEnabled = mapping.IsEnabled,
+                    AccountClassificationId = mapping.AccountClassificationId,
+                    AccountClassificationCode = mapping.AccountClassification?.Code,
+                    AccountClassificationName = mapping.AccountClassification?.Name,
+                    AccountClassificationStatus = mapping.AccountClassification?.Status.ToString(),
+                    IsMigrationReady = !mapping.IsEnabled || mapping.AccountClassification is
+                    {
+                        Status: AccountClassificationStatus.Active,
+                        IsPostingClassification: true
+                    },
                     FinancialStatementLineItem = mapping.FinancialStatementLineItem
                 })
                 .ToList();
