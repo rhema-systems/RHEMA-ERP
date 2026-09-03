@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 2 — configurable classifications completion |
-| Status | `CORRECTIONS_REQUIRED` |
+| Status | `REVIEWING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Branch | `codex/finance-configurable-classifications-phase2` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | `CHANGES_REQUIRED`; seven corrections sent directly to the implementing task |
+| Review status | Corrected six-commit stack at `62f1a138`; independent re-review in progress |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -65,11 +65,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
 | 1 | `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2` | `CHANGES_REQUIRED` | P1: deterministic v1-to-v2 seed upgrades are incomplete for existing tenants; dashboard aggregation is not bound to one authoritative book; classification mutation/audit and relationship checks are not atomic; singleton system-role cardinality is unenforced. P2: ad-hoc Chart of Accounts book/tenant selection is nondeterministic; mutation controls lack permission-aware UI gating; parent retirement readiness disagrees with backend lifecycle rules. Corrections and required regression gates were sent directly. | Not integrated |
+| 2 | `62f1a138efaaef78b5bcf2f7e4a1e3776ffb518b` | Independent re-review pending | Implementer reports all seven findings corrected, 219 focused backend tests and 9 frontend tests passing, focused lint and EF no-pending-model green. Adds unapplied migration `20260903120000_EnforceFinanceClassificationSystemRoleCardinality` with duplicate preflight and filtered singleton-role index. | Pending |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 2 completed a clean three-commit range at `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2`, but independent review returned `CHANGES_REQUIRED` with seven findings. The implementing task received the corrections and resumed in the existing isolated Phase 2 worktree. No Phase 2 commit has been integrated, no migration was applied, and no database was mutated.
+Last verified durable point: the implementing task returned a clean corrected six-commit Phase 2 stack at `62f1a138efaaef78b5bcf2f7e4a1e3776ffb518b`. Independent re-review of correction commits `4aa858dc`, `ab6e7572`, and `62f1a138` is in progress. No Phase 2 commit has been integrated, the new cardinality migration remains unapplied, and no persistent database was mutated.
 
 ## Next action
 
-Wait for the corrected Phase 2 handoff, independently re-review the correction commits and rerun the required backend/frontend/EF gates. Integrate only after approval, then update this ledger and stop before Phase 3 unless separately authorized.
+Complete independent re-review and rerun the required backend/frontend/EF/migration gates. Integrate the six commits only after approval, then update this ledger and stop before Phase 3 unless separately authorized.
