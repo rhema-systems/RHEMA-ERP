@@ -10,17 +10,17 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Phase 3 — classification-driven report layouts |
-| Status | `PHASE_3_COMPLETE` |
+| Phase | Phase 4 — book-specific revaluation policy and execution |
+| Status | `IMPLEMENTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
-| Branch | `codex/finance-report-layout-classifications-phase3` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-report-layout-classifications-phase3` |
+| Exact base | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
+| Branch | `codex/finance-revaluation-policy-phase4` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-revaluation-policy-phase4` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `d7bf176789d1e5c46bb71da2c16ec1e3f9e10d1c` |
+| Primary HEAD at activation | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Approved and integrated through primary commit `48610595` |
+| Review status | Implementation active; independent review pending handoff |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -78,8 +78,8 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 3 is independently approved and integrated through primary HEAD `48610595fc226f597c51536ac55db494a90b375c`. The primary test-project build passed with 0 errors after an initial environmental Roslyn `csc.dll` exit-code `-1` was cleared by rerunning the implementer's exact build command. Twenty-four focused backend tests, fifteen frontend tests, targeted ESLint, EF no-pending-model and diff checks passed. The publication-snapshot migration and all earlier migrations remain unapplied; no persistent database was mutated.
+Last verified durable point: Phase 3 is independently approved and integrated, and its coordination checkpoint is committed at primary HEAD `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. Phase 4 was dispatched to the implementing task from that exact base using the dedicated branch/worktree recorded above, and the task reports active. The publication-snapshot migration and all earlier migrations remain unapplied; no persistent database was mutated.
 
 ## Next action
 
-Commit this Phase 3 integration checkpoint, then immediately activate Phase 4 — book-specific revaluation policy and execution — from that exact primary commit. Continue through Phase 6 after independent review and clean integration. Do not apply migrations or cross any other escalation gate without user authorization.
+Monitor the Phase 4 implementation handoff, perform independent accounting/schema/security review, send any corrections directly, and integrate only a clean approved stack. Then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
