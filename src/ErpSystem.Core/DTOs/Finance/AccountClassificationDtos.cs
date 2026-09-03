@@ -8,6 +8,8 @@ public sealed class AccountClassificationDto
     public Guid AccountingBookId { get; set; }
     public string AccountingBookCode { get; set; } = string.Empty;
     public Guid? ParentClassificationId { get; set; }
+    public string? ParentClassificationCode { get; set; }
+    public string? ParentClassificationName { get; set; }
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -17,7 +19,32 @@ public sealed class AccountClassificationDto
     public bool IsPostingClassification { get; set; }
     public string Status { get; set; } = "Draft";
     public int DisplayOrder { get; set; }
+    public int ChildCount { get; set; }
+    public int TotalAccountCount { get; set; }
+    public int EnabledAccountCount { get; set; }
+    public bool IsLeaf => ChildCount == 0;
+    public bool CanRetire => EnabledAccountCount == 0 && ChildCount == 0 && Status != "Retired";
     public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class AccountClassificationUsageDto
+{
+    public Guid AccountAccountingBookId { get; set; }
+    public Guid AccountId { get; set; }
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public Guid AccountingBookId { get; set; }
+    public string AccountingBookCode { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; }
+}
+
+public sealed class AccountClassificationWhereUsedDto
+{
+    public Guid ClassificationId { get; set; }
+    public string ClassificationCode { get; set; } = string.Empty;
+    public int TotalMappings { get; set; }
+    public int EnabledMappings { get; set; }
+    public IReadOnlyList<AccountClassificationUsageDto> Mappings { get; set; } = [];
 }
 
 public sealed class SaveAccountClassificationDto

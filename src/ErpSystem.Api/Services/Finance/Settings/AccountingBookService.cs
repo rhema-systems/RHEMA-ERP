@@ -70,6 +70,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
             var classifications = await _context.AccountClassifications
                 .Where(item => item.TenantId == tenantId && !item.IsDeleted)
                 .ToListAsync(cancellationToken);
+            var parentIds = classifications.Where(item => item.ParentClassificationId.HasValue)
+                .Select(item => item.ParentClassificationId!.Value).ToHashSet();
             var resolved = new List<(AccountAccountingBookUpdateDto Request, AccountingBook Book, AccountClassification? Classification)>();
             foreach (var request in requestedMappings)
             {
@@ -83,7 +85,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     : null;
                 if (request.IsEnabled && (classification == null || classification.AccountingBookId != book.Id
                     || classification.Status != AccountClassificationStatus.Active
-                    || !classification.IsPostingClassification || classification.CoreAccountType != account.AccountType))
+                    || !classification.IsPostingClassification || parentIds.Contains(classification.Id)
+                    || classification.CoreAccountType != account.AccountType))
                     throw new InvalidOperationException("Each enabled accounting-book assignment requires a compatible active posting classification.");
                 resolved.Add((request, book, classification));
             }

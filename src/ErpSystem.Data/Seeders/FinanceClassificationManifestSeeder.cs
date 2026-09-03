@@ -11,34 +11,45 @@ namespace ErpSystem.Data.Seeders;
 /// </summary>
 public sealed class FinanceClassificationManifestSeeder
 {
-    public const string ManifestVersion = "FIN-CLASSIFICATION-1.0";
+    public const string ManifestVersion = "FIN-CLASSIFICATION-2.0";
     private static readonly string[] BookCodes = ["IFRS", "LOCAL_STATUTORY", "MANAGEMENT"];
 
-    private sealed record Definition(string Code, string Name, AccountType Type,
+    private sealed record Definition(string Code, string Name, AccountType Type, string? ParentCode = null,
         RevaluationTreatment Treatment = RevaluationTreatment.Exclude,
-        AccountClassificationSystemRole? Role = null);
+        AccountClassificationSystemRole? Role = null,
+        bool IsPosting = true);
 
     private static readonly Definition[] Definitions =
     [
-        new("ASSET_OTHER", "Other Assets", AccountType.Asset),
-        new("CASH", "Cash", AccountType.Asset, RevaluationTreatment.Include, AccountClassificationSystemRole.Cash),
-        new("BANK", "Bank", AccountType.Asset, RevaluationTreatment.Include, AccountClassificationSystemRole.Bank),
-        new("RECEIVABLE_CONTROL", "Receivables", AccountType.Asset, RevaluationTreatment.Include, AccountClassificationSystemRole.ReceivableControl),
-        new("INVENTORY_CONTROL", "Inventory", AccountType.Asset, Role: AccountClassificationSystemRole.InventoryControl),
-        new("FIXED_ASSET_COST", "Fixed Asset Cost", AccountType.Asset, Role: AccountClassificationSystemRole.FixedAssetCost),
-        new("ACCUMULATED_DEPRECIATION", "Accumulated Depreciation", AccountType.Asset, Role: AccountClassificationSystemRole.AccumulatedDepreciation),
-        new("ASSET_UNDER_CONSTRUCTION", "Asset Under Construction", AccountType.Asset, Role: AccountClassificationSystemRole.AssetUnderConstruction),
-        new("WHT_RECEIVABLE", "Withholding Tax Receivable", AccountType.Asset, Role: AccountClassificationSystemRole.WhtReceivable),
-        new("LIABILITY_OTHER", "Other Liabilities", AccountType.Liability),
-        new("PAYABLE_CONTROL", "Payables", AccountType.Liability, RevaluationTreatment.Include, AccountClassificationSystemRole.PayableControl),
-        new("ACCRUED_LIABILITY", "Accrued Liabilities", AccountType.Liability, RevaluationTreatment.Include),
-        new("DEBT", "Borrowings and Debt", AccountType.Liability, RevaluationTreatment.Include),
-        new("INPUT_TAX", "Input Tax", AccountType.Asset, Role: AccountClassificationSystemRole.InputTax),
-        new("OUTPUT_TAX", "Output Tax", AccountType.Liability, Role: AccountClassificationSystemRole.OutputTax),
-        new("WHT_PAYABLE", "Withholding Tax Payable", AccountType.Liability, Role: AccountClassificationSystemRole.WhtPayable),
-        new("EQUITY", "Equity", AccountType.Equity),
-        new("REVENUE", "Revenue", AccountType.Revenue),
-        new("EXPENSE", "Expense", AccountType.Expense),
+        new("ASSETS", "Assets", AccountType.Asset, IsPosting: false),
+        new("ASSET_OTHER", "Other Assets", AccountType.Asset, "ASSETS"),
+        new("CASH", "Cash", AccountType.Asset, "ASSETS", RevaluationTreatment.Include, AccountClassificationSystemRole.Cash),
+        new("BANK", "Bank", AccountType.Asset, "ASSETS", RevaluationTreatment.Include, AccountClassificationSystemRole.Bank),
+        new("RECEIVABLE_CONTROL", "Receivables", AccountType.Asset, "ASSETS", RevaluationTreatment.Include, AccountClassificationSystemRole.ReceivableControl),
+        new("INVENTORY_CONTROL", "Inventory", AccountType.Asset, "ASSETS", Role: AccountClassificationSystemRole.InventoryControl),
+        new("FIXED_ASSET_COST", "Fixed Asset Cost", AccountType.Asset, "ASSETS", Role: AccountClassificationSystemRole.FixedAssetCost),
+        new("ACCUMULATED_DEPRECIATION", "Accumulated Depreciation", AccountType.Asset, "ASSETS", Role: AccountClassificationSystemRole.AccumulatedDepreciation),
+        new("ASSET_UNDER_CONSTRUCTION", "Asset Under Construction", AccountType.Asset, "ASSETS", Role: AccountClassificationSystemRole.AssetUnderConstruction),
+        new("WHT_RECEIVABLE", "Withholding Tax Receivable", AccountType.Asset, "ASSETS", Role: AccountClassificationSystemRole.WhtReceivable),
+        new("INPUT_TAX", "Input Tax", AccountType.Asset, "ASSETS", Role: AccountClassificationSystemRole.InputTax),
+        new("LIABILITIES", "Liabilities", AccountType.Liability, IsPosting: false),
+        new("LIABILITY_OTHER", "Other Liabilities", AccountType.Liability, "LIABILITIES"),
+        new("PAYABLE_CONTROL", "Payables", AccountType.Liability, "LIABILITIES", RevaluationTreatment.Include, AccountClassificationSystemRole.PayableControl),
+        new("ACCRUED_LIABILITY", "Accrued Liabilities", AccountType.Liability, "LIABILITIES", RevaluationTreatment.Include),
+        new("DEBT", "Borrowings and Debt", AccountType.Liability, "LIABILITIES", RevaluationTreatment.Include),
+        new("OUTPUT_TAX", "Output Tax", AccountType.Liability, "LIABILITIES", Role: AccountClassificationSystemRole.OutputTax),
+        new("WHT_PAYABLE", "Withholding Tax Payable", AccountType.Liability, "LIABILITIES", Role: AccountClassificationSystemRole.WhtPayable),
+        new("EQUITY_ROOT", "Equity", AccountType.Equity, IsPosting: false),
+        new("EQUITY", "Equity Accounts", AccountType.Equity, "EQUITY_ROOT"),
+        new("REVENUE_ROOT", "Revenue", AccountType.Revenue, IsPosting: false),
+        new("REVENUE", "Operating Revenue", AccountType.Revenue, "REVENUE_ROOT"),
+        new("REVENUE_DEDUCTIONS", "Revenue Deductions", AccountType.Revenue, "REVENUE_ROOT"),
+        new("OTHER_INCOME", "Other Income", AccountType.Revenue, "REVENUE_ROOT"),
+        new("EXPENSE_ROOT", "Expenses", AccountType.Expense, IsPosting: false),
+        new("EXPENSE", "Operating Expenses", AccountType.Expense, "EXPENSE_ROOT"),
+        new("COST_OF_SALES", "Cost of Sales", AccountType.Expense, "EXPENSE_ROOT"),
+        new("OTHER_EXPENSE", "Other Expenses", AccountType.Expense, "EXPENSE_ROOT"),
+        new("TAX_EXPENSE", "Income Tax Expense", AccountType.Expense, "EXPENSE_ROOT")
     ];
 
     private readonly ApplicationDbContext _db;
@@ -88,7 +99,7 @@ public sealed class FinanceClassificationManifestSeeder
                         TenantId = tenantId, AccountingBookId = book.Id, Code = definition.Code,
                         Name = definition.Name, CoreAccountType = definition.Type,
                         DefaultRevaluationTreatment = definition.Treatment, SystemRole = definition.Role,
-                        IsPostingClassification = true, Status = AccountClassificationStatus.Active,
+                        IsPostingClassification = definition.IsPosting, Status = AccountClassificationStatus.Active,
                         DisplayOrder = Array.IndexOf(Definitions, definition) * 10 + 10,
                         CreatedAt = seedDate, CreatedBy = $"System ({ManifestVersion})"
                     };
@@ -99,6 +110,16 @@ public sealed class FinanceClassificationManifestSeeder
                 {
                     throw new InvalidOperationException($"Classification {book.Code}/{definition.Code} has an incompatible core account type.");
                 }
+            }
+            await _db.SaveChangesAsync(cancellationToken);
+            foreach (var definition in Definitions.Where(item => item.ParentCode != null))
+            {
+                var classification = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == definition.Code);
+                var parent = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == definition.ParentCode);
+                if (classification.ParentClassificationId == null
+                    && classification.CreatedBy?.Contains("FIN-CLASSIFICATION-", StringComparison.Ordinal) == true
+                    && classification.UpdatedBy == null)
+                    classification.ParentClassificationId = parent.Id;
             }
         }
         await _db.SaveChangesAsync(cancellationToken);
@@ -122,13 +143,16 @@ public sealed class FinanceClassificationManifestSeeder
                     mapping = new AccountAccountingBook
                     {
                         TenantId = tenantId, AccountId = account.Id, AccountingBookId = book.Id,
+                        AccountClassificationId = classification.Id, IsEnabled = true,
                         CreatedAt = seedDate, CreatedBy = $"System ({ManifestVersion})"
                     };
                     _db.AccountAccountingBooks.Add(mapping);
                     existingMappings.Add(mapping);
                 }
-                mapping.AccountClassificationId = classification.Id;
-                mapping.IsEnabled = true;
+                else if (mapping.AccountClassificationId == null && mapping.UpdatedBy == null)
+                {
+                    mapping.AccountClassificationId = classification.Id;
+                }
             }
         }
         await _db.SaveChangesAsync(cancellationToken);
@@ -153,8 +177,12 @@ public sealed class FinanceClassificationManifestSeeder
         {
             AccountType.Asset when naturalCode is "1990" or "9999" => "ASSET_OTHER",
             AccountType.Equity when naturalCode is "3000" or "3100" => "EQUITY",
-            AccountType.Revenue when naturalCode is "4000" or "4100" or "4110" or "4210" or "4900" or "4910" or "4920" or "7100" or "7110" or "7200" or "7210" => "REVENUE",
-            AccountType.Expense when naturalCode is "5000" or "6000" or "6020" or "6100" or "6200" or "6300" or "6400" or "6500" or "6600" => "EXPENSE",
+            AccountType.Revenue when naturalCode is "4000" or "4100" or "4110" => "REVENUE",
+            AccountType.Revenue when naturalCode == "4210" => "REVENUE_DEDUCTIONS",
+            AccountType.Revenue when naturalCode is "4900" or "4910" or "4920" or "7100" or "7200" => "OTHER_INCOME",
+            AccountType.Expense when naturalCode == "5000" => "COST_OF_SALES",
+            AccountType.Expense when naturalCode is "7110" or "7210" => "OTHER_EXPENSE",
+            AccountType.Expense when naturalCode is "6000" or "6020" or "6100" or "6200" or "6300" or "6400" or "6500" or "6600" => "EXPENSE",
             _ => null
         };
     }

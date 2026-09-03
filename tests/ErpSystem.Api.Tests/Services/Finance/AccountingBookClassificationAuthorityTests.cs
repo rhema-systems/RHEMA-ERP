@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using ErpSystem.Data.Seeders;
@@ -26,7 +27,7 @@ public sealed class AccountingBookClassificationAuthorityTests
         await using var db = CreateContext();
         var book = SeedBook(db, tenantId);
         await db.SaveChangesAsync();
-        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object);
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
 
         var result = await service.CreateAsync(new SaveAccountClassificationDto
         {
@@ -91,7 +92,7 @@ public sealed class AccountingBookClassificationAuthorityTests
             IsEnabled = true
         });
         await db.SaveChangesAsync();
-        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object);
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
 
         var action = () => service.UpdateAsync(classification.Id, new SaveAccountClassificationDto
         {
@@ -131,7 +132,7 @@ public sealed class AccountingBookClassificationAuthorityTests
             IsEnabled = true
         });
         await db.SaveChangesAsync();
-        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object);
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
 
         var action = () => service.UpdateAsync(classification.Id, new SaveAccountClassificationDto
         {
@@ -167,7 +168,7 @@ public sealed class AccountingBookClassificationAuthorityTests
         };
         db.AccountAccountingBooks.Add(mapping);
         await db.SaveChangesAsync();
-        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object);
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
         var request = new RetireAccountClassificationDto
         {
             Reason = "Superseded after reviewed remapping.",
@@ -266,6 +267,15 @@ public sealed class AccountingBookClassificationAuthorityTests
         await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var firstClassifications = await db.AccountClassifications.CountAsync();
         var firstMappings = await db.AccountAccountingBooks.CountAsync();
+        var cashAccountId = await db.Accounts.Where(item => item.AccountCode == "1000").Select(item => item.Id).SingleAsync();
+        var reviewedMapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .SingleAsync(item => item.AccountId == cashAccountId && item.AccountingBook.Code == "IFRS");
+        reviewedMapping.AccountClassificationId = await db.AccountClassifications
+            .Where(item => item.AccountingBookId == reviewedMapping.AccountingBookId && item.Code == "ASSET_OTHER")
+            .Select(item => item.Id).SingleAsync();
+        reviewedMapping.IsEnabled = false;
+        reviewedMapping.UpdatedBy = "finance.admin";
+        await db.SaveChangesAsync();
         await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
         (await db.AccountClassifications.CountAsync()).Should().Be(firstClassifications);
@@ -276,7 +286,153 @@ public sealed class AccountingBookClassificationAuthorityTests
         (await db.AccountClassifications.Where(item => item.Code == "EXPENSE")
             .Select(item => item.DefaultRevaluationTreatment).Distinct().SingleAsync())
             .Should().Be(RevaluationTreatment.Exclude);
+        reviewedMapping.AccountClassificationId.Should().Be(
+            await db.AccountClassifications.Where(item => item.AccountingBookId == reviewedMapping.AccountingBookId && item.Code == "ASSET_OTHER")
+                .Select(item => item.Id).SingleAsync());
+        reviewedMapping.IsEnabled.Should().BeFalse();
+        (await db.AccountClassifications.CountAsync(item => item.Code == "ASSETS" && !item.IsPostingClassification))
+            .Should().Be(3);
+        (await db.AccountClassifications.Where(item => item.Code == "CASH")
+            .AllAsync(item => item.ParentClassificationId != null)).Should().BeTrue();
+        FinanceClassificationManifestSeeder.ResolveReviewedClassificationCode("5000", AccountType.Expense)
+            .Should().Be("COST_OF_SALES");
     }
+
+    [Fact]
+    public async Task Hierarchy_RejectsCrossTypeParentCyclesAndNonLeafAssignments()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var assetRoot = SeedClassification(db, tenantId, book.Id, "ASSETS", AccountType.Asset);
+        assetRoot.IsPostingClassification = false;
+        var child = SeedClassification(db, tenantId, book.Id, "CASH", AccountType.Asset);
+        child.IsPostingClassification = false;
+        child.ParentClassificationId = assetRoot.Id;
+        var expenseRoot = SeedClassification(db, tenantId, book.Id, "EXPENSES", AccountType.Expense);
+        expenseRoot.IsPostingClassification = false;
+        var account = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        var crossType = () => service.UpdateAsync(child.Id, Request(child, book.Id, parentId: expenseRoot.Id));
+        await crossType.Should().ThrowAsync<InvalidOperationException>().WithMessage("*share accounting book and core account type*");
+
+        var cycle = () => service.UpdateAsync(assetRoot.Id, Request(assetRoot, book.Id, parentId: child.Id));
+        await cycle.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cycles are prohibited*");
+
+        var mapping = new AccountingBookService(db, CurrentUser(tenantId).Object);
+        var nonLeaf = () => mapping.SyncAccountMappingsAsync(account,
+        [
+            new AccountAccountingBookUpdateDto { AccountingBookId = book.Id, AccountClassificationId = assetRoot.Id, IsEnabled = true }
+        ]);
+        await nonLeaf.Should().ThrowAsync<InvalidOperationException>().WithMessage("*compatible active posting classification*");
+    }
+
+    [Fact]
+    public async Task WhereUsed_ReportsEnabledAndHistoricalMappings()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        var active = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var historical = SeedAccount(db, tenantId, "6200", AccountType.Expense);
+        db.AccountAccountingBooks.AddRange(
+            new AccountAccountingBook { TenantId = tenantId, AccountId = active.Id, AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = true },
+            new AccountAccountingBook { TenantId = tenantId, AccountId = historical.Id, AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = false });
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        var usage = await service.GetWhereUsedAsync(classification.Id);
+
+        usage.TotalMappings.Should().Be(2);
+        usage.EnabledMappings.Should().Be(1);
+        usage.Mappings.Should().Contain(item => item.AccountCode == "6100" && item.IsEnabled);
+        usage.Mappings.Should().Contain(item => item.AccountCode == "6200" && !item.IsEnabled);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_RejectsStaleClassificationRowVersion()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        classification.RowVersion = [1, 2, 3];
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        var request = Request(classification, book.Id);
+        request.RowVersion = Convert.ToBase64String([9, 9, 9]);
+        var action = () => service.UpdateAsync(classification.Id, request);
+
+        await action.Should().ThrowAsync<DbUpdateConcurrencyException>();
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsSystemRoleIncompatibleWithCoreAccountType()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        var action = () => service.CreateAsync(new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id, Code = "BANK_REVENUE", Name = "Invalid bank revenue",
+            CoreAccountType = nameof(AccountType.Revenue), SystemRole = nameof(AccountClassificationSystemRole.Bank),
+            IsPostingClassification = true, Status = nameof(AccountClassificationStatus.Active)
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*incompatible with core account type*");
+    }
+
+    [Fact]
+    public async Task CreateUpdateAndRetire_RecordGovernanceAuditEvents()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        await db.SaveChangesAsync();
+        var audit = Audit();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, audit.Object);
+        var created = await service.CreateAsync(new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id, Code = "OTHER_ASSET", Name = "Other asset",
+            CoreAccountType = nameof(AccountType.Asset), Status = nameof(AccountClassificationStatus.Active),
+            IsPostingClassification = true
+        });
+        var tracked = await db.AccountClassifications.SingleAsync(item => item.Id == created.Id);
+        tracked.RowVersion = [1];
+        await db.SaveChangesAsync();
+        created.RowVersion = Convert.ToBase64String([1]);
+        await service.UpdateAsync(created.Id, new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id, Code = created.Code, Name = "Other assets",
+            CoreAccountType = nameof(AccountType.Asset), Status = nameof(AccountClassificationStatus.Active),
+            IsPostingClassification = true, RowVersion = created.RowVersion.Length == 0 ? Convert.ToBase64String([1]) : created.RowVersion
+        });
+        var refreshed = await db.AccountClassifications.AsNoTracking().SingleAsync(item => item.Id == created.Id);
+        await service.RetireAsync(created.Id, new RetireAccountClassificationDto
+        {
+            Reason = "Superseded by the approved hierarchy.",
+            RowVersion = refreshed.RowVersion.Length == 0 ? Convert.ToBase64String([1]) : Convert.ToBase64String(refreshed.RowVersion)
+        });
+
+        audit.Verify(item => item.RecordAsync(It.Is<FinanceAuditEventDto>(e => e.EventType == ErpSystem.Shared.FinanceAuditEvents.AccountClassificationCreated), It.IsAny<CancellationToken>()), Times.Once);
+        audit.Verify(item => item.RecordAsync(It.Is<FinanceAuditEventDto>(e => e.EventType == ErpSystem.Shared.FinanceAuditEvents.AccountClassificationUpdated && e.BeforeValues != null), It.IsAny<CancellationToken>()), Times.Once);
+        audit.Verify(item => item.RecordAsync(It.Is<FinanceAuditEventDto>(e => e.EventType == ErpSystem.Shared.FinanceAuditEvents.AccountClassificationRetired && e.Reason != null), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static SaveAccountClassificationDto Request(AccountClassification item, Guid bookId, Guid? parentId = null) => new()
+    {
+        AccountingBookId = bookId, ParentClassificationId = parentId, Code = item.Code, Name = item.Name,
+        CoreAccountType = item.CoreAccountType.ToString(), DefaultRevaluationTreatment = item.DefaultRevaluationTreatment.ToString(),
+        IsPostingClassification = item.IsPostingClassification, Status = item.Status.ToString(),
+        RowVersion = item.RowVersion.Length == 0 ? Convert.ToBase64String([1]) : Convert.ToBase64String(item.RowVersion)
+    };
 
     [Fact]
     public async Task ProvisioningBoundary_IsIdempotentAndOwnsBookClassificationMappings()
@@ -334,6 +490,14 @@ public sealed class AccountingBookClassificationAuthorityTests
         currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid().ToString());
         currentUser.SetupGet(item => item.UserName).Returns("finance.classification.tests");
         return currentUser;
+    }
+
+    private static Mock<IFinanceAuditService> Audit()
+    {
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ErpSystem.Core.Entities.AuditLog());
+        return audit;
     }
 
     private static AccountingBook SeedBook(ApplicationDbContext db, Guid tenantId)

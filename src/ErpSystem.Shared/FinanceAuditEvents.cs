@@ -2,6 +2,9 @@ namespace ErpSystem.Shared;
 
 public static class FinanceAuditEvents
 {
+    public const string AccountClassificationCreated = "Finance.GL.AccountClassification.Created";
+    public const string AccountClassificationUpdated = "Finance.GL.AccountClassification.Updated";
+    public const string AccountClassificationRetired = "Finance.GL.AccountClassification.Retired";
     public const string JournalCreated = "Finance.JournalEntry.Created";
     public const string JournalUpdated = "Finance.JournalEntry.Updated";
     public const string JournalDeleted = "Finance.JournalEntry.Deleted";

@@ -10,6 +10,14 @@ Finance Phase 1A separates two concepts that the V1 name `BookClassification` ob
 External producers submit the first value and never submit the second. Finance resolves and validates
 the detailed classification from `AccountAccountingBook` for every posting line.
 
+Phase 2 clarification: classification codes, IDs, names, hierarchy nodes and `SystemRole` are all
+Finance-owned configuration. Procurement, Inventory, Sales and HR producers must not copy their own
+category captions into `AccountCategory`/`AccountSubCategory`, infer a Finance classification from a
+display string, or submit a raw classification ID. Where a producer creates a GL account, it must use
+the Finance provisioning boundary with stable account intent/code; Finance creates the canonical-book
+mappings and resolves its reviewed stable classification codes. Producer-owner conversion remains a
+coordinated stacked-integration task and does not authorize direct edits to Finance tables.
+
 V1 remains available only as a deprecated Finance-owned compatibility boundary while module owners
 adopt V2. The coordinated final cutover must leave no permanent dual contract:
 

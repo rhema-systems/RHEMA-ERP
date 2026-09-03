@@ -19,6 +19,11 @@ public sealed class AccountClassificationsController : ControllerBase
     public async Task<IActionResult> Get([FromQuery] Guid? accountingBookId, [FromQuery] bool includeInactive = false, CancellationToken cancellationToken = default) =>
         Ok(await _service.GetAsync(accountingBookId, includeInactive, cancellationToken));
 
+    [HttpGet("{id:guid}/where-used")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetWhereUsed(Guid id, CancellationToken cancellationToken = default) =>
+        Ok(await _service.GetWhereUsedAsync(id, cancellationToken));
+
     [HttpPost]
     [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
     public async Task<IActionResult> Create([FromBody] SaveAccountClassificationDto request, CancellationToken cancellationToken) =>
