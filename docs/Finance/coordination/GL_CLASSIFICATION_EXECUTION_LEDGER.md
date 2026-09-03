@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 2 — configurable classifications completion |
-| Status | `REVIEWING` |
+| Status | `CORRECTIONS_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Branch | `codex/finance-configurable-classifications-phase2` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `30565ea50194559611616946fcfc2f53cbd3eab1` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Phase 2 independent review in progress for `30565ea5..1d6521e4` |
+| Review status | `CHANGES_REQUIRED`; seven corrections sent directly to the implementing task |
 | Connectivity state | Online at activation |
 
 ## Authoritative inputs
@@ -64,12 +64,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2` | Independent review pending | Implementer reports a clean three-commit range, no schema change, 129 focused backend tests and 5 frontend tests passing, focused lint green, and EF no-pending-model green. | Pending |
+| 1 | `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2` | `CHANGES_REQUIRED` | P1: deterministic v1-to-v2 seed upgrades are incomplete for existing tenants; dashboard aggregation is not bound to one authoritative book; classification mutation/audit and relationship checks are not atomic; singleton system-role cardinality is unenforced. P2: ad-hoc Chart of Accounts book/tenant selection is nondeterministic; mutation controls lack permission-aware UI gating; parent retirement readiness disagrees with backend lifecycle rules. Corrections and required regression gates were sent directly. | Not integrated |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 2 completed a clean three-commit range at `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2` and returned `REVIEW_REQUIRED`. Independent review is in progress. No primary dirty-file path overlaps the Phase 2 range, no migration was added or applied, and no database was mutated.
+Last verified durable point: Phase 2 completed a clean three-commit range at `1d6521e4976c0e9334dd7290e8d5c47d715ca2f2`, but independent review returned `CHANGES_REQUIRED` with seven findings. The implementing task received the corrections and resumed in the existing isolated Phase 2 worktree. No Phase 2 commit has been integrated, no migration was applied, and no database was mutated.
 
 ## Next action
 
-Complete independent Phase 2 review. Send concrete corrections directly if required; otherwise integrate the three clean commits, rerun proportionate backend/frontend/EF gates on primary, update this ledger, and stop before Phase 3 unless separately authorized.
+Wait for the corrected Phase 2 handoff, independently re-review the correction commits and rerun the required backend/frontend/EF gates. Integrate only after approval, then update this ledger and stop before Phase 3 unless separately authorized.
