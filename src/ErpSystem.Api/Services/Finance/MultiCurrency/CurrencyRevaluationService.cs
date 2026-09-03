@@ -2091,7 +2091,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             .Append(batch.FiscalPeriodId.ToString("N")).Append('|')
             .Append(batch.Scope).Append('|')
             .Append(batch.FunctionalCurrencyCode).Append('|')
-            .Append(batch.AutoReverseNextPeriod);
+            .Append(batch.AutoReverseNextPeriod).Append('|')
+            .Append(batch.IdempotencyKey);
         foreach (var line in batch.Lines
                      .OrderBy(line => line.AccountId)
                      .ThenBy(line => line.TransactionCurrency)
@@ -2099,7 +2100,8 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                      .ThenBy(line => line.SourceDocumentType)
                      .ThenBy(line => line.SourceDocumentId))
         {
-            evidence.Append('|').Append(line.AccountId.ToString("N"))
+            evidence.Append('|').Append(line.TenantId.ToString("N"))
+                .Append(':').Append(line.AccountId.ToString("N"))
                 .Append(':').Append(line.SourceModule)
                 .Append(':').Append(line.SourceDocumentType)
                 .Append(':').Append(line.SourceDocumentId?.ToString("N") ?? "NONE")
