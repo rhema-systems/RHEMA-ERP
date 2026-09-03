@@ -48,20 +48,28 @@ public sealed class EmployeeImportSessionsController : ControllerBase
     public async Task<ActionResult<List<EmployeeImportColumnGuideDto>>> Columns(CancellationToken ct)
         => Ok(await _service.GetColumnGuideAsync(ct));
 
-    /// <summary>Upload a filled template. Checks every row; writes nothing to the register.</summary>
+    /// <summary>
+    /// Upload a filled template. Checks every row; writes nothing to the register.
+    /// <paramref name="mode"/> decides what a staff number already in the register means: an error
+    /// (CreateOnly, the default), an update of that employee (UpdateOnly), or either (CreateOrUpdate).
+    /// </summary>
     [HttpPost]
     [RequestSizeLimit(15_728_640)]
     [ProducesResponseType(typeof(EmployeeImportSessionSummaryDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<EmployeeImportSessionSummaryDto>> Upload(IFormFile? file, CancellationToken ct)
+    public async Task<ActionResult<EmployeeImportSessionSummaryDto>> Upload(
+        IFormFile? file, [FromForm] EmployeeImportMode? mode, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "Select a filled employee import template (.xlsx)." });
+        if (mode.HasValue && !Enum.IsDefined(mode.Value))
+            return BadRequest(new { message = "Mode must be CreateOnly, UpdateOnly or CreateOrUpdate." });
 
         try
         {
             await using var stream = file.OpenReadStream();
-            var session = await _service.CreateSessionAsync(stream, file.FileName, file.ContentType, ct);
+            var session = await _service.CreateSessionAsync(
+                stream, file.FileName, file.ContentType, mode ?? EmployeeImportMode.CreateOnly, ct);
             return CreatedAtAction(nameof(Get), new { id = session.Id }, session);
         }
         catch (EmployeeImportFileRejectedException ex)

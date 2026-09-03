@@ -50,6 +50,17 @@ public class EmployeeImportSession : TenantEntity
 
     public EmployeeImportSessionStatus Status { get; set; } = EmployeeImportSessionStatus.Validated;
 
+    /// <summary>Chosen at upload; decides whether a known staff number is an error or an update.</summary>
+    public EmployeeImportMode Mode { get; set; } = EmployeeImportMode.CreateOnly;
+
+    /// <summary>Rows the checker marked as creates / updates (errors excluded).</summary>
+    public int CreateCount { get; set; }
+    public int UpdateCount { get; set; }
+
+    /// <summary>Of <see cref="CommittedCount"/>, how many were creates and how many updates.</summary>
+    public int CreatedCount { get; set; }
+    public int UpdatedCount { get; set; }
+
     public EmployeeImportCommitPolicy? CommitPolicy { get; set; }
     public Guid? CommitRequestedByUserId { get; set; }
     public DateTime? CommitRequestedOn { get; set; }
@@ -108,6 +119,11 @@ public class EmployeeImportRow : TenantEntity
     public string FindingsJson { get; set; } = "[]";
 
     public EmployeeImportRowOutcome Outcome { get; set; } = EmployeeImportRowOutcome.Ready;
+
+    public EmployeeImportRowAction Action { get; set; } = EmployeeImportRowAction.Create;
+
+    /// <summary>The employee an Update row changes. Indexed, no FK: the row is history, not a relation.</summary>
+    public Guid? TargetEmployeeId { get; set; }
 
     /// <summary>HR's toggle to leave a row out of the commit.</summary>
     public bool Skip { get; set; }

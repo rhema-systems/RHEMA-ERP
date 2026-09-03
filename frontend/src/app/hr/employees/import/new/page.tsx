@@ -29,8 +29,28 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { WizardSteps } from '@/components/hr/employee-import/WizardSteps';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { employeeImportService, EmployeeImportUploadError } from '@/services/hr/employee-import.service';
-import type { EmployeeImportFinding } from '@/types/hr/employee-import';
+import type { EmployeeImportFinding, EmployeeImportMode } from '@/types/hr/employee-import';
+
+const MODES: { value: EmployeeImportMode; label: string; help: string }[] = [
+  {
+    value: 'CreateOnly',
+    label: 'Create new employees',
+    help: 'Every row is a new person. A staff number already in the register is an error.',
+  },
+  {
+    value: 'UpdateOnly',
+    label: 'Update existing employees',
+    help: 'Rows are matched by staff number. Only the cells you filled change; a blank cell leaves the record as it is. A number not in the register is an error.',
+  },
+  {
+    value: 'CreateOrUpdate',
+    label: 'Create or update',
+    help: 'A known staff number updates that person; an unknown one creates a new employee.',
+  },
+];
 
 export default function NewEmployeeImportPage() {
   const router = useRouter();
@@ -40,6 +60,7 @@ export default function NewEmployeeImportPage() {
 
   const [downloading, setDownloading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [mode, setMode] = useState<EmployeeImportMode>('CreateOnly');
   const [uploading, setUploading] = useState(false);
   const [rejection, setRejection] = useState<{ message: string; findings: EmployeeImportFinding[] } | null>(null);
 
@@ -64,11 +85,12 @@ export default function NewEmployeeImportPage() {
     setUploading(true);
     setRejection(null);
     try {
-      const session = await employeeImportService.upload(file);
+      const session = await employeeImportService.upload(file, mode);
       await queryClient.invalidateQueries({ queryKey: ['hr', 'employee-import', 'sessions'] });
       toast({
         title: `${session.reference} checked`,
-        description: `${session.totalRows} rows: ${session.readyCount} ready, ${session.warningCount} with warnings, ${session.errorCount} with errors.`,
+        description: `${session.totalRows} rows: ${session.readyCount} ready, ${session.warningCount} with warnings, ${session.errorCount} with errors` +
+          (mode === 'CreateOnly' ? '.' : ` — ${session.createCount} to create, ${session.updateCount} to update.`),
       });
       router.push(`/hr/employees/import/${session.id}`);
     } catch (error: any) {
@@ -185,6 +207,20 @@ export default function NewEmployeeImportPage() {
                 className="hidden"
                 onChange={(e) => onPick(e.target.files?.[0] ?? null)}
               />
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">What should this file do?</div>
+              <RadioGroup value={mode} onValueChange={(v) => setMode(v as EmployeeImportMode)} className="space-y-2">
+                {MODES.map((m) => (
+                  <div key={m.value} className="flex items-start gap-2">
+                    <RadioGroupItem value={m.value} id={`mode-${m.value}`} className="mt-0.5" />
+                    <Label htmlFor={`mode-${m.value}`} className="font-normal leading-snug">
+                      <span className="font-medium">{m.label}.</span> <span className="text-muted-foreground">{m.help}</span>
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
             </div>
 
             {rejection && (

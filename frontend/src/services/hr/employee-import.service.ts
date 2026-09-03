@@ -5,6 +5,7 @@ import type {
   EmployeeImportCommitPolicy,
   EmployeeImportFileRejection,
   EmployeeImportFollowUp,
+  EmployeeImportMode,
   EmployeeImportProgress,
   EmployeeImportRow,
   EmployeeImportRowOutcome,
@@ -35,10 +36,15 @@ class EmployeeImportService {
     return apiService.get<EmployeeImportColumnGuide[]>(`${this.baseUrl}/columns`);
   }
 
-  /** Uploads a filled template. Checks every row; writes nothing to the register. */
-  async upload(file: File): Promise<EmployeeImportSessionSummary> {
+  /**
+   * Uploads a filled template. Checks every row; writes nothing to the register.
+   * `mode` decides what a staff number already in the register means: an error (CreateOnly),
+   * an update of that employee (UpdateOnly), or either (CreateOrUpdate).
+   */
+  async upload(file: File, mode: EmployeeImportMode = 'CreateOnly'): Promise<EmployeeImportSessionSummary> {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('mode', mode);
     try {
       return await apiService.post<EmployeeImportSessionSummary>(this.baseUrl, formData);
     } catch (error) {

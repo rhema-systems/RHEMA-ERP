@@ -401,11 +401,17 @@ public class EmployeeService : IEmployeeService
             var newPosition = await _positionRepository.GetByIdAsync(dto.PositionId.Value);
             if (newPosition != null)
             {
+                // ⚠ TenantId was missing here until 2026-09-03: the create path stamps it (the
+                // DbContext auto-stamp is inert), this path did not, and every position change made
+                // through an update failed on FK_EmployeePositionHistories_Tenants_TenantId. Found by
+                // the employee-import update harness; the edit form had the same hole.
                 var newHistory = new EmployeePositionHistory
                 {
                     EmployeeId = employeeId,
+                    TenantId = employee.TenantId,
                     PositionId = dto.PositionId.Value,
-                    LocationLevelId = (newLocationLevelId ?? employee.LocationLevelId) ?? Guid.Empty,
+                    // Nullable on both sides — leave it null rather than inventing an empty FK (as on create).
+                    LocationLevelId = newLocationLevelId ?? employee.LocationLevelId,
                     LocationId = dto.LocationId ?? employee.LocationId,
                     OrganizationLevelId = (newOrgLevelId ?? employee.OrganizationLevelId) ?? Guid.Empty,
                     OrganizationUnitId = dto.OrganizationUnitId ?? employee.OrganizationUnitId,

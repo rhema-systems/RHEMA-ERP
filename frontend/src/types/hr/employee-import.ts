@@ -23,6 +23,24 @@ export type EmployeeImportRowOutcome =
 
 export type EmployeeImportCommitPolicy = 'ValidRowsOnly' | 'AllOrNothing';
 
+/** What a session may do to the register. Chosen at upload. */
+export type EmployeeImportMode = 'CreateOnly' | 'UpdateOnly' | 'CreateOrUpdate';
+
+export type EmployeeImportRowAction = 'Create' | 'Update';
+
+/** One field an Update row would change. */
+export interface EmployeeImportChange {
+  field: string;
+  from?: string | null;
+  to?: string | null;
+}
+
+export const IMPORT_MODE_LABEL: Record<EmployeeImportMode, string> = {
+  CreateOnly: 'Create new employees',
+  UpdateOnly: 'Update existing employees',
+  CreateOrUpdate: 'Create or update',
+};
+
 export type EmployeeImportFindingSeverity = 'Error' | 'Warning';
 
 export interface EmployeeImportFinding {
@@ -51,6 +69,13 @@ export interface EmployeeImportSessionSummary {
   uploadedByName?: string | null;
   uploadedOn: string;
   status: EmployeeImportSessionStatus;
+  mode: EmployeeImportMode;
+  /** Rows the checker marked as creates / updates, errors excluded. */
+  createCount: number;
+  updateCount: number;
+  /** Of committedCount, how many were creates and how many updates. */
+  createdCount: number;
+  updatedCount: number;
   commitPolicy?: EmployeeImportCommitPolicy | null;
   commitRequestedOn?: string | null;
   commitStartedOn?: string | null;
@@ -75,10 +100,14 @@ export interface EmployeeImportRow {
   displayName?: string | null;
   employmentType?: string | null;
   outcome: EmployeeImportRowOutcome;
+  action: EmployeeImportRowAction;
+  targetEmployeeId?: string | null;
   skip: boolean;
   errorCount: number;
   warningCount: number;
   findings: EmployeeImportFinding[];
+  /** For an Update row: what would change. Empty for a Create row. */
+  changes: EmployeeImportChange[];
   /** The cells as read, keyed by column key. */
   values: Record<string, string | null>;
   createdEmployeeId?: string | null;
@@ -98,6 +127,8 @@ export interface EmployeeImportProgress {
   totalRows: number;
   toCommit: number;
   committedCount: number;
+  createdCount: number;
+  updatedCount: number;
   failedCount: number;
   remaining: number;
   commitStartedOn?: string | null;
@@ -141,8 +172,8 @@ export const ROW_OUTCOME_LABEL: Record<EmployeeImportRowOutcome, string> = {
   Ready: 'Ready',
   Warning: 'Warning',
   Error: 'Error',
-  Committed: 'Created',
-  CommittedWithIssues: 'Created with issues',
+  Committed: 'Written',
+  CommittedWithIssues: 'Written with issues',
   Failed: 'Failed',
   Skipped: 'Skipped',
 };

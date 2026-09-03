@@ -29,6 +29,11 @@ public class EmployeeImportSessionSummaryDto
     public string? UploadedByName { get; set; }
     public DateTime UploadedOn { get; set; }
     public EmployeeImportSessionStatus Status { get; set; }
+    public EmployeeImportMode Mode { get; set; }
+    public int CreateCount { get; set; }
+    public int UpdateCount { get; set; }
+    public int CreatedCount { get; set; }
+    public int UpdatedCount { get; set; }
     public EmployeeImportCommitPolicy? CommitPolicy { get; set; }
     public DateTime? CommitRequestedOn { get; set; }
     public DateTime? CommitStartedOn { get; set; }
@@ -64,10 +69,15 @@ public class EmployeeImportRowDto
     public string? DisplayName { get; set; }
     public EmploymentType? EmploymentType { get; set; }
     public EmployeeImportRowOutcome Outcome { get; set; }
+    public EmployeeImportRowAction Action { get; set; }
+    public Guid? TargetEmployeeId { get; set; }
     public bool Skip { get; set; }
     public int ErrorCount { get; set; }
     public int WarningCount { get; set; }
     public List<EmployeeImportFindingDto> Findings { get; set; } = new();
+
+    /// <summary>For an Update row: what would change, field by field. Empty for a Create row.</summary>
+    public List<EmployeeImportChangeDto> Changes { get; set; } = new();
 
     /// <summary>The cells as read, keyed by column key.</summary>
     public Dictionary<string, string?> Values { get; set; } = new();
@@ -95,12 +105,22 @@ public class EmployeeImportSkipRowDto
     public bool Skip { get; set; }
 }
 
+/// <summary>One field an Update row would change: the register's value and the sheet's.</summary>
+public class EmployeeImportChangeDto
+{
+    public string Field { get; set; } = string.Empty;
+    public string? From { get; set; }
+    public string? To { get; set; }
+}
+
 public class EmployeeImportProgressDto
 {
     public EmployeeImportSessionStatus Status { get; set; }
     public int TotalRows { get; set; }
     public int ToCommit { get; set; }
     public int CommittedCount { get; set; }
+    public int CreatedCount { get; set; }
+    public int UpdatedCount { get; set; }
     public int FailedCount { get; set; }
     public int Remaining { get; set; }
     public DateTime? CommitStartedOn { get; set; }
@@ -142,7 +162,18 @@ public class EmployeeImportColumnGuideDto
 
 public class EmployeeImportResolvedRow
 {
+    public EmployeeImportRowAction Action { get; set; } = EmployeeImportRowAction.Create;
+
+    /// <summary>Create rows: the full create payload.</summary>
     public CreateEmployeeDto Employee { get; set; } = new();
+
+    /// <summary>Update rows: the employee and the fields that were supplied (null = leave alone).</summary>
+    public Guid? TargetEmployeeId { get; set; }
+    public UpdateEmployeeDto? Update { get; set; }
+    public List<EmployeeImportChangeDto> Changes { get; set; } = new();
+
+    /// <summary>Update rows: the level/notch differs from the current assignment, so assign again.</summary>
+    public bool SalaryChanged { get; set; }
 
     public EmployeeImportResolvedSalary? Salary { get; set; }
     public EmployeeImportResolvedContract? Contract { get; set; }

@@ -224,6 +224,21 @@ public static class EmployeeImportColumns
     public static string NormalizeCode(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : WhitespaceRun.Replace(value, "").ToUpperInvariant();
 
+    /// <summary>1 → A, 27 → AA: the Excel column letter, so findings can name a cell after the workbook is closed.</summary>
+    public static string ColumnLetter(int column)
+    {
+        var letters = string.Empty;
+        while (column > 0)
+        {
+            var rem = (column - 1) % 26;
+            letters = (char)('A' + rem) + letters;
+            column = (column - 1) / 26;
+        }
+        return letters;
+    }
+
+    public static string CellAddress(int column, int row) => $"{EmployeesSheet}!{ColumnLetter(column)}{row}";
+
     private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
 }
 
@@ -237,6 +252,60 @@ public sealed record SalaryLevelRef(Guid Id, string Code, string Name, Guid Grad
 public sealed record SalaryNotchRef(Guid Id, int Number, decimal Amount);
 public sealed record QualificationRef(Guid Id, string Name, string? ShortCode);
 public sealed record IdentificationTypeRef(Guid Id, string Name, bool HasExpiryDate);
+
+/// <summary>
+/// What the register holds for one live employee whose staff number appears in the file — the
+/// "from" side of an Update row's diff, and the values an update must carry forward.
+/// </summary>
+public sealed class EmployeeSnapshot
+{
+    public required Guid Id { get; init; }
+    public required string EmployeeNumber { get; init; }
+    public string? Title { get; init; }
+    public required string FirstName { get; init; }
+    public string? MiddleName { get; init; }
+    public required string LastName { get; init; }
+    public Gender? Gender { get; init; }
+    public DateOnly? DateOfBirth { get; init; }
+    public MaritalStatus? MaritalStatus { get; init; }
+    public string? Religion { get; init; }
+    public string? Hometown { get; init; }
+    /// <summary>⚠ The update mapping writes these two unconditionally; an update must send them back.</summary>
+    public bool HasDisability { get; init; }
+    public bool IsFullTime { get; init; }
+    public EmploymentType EmploymentType { get; init; }
+    public DateOnly? DateEmployed { get; init; }
+    public Guid? DepartmentId { get; init; }
+    public Guid? SectionId { get; init; }
+    public Guid PositionId { get; init; }
+    public Guid? OrganizationUnitId { get; init; }
+    public Guid? LocationId { get; init; }
+    public Guid? ManagerId { get; init; }
+    public string? ManagerNumber { get; init; }
+    public bool IsOnPayroll { get; init; }
+    public OffPayrollReason? OffPayrollReason { get; init; }
+    public decimal? Salary { get; init; }
+    public string? Email { get; init; }
+    public string? MobileNumber { get; init; }
+    public string? TelephoneNumber { get; init; }
+    public string? SsnitNumber { get; init; }
+    public string? TinNumber { get; init; }
+    public string? DigitalAddress { get; init; }
+    public string? Address { get; init; }
+    public string? City { get; init; }
+    public string? State { get; init; }
+    public string? Notes { get; init; }
+    public Guid? CurrentLevelId { get; init; }
+    public Guid? CurrentNotchId { get; init; }
+    public string? CurrentLevelCode { get; init; }
+    public int? CurrentNotchNumber { get; init; }
+    /// <summary>Normalised names of the qualifications already on the profile.</summary>
+    public HashSet<string> QualificationNames { get; init; } = new();
+    /// <summary>Normalised document numbers already on the profile, per identification type.</summary>
+    public Dictionary<Guid, HashSet<string>> IdNumbers { get; init; } = new();
+
+    public string DisplayName => string.Join(" ", new[] { FirstName, LastName }.Where(s => !string.IsNullOrWhiteSpace(s)));
+}
 
 /// <summary>Everything the checker needs, loaded once per upload so 10,000 rows cost 10,000 dictionary hits, not 10,000 queries.</summary>
 public sealed class EmployeeImportReferenceData
@@ -264,6 +333,12 @@ public sealed class EmployeeImportReferenceData
     public required Dictionary<EmploymentType, StaffNumberFormat?> Rules { get; init; }
     public required Dictionary<Guid, string> OrganizationUnitNames { get; init; }
     public required Dictionary<Guid, string> StaffLevelNames { get; init; }
+
+    /// <summary>
+    /// Live employees whose staff numbers appear in the file, by normalised number. Loaded only for
+    /// a session that may update, and only for the numbers actually present.
+    /// </summary>
+    public Dictionary<string, EmployeeSnapshot> Snapshots { get; init; } = new();
 }
 
 /// <summary>Code-or-name resolution with "did you mean" suggestions.</summary>

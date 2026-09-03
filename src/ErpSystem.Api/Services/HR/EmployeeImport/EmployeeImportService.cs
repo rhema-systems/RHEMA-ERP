@@ -86,9 +86,10 @@ public sealed class EmployeeImportService : IEmployeeImportService
     // ── Upload → session ─────────────────────────────────────────────────────────────────────
 
     public async Task<EmployeeImportSessionSummaryDto> CreateSessionAsync(
-        Stream content, string fileName, string contentType, CancellationToken cancellationToken = default)
+        Stream content, string fileName, string contentType, EmployeeImportMode mode, CancellationToken cancellationToken = default)
     {
         var tenantId = RequireTenant();
+        if (!Enum.IsDefined(mode)) throw new ArgumentException("Unknown import mode.");
         var userId = _currentUser.UserId;
         var safeName = Path.GetFileName(string.IsNullOrWhiteSpace(fileName) ? "employees.xlsx" : fileName);
 
@@ -108,7 +109,15 @@ public sealed class EmployeeImportService : IEmployeeImportService
         var columns = EmployeeImportColumns.Build(refs.IdentificationTypes);
 
         buffer.Position = 0;
-        var parsed = EmployeeImportWorkbookReader.Read(buffer, refs, columns);
+        var raw = EmployeeImportWorkbookReader.ReadRaw(buffer, columns, refs.IdentificationTypes);
+        if (raw.FileRejected)
+            throw new EmployeeImportFileRejectedException(raw.FileFindings);
+
+        // An update needs the register's current values — for exactly the numbers in the file.
+        if (mode != EmployeeImportMode.CreateOnly)
+            await LoadSnapshotsAsync(refs, raw.StaffNumbers.ToList(), cancellationToken);
+
+        var parsed = EmployeeImportWorkbookReader.Resolve(raw, refs, columns, mode);
         if (parsed.FileRejected)
             throw new EmployeeImportFileRejectedException(parsed.FileFindings);
 
@@ -119,7 +128,9 @@ public sealed class EmployeeImportService : IEmployeeImportService
             .Select(s => s.Reference)
             .FirstOrDefaultAsync(cancellationToken);
         if (earlier != null)
-            parsed.FileFindings.Add(FileWarning($"This exact file was already committed as import {earlier}. Committing it again will fail on every staff number."));
+            parsed.FileFindings.Add(FileWarning(mode == EmployeeImportMode.CreateOnly
+                ? $"This exact file was already committed as import {earlier}. Committing it again will fail on every staff number."
+                : $"This exact file was already committed as import {earlier}."));
 
         var session = new EmployeeImportSession
         {
@@ -133,10 +144,13 @@ public sealed class EmployeeImportService : IEmployeeImportService
             UploadedByName = Truncate(_currentUser.FullName, 200),
             UploadedOn = DateTime.UtcNow,
             Status = EmployeeImportSessionStatus.Validated,
+            Mode = mode,
             TotalRows = parsed.Rows.Count,
             ReadyCount = parsed.Rows.Count(r => r.Outcome == EmployeeImportRowOutcome.Ready),
             WarningCount = parsed.Rows.Count(r => r.Outcome == EmployeeImportRowOutcome.Warning),
             ErrorCount = parsed.Rows.Count(r => r.Outcome == EmployeeImportRowOutcome.Error),
+            CreateCount = parsed.Rows.Count(r => r.Outcome != EmployeeImportRowOutcome.Error && r.Action == EmployeeImportRowAction.Create),
+            UpdateCount = parsed.Rows.Count(r => r.Outcome != EmployeeImportRowOutcome.Error && r.Action == EmployeeImportRowAction.Update),
             FileFindingsJson = JsonSerializer.Serialize(parsed.FileFindings, Json),
             CreatedById = userId,
         };
@@ -154,6 +168,8 @@ public sealed class EmployeeImportService : IEmployeeImportService
             ResolvedJson = r.Resolved == null ? null : JsonSerializer.Serialize(r.Resolved, Json),
             FindingsJson = JsonSerializer.Serialize(r.Findings, Json),
             Outcome = r.Outcome,
+            Action = r.Action,
+            TargetEmployeeId = r.TargetEmployeeId,
             ErrorCount = r.ErrorCount,
             WarningCount = r.WarningCount,
             ManagerRowNumber = r.ManagerRowNumber,
@@ -348,6 +364,8 @@ public sealed class EmployeeImportService : IEmployeeImportService
         session.ErrorCount = errors;
         session.ReadyCount = live.Count(r => r.Outcome == EmployeeImportRowOutcome.Ready);
         session.WarningCount = live.Count(r => r.Outcome == EmployeeImportRowOutcome.Warning);
+        session.CreateCount = live.Count(r => r.Outcome != EmployeeImportRowOutcome.Error && r.Action == EmployeeImportRowAction.Create);
+        session.UpdateCount = live.Count(r => r.Outcome != EmployeeImportRowOutcome.Error && r.Action == EmployeeImportRowAction.Update);
         session.LastModifiedById = _currentUser.UserId;
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -370,6 +388,8 @@ public sealed class EmployeeImportService : IEmployeeImportService
             TotalRows = session.TotalRows,
             ToCommit = toCommit,
             CommittedCount = session.CommittedCount,
+            CreatedCount = session.CreatedCount,
+            UpdatedCount = session.UpdatedCount,
             FailedCount = session.FailedCount,
             Remaining = Math.Max(0, toCommit - session.CommittedCount - session.FailedCount),
             CommitStartedOn = session.CommitStartedOn,
@@ -395,7 +415,7 @@ public sealed class EmployeeImportService : IEmployeeImportService
         var session = await FindSessionAsync(sessionId, tracking: false, cancellationToken)
                       ?? throw new ArgumentException("Import session not found.");
         var rows = await _db.EmployeeImportRows.AsNoTracking()
-            .Where(r => r.SessionId == session.Id && r.CreatedEmployeeId != null
+            .Where(r => r.SessionId == session.Id && (r.CreatedEmployeeId != null || r.TargetEmployeeId != null)
                         && (r.Outcome == EmployeeImportRowOutcome.Committed || r.Outcome == EmployeeImportRowOutcome.CommittedWithIssues))
             .OrderBy(r => r.RowNumber)
             .ToListAsync(cancellationToken);
@@ -411,7 +431,7 @@ public sealed class EmployeeImportService : IEmployeeImportService
             if (items.Count == 0) continue;
             result.Add(new EmployeeImportFollowUpDto
             {
-                EmployeeId = row.CreatedEmployeeId!.Value,
+                EmployeeId = (row.CreatedEmployeeId ?? row.TargetEmployeeId)!.Value,
                 StaffNumber = row.StaffNumber ?? string.Empty,
                 DisplayName = row.DisplayName ?? string.Empty,
                 RowNumber = row.RowNumber,
@@ -490,12 +510,49 @@ public sealed class EmployeeImportService : IEmployeeImportService
             : JsonSerializer.Deserialize<EmployeeImportResolvedRow>(snapshot.ResolvedJson, Json);
 
         Guid? createdId = null;
+        Guid? writtenId = null;   // the employee the row ended up on: created, or the update's target
         string? failure = null;
         var issues = new List<string>();
+        var isUpdate = resolved?.Action == EmployeeImportRowAction.Update;
+        var noChanges = false;
 
         if (resolved == null)
         {
             failure = "The row has no resolved payload; upload the file again.";
+        }
+        else if (isUpdate)
+        {
+            if (resolved.TargetEmployeeId == null || resolved.Update == null)
+                failure = "The update row has no target; upload the file again.";
+            else if (resolved.Changes.Count == 0 && !resolved.SalaryChanged && resolved.Identifications.Count == 0
+                     && resolved.Qualifications.Count == 0 && resolved.ManagerRowNumber == null)
+            {
+                writtenId = resolved.TargetEmployeeId;
+                noChanges = true;
+            }
+            else
+            {
+                try
+                {
+                    // Only fields the sheet supplied are set; the service treats null as "leave alone".
+                    // Child-record changes (level/notch, qualifications, new documents) are written
+                    // below through their own services, not through the employee update.
+                    var hasFieldChanges = resolved.Changes.Any(c =>
+                        c.Field is not ("Salary Level / Notch" or "Qualification" or "Professional Qualification")
+                        && !c.Field.EndsWith("(new document)", StringComparison.Ordinal));
+                    if (hasFieldChanges || resolved.Update.ManagerId.HasValue)
+                        await _employees.UpdateEmployeeAsync(resolved.TargetEmployeeId.Value, resolved.Update, cancellationToken);
+                    writtenId = resolved.TargetEmployeeId;
+                }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+                {
+                    failure = ex.Message;
+                }
+                catch (DbUpdateException ex)
+                {
+                    failure = "The database refused the row: " + (ex.InnerException?.Message ?? ex.Message);
+                }
+            }
         }
         else
         {
@@ -503,6 +560,7 @@ public sealed class EmployeeImportService : IEmployeeImportService
             {
                 var created = await _employees.ImportEmployeeAsync(resolved.Employee, cancellationToken);
                 createdId = created.Id;
+                writtenId = created.Id;
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
             {
@@ -512,24 +570,29 @@ public sealed class EmployeeImportService : IEmployeeImportService
             {
                 failure = "The database refused the row: " + (ex.InnerException?.Message ?? ex.Message);
             }
+        }
 
-            if (createdId.HasValue)
-            {
-                var employeeId = createdId.Value;
-                var effective = (resolved.Employee.DateEmployed ?? DateOnly.FromDateTime(DateTime.UtcNow)).ToDateTime(TimeOnly.MinValue);
+        if (resolved != null && writtenId.HasValue && !noChanges)
+        {
+            {   // children — each its own unit of work, each failure an issue on the row, not a failed row
+                var employeeId = writtenId.Value;
+                var effective = (isUpdate
+                    ? resolved.Update?.DateEmployed ?? DateOnly.FromDateTime(DateTime.UtcNow)
+                    : resolved.Employee.DateEmployed ?? DateOnly.FromDateTime(DateTime.UtcNow)).ToDateTime(TimeOnly.MinValue);
+                var onPayroll = isUpdate ? resolved.Update?.IsOnPayroll ?? true : resolved.Employee.IsOnPayroll;
 
-                if (resolved.Salary != null && resolved.Employee.IsOnPayroll)
+                if (resolved.Salary != null && onPayroll && (!isUpdate || resolved.SalaryChanged))
                     await TryChildAsync(issues, "Salary level/notch not assigned", () => _employees.AssignSalaryAsync(new CreateEmployeeSalaryAssignmentDto
                     {
                         EmployeeId = employeeId,
                         GradeId = resolved.Salary.GradeId,
                         LevelId = resolved.Salary.LevelId,
                         NotchId = resolved.Salary.NotchId,
-                        EffectiveDate = effective,
-                        AssignmentReason = "Imported from the employee register",
+                        EffectiveDate = isUpdate ? DateTime.UtcNow.Date : effective,
+                        AssignmentReason = isUpdate ? "Updated from the employee register" : "Imported from the employee register",
                     }, cancellationToken));
 
-                if (resolved.Contract != null)
+                if (resolved.Contract != null && !isUpdate)
                     await TryChildAsync(issues, "Contract not recorded", () => _employees.AddContractAsync(new CreateEmployeeContractDetailDto
                     {
                         EmployeeId = employeeId,
@@ -571,12 +634,14 @@ public sealed class EmployeeImportService : IEmployeeImportService
         var row = await _db.EmployeeImportRows.FirstAsync(r => r.Id == rowId, cancellationToken);
         var session = await _db.EmployeeImportSessions.FirstAsync(s => s.Id == sessionId, cancellationToken);
         row.CommittedOn = DateTime.UtcNow;
-        if (createdId.HasValue)
+        if (writtenId.HasValue)
         {
             row.CreatedEmployeeId = createdId;
             row.Outcome = issues.Count == 0 ? EmployeeImportRowOutcome.Committed : EmployeeImportRowOutcome.CommittedWithIssues;
-            row.CommitMessage = issues.Count == 0 ? null : Truncate(string.Join(" | ", issues), 2000);
+            row.CommitMessage = noChanges ? "No changes — the employee was left as it is."
+                : issues.Count == 0 ? null : Truncate(string.Join(" | ", issues), 2000);
             session.CommittedCount++;
+            if (isUpdate) session.UpdatedCount++; else session.CreatedCount++;
         }
         else
         {
@@ -611,16 +676,21 @@ public sealed class EmployeeImportService : IEmployeeImportService
             .Where(r => r.SessionId == sessionId).ToListAsync(cancellationToken);
         var byRowNumber = rows.ToDictionary(r => r.RowNumber);
 
-        foreach (var row in rows.Where(r => r.ManagerRowNumber.HasValue && r.CreatedEmployeeId.HasValue))
+        foreach (var row in rows.Where(r => r.ManagerRowNumber.HasValue && (r.CreatedEmployeeId.HasValue || r.TargetEmployeeId.HasValue)
+                                             && r.Outcome is EmployeeImportRowOutcome.Committed or EmployeeImportRowOutcome.CommittedWithIssues))
         {
             string? issue = null;
-            if (!byRowNumber.TryGetValue(row.ManagerRowNumber!.Value, out var managerRow) || managerRow.CreatedEmployeeId == null)
+            var employeeId = (row.CreatedEmployeeId ?? row.TargetEmployeeId)!.Value;
+            var managerId = byRowNumber.TryGetValue(row.ManagerRowNumber!.Value, out var managerRow)
+                ? managerRow.CreatedEmployeeId ?? managerRow.TargetEmployeeId
+                : null;
+            if (managerId == null)
                 issue = $"Manager (row {row.ManagerRowNumber}) did not import; no manager set.";
             else
             {
                 try
                 {
-                    await _employees.AssignManagerAsync(row.CreatedEmployeeId!.Value, managerRow.CreatedEmployeeId.Value, cancellationToken);
+                    await _employees.AssignManagerAsync(employeeId, managerId.Value, cancellationToken);
                 }
                 catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DbUpdateException)
                 {
@@ -817,6 +887,135 @@ public sealed class EmployeeImportService : IEmployeeImportService
         };
     }
 
+    /// <summary>
+    /// The register's current values for the live employees whose staff numbers are in the file —
+    /// the "from" side of every update. Queried in chunks: SQL Server takes at most 2,100 parameters
+    /// and a file may hold 10,000 numbers.
+    /// </summary>
+    private async Task LoadSnapshotsAsync(EmployeeImportReferenceData refs, List<string> staffNumbers, CancellationToken ct)
+    {
+        var wanted = staffNumbers.Select(n => n.Trim()).Where(n => n.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (wanted.Count == 0) return;
+        var tenantId = refs.TenantId;
+
+        var employees = new List<Employee>();
+        foreach (var chunk in wanted.Chunk(500))
+        {
+            var numbers = chunk.ToList();
+            employees.AddRange(await _db.Employees.AsNoTracking()
+                .Where(e => e.TenantId == tenantId && !e.IsDeleted && numbers.Contains(e.EmployeeNumber))
+                .ToListAsync(ct));
+        }
+        if (employees.Count == 0) return;
+
+        var ids = employees.Select(e => e.Id).ToList();
+        var managerIds = employees.Where(e => e.ManagerId.HasValue).Select(e => e.ManagerId!.Value).Distinct().ToList();
+        var managerNumbers = new Dictionary<Guid, string>();
+        foreach (var chunk in managerIds.Chunk(500))
+        {
+            var set = chunk.ToList();
+            foreach (var m in await _db.Employees.AsNoTracking().IgnoreQueryFilters()
+                         .Where(e => set.Contains(e.Id)).Select(e => new { e.Id, e.EmployeeNumber }).ToListAsync(ct))
+                managerNumbers[m.Id] = m.EmployeeNumber;
+        }
+
+        var assignments = new Dictionary<Guid, (Guid? LevelId, Guid? NotchId)>();
+        var qualifications = new Dictionary<Guid, HashSet<string>>();
+        var idCards = new Dictionary<Guid, Dictionary<Guid, HashSet<string>>>();
+        foreach (var chunk in ids.Chunk(500))
+        {
+            var set = chunk.ToList();
+            var current = await _db.EmployeeSalaryAssignments.AsNoTracking()
+                .Where(a => set.Contains(a.EmployeeId) && !a.IsDeleted && a.EffectiveTo == null)
+                .OrderBy(a => a.EmployeeId).ThenByDescending(a => a.EffectiveDate)
+                .Select(a => new { a.EmployeeId, a.LevelId, a.NotchId })
+                .ToListAsync(ct);
+            foreach (var a in current) assignments.TryAdd(a.EmployeeId, (a.LevelId, a.NotchId));
+
+            var quals = await _db.EmployeeQualifications.AsNoTracking()
+                .Where(q => set.Contains(q.EmployeeId) && !q.IsDeleted)
+                .Select(q => new { q.EmployeeId, q.CustomQualificationName, MasterName = q.Qualification != null ? q.Qualification.Name : null })
+                .ToListAsync(ct);
+            foreach (var q in quals)
+            {
+                var names = qualifications.TryGetValue(q.EmployeeId, out var n) ? n : qualifications[q.EmployeeId] = new HashSet<string>();
+                foreach (var name in new[] { q.CustomQualificationName, q.MasterName })
+                {
+                    var key = EmployeeImportColumns.NormalizeKey(name);
+                    if (key.Length > 0) names.Add(key);
+                }
+            }
+
+            var cards = await _db.EmployeeIdentificationCards.AsNoTracking()
+                .Where(c => set.Contains(c.EmployeeId) && !c.IsDeleted)
+                .Select(c => new { c.EmployeeId, c.IdentificationTypeId, c.DocumentNumber })
+                .ToListAsync(ct);
+            foreach (var c in cards)
+            {
+                var perType = idCards.TryGetValue(c.EmployeeId, out var p) ? p : idCards[c.EmployeeId] = new Dictionary<Guid, HashSet<string>>();
+                var numbersOfType = perType.TryGetValue(c.IdentificationTypeId, out var s) ? s : perType[c.IdentificationTypeId] = new HashSet<string>();
+                var key = EmployeeImportColumns.NormalizeKey(c.DocumentNumber);
+                if (key.Length > 0) numbersOfType.Add(key);
+            }
+        }
+
+        var levelsById = refs.SalaryLevels.Values.GroupBy(l => l.Id).ToDictionary(g => g.Key, g => g.First());
+        foreach (var e in employees)
+        {
+            assignments.TryGetValue(e.Id, out var assignment);
+            var level = assignment.LevelId.HasValue ? levelsById.GetValueOrDefault(assignment.LevelId.Value) : null;
+            var notch = assignment.NotchId.HasValue && level != null
+                ? refs.NotchesByLevel.GetValueOrDefault(level.Id)?.FirstOrDefault(n => n.Id == assignment.NotchId.Value)
+                : null;
+
+            var snapshot = new EmployeeSnapshot
+            {
+                Id = e.Id,
+                EmployeeNumber = e.EmployeeNumber,
+                Title = e.Title,
+                FirstName = e.FirstName,
+                MiddleName = e.MiddleName,
+                LastName = e.LastName,
+                Gender = e.Gender,
+                DateOfBirth = e.DateOfBirth,
+                MaritalStatus = e.MaritalStatus,
+                Religion = e.Religion,
+                Hometown = e.Hometown,
+                HasDisability = e.HasDisability,
+                IsFullTime = e.IsFullTime,
+                EmploymentType = e.EmploymentType,
+                DateEmployed = e.DateEmployed,
+                DepartmentId = e.DepartmentId,
+                SectionId = e.SectionId,
+                PositionId = e.PositionId,
+                OrganizationUnitId = e.OrganizationUnitId,
+                LocationId = e.LocationId,
+                ManagerId = e.ManagerId,
+                ManagerNumber = e.ManagerId.HasValue ? managerNumbers.GetValueOrDefault(e.ManagerId.Value) : null,
+                IsOnPayroll = e.IsOnPayroll,
+                OffPayrollReason = e.OffPayrollReason,
+                Salary = e.Salary,
+                Email = e.EmailAddress,
+                MobileNumber = e.MobileNumber,
+                TelephoneNumber = e.TelephoneNumber,
+                SsnitNumber = e.SocialSecurityNumber,
+                TinNumber = e.TINNumber,
+                DigitalAddress = e.DigitalAddress,
+                Address = e.Address,
+                City = e.City,
+                State = e.State,
+                Notes = e.Notes,
+                CurrentLevelId = assignment.LevelId,
+                CurrentNotchId = assignment.NotchId,
+                CurrentLevelCode = level?.Code,
+                CurrentNotchNumber = notch?.Number,
+                QualificationNames = qualifications.GetValueOrDefault(e.Id) ?? new HashSet<string>(),
+                IdNumbers = idCards.GetValueOrDefault(e.Id) ?? new Dictionary<Guid, HashSet<string>>(),
+            };
+            refs.Snapshots[EmployeeImportColumns.NormalizeKey(e.EmployeeNumber)] = snapshot;
+        }
+    }
+
     // ── Plumbing ─────────────────────────────────────────────────────────────────────────────
 
     private async Task<EmployeeImportSession?> FindSessionAsync(Guid sessionId, bool tracking, CancellationToken ct)
@@ -836,6 +1035,11 @@ public sealed class EmployeeImportService : IEmployeeImportService
         UploadedByName = s.UploadedByName,
         UploadedOn = s.UploadedOn,
         Status = s.Status,
+        Mode = s.Mode,
+        CreateCount = s.CreateCount,
+        UpdateCount = s.UpdateCount,
+        CreatedCount = s.CreatedCount,
+        UpdatedCount = s.UpdatedCount,
         CommitPolicy = s.CommitPolicy,
         CommitRequestedOn = s.CommitRequestedOn,
         CommitStartedOn = s.CommitStartedOn,
@@ -863,10 +1067,13 @@ public sealed class EmployeeImportService : IEmployeeImportService
         DisplayName = r.DisplayName,
         EmploymentType = r.EmploymentType,
         Outcome = r.Outcome,
+        Action = r.Action,
+        TargetEmployeeId = r.TargetEmployeeId,
         Skip = r.Skip,
         ErrorCount = r.ErrorCount,
         WarningCount = r.WarningCount,
         Findings = ReadFindings(r.FindingsJson),
+        Changes = ReadChanges(r.ResolvedJson),
         Values = new Dictionary<string, string?>(ReadValues(r.RawJson)),
         CreatedEmployeeId = r.CreatedEmployeeId,
         CommitMessage = r.CommitMessage,
@@ -876,6 +1083,19 @@ public sealed class EmployeeImportService : IEmployeeImportService
     private static List<EmployeeImportFindingDto> ReadFindings(string? json)
         => string.IsNullOrEmpty(json) ? new List<EmployeeImportFindingDto>()
             : JsonSerializer.Deserialize<List<EmployeeImportFindingDto>>(json, Json) ?? new List<EmployeeImportFindingDto>();
+
+    private static List<EmployeeImportChangeDto> ReadChanges(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return new List<EmployeeImportChangeDto>();
+        try
+        {
+            return JsonSerializer.Deserialize<EmployeeImportResolvedRow>(json, Json)?.Changes ?? new List<EmployeeImportChangeDto>();
+        }
+        catch (JsonException)
+        {
+            return new List<EmployeeImportChangeDto>();
+        }
+    }
 
     private static Dictionary<string, string?> ReadValues(string? json)
         => string.IsNullOrEmpty(json) ? new Dictionary<string, string?>()

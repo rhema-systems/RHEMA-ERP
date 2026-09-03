@@ -688,6 +688,7 @@ public partial class ApplicationDbContext
                 .HasDatabaseName("IX_EmployeeImportRow_Session_RowNumber");
             entity.HasIndex(e => new { e.SessionId, e.Outcome });
             entity.HasIndex(e => e.CreatedEmployeeId);
+            entity.HasIndex(e => e.TargetEmployeeId);
 
             entity.HasOne(e => e.Session).WithMany(s => s.Rows)
                 .HasForeignKey(e => e.SessionId).OnDelete(DeleteBehavior.Cascade);

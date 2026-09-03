@@ -24,7 +24,8 @@ public interface IEmployeeImportService
     /// </summary>
     /// <exception cref="EmployeeImportFileRejectedException">The file itself is unusable.</exception>
     Task<EmployeeImportSessionSummaryDto> CreateSessionAsync(
-        Stream content, string fileName, string contentType, CancellationToken cancellationToken = default);
+        Stream content, string fileName, string contentType, EmployeeImportMode mode,
+        CancellationToken cancellationToken = default);
 
     Task<List<EmployeeImportSessionSummaryDto>> ListSessionsAsync(CancellationToken cancellationToken = default);
 

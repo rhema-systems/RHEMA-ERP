@@ -65,3 +65,25 @@ public enum EmployeeImportFindingSeverity
     Error = 1,
     Warning = 2,
 }
+
+/// <summary>What a session is allowed to do to the register (phase 4, 2026-09-03).</summary>
+public enum EmployeeImportMode
+{
+    /// <summary>Every row is a new employee; a staff number already in the register is an error.</summary>
+    CreateOnly = 1,
+
+    /// <summary>Every row updates an existing employee; a staff number not in the register is an error.</summary>
+    UpdateOnly = 2,
+
+    /// <summary>A known staff number updates, an unknown one creates.</summary>
+    CreateOrUpdate = 3,
+}
+
+/// <summary>What the checker decided a row will do.</summary>
+public enum EmployeeImportRowAction
+{
+    Create = 1,
+
+    /// <summary>Only the filled cells change; a blank cell leaves the record as it is.</summary>
+    Update = 2,
+}

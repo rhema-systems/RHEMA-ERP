@@ -328,6 +328,44 @@ plain HR).
 | **3. Proof** | Harness, docs (`HR-FINISH-PLAN.md` row, runbook page, this doc's status), the one-time conversion of TDC's real register once received. | a run |
 | **4. Update mode** | `UpdateExisting`: match by staff number, blank cells never overwrite, diff preview per row. | later |
 
+## 9. Update-existing mode (phase 4)
+
+A session carries a **mode**, chosen at upload: **Create new employees** (the default; a known
+staff number is an error), **Update existing employees** (rows are matched by staff number; an
+unknown number is an error), or **Create or update** (known updates, unknown creates). The same
+template serves all three.
+
+**An update changes only the cells that were filled.** A blank cell means "leave it", never "clear
+it"; clearing is a profile edit, not an import. Every filled cell is checked as it would be on
+create, then compared with the register, and the row carries a **diff** — field, register value,
+sheet value — that the review screen shows before anything is committed. A row whose filled cells
+all match the register is a warning ("nothing differs") and is written as a no-op.
+
+| Supplied on an update row | Effect |
+|---|---|
+| Names, title, gender, marital status, religion, hometown, addresses, notes, phones | Set when different. |
+| Employment Type | Set when different; full-time flag follows it. |
+| Date Employed, Date of Birth | Set when different; the age checks use the effective (supplied or current) pair. |
+| Contract End Date | **Ignored with a warning** — contracts are edited on the profile. |
+| Department, Section, Location | Resolved as on create; the section must belong to the effective department. |
+| Position | Set with its organisation unit (the service checks the pair); the unit change is shown too. |
+| On Payroll, Off-Payroll Reason, Monthly Basic Salary | Same rules as create against the effective membership; taking somebody off payroll needs a reason. |
+| Salary Level / Notch | Compared with the **current** assignment; when different, a new assignment is written (the service closes the old one). |
+| Email, SSNIT, TIN | Uniqueness excludes the employee's own current value. |
+| Identification numbers | Added only when the profile does not already hold that number for that type. |
+| Qualifications | Added only when the profile does not already hold that name. |
+| Manager Staff Number | Set when different; may be another row of the file (an update row's employee is known at check time, a create row's after it commits). |
+
+⚠ **Two things the update path forced:** `EmployeeMappingExtensions.Apply` writes `HasDisability`
+and `IsFullTime` **unconditionally**, so an import update must send the current values back or it
+would reset both to false — the checker copies them from the snapshot. And a position change must
+send the position's organisation unit, because the service validates the pair.
+
+**Snapshots** — the register's current values for the staff numbers in the file — are loaded only
+for update-capable modes, only for the numbers present, in chunks of 500 (SQL Server's 2,100
+parameter limit; a file may hold 10,000 numbers). Soft-deleted employees are never updated: their
+number is an error in every mode.
+
 ## 8. Build log
 
 ### 2026-09-03 — phase 1 written, awaiting migration + build
@@ -431,5 +469,46 @@ a rule before the UAT run and the same harness covers them.
 Scoped `tsc` over the slice: 0 errors. ⚠ Not yet opened in a browser — the harness proves the API;
 the screens are proven only by types until the user runs `npm run dev` and walks the wizard.
 
-**Still owed:** phase 4 (update-existing mode); the one-time conversion of TDC's real register once
-it arrives; the runbook page.
+### 2026-09-03 — committed (`f98d4a38`); runbook written
+
+Book 1 §1.3 of `docs/demo-runbook/` now walks the wizard in seven steps with the demo file
+`dev-harness\hr-demo-smoke\out\demo-employee-import.xlsx`, produced the evening before by
+`hr-demo-smoke/make-employee-import-file.mjs` (downloads the template from the demo database and
+fills six DEMO-00n rows with demo names; Book 0 step 4). It creates nothing until committed on stage.
+
+⚠ **Template size.** The empty template weighed **1.1 MB** because the column formats were applied
+to a 10,000-row *range*, which materialises a cell per row. Moved to column-level styles
+(`ws.Column(c).Style`) with the header row reset to General; data validation stays on the range
+(it creates no cells). Rebuilt and re-run: **74 green, template now 30 KB** (was 1,173 KB).
+
+### 2026-09-03 — phase 4 written (update-existing mode), awaiting migration + build
+
+§9 above is the rule set. Code: `EmployeeImportMode` / `EmployeeImportRowAction` enums; session
+columns `Mode`, `CreateCount`, `UpdateCount`, `CreatedCount`, `UpdatedCount`; row columns `Action`,
+`TargetEmployeeId` (indexed, no FK) — **migration `AddEmployeeImportUpdateMode` owed**. The reader
+is now two passes (`ReadRaw` → snapshots → `Resolve`) with `ResolveUpdateRow` beside
+`ResolveCreateRow`; shared pieces (section, salary level, ages, number shape, identifications,
+qualifications) were pulled out so the two cannot drift. The committer calls
+`UpdateEmployeeAsync` for field changes, `AssignSalaryAsync` when the level/notch differs, and the
+add services for new documents and qualifications; a no-change row is written as "No changes".
+Upload takes `mode` as a form field. Wizard: a mode choice on the upload page; an Action column,
+a per-row **What changes** table with the register value struck through, and created/updated
+split everywhere counts are shown. Scoped `tsc` + eslint: clean.
+Harness `run-update.mjs` (seeds four employees, then proves all three modes, the diff, the commit
+and the register) — **not yet run**; needs the build.
+
+**Migration `20260903091650_AddEmployeeImportUpdateMode` applied** (defaults for `Mode` and
+`Action` set to 1 by hand — EF's 0 is not an enum value). First `run-update.mjs`: **45/52**, the
+7 failures one cause, and it was not the importer:
+
+⚠ **Defect in `EmployeeService.UpdateEmployeeAsync`, found by the harness.** A position change
+writes an `EmployeePositionHistory` row **without `TenantId`** — the create path stamps it, the
+update path never did, and the DbContext auto-stamp is inert (the known HR tenancy gap). Every
+position change made through an update, including the edit form's, failed on
+`FK_EmployeePositionHistories_Tenants_TenantId`. Fixed in place, with `LocationLevelId` left null
+rather than `Guid.Empty` as the create path already does. Needs a build and a re-run.
+
+Rebuilt and re-run: **`run-update.mjs` 52/52, `run-smoke.mjs` 74/74.** Phase 4 done.
+
+**Still owed:** the one-time conversion of TDC's real register once it arrives; a browser walk of
+the wizard.

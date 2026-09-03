@@ -64,12 +64,13 @@ import { WizardSteps } from '@/components/hr/employee-import/WizardSteps';
 import { RowOutcomeBadge, SessionStatusBadge } from '@/components/hr/employee-import/SessionStatusBadge';
 import { employeeImportService } from '@/services/hr/employee-import.service';
 import { formatDateTime } from '@/lib/hr/attendance-format';
-import type {
-  EmployeeImportCommitPolicy,
-  EmployeeImportFinding,
-  EmployeeImportRow,
-  EmployeeImportRowOutcome,
-  EmployeeImportSessionSummary,
+import {
+  IMPORT_MODE_LABEL,
+  type EmployeeImportCommitPolicy,
+  type EmployeeImportFinding,
+  type EmployeeImportRow,
+  type EmployeeImportRowOutcome,
+  type EmployeeImportSessionSummary,
 } from '@/types/hr/employee-import';
 
 const PAGE_SIZE = 50;
@@ -278,7 +279,7 @@ export default function EmployeeImportSessionPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title={session.reference}
-        description={`${session.fileName} · uploaded ${formatDateTime(session.uploadedOn)} by ${session.uploadedByName ?? '—'}`}
+        description={`${session.fileName} · ${IMPORT_MODE_LABEL[session.mode] ?? session.mode} · uploaded ${formatDateTime(session.uploadedOn)} by ${session.uploadedByName ?? '—'}`}
         backHref="/hr/employees/import"
         actions={
           <div className="flex items-center gap-2">
@@ -314,9 +315,10 @@ export default function EmployeeImportSessionPage() {
 
       {/* ── Tiles ── */}
       {isDone ? (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
           <Tile label="Rows" value={session.totalRows} />
-          <Tile label="Created" value={session.committedCount} tone="green" />
+          <Tile label="Created" value={session.createdCount} tone="green" />
+          <Tile label="Updated" value={session.updatedCount} tone={session.updatedCount ? 'green' : 'muted'} />
           <Tile label="Failed at write" value={session.failedCount} tone={session.failedCount ? 'red' : 'muted'} />
           <Tile label="Not imported (errors)" value={session.errorCount} tone={session.errorCount ? 'red' : 'muted'} />
           <Tile label="Skipped" value={session.skippedCount} tone="muted" />
@@ -429,8 +431,11 @@ export default function EmployeeImportSessionPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Play className="h-5 w-5" /> Commit</CardTitle>
             <CardDescription>
-              {toCommit} {toCommit === 1 ? 'row' : 'rows'} will be written{liveErrors > 0 ? `; ${liveErrors} with errors will be left behind` : ''}
+              {toCommit} {toCommit === 1 ? 'row' : 'rows'} will be written
+              {session.mode !== 'CreateOnly' ? ` (${session.createCount} new, ${session.updateCount} updated)` : ''}
+              {liveErrors > 0 ? `; ${liveErrors} with errors will be left behind` : ''}
               {session.skippedCount > 0 ? `; ${session.skippedCount} skipped` : ''}. Rows with warnings import and are listed for follow-up.
+              {session.mode !== 'CreateOnly' ? ' An update changes only the cells that were filled; open a row to see exactly what.' : ''}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -508,6 +513,7 @@ export default function EmployeeImportSessionPage() {
                     <TableHead>Type</TableHead>
                     <TableHead>Department</TableHead>
                     <TableHead>Position</TableHead>
+                    {session.mode !== 'CreateOnly' && <TableHead>Action</TableHead>}
                     <TableHead>Result</TableHead>
                     <TableHead className="text-right">Findings</TableHead>
                     {session.status === 'Validated' && <TableHead className="w-20">Skip</TableHead>}
@@ -526,6 +532,11 @@ export default function EmployeeImportSessionPage() {
                           <TableCell>{row.employmentType ?? '—'}</TableCell>
                           <TableCell className="max-w-[180px] truncate">{row.values.Department ?? '—'}</TableCell>
                           <TableCell className="max-w-[200px] truncate">{row.values.Position ?? '—'}</TableCell>
+                          {session.mode !== 'CreateOnly' && (
+                            <TableCell>
+                              <Badge variant="outline">{row.action === 'Update' ? `Update · ${row.changes.length} change${row.changes.length === 1 ? '' : 's'}` : 'Create'}</Badge>
+                            </TableCell>
+                          )}
                           <TableCell><RowOutcomeBadge outcome={row.outcome} skip={row.skip} /></TableCell>
                           <TableCell className="text-right">
                             {row.errorCount > 0 && <Badge variant="destructive" className="mr-1">{row.errorCount} error{row.errorCount === 1 ? '' : 's'}</Badge>}
@@ -540,7 +551,33 @@ export default function EmployeeImportSessionPage() {
                         </TableRow>
                         {open && (
                           <TableRow className="bg-muted/30 hover:bg-muted/30">
-                            <TableCell colSpan={session.status === 'Validated' ? 9 : 8}>
+                            <TableCell colSpan={(session.status === 'Validated' ? 9 : 8) + (session.mode !== 'CreateOnly' ? 1 : 0)}>
+                              {row.action === 'Update' && (
+                                <div className="mb-4">
+                                  <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">What changes</div>
+                                  {row.changes.length === 0
+                                    ? <div className="text-sm text-muted-foreground">Nothing — every filled cell already matches the register.</div>
+                                    : (
+                                      <table className="text-sm">
+                                        <tbody>
+                                          {row.changes.map((c, i) => (
+                                            <tr key={i}>
+                                              <td className="pr-4 font-medium">{c.field}</td>
+                                              <td className="pr-2 text-muted-foreground line-through">{c.from ?? '—'}</td>
+                                              <td className="pr-2 text-muted-foreground">→</td>
+                                              <td>{c.to ?? '—'}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    )}
+                                  {row.targetEmployeeId && (
+                                    <Button variant="link" className="mt-1 h-auto p-0" onClick={() => router.push(`/hr/employees/${row.targetEmployeeId}`)}>
+                                      Open the current profile <ExternalLink className="ml-1 h-3 w-3" />
+                                    </Button>
+                                  )}
+                                </div>
+                              )}
                               <div className="grid gap-4 md:grid-cols-2">
                                 <div>
                                   <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">Findings</div>
@@ -603,12 +640,13 @@ export default function EmployeeImportSessionPage() {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Commit {toCommit} {toCommit === 1 ? 'employee' : 'employees'} to the register?</DialogTitle>
+            <DialogTitle>Commit {toCommit} {toCommit === 1 ? 'row' : 'rows'} to the register?</DialogTitle>
             <DialogDescription>
               {policy === 'AllOrNothing'
                 ? 'Every row is written. If any row is refused at write time it is reported and the rest continue; nothing is undone.'
                 : `${toCommit} rows are written; ${liveErrors} with errors and ${session.skippedCount} skipped are left behind.`}
-              {' '}Staff numbers are accepted exactly as given and the register's counter is advanced past them. This cannot be reversed from here.
+              {session.mode !== 'CreateOnly' ? ` ${session.createCount} employees are created and ${session.updateCount} updated — only the cells that were filled change.` : ''}
+              {' '}New staff numbers are accepted exactly as given and the register's counter is advanced past them. This cannot be reversed from here.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

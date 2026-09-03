@@ -175,6 +175,8 @@ public static class EmployeeImportWorkbooks
             ("6. Do not put department banner rows, totals or serial numbers in the data.", false),
             ("7. The example row (Staff Number EXAMPLE-001) is ignored; delete it or overwrite it.", false),
             ("8. Upload the file in HR → Employees → Import. Nothing is written until every row has been checked and you confirm.", false),
+            ("9. To change employees already in the register, choose 'Update existing' when uploading: rows are matched by", false),
+            ("   Staff Number, only the cells you filled change, and a blank cell leaves the record exactly as it is.", false),
             ("", false),
             ("What happens on upload", true),
             ("Every row is checked and gets one of three results: Ready, Warning (imports, but flagged for follow-up)", false),
@@ -223,11 +225,15 @@ public static class EmployeeImportWorkbooks
             if (!string.IsNullOrWhiteSpace(column.Help)) ws.Cell(1, c).CreateComment().AddText(column.Help);
             ws.Column(c).Width = column.Width;
 
+            // ⚠ Formats go on the COLUMN, not on a 10,000-row range: a range style materialises a
+            // cell per row and the empty template weighed 1.1 MB (measured 2026-09-03). Data
+            // validation on a range does not create cells, so it stays on the range.
+            var columnStyle = ws.Column(c).Style;
             var body = ws.Range(2, c, ValidationRows, c);
             switch (column.Kind)
             {
                 case EmployeeImportColumnKind.Date:
-                    body.Style.DateFormat.Format = "dd/mm/yyyy";
+                    columnStyle.DateFormat.Format = "dd/mm/yyyy";
                     if (withValidation)
                     {
                         var dv = body.CreateDataValidation();
@@ -252,7 +258,7 @@ public static class EmployeeImportWorkbooks
                     }
                     break;
                 case EmployeeImportColumnKind.Money:
-                    body.Style.NumberFormat.Format = "#,##0.00";
+                    columnStyle.NumberFormat.Format = "#,##0.00";
                     break;
                 case EmployeeImportColumnKind.List:
                     if (withValidation && column.ListName != null && lists.TryGetValue(column.ListName, out var range))
@@ -267,10 +273,12 @@ public static class EmployeeImportWorkbooks
                     }
                     break;
                 default:
-                    if (column.TextFormat) body.Style.NumberFormat.Format = "@";
+                    if (column.TextFormat) columnStyle.NumberFormat.Format = "@";
                     break;
             }
         }
+        // The header row must not inherit the column formats (a "@" header is harmless, a date one is not).
+        ws.Row(1).Style.NumberFormat.Format = "General";
         ws.Row(1).Height = 32;
         ws.SheetView.Freeze(1, 5);
         return ws;
