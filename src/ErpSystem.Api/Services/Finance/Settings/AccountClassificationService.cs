@@ -60,10 +60,20 @@ public sealed class AccountClassificationService : IAccountClassificationService
         ApplyRowVersion(entity, request.RowVersion);
         var parsed = await ValidateAsync(request, id, cancellationToken);
         var used = await _db.AccountAccountingBooks.AnyAsync(item => item.TenantId == TenantId && item.AccountClassificationId == id && !item.IsDeleted, cancellationToken);
+        var usedByEnabledMapping = await _db.AccountAccountingBooks.AnyAsync(item =>
+            item.TenantId == TenantId
+            && item.AccountClassificationId == id
+            && item.IsEnabled
+            && !item.IsDeleted,
+            cancellationToken);
         if (used && (entity.AccountingBookId != request.AccountingBookId
             || !string.Equals(entity.Code, NormalizeCode(request.Code), StringComparison.Ordinal)
             || entity.CoreAccountType != parsed.AccountType))
             throw new InvalidOperationException("A used classification's accounting book, code and core account type are immutable.");
+        if (usedByEnabledMapping
+            && (parsed.Status != AccountClassificationStatus.Active || !request.IsPostingClassification))
+            throw new InvalidOperationException(
+                "A classification used by enabled account-book assignments must remain active and posting-enabled.");
         entity.AccountingBookId = request.AccountingBookId;
         entity.ParentClassificationId = request.ParentClassificationId;
         entity.Code = NormalizeCode(request.Code);
@@ -88,6 +98,14 @@ public sealed class AccountClassificationService : IAccountClassificationService
             .SingleOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("Account classification was not found.");
         ApplyRowVersion(entity, request.RowVersion);
+        if (await _db.AccountAccountingBooks.AnyAsync(item =>
+                item.TenantId == TenantId
+                && item.AccountClassificationId == id
+                && item.IsEnabled
+                && !item.IsDeleted,
+                cancellationToken))
+            throw new InvalidOperationException(
+                "A classification used by enabled account-book assignments cannot be retired.");
         entity.Status = AccountClassificationStatus.Retired;
         entity.RetirementReason = request.Reason.Trim();
         entity.RetiredAtUtc = DateTime.UtcNow;

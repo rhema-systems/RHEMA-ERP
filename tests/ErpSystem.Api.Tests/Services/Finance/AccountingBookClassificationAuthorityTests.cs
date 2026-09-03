@@ -109,6 +109,150 @@ public sealed class AccountingBookClassificationAuthorityTests
             .WithMessage("*code and core account type are immutable*");
     }
 
+    [Theory]
+    [InlineData(nameof(AccountClassificationStatus.Draft), true)]
+    [InlineData(nameof(AccountClassificationStatus.Retired), true)]
+    [InlineData(nameof(AccountClassificationStatus.Active), false)]
+    public async Task UsedByEnabledMapping_CannotBecomeUnavailableForPosting(
+        string targetStatus,
+        bool isPostingClassification)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        var account = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            AccountClassificationId = classification.Id,
+            IsEnabled = true
+        });
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object);
+
+        var action = () => service.UpdateAsync(classification.Id, new SaveAccountClassificationDto
+        {
+            AccountingBookId = book.Id,
+            Code = classification.Code,
+            Name = classification.Name,
+            CoreAccountType = nameof(AccountType.Expense),
+            DefaultRevaluationTreatment = nameof(RevaluationTreatment.Exclude),
+            IsPostingClassification = isPostingClassification,
+            Status = targetStatus,
+            RowVersion = Convert.ToBase64String([1])
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enabled account-book assignments must remain active and posting-enabled*");
+    }
+
+    [Fact]
+    public async Task RetireAsync_RejectsClassificationUsedByEnabledMapping_ButAllowsDisabledHistory()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "CASH", AccountType.Asset);
+        var account = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        var mapping = new AccountAccountingBook
+        {
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            AccountClassificationId = classification.Id,
+            IsEnabled = true
+        };
+        db.AccountAccountingBooks.Add(mapping);
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object);
+        var request = new RetireAccountClassificationDto
+        {
+            Reason = "Superseded after reviewed remapping.",
+            RowVersion = Convert.ToBase64String([1])
+        };
+
+        var enabledAction = () => service.RetireAsync(classification.Id, request);
+        await enabledAction.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enabled account-book assignments cannot be retired*");
+
+        mapping.IsEnabled = false;
+        await db.SaveChangesAsync();
+        var retired = await service.RetireAsync(classification.Id, request);
+        retired.Status.Should().Be(nameof(AccountClassificationStatus.Retired));
+    }
+
+    [Fact]
+    public async Task SyncAccountMappingsAsync_RejectsStaleExistingMappingRowVersion()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        var account = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            AccountClassificationId = classification.Id,
+            IsEnabled = true,
+            RowVersion = [1, 2, 3]
+        });
+        await db.SaveChangesAsync();
+        var service = new AccountingBookService(db, CurrentUser(tenantId).Object);
+
+        var action = () => service.SyncAccountMappingsAsync(account,
+        [
+            new AccountAccountingBookUpdateDto
+            {
+                AccountingBookId = book.Id,
+                AccountClassificationId = classification.Id,
+                IsEnabled = true,
+                RowVersion = Convert.ToBase64String([9, 9, 9])
+            }
+        ]);
+
+        await action.Should().ThrowAsync<DbUpdateConcurrencyException>()
+            .WithMessage("*changed after it was loaded*");
+    }
+
+    [Fact]
+    public async Task SyncAccountMappingsAsync_RequiresRowVersionForExistingMapping()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        var account = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            AccountClassificationId = classification.Id,
+            IsEnabled = true,
+            RowVersion = [1, 2, 3]
+        });
+        await db.SaveChangesAsync();
+        var service = new AccountingBookService(db, CurrentUser(tenantId).Object);
+
+        var action = () => service.SyncAccountMappingsAsync(account,
+        [
+            new AccountAccountingBookUpdateDto
+            {
+                AccountingBookId = book.Id,
+                AccountClassificationId = classification.Id,
+                IsEnabled = true
+            }
+        ]);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Row version is required for an existing account-book assignment.");
+    }
+
     [Fact]
     public async Task ManifestSeeder_IsRepeatableAndMarksOnlyReviewedMonetaryLeavesIncluded()
     {
@@ -223,7 +367,8 @@ public sealed class AccountingBookClassificationAuthorityTests
             Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = bookId,
             Code = code, Name = code, CoreAccountType = type,
             DefaultRevaluationTreatment = RevaluationTreatment.Exclude,
-            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active,
+            RowVersion = [1]
         };
         db.AccountClassifications.Add(classification);
         return classification;

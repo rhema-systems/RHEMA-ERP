@@ -135,6 +135,7 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
                     accountClassificationId: mapping.accountClassificationId,
                     isEnabled: mapping.isEnabled,
                     financialStatementLineItem: mapping.financialStatementLineItem,
+                    rowVersion: mapping.rowVersion,
                 })));
             } catch (error) {
                 console.error('Error loading account:', error);

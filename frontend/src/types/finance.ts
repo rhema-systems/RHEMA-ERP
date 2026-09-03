@@ -176,6 +176,7 @@ export interface AccountAccountingBook {
     isEnabled: boolean;
     isMigrationReady: boolean;
     financialStatementLineItem?: string;
+    rowVersion: string;
 }
 
 export interface AccountBookAssignmentInput {
@@ -183,6 +184,7 @@ export interface AccountBookAssignmentInput {
     accountClassificationId?: string | null;
     isEnabled: boolean;
     financialStatementLineItem?: string;
+    rowVersion?: string;
 }
 
 export interface AccountClassification {

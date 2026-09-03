@@ -29,6 +29,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? AccountClassificationStatus { get; set; }
         public bool IsMigrationReady { get; set; }
         public string? FinancialStatementLineItem { get; set; }
+        public string RowVersion { get; set; } = string.Empty;
     }
 
     public class AccountAccountingBookUpdateDto
@@ -42,5 +43,7 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public Guid? AccountClassificationId { get; set; }
         public string? FinancialStatementLineItem { get; set; }
+        /// <summary>Required when updating an existing account/book assignment.</summary>
+        public string? RowVersion { get; set; }
     }
 }

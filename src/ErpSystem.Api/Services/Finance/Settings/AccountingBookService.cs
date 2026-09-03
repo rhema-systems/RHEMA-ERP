@@ -89,6 +89,10 @@ namespace ErpSystem.Api.Services.Finance.Settings
             }
             if (resolved.Select(item => item.Book.Id).Distinct().Count() != resolved.Count)
                 throw new InvalidOperationException("Accounting-book assignments must be unique.");
+            var requestedBookIds = resolved.Select(item => item.Book.Id).ToHashSet();
+            if (mappings.Any(item => !requestedBookIds.Contains(item.AccountingBookId)))
+                throw new InvalidOperationException(
+                    "Every existing account-book assignment must be included with its row version.");
             var now = DateTime.UtcNow;
             foreach (var item in resolved)
             {
@@ -102,20 +106,41 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     };
                     _context.AccountAccountingBooks.Add(mapping);
                 }
+                else
+                {
+                    ApplyRowVersion(mapping, item.Request.RowVersion);
+                }
                 mapping.IsEnabled = item.Request.IsEnabled;
                 mapping.AccountClassificationId = item.Classification?.Id;
                 mapping.FinancialStatementLineItem = item.Request.FinancialStatementLineItem;
                 mapping.UpdatedAt = now;
                 mapping.UpdatedBy = _currentUserService.UserName ?? "system";
             }
-            var requestedBookIds = resolved.Select(item => item.Book.Id).ToHashSet();
-            foreach (var omitted in mappings.Where(item => !requestedBookIds.Contains(item.AccountingBookId)))
-            {
-                omitted.IsEnabled = false;
-                omitted.UpdatedAt = now;
-                omitted.UpdatedBy = _currentUserService.UserName ?? "system";
-            }
             await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        private void ApplyRowVersion(AccountAccountingBook mapping, string? encodedRowVersion)
+        {
+            if (string.IsNullOrWhiteSpace(encodedRowVersion))
+                throw new InvalidOperationException("Row version is required for an existing account-book assignment.");
+
+            byte[] originalRowVersion;
+            try
+            {
+                originalRowVersion = Convert.FromBase64String(encodedRowVersion);
+            }
+            catch (FormatException)
+            {
+                throw new InvalidOperationException("Account-book assignment row version is invalid.");
+            }
+
+            if (originalRowVersion.Length == 0)
+                throw new InvalidOperationException("Account-book assignment row version is invalid.");
+            if (mapping.RowVersion.Length > 0 && !mapping.RowVersion.SequenceEqual(originalRowVersion))
+                throw new DbUpdateConcurrencyException(
+                    "The account-book assignment changed after it was loaded. Reload the account and retry.");
+
+            _context.Entry(mapping).Property(item => item.RowVersion).OriginalValue = originalRowVersion;
         }
 
         private async Task EnsureDefaultBooksAsync(CancellationToken cancellationToken)

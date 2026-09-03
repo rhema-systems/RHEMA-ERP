@@ -524,7 +524,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                         Status: AccountClassificationStatus.Active,
                         IsPostingClassification: true
                     },
-                    FinancialStatementLineItem = mapping.FinancialStatementLineItem
+                    FinancialStatementLineItem = mapping.FinancialStatementLineItem,
+                    RowVersion = mapping.RowVersion.Length == 0
+                        ? string.Empty
+                        : Convert.ToBase64String(mapping.RowVersion)
                 })
                 .ToList();
 
