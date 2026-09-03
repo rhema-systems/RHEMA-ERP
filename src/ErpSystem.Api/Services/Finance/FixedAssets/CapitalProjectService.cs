@@ -368,7 +368,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     "Capital project settlement dimensions synchronized.", cancellationToken);
                 await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
                     SettlementProducer, project.Id, postingDate, postingLines, cancellationToken);
-                await _postingEngine.PostAsync(new FinancePostingRequestDto
+                await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
                     SourceModule = SettlementProducer.Definition.PostingSourceModule,
                     OriginModuleCode = SettlementProducer.Definition.ProducerModule,

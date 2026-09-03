@@ -95,6 +95,11 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         var activeBooks = await GetActivePostingBooksAsync(cancellationToken);
         var defaultBook = GetDefaultBook(activeBooks);
         var postAllBooks = requestedBook == "ALL_ACTIVE_BOOKS";
+        if (dto.PostToGl && postAllBooks)
+        {
+            throw new InvalidOperationException(
+                "Posted depreciation must be orchestrated as one request per concrete accounting book; ALL_ACTIVE_BOOKS is projection-only.");
+        }
         var runBookClassification = postAllBooks
             ? "ALL_ACTIVE_BOOKS"
             : requestedBook ?? defaultBook.Code;
@@ -337,7 +342,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         _context.FixedAssetDepreciationRuns.Add(run);
         await _context.SaveChangesAsync(cancellationToken);
 
-        FinancePostingRequestDto? preparedPostingRequest = null;
+        FinancePostingRequestV2Dto? preparedPostingRequest = null;
         if (dto.PostToGl)
         {
             var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
@@ -833,7 +838,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         return account;
     }
 
-    private FinancePostingRequestDto BuildPostingRequest(
+    private FinancePostingRequestV2Dto BuildPostingRequest(
         FixedAssetDepreciationRun run,
         FiscalPeriod fiscalPeriod,
         IReadOnlyList<DepreciationLineWorkItem> lines,
@@ -883,7 +888,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             });
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = DepreciationProducer.Definition.PostingSourceModule,
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -896,7 +901,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             PostingDate = run.PostingDate,
             FiscalPeriodId = fiscalPeriod.Id,
             JournalType = "Fixed Asset Depreciation",
-            BookClassification = run.BookClassification == "ALL_ACTIVE_BOOKS" ? "IFRS" : run.BookClassification,
+            AccountingBookCode = run.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = run.IdempotencyKey,
             ReturnExistingOnDuplicate = true,

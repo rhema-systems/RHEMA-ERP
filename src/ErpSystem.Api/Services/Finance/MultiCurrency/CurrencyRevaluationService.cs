@@ -716,7 +716,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             reversalDate.Date,
             cancellationToken);
 
-        var postingRequest = new FinancePostingRequestDto
+        var postingRequest = new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModuleFx,
             SourceDocumentType = "FxRevaluationBatch",
@@ -727,7 +727,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"Reverse FX revaluation {batch.BatchNumber}",
             PostingDate = reversalDate.Date,
             JournalType = "FX Revaluation Reversal",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
             ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
             ReversalReason = reason.Trim(),
@@ -937,7 +937,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             },
             cancellationToken: cancellationToken);
 
-        var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModuleFx,
             SourceDocumentType = "VendorPaymentAllocation",
@@ -948,7 +948,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"AP realized FX {gainLossType.ToLowerInvariant()} for {payment.PaymentNumber}",
             PostingDate = payment.PaymentDate,
             JournalType = "Realized FX",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FX:Realized:AP:{tenantId:N}:{allocation.Id:N}",
             ReturnExistingOnDuplicate = true,
@@ -1141,7 +1141,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             },
             cancellationToken: cancellationToken);
 
-        var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModuleFx,
             SourceDocumentType = "PaymentAllocation",
@@ -1152,7 +1152,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             Description = $"AR realized FX {gainLossType.ToLowerInvariant()} for {payment.PaymentNumber}",
             PostingDate = payment.PaymentDate,
             JournalType = "Realized FX",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FX:Realized:AR:{tenantId:N}:{allocation.Id:N}",
             ReturnExistingOnDuplicate = true,
@@ -1610,7 +1610,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         return rate;
     }
 
-    private FinancePostingRequestDto BuildRevaluationPostingRequest(
+    private FinancePostingRequestV2Dto BuildRevaluationPostingRequest(
         FxRevaluationBatch batch,
         Guid unrealizedGainAccountId,
         Guid unrealizedLossAccountId)
@@ -1649,7 +1649,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             }
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModuleFx,
             SourceDocumentType = "FxRevaluationBatch",
@@ -1661,7 +1661,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             PostingDate = batch.RevaluationDate,
             FiscalPeriodId = batch.FiscalPeriodId,
             JournalType = "FX Revaluation",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
             IdempotencyKey = batch.IdempotencyKey,
             ReturnExistingOnDuplicate = true,

@@ -2712,7 +2712,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 if (closingEntry == null)
                     throw new InvalidOperationException("The fiscal year's closing journal entry could not be found.");
 
-                var reversalRequest = new FinancePostingRequestDto
+                var reversalRequest = new FinancePostingRequestV2Dto
                 {
                     SourceModule = "GL",
                     SourceDocumentType = "YearEndCloseReversal",
@@ -2932,7 +2932,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             // Post through the finance posting engine so the closing entry gets a posting
             // event, idempotency protection, and correct Account.Balance snapshot movements.
-            var postingRequest = new FinancePostingRequestDto
+            var postingRequest = new FinancePostingRequestV2Dto
             {
                 SourceModule = "GL",
                 SourceDocumentType = "YearEndClose",

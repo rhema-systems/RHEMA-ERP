@@ -495,7 +495,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             return lines;
         }
 
-        private FinancePostingRequestDto BuildLeasePostingRequest(
+        private FinancePostingRequestV2Dto BuildLeasePostingRequest(
             FinancePostingProducerContext producer,
             Guid sourceDocumentId,
             string reference,

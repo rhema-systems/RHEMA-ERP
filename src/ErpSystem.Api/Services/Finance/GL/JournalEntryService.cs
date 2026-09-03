@@ -877,12 +877,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             await EnsureFiscalPeriodOpenAsync(entry.FiscalPeriodId, entry.TenantId, entry.EntryDate, cancellationToken);
         }
 
-        private FinancePostingRequestDto BuildManualJournalPostingRequest(
+        private FinancePostingRequestV2Dto BuildManualJournalPostingRequest(
             JournalEntry entry,
             string functionalCurrency,
             IReadOnlyList<Guid> budgetReservationIds)
         {
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "GL",
                 SourceDocumentType = "ManualJournalEntry",
@@ -895,7 +895,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 PostingDate = entry.EntryDate,
                 FiscalPeriodId = entry.FiscalPeriodId,
                 JournalType = entry.JournalType,
-                BookClassification = entry.BookClassification,
+                AccountingBookCode = entry.BookClassification,
                 FunctionalCurrencyCode = functionalCurrency,
                 BudgetReservationIds = budgetReservationIds,
                 Lines = entry.Transactions
@@ -924,14 +924,14 @@ namespace ErpSystem.Api.Services.Finance.GL
             };
         }
 
-        private FinancePostingRequestDto BuildManualJournalReversalRequest(
+        private FinancePostingRequestV2Dto BuildManualJournalReversalRequest(
             JournalEntry original,
             DateTime reversalDate,
             Guid reversalFiscalPeriodId,
             string reason,
             string functionalCurrency)
         {
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "GL",
                 SourceDocumentType = "ManualJournalReversal",
@@ -946,7 +946,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 PostingDate = reversalDate,
                 FiscalPeriodId = reversalFiscalPeriodId,
                 JournalType = "Reversing",
-                BookClassification = original.BookClassification,
+                AccountingBookCode = original.BookClassification,
                 FunctionalCurrencyCode = functionalCurrency,
                 Lines = original.Transactions
                     .Where(t => !t.IsDeleted)

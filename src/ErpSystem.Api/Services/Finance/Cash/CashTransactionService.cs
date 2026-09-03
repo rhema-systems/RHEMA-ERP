@@ -1333,7 +1333,7 @@ public class CashTransactionService : ICashTransactionService
                 policy.Reason,
                 policy.ReversalDate,
                 cancellationToken);
-            var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+            var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
             {
                 SourceModule = "CASHBANK",
                 SourceDocumentType = sourceDocumentType,
@@ -1344,7 +1344,7 @@ public class CashTransactionService : ICashTransactionService
                 Description = $"Reverse {source.TransactionNumber}: {policy.Reason}",
                 PostingDate = policy.ReversalDate,
                 JournalType = $"{GetCashBankJournalType(source)} Reversal",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
                 ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                 ReversalReason = policy.Reason,
@@ -2033,7 +2033,7 @@ public class CashTransactionService : ICashTransactionService
         return await query.FirstOrDefaultAsync(cancellationToken);
     }
 
-    private async Task<FinancePostingRequestDto> BuildCashBankPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildCashBankPostingRequestAsync(
         CashTransaction transaction,
         FinancePostingProducerContext producer,
         CancellationToken cancellationToken)
@@ -2109,7 +2109,7 @@ public class CashTransactionService : ICashTransactionService
             throw new InvalidOperationException("Cash/bank posting request is not balanced.");
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "CASHBANK",
             SourceDocumentType = sourceDocumentType,
@@ -2122,7 +2122,7 @@ public class CashTransactionService : ICashTransactionService
             Description = description,
             PostingDate = transaction.TransactionDate.Date,
             JournalType = GetCashBankJournalType(transaction),
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = baseCurrencyCode,
             IdempotencyKey = $"CASHBANK:{sourceDocumentType}:{tenantId:N}:{transaction.Id:N}:Post",
             ReturnExistingOnDuplicate = true,

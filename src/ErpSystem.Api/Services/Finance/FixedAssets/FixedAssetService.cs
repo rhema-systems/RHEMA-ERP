@@ -1650,7 +1650,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     postingLines);
             }
 
-            var request = new FinancePostingRequestDto
+            var request = new FinancePostingRequestV2Dto
             {
                 SourceModule = DirectCapitalizationProducer.Definition.PostingSourceModule,
                 OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -1662,7 +1662,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 Description = $"Fixed asset capitalization - {asset.AssetCode} - {asset.Name}",
                 PostingDate = dto.CapitalizationDate.Date,
                 JournalType = "Fixed Asset Capitalization",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = isCorrectedCapitalization
                     ? $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize:{postingSourceDocumentId:N}"
@@ -1805,7 +1805,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         var functionalCurrency = NormalizeCurrency(dto.FunctionalCurrencyCode, "GHS");
         var amount = RoundMoney(dto.FunctionalAmount);
-        var request = new FinancePostingRequestDto
+        var request = new FinancePostingRequestV2Dto
         {
             SourceModule = "FA",
             // Period locks use the canonical short code, while journal inquiry retains the
@@ -1819,7 +1819,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             Description = $"Capitalize accepted procured asset {asset.AssetCode} - {asset.Name}",
             PostingDate = dto.CapitalizationDate.Date,
             JournalType = "Fixed Asset Capitalization",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FA:ProcurementFixedAssetCapitalization:{asset.TenantId:N}:{dto.CapitalizationId:N}:Post:v1",
             ReturnExistingOnDuplicate = true,
@@ -2084,7 +2084,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         plan.OriginalJournalEntryId,
                         reversalLines,
                         cancellationToken);
-                var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
                     SourceModule = CapitalizationReversalProducer.Definition.PostingSourceModule,
                     OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -2096,7 +2096,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     Description = $"Reverse fixed asset capitalization - {request.FixedAsset.AssetCode}",
                     PostingDate = plan.ReversalDate,
                     JournalType = "Fixed Asset Capitalization Reversal",
-                    BookClassification = "IFRS",
+                    AccountingBookCode = "IFRS",
                     FunctionalCurrencyCode = request.FixedAsset.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                     ReversalReason = policy.Reason,

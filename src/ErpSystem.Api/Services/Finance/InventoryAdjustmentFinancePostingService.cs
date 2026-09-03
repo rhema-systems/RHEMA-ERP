@@ -88,7 +88,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         if (lines.Count == 0) throw new InvalidOperationException("The stock adjustment has no non-zero value to post to Finance.");
         var producer = Producer();
         await ApplyDimensionsAsync(producer, adjustment.Id, adjustment.AdjustmentDate, lines, cancellationToken);
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -102,7 +102,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
                 : $"Inventory stock adjustment {adjustment.AdjustmentNumber} - {adjustment.ReasonCode}",
             PostingDate = adjustment.AdjustmentDate,
             JournalType = "System Generated",
-            BookClassification = isOpeningStock ? adjustment.BookClassification : "IFRS",
+            AccountingBookCode = isOpeningStock ? adjustment.BookClassification : "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"StockAdjustment:{adjustment.TenantId:N}:{adjustment.Id:N}:Post",
             Lines = lines
@@ -120,7 +120,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         var plan = await _posting.GetReversalPlanAsync(adjustment.FinancePostingEventId.Value, reason, DateTime.UtcNow, cancellationToken);
         if (!plan.IsDefined || plan.ReversalLines.Count == 0)
             throw new InvalidOperationException("Finance could not derive a balanced reversal for the stock adjustment.");
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -135,7 +135,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             Description = $"Reversal of inventory stock adjustment {adjustment.AdjustmentNumber}",
             PostingDate = plan.ReversalDate,
             JournalType = "System Generated",
-            BookClassification = adjustment.BookClassification,
+            AccountingBookCode = adjustment.BookClassification,
             FunctionalCurrencyCode = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant(),
             IdempotencyKey = $"StockAdjustment:{adjustment.TenantId:N}:{adjustment.Id:N}:Reverse",
             Lines = plan.ReversalLines

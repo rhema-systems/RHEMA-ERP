@@ -977,7 +977,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     reason,
                     reversalDate,
                     cancellationToken);
-                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
                     SourceModule = "AR",
                     SourceDocumentType = "CustomerPayment",
@@ -988,7 +988,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Description = $"Reverse customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
                     PostingDate = reversalDate,
                     JournalType = "AR Receipt Reversal",
-                    BookClassification = "IFRS",
+                    AccountingBookCode = "IFRS",
                     FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                     ReversalReason = reason,
@@ -1019,7 +1019,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         reason,
                         reversalDate,
                         cancellationToken);
-                    var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "FX",
                         SourceDocumentType = "PaymentAllocation",
@@ -1030,7 +1030,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         Description = $"Reverse AR realized FX for {payment.PaymentNumber}",
                         PostingDate = reversalDate,
                         JournalType = "Realized FX Reversal",
-                        BookClassification = "IFRS",
+                        AccountingBookCode = "IFRS",
                         FunctionalCurrencyCode = settlement.FunctionalCurrencyCode,
                         ReversalOfJournalEntryId = fxPlan.OriginalJournalEntryId,
                         ReversalReason = reason,
@@ -2108,7 +2108,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         }
                     }
 
-                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "AR",
                         SourceDocumentType = "CustomerPaymentAdvanceApplication",
@@ -2119,7 +2119,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         Description = $"Apply customer advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
                         PostingDate = applicationDate,
                         JournalType = "AR Customer Advance Application",
-                        BookClassification = "IFRS",
+                        AccountingBookCode = "IFRS",
                         FunctionalCurrencyCode = functionalCurrency,
                         IdempotencyKey = $"AR:CustomerPaymentAdvanceApplication:{payment.TenantId:N}:{allocation.Id:N}:Post",
                         ReturnExistingOnDuplicate = true,
@@ -2367,7 +2367,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     trimmedReason,
                     reversalDate,
                     cancellationToken);
-                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
                     SourceModule = originalEvent.SourceModule,
                     OriginModuleCode = originalEvent.OriginModuleCode,
@@ -2379,7 +2379,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Description = $"Reverse customer advance application {allocation.CustomerPayment.PaymentNumber}",
                     PostingDate = plan.ReversalDate,
                     JournalType = "Customer Advance Application Reversal",
-                    BookClassification = originalEvent.BookClassification,
+                    AccountingBookCode = originalEvent.BookClassification,
                     FunctionalCurrencyCode = originalEvent.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                     ReversalReason = trimmedReason,
@@ -2808,7 +2808,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             return payment;
         }
 
-        private async Task<FinancePostingRequestDto> BuildArReceiptPostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildArReceiptPostingRequestAsync(
             CustomerPayment payment,
             FinancePostingProducerContext producer,
             CancellationToken cancellationToken)
@@ -3243,7 +3243,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             payment.IsCustomerAdvance = isCustomerAdvance;
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = producer.Definition.PostingSourceModule,
                 OriginModuleCode = producer.Definition.ProducerModule,
@@ -3257,7 +3257,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     : $"Customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AR Receipt",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"{producer.Definition.SourceRoute}:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -3450,7 +3450,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             return configuredTax?.TaxReceivableAccountId;
         }
 
-        private async Task<FinancePostingRequestDto> BuildCustomerCreditNotePostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildCustomerCreditNotePostingRequestAsync(
             CustomerPayment payment,
             CancellationToken cancellationToken)
         {
@@ -3530,7 +3530,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
                 throw new InvalidOperationException("AR credit note posting is not balanced.");
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AR",
                 SourceDocumentType = "CustomerCreditNote",
@@ -3541,7 +3541,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Description = $"Customer credit note {payment.PaymentNumber} - {customer.PartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AR Credit Note",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AR:CustomerCreditNote:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,

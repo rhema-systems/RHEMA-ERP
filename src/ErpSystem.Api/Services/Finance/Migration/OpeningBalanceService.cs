@@ -1741,7 +1741,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 var plan = await _postingEngine.GetReversalPlanAsync(
                     request.OriginalPostingEventId, policy.Reason, policy.ReversalDate, cancellationToken);
                 var functionalCurrency = await GetFunctionalCurrencyAsync(request.TenantId, cancellationToken);
-                var posting = await _postingEngine.PostAsync(new FinancePostingRequestDto
+                var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
                     SourceModule = SourceModule,
                     SourceDocumentType = "OpeningBalanceBatchReversal",
@@ -1752,7 +1752,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                     Description = $"Reverse opening balance batch {request.OpeningBalanceBatch.BatchNumber}",
                     PostingDate = plan.ReversalDate,
                     JournalType = "Opening Balance Reversal",
-                    BookClassification = request.BookClassification,
+                    AccountingBookCode = request.BookClassification,
                     FunctionalCurrencyCode = functionalCurrency,
                     ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                     ReversalReason = policy.Reason,
@@ -1893,12 +1893,12 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         return diagnostics;
     }
 
-    private async Task<FinancePostingRequestDto> BuildPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildPostingRequestAsync(
         OpeningBalanceBatch batch,
         CancellationToken cancellationToken)
     {
         var functionalCurrency = await GetFunctionalCurrencyAsync(batch.TenantId, cancellationToken);
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = SourceModule,
             SourceDocumentType = EntityType,
@@ -1912,7 +1912,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             PostingDate = batch.OpeningDate,
             FiscalPeriodId = batch.FiscalPeriodId,
             JournalType = "Opening Balance",
-            BookClassification = batch.BookClassification,
+            AccountingBookCode = batch.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = batch.IdempotencyKey,
             ReturnExistingOnDuplicate = true,

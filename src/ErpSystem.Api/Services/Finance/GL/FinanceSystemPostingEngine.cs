@@ -25,7 +25,7 @@ public sealed class FinanceSystemPostingEngine : IFinanceSystemPostingEngine
         DateTime reversalDate, string systemActor, CancellationToken cancellationToken = default) =>
         CreateEngine(tenantId, systemActor).GetReversalPlanAsync(postingEventId, reason, reversalDate, cancellationToken);
 
-    public Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestDto request,
+    public Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestV2Dto request,
         string systemActor, CancellationToken cancellationToken = default)
     {
         if (request.SourceDocumentTenantId != tenantId ||

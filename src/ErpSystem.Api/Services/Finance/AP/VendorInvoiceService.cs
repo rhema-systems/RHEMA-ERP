@@ -2683,7 +2683,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             return producer;
         }
 
-        private async Task<FinancePostingRequestDto> BuildApInvoicePostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildApInvoicePostingRequestAsync(
             VendorInvoice invoice,
             IReadOnlyList<Guid> budgetReservationIds,
             FinancePostingProducerContext? producer,
@@ -2929,7 +2929,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 postingLines[i].LineNumber = i + 1;
             }
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AP",
                 SourceDocumentType = "VendorInvoice",
@@ -2940,7 +2940,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"Vendor invoice {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Invoice",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -2953,7 +2953,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
-        private async Task<FinancePostingRequestDto> BuildApOpeningBalancePostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildApOpeningBalancePostingRequestAsync(
             VendorInvoice invoice,
             FinanceSettings settings,
             Guid apAccountId,
@@ -3048,7 +3048,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             for (var index = 0; index < postingLines.Count; index++)
                 postingLines[index].LineNumber = index + 1;
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AP",
                 SourceDocumentType = "VendorInvoice",
@@ -3059,7 +3059,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"AP opening balance {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Opening Balance",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -3567,7 +3567,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
-        private static FinancePostingRequestDto BuildApReversalRequest(
+        private static FinancePostingRequestV2Dto BuildApReversalRequest(
             FinancePostingEvent originalEvent,
             FinanceReversalPlanDto plan,
             Guid sourceDocumentId,
@@ -3588,7 +3588,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             Description = description,
             PostingDate = plan.ReversalDate,
             JournalType = journalType,
-            BookClassification = originalEvent.BookClassification,
+            AccountingBookCode = originalEvent.BookClassification,
             FunctionalCurrencyCode = originalEvent.FunctionalCurrencyCode,
             ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
             ReversalReason = reason.Trim(),

@@ -730,7 +730,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
                 .Select(item => item.BaseCurrency)
                 .FirstOrDefaultAsync(cancellationToken),
             "GHS");
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "AP",
             SourceDocumentType = "SupplierDebitNoteReversal",
@@ -741,7 +741,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             Description = $"Reverse supplier debit note {note.DebitNoteNumber}",
             PostingDate = plan.ReversalDate,
             JournalType = "AP Supplier Debit Note Reversal",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
             ReversalReason = reason,
@@ -1287,7 +1287,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         return line;
     }
 
-    private async Task<FinancePostingRequestDto> BuildPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildPostingRequestAsync(
         SupplierDebitNote note,
         FinancePostingProducerContext? producer,
         CancellationToken cancellationToken)
@@ -1496,7 +1496,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         if (Round(lines.Sum(item => item.DebitAmount)) != Round(lines.Sum(item => item.CreditAmount)))
             throw new InvalidOperationException("Supplier debit-note posting is not balanced.");
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "AP",
             SourceDocumentType = "SupplierDebitNote",
@@ -1507,7 +1507,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             Description = $"Supplier debit note {note.DebitNoteNumber} - {note.Vendor.PartnerName}",
             PostingDate = note.DebitNoteDate,
             JournalType = "AP Supplier Debit Note",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"AP:SupplierDebitNote:{note.TenantId:N}:{note.Id:N}:Post",
             ReturnExistingOnDuplicate = true,

@@ -109,7 +109,7 @@ public sealed class RecurringJournalReversalProcessor
                 if (!plan.IsDefined || plan.OriginalJournalEntryId != occurrence.JournalEntryId)
                     throw new InvalidOperationException("The central posting engine did not return the expected immutable reversal plan.");
 
-                var posted = await _posting.PostAsync(tenantId, new FinancePostingRequestDto
+                var posted = await _posting.PostAsync(tenantId, new FinancePostingRequestV2Dto
                 {
                     SourceModule = "GL",
                     OriginModuleCode = "FIN",
@@ -124,7 +124,7 @@ public sealed class RecurringJournalReversalProcessor
                     Description = $"Automatic reversal of recurring journal occurrence {occurrence.Id}",
                     PostingDate = reversalDate,
                     JournalType = "Recurring Reversal",
-                    BookClassification = originalEvent.BookClassification,
+                    AccountingBookCode = originalEvent.BookClassification,
                     FunctionalCurrencyCode = originalEvent.FunctionalCurrencyCode,
                     IdempotencyKey = $"RecurringJournal:{tenantId:N}:{occurrence.Id:N}:AutoReverse",
                     ReturnExistingOnDuplicate = true,

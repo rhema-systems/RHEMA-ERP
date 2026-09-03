@@ -316,7 +316,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var snapshot = DeserializeSnapshot(occurrence.TemplateSnapshotJson);
         try
         {
-            var result = await _postingEngine.PostAsync(new FinancePostingRequestDto
+            var result = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
             {
                 SourceModule = "GL",
                 OriginModuleCode = "FIN",
@@ -328,7 +328,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
                 Description = $"Recurring journal {snapshot.TemplateNumber}: {snapshot.Name}",
                 PostingDate = occurrence.EffectiveDate.ToDateTime(TimeOnly.MinValue),
                 JournalType = "Recurring",
-                BookClassification = snapshot.BookClassification,
+                AccountingBookCode = snapshot.BookClassification,
                 FunctionalCurrencyCode = snapshot.CurrencyCode,
                 IdempotencyKey = $"RecurringJournal:{TenantId:N}:{occurrence.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,

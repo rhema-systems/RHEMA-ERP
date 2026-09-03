@@ -169,7 +169,7 @@ public partial class AssetValuationService
                             plan.OriginalJournalEntryId,
                             reversalLines,
                             cancellationToken);
-                    var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = ValuationCorrectionProducer.Definition.PostingSourceModule,
                         OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -181,7 +181,7 @@ public partial class AssetValuationService
                         Description = $"Correct {valuation.ValuationType} for {valuation.FixedAsset.AssetCode}",
                         PostingDate = plan.ReversalDate,
                         JournalType = "Fixed Asset Valuation Correction",
-                        BookClassification = valuation.BookClassification,
+                        AccountingBookCode = valuation.BookClassification,
                         FunctionalCurrencyCode = await GetFunctionalCurrencyAsync(),
                         ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                         ReversalReason = policy.Reason,

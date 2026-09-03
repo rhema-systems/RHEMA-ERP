@@ -447,7 +447,7 @@ public partial class AssetTransferService
         }
     }
 
-    private async Task<FinancePostingRequestDto> BuildReclassificationPostingRequestAsync(AssetTransfer transfer)
+    private async Task<FinancePostingRequestV2Dto> BuildReclassificationPostingRequestAsync(AssetTransfer transfer)
     {
         var lines = new List<FinancePostingLineDto>();
         var lineNumber = 1;
@@ -477,7 +477,7 @@ public partial class AssetTransferService
             throw new InvalidOperationException("GL reclassification produced no current account or segment balance movement.");
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = ReclassificationProducer.Definition.PostingSourceModule,
             // Fixed Assets is a Finance subledger. Period locks operate on canonical top-level
@@ -492,7 +492,7 @@ public partial class AssetTransferService
             PostingDate = (transfer.AccountingDate ?? transfer.TransferDate).Date,
             FiscalPeriodId = transfer.FiscalPeriodId,
             JournalType = "Fixed Asset Reclassification",
-            BookClassification = transfer.BookClassification,
+            AccountingBookCode = transfer.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FA:TransferReclassification:{transfer.TenantId:N}:{transfer.Id:N}",
             ReturnExistingOnDuplicate = true,

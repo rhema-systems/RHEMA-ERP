@@ -785,7 +785,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
             }
 
-            FinancePostingRequestDto postingRequest;
+            FinancePostingRequestV2Dto postingRequest;
             try
             {
                 postingRequest = await BuildArInvoicePostingRequestAsync(
@@ -893,7 +893,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     cancellationToken);
             }
 
-            FinancePostingRequestDto postingRequest;
+            FinancePostingRequestV2Dto postingRequest;
             try
             {
                 postingRequest = await BuildArInvoicePostingRequestAsync(
@@ -1160,7 +1160,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             return RoundMoney(totalTax);
         }
 
-        private async Task<FinancePostingRequestDto> BuildArInvoicePostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildArInvoicePostingRequestAsync(
             Invoice invoice,
             bool allowDraftTransition,
             FinancePostingProducerContext? producer,
@@ -1394,7 +1394,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 postingLines[i].LineNumber = i + 1;
             }
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AR",
                 SourceDocumentType = "CustomerInvoice",
@@ -1405,7 +1405,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Description = $"Customer invoice {invoice.InvoiceNumber} - {invoice.CustomerName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AR Invoice",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -1414,7 +1414,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             };
         }
 
-        private async Task<FinancePostingRequestDto> BuildArOpeningBalancePostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildArOpeningBalancePostingRequestAsync(
             Invoice invoice,
             FinanceSettings settings,
             Guid arAccountId,
@@ -1511,7 +1511,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 allocatedFunctional += functionalAmount;
             }
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AR",
                 SourceDocumentType = "CustomerInvoice",
@@ -1522,7 +1522,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Description = $"AR opening balance {invoice.InvoiceNumber} - {invoice.CustomerName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AR Opening Balance",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -1533,7 +1533,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task<InvoiceDto> CompleteArInvoicePostingAsync(
             Invoice invoice,
-            FinancePostingRequestDto postingRequest,
+            FinancePostingRequestV2Dto postingRequest,
             bool wasAlreadyLinked,
             Func<Task>? rollbackBeforeFailureAudit,
             FinancePostingProducerContext? producer,

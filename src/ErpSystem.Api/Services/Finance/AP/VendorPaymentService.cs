@@ -1338,7 +1338,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     reason,
                     reversalDate,
                     cancellationToken);
-                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
                     SourceModule = "AP",
                     SourceDocumentType = "VendorPayment",
@@ -1349,7 +1349,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Description = $"Reverse vendor payment {payment.PaymentNumber} - {payment.Supplier.Name}",
                     PostingDate = reversalDate,
                     JournalType = "AP Payment Reversal",
-                    BookClassification = "IFRS",
+                    AccountingBookCode = "IFRS",
                     FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                     ReversalReason = reason,
@@ -1381,7 +1381,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         reason,
                         reversalDate,
                         cancellationToken);
-                    var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "FX",
                         SourceDocumentType = "VendorPaymentAllocation",
@@ -1392,7 +1392,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         Description = $"Reverse AP realized FX for {payment.PaymentNumber}",
                         PostingDate = reversalDate,
                         JournalType = "Realized FX Reversal",
-                        BookClassification = "IFRS",
+                        AccountingBookCode = "IFRS",
                         FunctionalCurrencyCode = settlement.FunctionalCurrencyCode,
                         ReversalOfJournalEntryId = fxPlan.OriginalJournalEntryId,
                         ReversalReason = reason,
@@ -2203,7 +2203,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         }
                     }
 
-                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "AP",
                         SourceDocumentType = "VendorPaymentAdvanceApplication",
@@ -2214,7 +2214,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         Description = $"Apply supplier advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
                         PostingDate = applicationDate,
                         JournalType = "AP Supplier Advance Application",
-                        BookClassification = "IFRS",
+                        AccountingBookCode = "IFRS",
                         FunctionalCurrencyCode = functionalCurrency,
                         IdempotencyKey = $"AP:VendorPaymentAdvanceApplication:{payment.TenantId:N}:{allocation.Id:N}:Post",
                         ReturnExistingOnDuplicate = true,
@@ -4799,7 +4799,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 reason.Trim(),
                 DateTime.UtcNow.Date,
                 cancellationToken);
-            return await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+            return await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
             {
                 SourceModule = originalEvent.SourceModule,
                 OriginModuleCode = originalEvent.OriginModuleCode,
@@ -4811,7 +4811,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = description,
                 PostingDate = plan.ReversalDate,
                 JournalType = journalType,
-                BookClassification = originalEvent.BookClassification,
+                AccountingBookCode = originalEvent.BookClassification,
                 FunctionalCurrencyCode = originalEvent.FunctionalCurrencyCode,
                 ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                 ReversalReason = reason.Trim(),
@@ -4990,7 +4990,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 cancellationToken: cancellationToken);
         }
 
-        private async Task<FinancePostingRequestDto> BuildApPaymentPostingRequestAsync(
+        private async Task<FinancePostingRequestV2Dto> BuildApPaymentPostingRequestAsync(
             VendorPayment payment,
             CancellationToken cancellationToken)
         {
@@ -5377,7 +5377,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             payment.BankAccountId ??= bankAccount.Id;
             payment.IsSupplierAdvance = isSupplierAdvance;
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AP",
                 SourceDocumentType = "VendorPayment",
@@ -5390,7 +5390,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     : $"Vendor payment {payment.PaymentNumber} - {supplier.Name}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AP Payment",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,

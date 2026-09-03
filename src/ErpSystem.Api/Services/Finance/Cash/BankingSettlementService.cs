@@ -1322,7 +1322,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             });
         }
 
-        var posting = await _postingEngine.PostAsync(new FinancePostingRequestDto
+        var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "CASHBANK",
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -1593,7 +1593,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             }
         }
 
-        var posting = await _postingEngine.PostAsync(new FinancePostingRequestDto
+        var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "CASHBANK",
             OriginModuleCode = FinanceModuleLockCatalog.Finance,

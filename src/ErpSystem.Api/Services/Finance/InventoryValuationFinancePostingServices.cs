@@ -79,7 +79,7 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
 
         var producer = Producer();
         await ApplyDimensionsAsync(producer, receipt.Id, receipt.ReceiptDate, lines, cancellationToken);
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -91,7 +91,7 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
             Description = $"Accepted inventory receipt {receipt.ReceiptNumber}",
             PostingDate = receipt.ReceiptDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"ProcurementPurchaseOrderReceipt:{receipt.TenantId:N}:{receipt.Id:N}:AcceptedInventory",
             Lines = lines
@@ -223,7 +223,7 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
 
         var producer = Producer();
         await ApplyDimensionsAsync(producer, landedCost.Id, landedCost.PostedDate ?? landedCost.CostDate, lines, cancellationToken);
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -235,7 +235,7 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
             Description = $"Inventory landed cost {landedCost.LandedCostNumber}",
             PostingDate = landedCost.PostedDate ?? landedCost.CostDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryLandedCost:{landedCost.TenantId:N}:{landedCost.Id:N}:Post",
             Lines = lines

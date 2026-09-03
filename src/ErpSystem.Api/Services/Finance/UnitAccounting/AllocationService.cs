@@ -328,7 +328,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     var totalAllocated = lines.Sum(line => line.AllocatedAmount);
                     var postingLines = BuildPostingLines(rule, lines, totalAllocated);
 
-                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "GL",
                         OriginModuleCode = "FIN",
@@ -342,7 +342,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         PostingDate = allocationDate,
                         FiscalPeriodId = dto.FiscalPeriodId,
                         JournalType = "Allocation",
-                        BookClassification = "IFRS",
+                        AccountingBookCode = "IFRS",
                         FunctionalCurrencyCode = "GHS",
                         IdempotencyKey = $"allocation:{TenantId:N}:{rule.Id:N}:{dto.FiscalPeriodId:N}",
                         ReturnExistingOnDuplicate = true,
@@ -714,7 +714,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         snapshotLines,
                         batch.TotalAllocated);
 
-                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "GL",
                         OriginModuleCode = "FIN",
@@ -728,7 +728,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         PostingDate = batch.AllocationDate,
                         FiscalPeriodId = batch.FiscalPeriodId,
                         JournalType = "Allocation",
-                        BookClassification = batch.BookClassification,
+                        AccountingBookCode = batch.BookClassification,
                         FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
                         IdempotencyKey = batch.IdempotencyKey ?? $"allocation-run-batch:{TenantId:N}:{batch.Id:N}",
                         ReturnExistingOnDuplicate = true,

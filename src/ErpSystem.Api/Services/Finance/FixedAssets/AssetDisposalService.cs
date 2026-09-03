@@ -1484,7 +1484,7 @@ public class AssetDisposalService : IAssetDisposalService
         }
     }
 
-    private async Task<FinancePostingRequestDto> BuildDisposalPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildDisposalPostingRequestAsync(
         AssetDisposal disposal,
         FixedAsset asset,
         FiscalPeriod fiscalPeriod,
@@ -1543,7 +1543,7 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Fixed asset disposal posting requires at least two balanced posting lines.");
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = DisposalProducer.Definition.PostingSourceModule,
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -1556,7 +1556,7 @@ public class AssetDisposalService : IAssetDisposalService
             PostingDate = (disposal.AccountingDate ?? disposal.DisposalDate).Date,
             FiscalPeriodId = fiscalPeriod.Id,
             JournalType = "Fixed Asset Disposal",
-            BookClassification = disposal.BookClassification,
+            AccountingBookCode = disposal.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = BuildPostingIdempotencyKey(disposal),
             ReturnExistingOnDuplicate = true,

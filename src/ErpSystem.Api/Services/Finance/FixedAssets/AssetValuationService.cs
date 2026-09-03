@@ -579,7 +579,7 @@ public partial class AssetValuationService : IAssetValuationService
         };
     }
 
-    private async Task<FinancePostingRequestDto> BuildPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildPostingRequestAsync(
         AssetValuation valuation,
         FixedAsset asset,
         FiscalPeriod fiscalPeriod,
@@ -637,7 +637,7 @@ public partial class AssetValuationService : IAssetValuationService
             throw new InvalidOperationException("Valuation posting requires at least two balanced posting lines.");
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = ValuationProducer(valuation.ValuationType).Definition.PostingSourceModule,
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -655,7 +655,7 @@ public partial class AssetValuationService : IAssetValuationService
                 ValuationType.Impairment => "Fixed Asset Impairment",
                 _ => "Fixed Asset Impairment Reversal"
             },
-            BookClassification = valuation.BookClassification,
+            AccountingBookCode = valuation.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FA:Valuation:{valuation.TenantId:N}:{valuation.Id:N}:{valuation.ValuationType}",
             ReturnExistingOnDuplicate = true,

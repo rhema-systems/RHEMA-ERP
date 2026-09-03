@@ -28,6 +28,6 @@ public interface IFinanceSystemPostingEngine
 {
     Task<FinanceReversalPlanDto> GetReversalPlanAsync(Guid tenantId, Guid postingEventId, string reason,
         DateTime reversalDate, string systemActor, CancellationToken cancellationToken = default);
-    Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestDto request,
+    Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestV2Dto request,
         string systemActor, CancellationToken cancellationToken = default);
 }

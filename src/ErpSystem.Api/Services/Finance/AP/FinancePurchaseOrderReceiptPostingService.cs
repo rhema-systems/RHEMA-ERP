@@ -234,7 +234,7 @@ public sealed class FinancePurchaseOrderReceiptPostingService
             throw new InvalidOperationException($"Finance GRV {receipt.ReceiptNumber} has no positive-value lines to post.");
         }
 
-        await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "AP",
             SourceDocumentType = "FinancePurchaseOrderReceipt",
@@ -245,7 +245,7 @@ public sealed class FinancePurchaseOrderReceiptPostingService
             Description = $"Finance GRV {receipt.ReceiptNumber} - {purchaseOrder.Vendor?.PartnerName ?? purchaseOrder.OrderNumber}",
             PostingDate = receipt.ReceiptDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FinancePurchaseOrderReceipt:{tenantId:N}:{receipt.Id:N}:Post",
             Lines = lines

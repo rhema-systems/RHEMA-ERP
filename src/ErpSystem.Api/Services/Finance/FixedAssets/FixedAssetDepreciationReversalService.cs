@@ -226,7 +226,7 @@ public partial class FixedAssetDepreciationService
                             plan.OriginalJournalEntryId,
                             reversalLines,
                             cancellationToken);
-                    var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = DepreciationReversalProducer.Definition.PostingSourceModule,
                         OriginModuleCode = FinanceModuleLockCatalog.Finance,
@@ -238,7 +238,7 @@ public partial class FixedAssetDepreciationService
                         Description = $"Reverse fixed asset depreciation - {run.FiscalPeriod.PeriodCode} - {run.BookClassification}",
                         PostingDate = plan.ReversalDate,
                         JournalType = "Fixed Asset Depreciation Reversal",
-                        BookClassification = run.BookClassification == "ALL_ACTIVE_BOOKS" ? "IFRS" : run.BookClassification,
+                        AccountingBookCode = run.BookClassification,
                         FunctionalCurrencyCode = await GetFunctionalCurrencyAsync(cancellationToken),
                         ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                         ReversalReason = policy.Reason,

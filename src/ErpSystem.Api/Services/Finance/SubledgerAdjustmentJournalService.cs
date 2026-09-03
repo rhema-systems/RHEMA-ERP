@@ -265,7 +265,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             ? $"AR {adjustment.AdjustmentType} {purposeLabel} {adjustment.AdjustmentNumber} - {counterpartyName}"
             : $"AP {adjustment.AdjustmentType} {purposeLabel} {adjustment.AdjustmentNumber} - {counterpartyName}";
 
-        return await _postingEngine.PostAsync(new FinancePostingRequestDto
+        return await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = adjustment.Module,
             SourceDocumentType = "SubledgerAdjustmentJournal",
