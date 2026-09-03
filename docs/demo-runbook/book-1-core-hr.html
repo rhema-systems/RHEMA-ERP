@@ -60,7 +60,7 @@
 
 <h2>1. Employees — the master record</h2>
 <div class="who">hr.head</div>
-<p class="path">Sidebar: <b>Human Resources → Employees</b> · <code>/hr/employees</code></p>
+<p class="path">Sidebar: <b>Human Resources → Employees → Employees</b> · <code>/hr/employees</code></p>
 <div class="box ok">A register of 127 people. Search box, filters by unit and status, and a row per employee showing staff number, name, position, unit and status. Sorting by staff number puts <b>TDC/00001 Nana Nyaho, Managing Director</b> at the top and the establishment reads downwards from there.</div>
 <div class="box say">"Every person in the Corporation is here once. The staff number is issued by the system — TDC, slash, a five-digit counter — and it never changes, even if the person moves from contract to permanent. Notice the register reads top-down: the Managing Director, the two General Managers, then the Heads of Department. That is not sorting — it is the organogram."</div>
 <table class="steps">
@@ -96,7 +96,7 @@
 
 <h2 class="pb">2. Organisation and the organogram</h2>
 <div class="who">hr.head</div>
-<p class="path"><b>Human Resources → Organogram</b> · <code>/hr/organogram</code></p>
+<p class="path"><b>Human Resources → Employees → Organogram</b> · <code>/hr/organogram</code></p>
 <div class="box ok">A tree from <b>Board of Directors</b> → <b>Managing Director's Office</b> → the two directorates (Finance &amp; Administration; Operations) → departments and units → sections. Each unit shows its head. Expand <b>Operations Directorate → Development Department</b>: head Kwasi Danquah; sections Architecture, Building Maintenance, Planning, Quantity Survey, Survey/Geodetic.</div>
 <div class="box say">"This is TDC's organogram as supplied: 41 units, Board to section. The boxes on the original chart are <i>positions</i>, and that is how it is modelled — units are the places, positions are the jobs, and each position knows which position it reports to. So the reporting line of every employee comes from the establishment, not from somebody typing a manager's name."</div>
 <table class="steps">
@@ -119,7 +119,7 @@
 
 <h2 class="pb">3. Job architecture and job descriptions</h2>
 <div class="who">hr.head</div>
-<p class="path"><b>Human Resources → Job Descriptions → Register</b> · <code>/hr/job-descriptions</code> · <b>Coverage Gaps</b> · <code>/hr/job-descriptions/gaps</code></p>
+<p class="path"><b>Human Resources → Talent &amp; Performance → Job Descriptions → Register</b> · <code>/hr/job-descriptions</code> · <b>Coverage Gaps</b> · <code>/hr/job-descriptions/gaps</code></p>
 <div class="box ok">46 job descriptions. Open any one: purpose, key responsibilities, qualifications, required competencies, working conditions, the position(s) it covers, version and approval status.</div>
 <table class="steps">
   <tr><td>1</td><td>Coverage gaps</td><td>Positions with no current job description. Say: "A position without a job description cannot be advertised — the vacancy pulls its advert text from here."</td></tr>
@@ -130,7 +130,7 @@
 
 <h2>4. Manpower budget</h2>
 <div class="who">hr.head</div>
-<p class="path"><b>Human Resources → Manpower Recruitment Budgets</b> · <code>/hr/manpower-budgets</code></p>
+<p class="path"><b>Human Resources → Pay &amp; Benefits → Manpower Recruitment Budgets</b> · <code>/hr/manpower-budgets</code></p>
 <div class="box ok">One budget: <b>MPB-2026-0001, Development Department, FY 2027</b>, status Submitted — current headcount 7, planned 9, two new hires. One line for <b>Geodetic Engineer</b>: 1 established, 0 filled, planned 2, marked critical.</div>
 <div class="box say">"The budget is where next year's headcount is argued. Once the Managing Director approves it, the approved headcount is written back onto the establishment — the expected headcount you saw in section 2 — and requisitions are checked against it."</div>
 <table class="steps">
@@ -140,7 +140,7 @@
 
 <h2 class="pb">5. Recruitment — end to end</h2>
 <div class="who">hr.head</div>
-<p class="path"><b>Human Resources → Recruitment</b> · dashboard <code>/hr/recruitment/dashboard</code></p>
+<p class="path"><b>Human Resources → Workforce Lifecycle → Recruitment</b> · dashboard <code>/hr/recruitment/dashboard</code></p>
 <div class="box say">"Recruitment runs from an established vacancy to a person on the register, and every step is a record: requisition, vacancy, advert, candidate, application, interview, offer, hire. Nothing skips a step, and the person who is finally created carries the hire record that created them."</div>
 
 <h3>5.1 Establishment view and requisitions</h3>
@@ -179,7 +179,7 @@
 
 <h2 class="pb">6. Orientation and onboarding</h2>
 <div class="who">hr.head</div>
-<p class="path"><b>Human Resources → Orientation &amp; Onboarding → Dashboard</b> · <code>/hr/orientation/dashboard</code></p>
+<p class="path"><b>Human Resources → Workforce Lifecycle → Orientation &amp; Onboarding → Dashboard</b> · <code>/hr/orientation/dashboard</code></p>
 <div class="box ok">Six new starters enrolled on the corporate induction programme; completion by module; sessions upcoming.</div>
 <table class="steps">
   <tr><td>1</td><td>Programmes</td><td><code>/administration/hr/orientation/programs</code>: three programmes, each a set of modules with content items (documents, videos, acknowledgements, assessments).</td></tr>
@@ -191,7 +191,7 @@
 
 <h2>7. Probation and confirmation</h2>
 <div class="who">hr.head</div>
-<p class="path"><b>Human Resources → Probation &amp; Confirmation → Register</b> · <code>/hr/probation</code></p>
+<p class="path"><b>Human Resources → Workforce Lifecycle → Probation &amp; Confirmation → Register</b> · <code>/hr/probation</code></p>
 <div class="box ok">Six probation periods, one per new starter, each with a scheduled first review three months from the hire date and a confirming authority.</div>
 <div class="box say">"Probation is not a status somebody remembers to change. The period is created from the contract, the reviews are scheduled, the reviewer is the line manager, and confirmation is a decision by the confirming authority that writes the confirmation date onto the employee and unlocks the benefits that were withheld until then."</div>
 <table class="steps">

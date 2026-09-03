@@ -58,23 +58,23 @@
 
 <h2>1. The dashboard</h2>
 <div class="who">she.officer</div>
-<p class="path"><b>Human Resources → Safety (SHE) → Dashboard</b> · <code>/hr/safety/dashboard</code></p>
+<p class="path"><b>Safety (SHE) → Dashboard</b> <span style="color:var(--muted)">(its own sidebar item, directly beneath Human Resources)</span> · <code>/hr/safety/dashboard</code></p>
 <div class="box ok">Tiles: open incidents, overdue corrective actions, hazards due for review, high-risk hazards, risk assessments expiring, inspections due, permits active / expiring / suspended, equipment due for inspection or with expiring certification, PPE below re-order. Every tile is a number today, and every number is a link.</div>
 <div class="box say">"Safety is run from this screen. Each tile is a question the SHE officer would otherwise ask by walking round — what is open, what is overdue, what expires this month — and each answer is a list she can act on. The dashboard is not a report; it is the to-do list."</div>
 
 <h2>2. Incidents</h2>
-<p class="path"><b>Safety (SHE) → Incidents</b> · <code>/hr/safety/incidents</code></p>
+<p class="path"><b>Safety (SHE) → Incidents &amp; Hazards → Incidents</b> · <code>/hr/safety/incidents</code></p>
 <div class="box ok">Four: <b>INC-2026-001</b> (a hand caught at a pinch point — lost-time injury, under investigation), <b>INC-2026-002</b> (a dropped load, a near-miss — reported), <b>INC-2026-003</b> (a small electrical fire — corrective actions in progress), <b>INC-2026-004</b> (a slip, first aid only — closed). Each reported by a named TDC employee.</div>
 <table class="steps">
   <tr><td>1</td><td>Open INC-2026-001</td><td>Walk the tabs: the report (what, where, when, who, witnesses, injured body parts, injury type); investigation team and root cause; corrective actions with owners and due dates; documents and photographs; follow-ups; the statutory submission to the regulator with its reference; the link to an insurance claim.</td></tr>
   <tr><td>2</td><td>Report one live</td><td>Switch to <span class="who">staff</span>: <b>Health &amp; Safety → My Safety → Report</b> · <code>/me/safety/report/incident</code>. "Loose paving slab at the Community 25 site office entrance; a visitor stumbled, no injury." Location, date, type Near-miss. Submit. Say: "Any employee reports from their phone; nothing needs an officer to be present."</td></tr>
   <tr><td>3</td><td>Triage it</td><td>Back as <span class="who">she.officer</span>: the new incident is at the top of the register. Classify it, assign an investigator, add a corrective action ("Re-lay the slab; barrier the entrance until done") with an owner — <b>Kwasi Danquah</b> — and a due date next week.</td></tr>
-  <tr><td>4</td><td>The owner closes it</td><td>Switch to <span class="who">head.dev</span>: <b>Safety (SHE) → Corrective Actions</b> · <code>/hr/safety/corrective-actions</code>: the action is his. Mark it complete with a note and evidence. Back on the dashboard the open-actions tile drops by one.</td></tr>
+  <tr><td>4</td><td>The owner closes it</td><td>Switch to <span class="who">head.dev</span>: <b>Safety (SHE) → Incidents &amp; Hazards → Corrective Actions</b> · <code>/hr/safety/corrective-actions</code>: the action is his. Mark it complete with a note and evidence. Back on the dashboard the open-actions tile drops by one.</td></tr>
 </table>
 <div class="box aside">Reporting is open to every employee (<code>/me/safety</code>), and an anonymous route exists for environmental incidents. Reading, investigating and closing are gated by the SHE permission family. Statutory reporting to the Department of Factories Inspectorate is a record on the incident with the body, the date and the reference — the reminder engine chases the deadline.</div>
 
 <h2 class="pb">3. Hazards and risk assessments</h2>
-<p class="path"><b>Safety (SHE) → Hazards</b> · <code>/hr/safety/hazards</code> · <b>Risk Assessments</b> · <code>/hr/safety/risk-assessments</code></p>
+<p class="path"><b>Safety (SHE) → Incidents &amp; Hazards → Hazards</b> · <code>/hr/safety/hazards</code> · <b>Risk Assessments</b> · <code>/hr/safety/risk-assessments</code></p>
 <div class="box ok">Three hazards (HAZ-001 a pinch point, HAZ-002 welding fumes, HAZ-003 a wet-floor slip risk), each with a risk rating, controls in place, corrective actions and a review date. Two risk assessments, each covering several hazards, with an expiry and a list of people who must acknowledge it.</div>
 <table class="steps">
   <tr><td>1</td><td>Open HAZ-002</td><td>Likelihood × severity → the rating; the hierarchy of controls recorded (elimination, substitution, engineering, administrative, PPE); the corrective actions; the next review.</td></tr>
@@ -83,7 +83,7 @@
 </table>
 
 <h2>4. Inspections</h2>
-<p class="path"><b>Safety (SHE) → Inspections</b> · <code>/hr/safety/inspections</code></p>
+<p class="path"><b>Safety (SHE) → Inspections &amp; Audits → Inspections</b> · <code>/hr/safety/inspections</code></p>
 <div class="box ok">Two inspections against checklists, with items passed and failed, hazards found and the actions raised from them.</div>
 <table class="steps">
   <tr><td>1</td><td>Checklists</td><td><code>/administration/hr/safety/checklists</code>: the inspection checklists (site, office, vehicle, fire) and their items.</td></tr>
@@ -91,7 +91,7 @@
 </table>
 
 <h2 class="pb">5. Permits to work</h2>
-<p class="path"><b>Safety (SHE) → Permits to Work</b> · <code>/hr/safety/permits</code></p>
+<p class="path"><b>Safety (SHE) → Inspections &amp; Audits → Permits to Work</b> · <code>/hr/safety/permits</code></p>
 <div class="box ok">Three permits — <b>PTW-2026-001</b> and <b>PTW-2026-002</b> active, <b>PTW-2026-003</b> expired — each for a type of work (hot work, confined space, work at height, electrical), a location, a window of validity, the named workers, the isolations and precautions, the issuer and the acceptor, extensions and closure.</div>
 <div class="box say">"Nobody does hot work or enters a confined space on a TDC site without a permit. The permit says who, where, until when, what has been isolated, and who signed it on and off. When it expires the work stops — the dashboard shows expiring permits three days out."</div>
 <table class="steps">
@@ -101,7 +101,7 @@
 </table>
 
 <h2>6. PPE</h2>
-<p class="path"><b>Safety (SHE) → PPE Stock</b> · <code>/hr/safety/ppe</code> · <b>PPE Issuance</b> · <code>/hr/safety/ppe/issuances</code></p>
+<p class="path"><b>Safety (SHE) → PPE &amp; Equipment → PPE Stock</b> · <code>/hr/safety/ppe</code> · <b>PPE Issuance</b> · <code>/hr/safety/ppe/issuances</code></p>
 <div class="box ok">Stock by PPE type (helmets, boots, high-visibility vests, gloves, eye protection, harnesses) with quantities, re-order levels and what is below them; issuances to named employees with sizes, issue dates and replacement due dates.</div>
 <table class="steps">
   <tr><td>1</td><td>Requirements</td><td><code>/administration/hr/safety/ppe-requirements</code>: which positions require which PPE — a Draughtsman none, a Building Inspector helmet, boots, vest.</td></tr>
@@ -117,12 +117,12 @@
 </table>
 
 <h2>8. Safety training</h2>
-<p class="path"><b>Safety (SHE) → Safety Training</b> · <code>/hr/safety/training</code></p>
+<p class="path"><b>Safety (SHE) → People &amp; Health → Safety Training</b> · <code>/hr/safety/training</code></p>
 <div class="box ok">Programmes (induction, fire warden, first aid, working at height), plans and attendances — for employees <i>and</i> contractors' staff — with certificate expiry against the statutory requirement.</div>
 <div class="box say">"This is deliberately separate from the corporate training you saw in Book 3. Safety training has to record people who are not employees — a contractor's welder — and it has to say when a certificate lapses under the regulation. Neither fits a learning-and-development catalogue."</div>
 
 <h2>9. Contractors</h2>
-<p class="path"><b>Safety (SHE) → Contractors</b> · <code>/hr/safety/contractors</code></p>
+<p class="path"><b>Safety (SHE) → People &amp; Health → Contractors</b> · <code>/hr/safety/contractors</code></p>
 <div class="box ok">Two contractors with their documents (insurance, method statements), inductions per worker, site inspections and non-compliances raised against them.</div>
 <table class="steps">
   <tr><td>1</td><td>Open one</td><td>Documents and their expiry; inducted workers; inspections; non-compliances with severity and the contractor's response; the score that decides whether they may be engaged again.</td></tr>
@@ -130,7 +130,7 @@
 </table>
 
 <h2 class="pb">10. Occupational health and return to work</h2>
-<p class="path"><b>Safety (SHE) → Occupational Health</b> · <code>/hr/safety/occupational-health</code> · <b>Return to Work</b> · <code>/hr/safety/return-to-work</code></p>
+<p class="path"><b>Safety (SHE) → People &amp; Health → Occupational Health</b> · <code>/hr/safety/occupational-health</code> · <b>Return to Work</b> · <code>/hr/safety/return-to-work</code></p>
 <div class="box ok">Health surveillance programmes (noise, dust, drivers' eyesight), first-aid stations and their first-aiders, wellness programmes; return-to-work plans after injury or long absence, with phases, adjustments and reviews.</div>
 <table class="steps">
   <tr><td>1</td><td>Surveillance</td><td>Who is enrolled in which surveillance programme, when last examined, when next due.</td></tr>
@@ -139,7 +139,7 @@
 <div class="box aside">These screens ride the medical permission family, not the SHE one, so a SHE officer sees what a nurse would see — the surveillance and the plan — and not the employee's wider medical file. The bridge to Medical (Book 2 §5) is by reference.</div>
 
 <h2>11. Environmental</h2>
-<p class="path"><b>Safety (SHE) → Environmental</b> · <code>/hr/safety/environmental</code></p>
+<p class="path"><b>Safety (SHE) → Environment → Environmental</b> · <code>/hr/safety/environmental</code></p>
 <table class="steps">
   <tr><td>1</td><td>Overview</td><td>Monitoring schedules (noise, effluent, air quality) with results due and overdue; regulatory updates from the EPA with their impact; sustainability initiatives and their targets.</td></tr>
   <tr><td>2</td><td>Permits</td><td><code>/hr/safety/environmental/permits</code>. Create one live: EPA environmental permit for the Community 25 development, permit number, issued and expiry dates, conditions. Say: "The statutory ladder — permit, conditions, monitoring, monthly report, review — is enforced here; a red expiry is a permit the Corporation is operating without."</td></tr>
