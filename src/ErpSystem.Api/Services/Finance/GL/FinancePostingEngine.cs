@@ -42,23 +42,36 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
     public async Task<FinancePostingResultDto> PostAsync(
         FinancePostingRequestDto request,
         CancellationToken cancellationToken = default) =>
-        await PostCoreAsync(request, producerContext: null, cancellationToken);
+        await PostCoreAsync(request, request.BookClassification, producerContext: null, allowHistoricalMappingException: false, cancellationToken);
 
     public async Task<FinancePostingResultDto> PostAsync(
         FinancePostingRequestDto request,
         FinancePostingProducerContext producerContext,
         CancellationToken cancellationToken = default) =>
-        await PostCoreAsync(request, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), cancellationToken);
+        await PostCoreAsync(request, request.BookClassification, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), allowHistoricalMappingException: false, cancellationToken);
+
+    public async Task<FinancePostingResultDto> PostAsync(
+        FinancePostingRequestV2Dto request,
+        CancellationToken cancellationToken = default) =>
+        await PostCoreAsync(request, request.AccountingBookCode, producerContext: null, allowHistoricalMappingException: false, cancellationToken);
+
+    public async Task<FinancePostingResultDto> PostAsync(
+        FinancePostingRequestV2Dto request,
+        FinancePostingProducerContext producerContext,
+        CancellationToken cancellationToken = default) =>
+        await PostCoreAsync(request, request.AccountingBookCode, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), allowHistoricalMappingException: false, cancellationToken);
 
     private async Task<FinancePostingResultDto> PostCoreAsync(
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
+        string accountingBookCode,
         FinancePostingProducerContext? producerContext,
+        bool allowHistoricalMappingException,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var tenantId = _currentUserService.GetRequiredFinanceTenantId();
-        var validation = await ValidatePostingRequestAsync(tenantId, request, producerContext, cancellationToken);
+        var validation = await ValidatePostingRequestAsync(tenantId, request, accountingBookCode, producerContext, allowHistoricalMappingException, cancellationToken);
 
         var existingPosting = await FindExistingPostingAsync(tenantId, validation, cancellationToken);
         if (existingPosting != null)
@@ -109,7 +122,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
     private async Task<FinancePostingResultDto> ExecutePostingAsync(
         Guid tenantId,
         ValidatedPosting validation,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         CancellationToken cancellationToken)
     {
         var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, cancellationToken);
@@ -273,6 +286,45 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         };
     }
 
+    public async Task<FinancePostingResultDto> ReverseAsync(
+        Guid postingEventId,
+        string reason,
+        DateTime? reversalDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+        var plan = await GetReversalPlanAsync(postingEventId, reason, reversalDate, cancellationToken);
+        var original = await _context.FinancePostingEvents.AsNoTracking()
+            .Include(item => item.JournalEntry)
+            .SingleAsync(item => item.Id == postingEventId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        var journal = original.JournalEntry ?? throw new InvalidOperationException("Original Finance journal evidence is missing.");
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "GL",
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = "FinancePostingEventReversal",
+            SourceDocumentId = postingEventId,
+            SourceDocumentTenantId = tenantId,
+            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+            ReversalReason = plan.Reason,
+            ReversalType = "Exact",
+            PostingAction = "Reverse",
+            SourceDocumentReference = original.SourceDocumentReference,
+            Description = $"Exact reversal of {journal.JournalEntryNumber}: {plan.Reason}",
+            PostingDate = plan.ReversalDate,
+            JournalType = "System Generated",
+            AccountingBookCode = original.BookClassification,
+            FunctionalCurrencyCode = original.FunctionalCurrencyCode,
+            IdempotencyKey = $"exact-reversal:{postingEventId:N}",
+            ReturnExistingOnDuplicate = true,
+            Lines = plan.ReversalLines
+        };
+        // Only this server-derived command can admit inactive historical book mappings. Ordinary
+        // V1/V2 requests cannot set or influence the exception.
+        return await PostCoreAsync(request, request.AccountingBookCode, producerContext: null,
+            allowHistoricalMappingException: true, cancellationToken);
+    }
+
     private async Task<DateTime> ResolveDefaultReversalDateAsync(
         Guid tenantId,
         CancellationToken cancellationToken)
@@ -362,7 +414,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         journalEntry.IsBalanced = true;
         journalEntry.IsMultiCurrency = validation.IsMultiCurrency;
         journalEntry.PrimaryCurrency = validation.PrimaryCurrency;
-        journalEntry.BookClassification = validation.BookClassification;
+        journalEntry.BookClassification = validation.AccountingBookCode;
         journalEntry.FiscalPeriodId = validation.FiscalPeriod.Id;
         journalEntry.PostingDate = now;
         journalEntry.PostedByUserId = postedByUserId;
@@ -380,7 +432,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             transaction.SourceDocumentId = validation.SourceDocumentId;
             transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
             transaction.SourceDocumentType = validation.SourceDocumentType;
-            transaction.BookClassification = validation.BookClassification;
+            transaction.BookClassification = validation.AccountingBookCode;
             transaction.FunctionalCurrencyCode = validation.FunctionalCurrencyCode;
             transaction.TransactionCurrency = requestLine.TransactionCurrency;
             transaction.TransactionDebitAmount = requestLine.TransactionDebitAmount;
@@ -429,7 +481,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             IsBalanced = true,
             IsMultiCurrency = validation.IsMultiCurrency,
             PrimaryCurrency = validation.PrimaryCurrency,
-            BookClassification = validation.BookClassification,
+            BookClassification = validation.AccountingBookCode,
             FiscalPeriodId = validation.FiscalPeriod.Id,
             PostingDate = now,
             PostedByUserId = postedByUserId,
@@ -473,7 +525,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 SourceDocumentId = validation.SourceDocumentId,
                 SourceDocumentType = validation.SourceDocumentType,
                 SourceReferenceNumber = line.SourceReferenceNumber ?? validation.SourceDocumentReference,
-                BookClassification = validation.BookClassification,
+                BookClassification = validation.AccountingBookCode,
                 FiscalPeriodId = validation.FiscalPeriod.Id,
                 PostedDate = now,
                 PostingStatus = PostedStatus,
@@ -535,7 +587,33 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             throw new InvalidOperationException("Reversal journal entries cannot be reversed from this action.");
         }
 
+        if (validation.AllowsHistoricalMappingException)
+            EnsureExactReversalLines(original, validation);
+
         return original;
+    }
+
+    private static void EnsureExactReversalLines(JournalEntry original, ValidatedPosting validation)
+    {
+        var source = original.Transactions.OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
+        var reversal = validation.Lines.OrderBy(item => item.LineNumber).ToList();
+        if (source.Count != reversal.Count) throw new InvalidOperationException("Exact reversal evidence line count is inconsistent.");
+        for (var index = 0; index < source.Count; index++)
+        {
+            var a = source[index];
+            var b = reversal[index];
+            if (a.AccountId != b.AccountId || a.DebitAmount != b.CreditAmount || a.CreditAmount != b.DebitAmount
+                || a.TransactionDebitAmount != b.TransactionCreditAmount || a.TransactionCreditAmount != b.TransactionDebitAmount
+                || a.ForeignCurrencyAmount != b.ForeignCurrencyAmount || a.ExchangeRateId != b.ExchangeRateId
+                || a.ExchangeRate != b.ExchangeRate || a.ExchangeRateDate != b.ExchangeRateDate
+                || a.SourceDocumentLineId != b.SourceDocumentLineId
+                || !string.Equals(a.ExchangeRateSource, b.ExchangeRateSource, StringComparison.Ordinal)
+                || !string.Equals(a.TransactionCurrency, b.TransactionCurrency, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(a.SourceReferenceNumber, b.SourceReferenceNumber, StringComparison.Ordinal)
+                || !string.Equals(a.SegmentString, b.SegmentString, StringComparison.Ordinal)
+                || a.FinanceDimensionSetId != b.DimensionSet?.Id || a.LineNumber != b.LineNumber)
+                throw new InvalidOperationException("Exact reversal lines do not match immutable original posting evidence.");
+        }
     }
 
     private static void ApplyOriginalReversalLinks(
@@ -609,7 +687,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             PrimaryExchangeRateId = validation.PrimaryExchangeRateId,
             PrimaryExchangeRate = validation.PrimaryExchangeRate,
             PrimaryExchangeRateDate = validation.PrimaryExchangeRateDate,
-            BookClassification = validation.BookClassification,
+            BookClassification = validation.AccountingBookCode,
             CreatedAt = now,
             CreatedBy = _currentUserService.UserName,
             CreatedById = postedByUserId
@@ -898,8 +976,10 @@ WHERE [Id] = {delta.AccountId}
 
     private async Task<ValidatedPosting> ValidatePostingRequestAsync(
         Guid tenantId,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
+        string accountingBookCode,
         FinancePostingProducerContext? producerContext,
+        bool allowHistoricalMappingException,
         CancellationToken cancellationToken)
     {
         if (!await _context.Tenants.AnyAsync(t => t.Id == tenantId && !t.IsDeleted, cancellationToken))
@@ -929,7 +1009,27 @@ WHERE [Id] = {delta.AccountId}
         var postingAction = NormalizeRequired(request.PostingAction, "Posting action", 50);
         var description = NormalizeRequired(request.Description, "Posting description", 500);
         var journalType = NormalizeRequired(request.JournalType, "Journal type", 50);
-        var bookClassification = NormalizeRequired(request.BookClassification, "Book classification", 20);
+        var normalizedAccountingBookCode = NormalizeRequired(accountingBookCode, "Accounting book code", 20).ToUpperInvariant();
+        if (string.Equals(normalizedAccountingBookCode, "ALL_ACTIVE_BOOKS", StringComparison.Ordinal))
+        {
+            await RecordAccountingBookAuthorityDenialAsync(
+                tenantId, request, normalizedAccountingBookCode, "BOOK_CODE_PSEUDO", cancellationToken);
+            throw new InvalidOperationException("ALL_ACTIVE_BOOKS must be expanded by source orchestration before single-book posting.");
+        }
+        var accountingBook = await _context.AccountingBooks.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Code == normalizedAccountingBookCode && !item.IsDeleted, cancellationToken);
+        if (accountingBook == null)
+        {
+            await RecordAccountingBookAuthorityDenialAsync(
+                tenantId, request, normalizedAccountingBookCode, "BOOK_UNAVAILABLE", cancellationToken);
+            throw new InvalidOperationException("Accounting book is unavailable for this tenant.");
+        }
+        if ((!accountingBook.IsActive || !accountingBook.AllowsPosting) && !allowHistoricalMappingException)
+        {
+            await RecordAccountingBookAuthorityDenialAsync(
+                tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
+            throw new InvalidOperationException("Accounting book is unavailable for posting.");
+        }
         var requestedFunctionalCurrency = NormalizeCurrency(request.FunctionalCurrencyCode, "Functional currency");
         var functionalCurrencyConfig = await ResolveTenantFunctionalCurrencyAsync(tenantId, cancellationToken);
         var functionalCurrency = functionalCurrencyConfig.CurrencyCode;
@@ -1208,6 +1308,8 @@ WHERE [Id] = {delta.AccountId}
 
         if (accounts.Count != accountIds.Count)
         {
+            await RecordAccountingBookAuthorityDenialAsync(
+                tenantId, request, normalizedAccountingBookCode, "ACCOUNT_UNAVAILABLE", cancellationToken);
             throw new InvalidOperationException("One or more posting accounts were not found for this tenant.");
         }
 
@@ -1216,9 +1318,48 @@ WHERE [Id] = {delta.AccountId}
             .Select(a => a.AccountNumber)
             .ToList();
 
-        if (inactiveAccounts.Count > 0)
+        if (inactiveAccounts.Count > 0 && !allowHistoricalMappingException)
         {
             throw new InvalidOperationException($"Cannot post to inactive GL account(s): {string.Join(", ", inactiveAccounts)}.");
+        }
+
+        if (!allowHistoricalMappingException && string.Equals(sourceModule, "GL", StringComparison.OrdinalIgnoreCase))
+        {
+            var prohibited = accounts.Values.Where(item => !item.AllowDirectPosting || item.IsControlAccount)
+                .Select(item => item.AccountNumber).ToList();
+            if (prohibited.Count > 0)
+                throw new InvalidOperationException($"Direct GL posting is not allowed for account(s): {string.Join(", ", prohibited)}.");
+        }
+
+        var bookMappings = await _context.AccountAccountingBooks.AsNoTracking()
+            .Include(item => item.AccountClassification)
+            .Where(item => item.TenantId == tenantId && item.AccountingBookId == accountingBook.Id
+                && accountIds.Contains(item.AccountId) && !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (bookMappings.Select(item => item.AccountId).Distinct().Count() != accountIds.Count)
+        {
+            await RecordAccountingBookAuthorityDenialAsync(
+                tenantId, request, normalizedAccountingBookCode, "ACCOUNT_BOOK_MAPPING_UNAVAILABLE", cancellationToken);
+            throw new InvalidOperationException("One or more posting accounts are not enabled for the requested accounting book.");
+        }
+        if (!allowHistoricalMappingException)
+        {
+            foreach (var mapping in bookMappings)
+            {
+                var classification = mapping.AccountClassification;
+                // Nullable classifications are a visible transition state for pre-Phase-1A mappings.
+                // Finance account create/edit never produces this state, while readiness diagnostics
+                // identify it for migration. Once classified, the mapping must be fully valid here.
+                if (!mapping.IsEnabled || (classification != null && (classification.TenantId != tenantId
+                    || classification.AccountingBookId != accountingBook.Id || classification.IsDeleted
+                    || classification.Status != AccountClassificationStatus.Active || !classification.IsPostingClassification
+                    || classification.CoreAccountType != accounts[mapping.AccountId].AccountType)))
+                {
+                    await RecordAccountingBookAuthorityDenialAsync(
+                        tenantId, request, normalizedAccountingBookCode, "ACCOUNT_BOOK_MAPPING_INVALID", cancellationToken);
+                    throw new InvalidOperationException("One or more posting accounts lack an enabled, compatible accounting-book classification.");
+                }
+            }
         }
 
         var multiCurrencyAccountIds = accounts.Values
@@ -1284,7 +1425,7 @@ WHERE [Id] = {delta.AccountId}
             description,
             postingDate,
             journalType,
-            bookClassification,
+            normalizedAccountingBookCode,
             functionalCurrency,
             fiscalPeriod,
             normalizedLines,
@@ -1298,7 +1439,8 @@ WHERE [Id] = {delta.AccountId}
             exchangeRatePolicyOverrideUsed,
             NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"),
             request.ExchangeRateOverrideApprovedByUserId,
-            request.ExchangeRateOverrideApprovedAt);
+            request.ExchangeRateOverrideApprovedAt,
+            allowHistoricalMappingException);
     }
 
     private async Task<FiscalPeriod> ResolveFiscalPeriodAsync(
@@ -1334,7 +1476,7 @@ WHERE [Id] = {delta.AccountId}
         Guid tenantId,
         FiscalPeriod fiscalPeriod,
         string originModuleCode,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         CancellationToken cancellationToken)
     {
         var module = await _context.ModuleDefinitions
@@ -1436,7 +1578,7 @@ WHERE [Id] = {delta.AccountId}
         string sourceDocumentType,
         DateTime postingDate,
         FinanceSettings? settings,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         CancellationToken cancellationToken)
     {
         var isRevaluation = sourceDocumentType.Contains("Revaluation", StringComparison.OrdinalIgnoreCase);
@@ -1519,7 +1661,7 @@ WHERE [Id] = {delta.AccountId}
         decimal? suppliedRate,
         ExchangeRatePolicy policy,
         bool requireOverrideApproval,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         CancellationToken cancellationToken)
     {
         ExchangeRate? rate;
@@ -1676,7 +1818,7 @@ WHERE [Id] = {delta.AccountId}
     }
 
     private static void EnsureExchangeRateOverrideApproval(
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         bool requireApproval)
     {
         var reason = request.ExchangeRateOverrideReason?.Trim();
@@ -1877,7 +2019,7 @@ WHERE [Id] = {delta.AccountId}
 
     private async Task RecordPostingBlockedByPeriodAuditAsync(
         Guid tenantId,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         FiscalPeriod fiscalPeriod,
         DateTime postingDate,
         CancellationToken cancellationToken)
@@ -1916,9 +2058,41 @@ WHERE [Id] = {delta.AccountId}
         }, cancellationToken);
     }
 
+    private async Task RecordAccountingBookAuthorityDenialAsync(
+        Guid tenantId,
+        FinancePostingCommandDto request,
+        string accountingBookCode,
+        string denialReasonCode,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+            return;
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.PostingBlockedAccountingBookAuthority,
+            TenantId = tenantId,
+            SourceModule = request.SourceModule,
+            SourceDocumentType = request.SourceDocumentType,
+            SourceDocumentId = request.SourceDocumentId == Guid.Empty ? null : request.SourceDocumentId,
+            Reason = denialReasonCode,
+            AfterValues = new
+            {
+                DenialReasonCode = denialReasonCode,
+                AccountingBookCode = accountingBookCode,
+                request.PostingAction,
+                request.SourceDocumentReference,
+                request.PostingDate
+            },
+            Comment = "Posting blocked by canonical accounting-book authority validation.",
+            Resource = "Finance.AccountingBook",
+            ResourceId = accountingBookCode
+        }, cancellationToken);
+    }
+
     private async Task RecordFutureDatedPostingBlockedAuditAsync(
         Guid tenantId,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         FiscalPeriod fiscalPeriod,
         DateTime postingDate,
         CancellationToken cancellationToken)
@@ -1951,7 +2125,7 @@ WHERE [Id] = {delta.AccountId}
 
     private async Task RecordPostingBlockedByModuleAuditAsync(
         Guid tenantId,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         FiscalPeriod fiscalPeriod,
         string originModuleCode,
         string reason,
@@ -1996,7 +2170,7 @@ WHERE [Id] = {delta.AccountId}
 
     private async Task RecordForeignCurrencyPostingBlockedAuditAsync(
         Guid tenantId,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         string transactionCurrency,
         string reason,
         CancellationToken cancellationToken)
@@ -2211,7 +2385,7 @@ WHERE [Id] = {delta.AccountId}
     private async Task<ValidatedDimensionSet?> ResolveDimensionSetAsync(
         Guid tenantId,
         DateTime postingDate,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         FinanceDimensionRouteDefinition? route,
         FinanceDimensionCertificationState certificationState,
         FinancePostingLineDto line,
@@ -2552,7 +2726,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         Guid tenantId,
         Guid accountId,
         DateTime date,
-        FinancePostingRequestDto request,
+        FinancePostingCommandDto request,
         FinanceDimensionRouteDefinition? route,
         CancellationToken cancellationToken)
     {
@@ -2652,7 +2826,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string Description,
         DateTime PostingDate,
         string JournalType,
-        string BookClassification,
+        string AccountingBookCode,
         string FunctionalCurrencyCode,
         FiscalPeriod FiscalPeriod,
         IReadOnlyList<ValidatedPostingLine> Lines,
@@ -2666,7 +2840,8 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         bool ExchangeRatePolicyOverrideUsed,
         string? ExchangeRateOverrideReason,
         Guid? ExchangeRateOverrideApprovedByUserId,
-        DateTime? ExchangeRateOverrideApprovedAt);
+        DateTime? ExchangeRateOverrideApprovedAt,
+        bool AllowsHistoricalMappingException);
 
     private sealed record ValidatedPostingLine(
         Guid AccountId,

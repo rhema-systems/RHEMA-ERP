@@ -224,6 +224,7 @@ public static class FinanceAuditEvents
     public const string AccountingPeriodModuleAutoRelocked = "Finance.AccountingPeriod.ModuleAutoRelocked";
     public const string PostingBlockedPeriodClosedLocked = "Finance.PostingEvent.BlockedPeriodClosedLocked";
     public const string PostingBlockedModuleLocked = "Finance.PostingEvent.BlockedModuleLocked";
+    public const string PostingBlockedAccountingBookAuthority = "Finance.PostingEvent.BlockedAccountingBookAuthority";
 
     public const string ReportExported = "Finance.Report.Exported";
     public const string ReportPrinted = "Finance.Report.Printed";

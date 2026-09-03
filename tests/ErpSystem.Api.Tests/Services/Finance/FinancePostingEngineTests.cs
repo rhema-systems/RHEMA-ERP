@@ -843,24 +843,10 @@ public sealed class FinancePostingEngineTests
 
         var plan = await service.GetReversalPlanAsync(original.PostingEventId, "Correct classification", new DateTime(2026, 7, 5));
         plan.ReversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
-        var reversal = await service.PostAsync(new FinancePostingRequestDto
-        {
-            SourceModule = "TEST",
-            SourceDocumentType = "TestDocumentReversal",
-            SourceDocumentId = request.SourceDocumentId,
-            SourceDocumentTenantId = tenantId,
-            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
-            ReversalReason = plan.Reason,
-            ReversalType = "Manual",
-            PostingAction = plan.PostingAction,
-            SourceDocumentReference = "REV-SRC-001",
-            Description = "Exact dimension reversal",
-            PostingDate = plan.ReversalDate,
-            JournalType = "Reversing",
-            BookClassification = "IFRS",
-            FunctionalCurrencyCode = "GHS",
-            Lines = plan.ReversalLines
-        });
+        var reversal = await service.ReverseAsync(
+            original.PostingEventId,
+            plan.Reason,
+            plan.ReversalDate);
 
         var reversalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == reversal.JournalEntryId).ToListAsync();
         reversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
@@ -872,6 +858,64 @@ public sealed class FinancePostingEngineTests
         snapshots.Should().OnlyContain(snapshot => snapshot.FinanceDimensionSetId == originalSetId);
         snapshots.SelectMany(snapshot => snapshot.Items).Should().OnlyContain(item =>
             item.DimensionValueNameSnapshot == "Sales" && item.SnapshotQuality == "Exact");
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task PostAsync_ShouldRejectPseudoBookAtSingleBookBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.AccountingBookCode = "ALL_ACTIVE_BOOKS";
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AuditLog());
+
+        var action = () => CreateService(db, tenantId, financeAuditService: audit.Object).PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ALL_ACTIVE_BOOKS must be expanded*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        audit.Verify(item => item.RecordAsync(
+            It.Is<FinanceAuditEventDto>(entry =>
+                entry.EventType == FinanceAuditEvents.PostingBlockedAccountingBookAuthority
+                && entry.Reason == "BOOK_CODE_PSEUDO"
+                && entry.ResourceId == "ALL_ACTIVE_BOOKS"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task ExactReversal_ShouldUseDisabledHistoricalMapping_AndRemainIdempotent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var original = await service.PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        foreach (var mapping in await db.AccountAccountingBooks.ToListAsync())
+            mapping.IsEnabled = false;
+        (await db.AccountingBooks.SingleAsync()).IsActive = false;
+        await db.SaveChangesAsync();
+
+        var reversal = await service.ReverseAsync(original.PostingEventId, "Correct exact posting", new DateTime(2026, 7, 5));
+        var duplicate = await service.ReverseAsync(original.PostingEventId, "Correct exact posting", new DateTime(2026, 7, 5));
+
+        reversal.WasDuplicate.Should().BeFalse();
+        duplicate.WasDuplicate.Should().BeTrue();
+        duplicate.JournalEntryId.Should().Be(reversal.JournalEntryId);
+        (await db.JournalEntries.CountAsync()).Should().Be(2);
     }
 
     [Fact]
@@ -931,10 +975,15 @@ public sealed class FinancePostingEngineTests
     private static FinancePostingEngine CreateService(
         ApplicationDbContext db,
         Guid tenantId,
-        IDictionary<string, string>? claims = null)
+        IDictionary<string, string>? claims = null,
+        IFinanceAuditService? financeAuditService = null)
     {
         var currentUser = CreateCurrentUser(tenantId, claims);
-        return new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
+        return new FinancePostingEngine(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            financeAuditService);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(
@@ -968,6 +1017,16 @@ public sealed class FinancePostingEngineTests
             BaseCurrency = "GHS",
             CoaType = "Segmented",
             AccountSeparator = "-"
+        });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
         });
     }
 
@@ -1024,6 +1083,15 @@ public sealed class FinancePostingEngineTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            IsEnabled = true
+        });
         return account;
     }
 
@@ -1106,9 +1174,9 @@ public sealed class FinancePostingEngineTests
         return exchangeRate;
     }
 
-    private static FinancePostingRequestDto CreateRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    private static FinancePostingRequestV2Dto CreateRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
     {
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "TestDocument",
@@ -1119,7 +1187,7 @@ public sealed class FinancePostingEngineTests
             Description = "Batch 4 posting engine test",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {
@@ -1139,9 +1207,9 @@ public sealed class FinancePostingEngineTests
         };
     }
 
-    private static FinancePostingRequestDto CreateForeignCurrencyRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    private static FinancePostingRequestV2Dto CreateForeignCurrencyRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
     {
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "ForeignCurrencyDocument",
@@ -1152,7 +1220,7 @@ public sealed class FinancePostingEngineTests
             Description = "Foreign currency posting engine test",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {
