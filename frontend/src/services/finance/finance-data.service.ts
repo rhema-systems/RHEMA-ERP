@@ -6,6 +6,7 @@
 import type {
     Account,
     AccountingBook,
+    AccountClassification,
     Currency,
     ExchangeRate,
     FiscalYear,
@@ -135,6 +136,14 @@ class FinanceDataService {
 
         const endpoint = `/finance/accounting-books${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<AccountingBook[]>(endpoint);
+    }
+
+    async getAccountClassifications(accountingBookId?: string, includeInactive = false): Promise<AccountClassification[]> {
+        const queryParams = new URLSearchParams();
+        if (accountingBookId) queryParams.append('accountingBookId', accountingBookId);
+        if (includeInactive) queryParams.append('includeInactive', 'true');
+        const suffix = queryParams.toString() ? `?${queryParams}` : '';
+        return apiService.get<AccountClassification[]>(`/finance/account-classifications${suffix}`);
     }
 
     async getAccounts(filters?: {

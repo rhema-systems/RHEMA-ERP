@@ -169,8 +169,37 @@ export interface AccountAccountingBook {
     accountingBookId: string;
     accountingBookCode: string;
     accountingBookName: string;
+    accountClassificationId?: string | null;
+    accountClassificationCode?: string | null;
+    accountClassificationName?: string | null;
+    accountClassificationStatus?: 'Draft' | 'Active' | 'Retired' | null;
+    isEnabled: boolean;
+    isMigrationReady: boolean;
+    financialStatementLineItem?: string;
+}
+
+export interface AccountBookAssignmentInput {
+    accountingBookId: string;
+    accountClassificationId?: string | null;
     isEnabled: boolean;
     financialStatementLineItem?: string;
+}
+
+export interface AccountClassification {
+    id: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    parentClassificationId?: string | null;
+    code: string;
+    name: string;
+    description?: string;
+    coreAccountType: AccountType;
+    defaultRevaluationTreatment: 'Exclude' | 'Include';
+    systemRole?: string | null;
+    isPostingClassification: boolean;
+    status: 'Draft' | 'Active' | 'Retired';
+    displayOrder: number;
+    rowVersion: string;
 }
 
 export interface Account {
@@ -1328,6 +1357,7 @@ export interface CreateAccountDto {
     isControlAccount: boolean;
     budgetTrackingEnabled: boolean;
     status: AccountStatus;
+    accountingBooks: AccountBookAssignmentInput[];
 }
 
 export interface SegmentValueInput {

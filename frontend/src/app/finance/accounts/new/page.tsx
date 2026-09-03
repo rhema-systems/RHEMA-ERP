@@ -13,12 +13,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Plus, ArrowLeft, Save, Loader2, Eye, Layers, Wand2, Check, ChevronsUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructure, SegmentLookupValue, FinanceSettings } from '@/types/finance';
+import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructure, SegmentLookupValue, FinanceSettings, AccountBookAssignmentInput } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { AccountBookAssignments } from '@/components/finance/accounts/account-book-assignments';
 
 interface SegmentValue {
     segmentId: string;
@@ -127,6 +128,7 @@ export default function NewAccountPage() {
     // Segment values for segmented COA
     const [segmentValues, setSegmentValues] = useState<Record<string, string>>({});
     const [segmentErrors, setSegmentErrors] = useState<Record<string, string>>({});
+    const [accountingBooks, setAccountingBooks] = useState<AccountBookAssignmentInput[]>([]);
 
     // Form data
     const [formData, setFormData] = useState({
@@ -139,9 +141,6 @@ export default function NewAccountPage() {
         description: '',
         currencyCode: 'GHS',
         isMultiCurrency: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
         allowDirectPosting: true,
         isControlAccount: false,
         budgetTrackingEnabled: false,
@@ -353,6 +352,11 @@ export default function NewAccountPage() {
                 throw new Error(Object.values(nextErrors)[0]);
             }
 
+            const enabledBooks = accountingBooks.filter(book => book.isEnabled);
+            if (enabledBooks.length === 0 || enabledBooks.some(book => !book.accountClassificationId)) {
+                toast({ title: 'Accounting-book assignment required', description: 'Enable at least one book and select a compatible classification for every enabled book.', variant: 'destructive' });
+                return;
+            }
             setSaving(true);
 
             // Build segment values array for segmented accounts
@@ -375,16 +379,14 @@ export default function NewAccountPage() {
                 cashFlowClassification: formData.cashFlowClassification || null,
                 currencyCode: formData.currencyCode,
                 isMultiCurrency: formData.isMultiCurrency,
-                isIFRSClassified: formData.isIFRSClassified,
-                isManagementClassified: formData.isBaseClassified,
-                isBaseFrameworkClassified: formData.isBaseClassified,
-                isLocalFrameworkClassified: formData.isLocalClassified,
+                isIFRSClassified: false,
                 isPostingAllowed: formData.allowDirectPosting,
                 isControlAccount: formData.isControlAccount,
                 budgetTrackingEnabled: formData.budgetTrackingEnabled,
                 status: formData.status,
                 isSegmented: true,  // Always segmented
                 segmentValues: segmentValueInputs,
+                accountingBooks,
             });
 
             toast({
@@ -848,48 +850,14 @@ export default function NewAccountPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Classification */}
+                        {/* Accounting-book assignments */}
                         <Card>
                             <CardHeader>
-                                <CardTitle>Classification</CardTitle>
+                                <CardTitle>Accounting Books</CardTitle>
+                                <CardDescription>Enable each reporting book this account belongs to, then select its detailed classification.</CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-3">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isIFRSClassified"
-                                        checked={formData.isIFRSClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isIFRSClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isIFRSClassified" className="cursor-pointer text-sm">
-                                        IFRS Classification
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isBaseClassified"
-                                        checked={formData.isBaseClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isBaseClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isBaseClassified" className="cursor-pointer text-sm">
-                                        Base Classification
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isLocalClassified"
-                                        checked={formData.isLocalClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isLocalClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isLocalClassified" className="cursor-pointer text-sm">
-                                        Local Classification
-                                    </Label>
-                                </div>
+                            <CardContent>
+                                <AccountBookAssignments accountType={formData.accountType} value={accountingBooks} onChange={setAccountingBooks} />
                             </CardContent>
                         </Card>
 

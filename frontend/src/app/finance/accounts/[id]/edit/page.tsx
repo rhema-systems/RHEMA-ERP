@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Save, Loader2, Check, ChevronsUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { AccountType, AccountStatus, Account, CashFlowClassification, UpdateAccountDto } from '@/types/finance';
+import type { AccountType, AccountStatus, Account, CashFlowClassification, UpdateAccountDto, AccountBookAssignmentInput } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -31,6 +31,7 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Trash2 } from 'lucide-react';
+import { AccountBookAssignments } from '@/components/finance/accounts/account-book-assignments';
 
 // IFRS/IAS/GAAP Standard Account Types
 const DETAILED_ACCOUNT_TYPES: { group: string; types: { label: string; value: string; type: AccountType }[] }[] = [
@@ -111,6 +112,7 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
     const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState<Account | null>(null);
     const [transactionError, setTransactionError] = useState<string | null>(null);
+    const [accountingBooks, setAccountingBooks] = useState<AccountBookAssignmentInput[]>([]);
 
     // Combobox state
     const [openAccountType, setOpenAccountType] = useState(false);
@@ -128,6 +130,12 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
                     isLocalClassified: accountData.isLocalClassified ?? accountData.isLocalFrameworkClassified ?? true,
                     budgetTrackingEnabled: accountData.budgetTrackingEnabled ?? false,
                 });
+                setAccountingBooks((accountData.accountingBooks ?? []).map(mapping => ({
+                    accountingBookId: mapping.accountingBookId,
+                    accountClassificationId: mapping.accountClassificationId,
+                    isEnabled: mapping.isEnabled,
+                    financialStatementLineItem: mapping.financialStatementLineItem,
+                })));
             } catch (error) {
                 console.error('Error loading account:', error);
                 toast({
@@ -147,6 +155,11 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
         if (!formData) return;
 
         try {
+            const enabledBooks = accountingBooks.filter(book => book.isEnabled);
+            if (enabledBooks.length === 0 || enabledBooks.some(book => !book.accountClassificationId)) {
+                toast({ title: 'Accounting-book assignment required', description: 'Enable at least one book and select a compatible classification for every enabled book.', variant: 'destructive' });
+                return;
+            }
             setSaving(true);
             setTransactionError(null);
 
@@ -162,15 +175,13 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
                 cashFlowClassification: formData.cashFlowClassification || null,
                 currencyCode: formData.currencyCode,
                 isMultiCurrency: formData.isMultiCurrency,
-                isIFRSClassified: formData.isIFRSClassified,
-                isManagementClassified: formData.isBaseClassified ?? formData.isBaseFrameworkClassified ?? true,
-                isBaseFrameworkClassified: formData.isBaseClassified ?? formData.isBaseFrameworkClassified ?? true,
-                isLocalFrameworkClassified: formData.isLocalClassified ?? formData.isLocalFrameworkClassified ?? true,
+                isIFRSClassified: false,
                 isPostingAllowed: formData.allowDirectPosting ?? formData.isPostingAllowed ?? true,
                 isControlAccount: formData.isControlAccount,
                 budgetTrackingEnabled: formData.budgetTrackingEnabled,
                 status: formData.status,
                 isSegmented: formData.isSegmented,
+                accountingBooks,
             };
 
             await financeDataService.updateAccount(id, updateDto);
@@ -553,48 +564,19 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
                             </CardContent>
                         </Card>
 
-                        {/* Classification Flags */}
+                        {/* Accounting-book assignments */}
                         <Card>
                             <CardHeader>
-                                <CardTitle>Reporting Flags</CardTitle>
+                                <CardTitle>Accounting Books</CardTitle>
+                                <CardDescription>Book membership and detailed classification are authoritative for posting and reporting.</CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-3">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isIFRSClassified"
-                                        checked={formData.isIFRSClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isIFRSClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isIFRSClassified" className="cursor-pointer text-sm">
-                                        IFRS Classification
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isBaseClassified"
-                                        checked={formData.isBaseClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isBaseClassified: checked as boolean })
-                                        } // Renamed prop usage check
-                                    />
-                                    <Label htmlFor="isBaseClassified" className="cursor-pointer text-sm">
-                                        Base Classification
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isLocalClassified"
-                                        checked={formData.isLocalClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isLocalClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isLocalClassified" className="cursor-pointer text-sm">
-                                        Local Classification
-                                    </Label>
-                                </div>
+                            <CardContent>
+                                <AccountBookAssignments
+                                    accountType={formData.accountType}
+                                    value={accountingBooks}
+                                    onChange={setAccountingBooks}
+                                    historicalMappings={formData.accountingBooks}
+                                />
                             </CardContent>
                         </Card>
 
