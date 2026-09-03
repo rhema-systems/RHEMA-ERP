@@ -26,4 +26,26 @@ describe('account FX revaluation policy governance', () => {
         expect(source).toContain('Pending independent approval');
         expect(source).toContain('confirmNonstandardInclusion: confirmNonstandard');
     });
+
+    it('saves rate settings and revaluation treatment as visibly independent operations', () => {
+        const rateHandler = source.slice(
+            source.indexOf('const handleSaveRatePolicy'),
+            source.indexOf('const handleSaveRevaluationPolicy'),
+        );
+        const revaluationHandler = source.slice(
+            source.indexOf('const handleSaveRevaluationPolicy'),
+            source.indexOf('const openPolicyDecision'),
+        );
+
+        expect(rateHandler).toContain('updateAccountCurrencyLinkRatePolicy');
+        expect(rateHandler).not.toContain('saveAccountBookCurrencyPolicy');
+        expect(rateHandler).toContain('Rate settings not saved');
+        expect(rateHandler).toContain('await loadAccountData(false)');
+        expect(revaluationHandler).toContain('saveAccountBookCurrencyPolicy');
+        expect(revaluationHandler).not.toContain('updateAccountCurrencyLinkRatePolicy');
+        expect(revaluationHandler).toContain('Revaluation treatment not saved');
+        expect(revaluationHandler).toContain('await loadAccountData(false)');
+        expect(source).toContain('Save revaluation treatment');
+        expect(source).toContain('Save rate settings');
+    });
 });

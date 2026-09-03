@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle, Loader2, RefreshCw, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -12,9 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { financeService } from '@/services/finance.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { AccountingBook, Currency, CurrencyRevaluationPostingResultDto, CurrencyRevaluationPreviewDto, FinanceSettings, FxRevaluationBatchSummaryDto } from '@/types/finance';
+import { getFxRevaluationAccess } from './access';
 
 const emptyGuid = '00000000-0000-0000-0000-000000000000';
 
@@ -24,15 +26,21 @@ function messageFrom(error: unknown, fallback: string) {
 
 export default function CurrencyRevaluationPage() {
     const { toast } = useToast();
+    const { hasPermission, isLoading: authLoading, error: authError } = useAuth();
+    const { canRead, canRun } = getFxRevaluationAccess(hasPermission);
     const [step, setStep] = useState<1 | 2 | 3>(1);
     const [busy, setBusy] = useState(false);
     const [loadingSetup, setLoadingSetup] = useState(true);
+    const [setupError, setSetupError] = useState<string | null>(null);
+    const [setupReloadKey, setSetupReloadKey] = useState(0);
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [currencies, setCurrencies] = useState<Currency[]>([]);
     const [accountingBooks, setAccountingBooks] = useState<AccountingBook[]>([]);
     const [preview, setPreview] = useState<CurrencyRevaluationPreviewDto | null>(null);
     const [postedJournal, setPostedJournal] = useState<CurrencyRevaluationPostingResultDto | null>(null);
     const [history, setHistory] = useState<FxRevaluationBatchSummaryDto[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(true);
+    const [historyError, setHistoryError] = useState<string | null>(null);
     const [reversingBatch, setReversingBatch] = useState<FxRevaluationBatchSummaryDto | null>(null);
     const [reversalDate, setReversalDate] = useState(new Date().toISOString().slice(0, 10));
     const [reversalReason, setReversalReason] = useState('');
@@ -44,7 +52,14 @@ export default function CurrencyRevaluationPage() {
     });
 
     useEffect(() => {
+        if (authLoading) return;
+        if (!canRead) {
+            setLoadingSetup(false);
+            return;
+        }
         let active = true;
+        setLoadingSetup(true);
+        setSetupError(null);
         void Promise.all([
             financeDataService.getFinanceSettings(),
             financeDataService.getCurrencies({ isActive: true }),
@@ -61,14 +76,13 @@ export default function CurrencyRevaluationPage() {
                     accountingBookCode: current.accountingBookCode || postingBooks.find(book => book.isDefault)?.code || '',
                 }));
             })
-            .catch(error => toast({
-                title: 'Revaluation setup could not be loaded',
-                description: messageFrom(error, 'Refresh the page and verify your Finance permissions.'),
-                variant: 'destructive',
-            }))
+            .catch(error => {
+                if (!active) return;
+                setSetupError(messageFrom(error, 'Refresh the page and verify your Finance permissions.'));
+            })
             .finally(() => { if (active) setLoadingSetup(false); });
         return () => { active = false; };
-    }, [toast]);
+    }, [authLoading, canRead, setupReloadKey]);
 
     const request = useMemo(() => ({
         revaluationDate: parameters.revaluationDate,
@@ -83,14 +97,23 @@ export default function CurrencyRevaluationPage() {
         && settings?.unrealizedFxLossAccountId,
     );
 
-    const loadHistory = async () => {
+    const loadHistory = useCallback(async () => {
+        if (!canRead) return;
         const year = new Date().getFullYear();
-        setHistory(await financeService.getRevaluationHistory(`${year}-01-01`, `${year}-12-31`));
-    };
+        setHistoryLoading(true);
+        setHistoryError(null);
+        try {
+            setHistory(await financeService.getRevaluationHistory(`${year}-01-01`, `${year}-12-31`));
+        } catch (error) {
+            setHistoryError(messageFrom(error, 'Revaluation history could not be loaded.'));
+        } finally {
+            setHistoryLoading(false);
+        }
+    }, [canRead]);
 
     useEffect(() => {
-        void loadHistory().catch(error => console.warn('Revaluation history could not be loaded', error));
-    }, []);
+        if (!authLoading && canRead) void loadHistory();
+    }, [authLoading, canRead, loadHistory]);
 
     const handlePreview = async () => {
         try {
@@ -110,6 +133,7 @@ export default function CurrencyRevaluationPage() {
     };
 
     const handlePost = async () => {
+        if (!canRun) return;
         try {
             setBusy(true);
             const journal = await financeService.runRevaluation({
@@ -133,7 +157,7 @@ export default function CurrencyRevaluationPage() {
     };
 
     const handleReverse = async () => {
-        if (!reversingBatch || reversalReason.trim().length < 5) return;
+        if (!canRun || !reversingBatch || reversalReason.trim().length < 5) return;
         try {
             setBusy(true);
             await financeService.reverseRevaluation(reversingBatch.id, reversalDate, reversalReason.trim());
@@ -156,6 +180,18 @@ export default function CurrencyRevaluationPage() {
 
     const formatMoney = (amount: number, currency = settings?.baseCurrency || 'GHS') =>
         new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(amount);
+
+    if (authLoading) {
+        return <div className="flex min-h-[320px] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /><span className="ml-3">Checking Finance access…</span></div>;
+    }
+
+    if (authError) {
+        return <Alert variant="destructive"><TriangleAlert className="h-4 w-4" /><AlertTitle>Finance access could not be checked</AlertTitle><AlertDescription>Refresh the page to retry authentication and permission loading.</AlertDescription></Alert>;
+    }
+
+    if (!canRead) {
+        return <Alert variant="destructive"><TriangleAlert className="h-4 w-4" /><AlertTitle>Permission denied</AlertTitle><AlertDescription>Finance.Read is required to view revaluation previews and history.</AlertDescription></Alert>;
+    }
 
     return (
         <div className="space-y-6">
@@ -184,6 +220,11 @@ export default function CurrencyRevaluationPage() {
                     </div>;
                 })}
             </div>
+
+            {setupError ? <Alert variant="destructive">
+                <TriangleAlert className="h-4 w-4" /><AlertTitle>Revaluation setup could not be loaded</AlertTitle>
+                <AlertDescription className="flex items-center justify-between gap-4"><span>{setupError}</span><Button variant="outline" size="sm" onClick={() => setSetupReloadKey(value => value + 1)}>Retry setup</Button></AlertDescription>
+            </Alert> : null}
 
             {step === 1 ? <Card className="mx-auto max-w-4xl">
                 <CardHeader>
@@ -226,7 +267,7 @@ export default function CurrencyRevaluationPage() {
                         </div>
                     </div>
                     <Alert><TriangleAlert className="h-4 w-4" /><AlertTitle>Live accounting data</AlertTitle><AlertDescription>Only posted transactions dated on or before the selected date are included. A matching approved closing rate and an open fiscal period are required.</AlertDescription></Alert>
-                    <div className="flex justify-end"><Button onClick={handlePreview} disabled={busy || loadingSetup || !parameters.revaluationDate || !parameters.accountingBookCode}>
+                    <div className="flex justify-end"><Button onClick={handlePreview} disabled={busy || loadingSetup || Boolean(setupError) || !parameters.revaluationDate || !parameters.accountingBookCode}>
                         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Preview live exposures{!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
                     </Button></div>
                 </CardContent>
@@ -254,7 +295,7 @@ export default function CurrencyRevaluationPage() {
                                     <td className="p-3 text-right"><span className={line.gainLossType === 'Gain' ? 'font-semibold text-green-600' : 'font-semibold text-red-600'}>{formatMoney(Math.abs(line.gainLossAmount), line.functionalCurrencyCode)}</span><Badge variant="outline" className="ml-2">{line.gainLossType}</Badge></td>
                                 </tr>)}</tbody>
                             </table></div>}
-                        <div className="flex justify-between"><Button variant="outline" onClick={() => setStep(1)}>Back</Button><Button onClick={handlePost} disabled={busy || preview.lines.length === 0 || !configurationReady}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Post revaluation journal</Button></div>
+                        <div className="flex justify-between"><Button variant="outline" onClick={() => setStep(1)}>Back</Button>{canRun ? <Button onClick={handlePost} disabled={busy || preview.lines.length === 0 || !configurationReady}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Post revaluation journal</Button> : <p className="self-center text-sm text-muted-foreground">Finance.FX.Revaluation.Run is required to post.</p>}</div>
                     </CardContent>
                 </Card>
             </div> : null}
@@ -269,7 +310,9 @@ export default function CurrencyRevaluationPage() {
             <Card>
                 <CardHeader><CardTitle>Revaluation history</CardTitle><CardDescription>Posted batches for the current calendar year, including their journals and reversals.</CardDescription></CardHeader>
                 <CardContent>
-                    {history.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No revaluation batches found this year.</p> :
+                    {historyLoading ? <div className="flex items-center justify-center py-6 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading revaluation history…</div> :
+                    historyError ? <Alert variant="destructive"><TriangleAlert className="h-4 w-4" /><AlertTitle>Revaluation history could not be loaded</AlertTitle><AlertDescription className="flex items-center justify-between gap-4"><span>{historyError}</span><Button variant="outline" size="sm" onClick={() => void loadHistory()}>Retry history</Button></AlertDescription></Alert> :
+                    history.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No revaluation batches found this year.</p> :
                         <div className="overflow-x-auto rounded-md border"><table className="w-full text-sm">
                             <thead className="bg-muted/50"><tr><th className="p-3 text-left">Batch</th><th className="p-3 text-left">Date</th><th className="p-3 text-left">Currencies</th><th className="p-3 text-right">Exposures</th><th className="p-3 text-right">Net gain/(loss)</th><th className="p-3 text-left">Status</th><th className="p-3 text-right">Actions</th></tr></thead>
                             <tbody>{history.map(batch => <tr key={batch.id} className="border-t">
@@ -282,14 +325,14 @@ export default function CurrencyRevaluationPage() {
                                 <td className="p-3"><div className="flex justify-end gap-2">
                                     {batch.journalEntryId ? <Button size="sm" variant="outline" asChild><a href={`/finance/journal-entries/${batch.journalEntryId}`}>{batch.journalEntryNumber || 'Journal'}</a></Button> : null}
                                     {batch.reversalJournalEntryId ? <Button size="sm" variant="outline" asChild><a href={`/finance/journal-entries/${batch.reversalJournalEntryId}`}>Reversal</a></Button> : null}
-                                    {batch.status === 'Posted' ? <Button size="sm" variant="destructive" onClick={() => setReversingBatch(batch)}>Reverse</Button> : null}
+                                    {canRun && batch.status === 'Posted' ? <Button size="sm" variant="destructive" onClick={() => setReversingBatch(batch)}>Reverse</Button> : null}
                                 </div></td>
                             </tr>)}</tbody>
                         </table></div>}
                 </CardContent>
             </Card>
 
-            <Dialog open={Boolean(reversingBatch)} onOpenChange={open => { if (!open) setReversingBatch(null); }}>
+            <Dialog open={canRun && Boolean(reversingBatch)} onOpenChange={open => { if (!open) setReversingBatch(null); }}>
                 <DialogContent>
                     <DialogHeader><DialogTitle>Reverse {reversingBatch?.batchNumber}</DialogTitle><DialogDescription>A balanced reversal journal will be posted through the Finance posting engine. The original journal remains in the audit trail.</DialogDescription></DialogHeader>
                     <div className="space-y-4 py-3">

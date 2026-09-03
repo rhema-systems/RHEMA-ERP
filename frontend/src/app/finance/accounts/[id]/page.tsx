@@ -34,7 +34,8 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     const [addingLink, setAddingLink] = useState(false);
     const [removingLinkId, setRemovingLinkId] = useState<string | null>(null);
     const [editingLink, setEditingLink] = useState<AccountCurrencyLink | null>(null);
-    const [savingPolicy, setSavingPolicy] = useState(false);
+    const [savingRatePolicy, setSavingRatePolicy] = useState(false);
+    const [savingRevaluationPolicy, setSavingRevaluationPolicy] = useState(false);
     const [policyForm, setPolicyForm] = useState<UpdateCurrencyLinkRatePolicyDto | null>(null);
     const [selectedPolicyBookId, setSelectedPolicyBookId] = useState('');
     const [policyChoice, setPolicyChoice] = useState<'inherit' | 'include' | 'exclude'>('inherit');
@@ -56,43 +57,37 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         notes: '',
     });
 
-    // Load account data
-    useEffect(() => {
-        const loadData = async () => {
-            try {
-                setLoading(true);
+    const loadAccountData = React.useCallback(async (showPageLoader = true) => {
+        try {
+            if (showPageLoader) setLoading(true);
 
-                // Load account, currencies, and currency links in parallel
-                const [accountData, currenciesData] = await Promise.all([
-                    financeDataService.getAccountById(id),
-                    financeDataService.getCurrencies(),
+            const [accountData, currenciesData] = await Promise.all([
+                financeDataService.getAccountById(id),
+                financeDataService.getCurrencies(),
+            ]);
+
+            setAccount(accountData);
+            setCurrencies(currenciesData);
+
+            if (accountData.isMultiCurrency) {
+                const [links, policies] = await Promise.all([
+                    financeDataService.getAccountCurrencyLinks(id),
+                    financeDataService.getAccountBookCurrencyPolicies(id),
                 ]);
-
-                setAccount(accountData);
-                setCurrencies(currenciesData);
-
-                // Load currency links if multi-currency enabled
-                if (accountData.isMultiCurrency) {
-                    const [links, policies] = await Promise.all([
-                        financeDataService.getAccountCurrencyLinks(id),
-                        financeDataService.getAccountBookCurrencyPolicies(id),
-                    ]);
-                    setCurrencyLinks(links);
-                    setRevaluationPolicies(policies);
-                }
-            } catch (error) {
-                console.error('Error loading account:', error);
-                toast({
-                    title: 'Error',
-                    description: 'Failed to load account details',
-                    variant: 'destructive',
-                });
-            } finally {
-                setLoading(false);
+                setCurrencyLinks(links);
+                setRevaluationPolicies(policies);
             }
-        };
-        loadData();
+        } catch (error) {
+            console.error('Error loading account:', error);
+            toast({ title: 'Refresh failed', description: 'Authoritative account policy state could not be refreshed.', variant: 'destructive' });
+        } finally {
+            if (showPageLoader) setLoading(false);
+        }
     }, [id, toast]);
+
+    useEffect(() => {
+        void loadAccountData();
+    }, [loadAccountData]);
 
     const getAccountTypeBadge = (type: AccountType) => {
         const colors: Record<AccountType, string> = {
@@ -227,7 +222,24 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     };
 
     const handleSaveRatePolicy = async () => {
-        if (!editingLink || !policyForm || !selectedPolicy) return;
+        if (!editingLink || !policyForm) return;
+        try {
+            setSavingRatePolicy(true);
+            await financeDataService.updateAccountCurrencyLinkRatePolicy(id, editingLink.linkedCurrencyCode, policyForm);
+            toast({
+                title: 'Rate settings saved',
+                description: `${editingLink.linkedCurrencyCode} transaction and closing-rate settings were updated independently.`,
+            });
+        } catch (error: any) {
+            toast({ title: 'Rate settings not saved', description: error?.message || 'The rate-policy update failed. Revaluation treatment was not changed by this action.', variant: 'destructive' });
+        } finally {
+            setSavingRatePolicy(false);
+            await loadAccountData(false);
+        }
+    };
+
+    const handleSaveRevaluationPolicy = async () => {
+        if (!editingLink || !selectedPolicy) return;
         if (policyReason.trim().length < 5) {
             toast({ title: 'Reason required', description: 'Enter at least five characters explaining this policy decision.', variant: 'destructive' });
             return;
@@ -238,32 +250,24 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
             return;
         }
         try {
-            setSavingPolicy(true);
-            const [updated, savedPolicy] = await Promise.all([
-                financeDataService.updateAccountCurrencyLinkRatePolicy(id, editingLink.linkedCurrencyCode, policyForm),
-                financeDataService.saveAccountBookCurrencyPolicy(id, editingLink.id, selectedPolicy.accountingBookId, {
-                    revaluationOverride: policyChoice === 'inherit' ? null : policyChoice === 'include',
-                    reason: policyReason.trim(),
-                    confirmNonstandardInclusion: confirmNonstandard,
-                    rowVersion: selectedPolicy.rowVersion,
-                }),
-            ]);
-            setCurrencyLinks(current => current.map(link => link.id === updated.id ? updated : link));
-            setRevaluationPolicies(current => current.map(policy =>
-                policy.accountCurrencyLinkId === savedPolicy.accountCurrencyLinkId && policy.accountingBookId === savedPolicy.accountingBookId
-                    ? savedPolicy : policy));
-            setEditingLink(null);
-            setPolicyForm(null);
+            setSavingRevaluationPolicy(true);
+            const savedPolicy = await financeDataService.saveAccountBookCurrencyPolicy(id, editingLink.id, selectedPolicy.accountingBookId, {
+                revaluationOverride: policyChoice === 'inherit' ? null : policyChoice === 'include',
+                reason: policyReason.trim(),
+                confirmNonstandardInclusion: confirmNonstandard,
+                rowVersion: selectedPolicy.rowVersion,
+            });
             toast({
                 title: savedPolicy.lifecycleStatus === 'PendingApproval' ? 'Approval requested' : 'Policy saved',
                 description: savedPolicy.lifecycleStatus === 'PendingApproval'
                     ? 'The non-standard inclusion is not effective until a different authorized user approves it.'
-                    : `${updated.linkedCurrencyCode} policy updated for ${savedPolicy.accountingBookCode}.`,
+                    : `${editingLink.linkedCurrencyCode} revaluation treatment was updated for ${savedPolicy.accountingBookCode}; rate settings were not changed.`,
             });
         } catch (error: any) {
-            toast({ title: 'Error', description: error?.message || 'Failed to update rate policy', variant: 'destructive' });
+            toast({ title: 'Revaluation treatment not saved', description: error?.message || 'The governed override failed. Rate settings were not changed by this action.', variant: 'destructive' });
         } finally {
-            setSavingPolicy(false);
+            setSavingRevaluationPolicy(false);
+            await loadAccountData(false);
         }
     };
 
@@ -761,6 +765,12 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                 <Input value={policyReason} onChange={event => setPolicyReason(event.target.value)} placeholder="Explain why this book/currency treatment is required" />
                                             </div>
                                             {selectedPolicy.lifecycleStatus === 'PendingApproval' && <Alert className="border-amber-500"><AlertTriangle className="h-4 w-4" /><AlertDescription>Pending independent approval. The current effective treatment remains unchanged.</AlertDescription></Alert>}
+                                            <div className="flex justify-end">
+                                                <Button onClick={handleSaveRevaluationPolicy} disabled={savingRevaluationPolicy || !canOverrideFxPolicy || selectedPolicy.lifecycleStatus === 'PendingApproval'}>
+                                                    {savingRevaluationPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                    Save revaluation treatment
+                                                </Button>
+                                            </div>
                                         </>}
                                         <div className="space-y-2">
                                             <Label>Revaluation Frequency</Label>
@@ -819,14 +829,16 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                         <Label>Notes</Label>
                                         <Input value={policyForm.notes || ''} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} />
                                     </div>
+                                    <div className="flex justify-end">
+                                        <Button variant="secondary" onClick={handleSaveRatePolicy} disabled={savingRatePolicy || !canOverrideFxPolicy}>
+                                            {savingRatePolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            Save rate settings
+                                        </Button>
+                                    </div>
                                 </div>
                             )}
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setEditingLink(null)}>Cancel</Button>
-                                <Button onClick={handleSaveRatePolicy} disabled={savingPolicy || !selectedPolicy || !canOverrideFxPolicy || selectedPolicy.lifecycleStatus === 'PendingApproval'}>
-                                    {savingPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Save Policy
-                                </Button>
+                                <Button variant="outline" onClick={() => setEditingLink(null)}>Close</Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>

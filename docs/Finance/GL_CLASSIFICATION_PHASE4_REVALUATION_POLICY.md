@@ -54,13 +54,25 @@ delta                   = target value - (signed carrying value + prior unrevers
 Normal balance affects labels, not arithmetic. Each line freezes exact book, classification ID/code/name,
 core type, classification default, nullable override, effective source, warning, signed balances, prior
 unreversed adjustment, and the approved closing-rate ID/value/date/type/quote side. The canonical SHA-256
-preview fingerprint covers this evidence. A posting request carrying `ExpectedPreviewFingerprint` fails
-closed if policy, mapping, classification, exposure, rate, or prior adjustment changed after preview.
+preview fingerprint covers this evidence, including governance-warning text and the configured gain/loss
+posting account. Every non-preview posting request must carry the canonical 64-character
+`ExpectedPreviewFingerprint`; omission, malformed input, or any policy, mapping, classification,
+exposure, warning, posting-account, rate, or prior-adjustment change fails closed.
 
 Batches and prior adjustments are book-scoped. Posting and exact reversal use the V2 central posting
 engine and the frozen `AccountingBookCode`; idempotency includes tenant, book, scope, date, and period.
+The central posting transaction is an explicit boundary: if it commits before ancillary batch/audit
+evidence fails, the batch remains `PostingRecoveryRequired`. A retry validates the frozen fingerprint,
+replays the deterministic key, recovers the existing posting event/journal, and completes evidence without
+creating another journal. It is never represented as a permanently failed accounting posting.
 History exposes a non-standard-policy count, preview displays the full warning, and period-close evidence
 lists the affected account/classification/currency lines per posted book batch.
+
+The revaluation workspace requires `Finance.Read`; `Finance.FX.Revaluation.Run` is an additional gate for
+Post and Reverse only. Loading, permission-denied, request failure/retry, and genuinely empty history are
+distinct states. On account inquiry, rate settings and book-specific revaluation treatment have separate
+save actions and outcomes. Each action refreshes authoritative state after success or failure, so a partial
+two-request save can no longer be presented as one atomic operation.
 
 ## Forward migration and reset
 
