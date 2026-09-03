@@ -21,27 +21,34 @@ The workspace provides:
 - Controlled template download and JSON/workbook preview and commit.
 - Legacy-mapping migration preview and commit.
 - Version history with read-only row, formula, and mapping inspection.
+- API-driven classification mappings can be added to or removed from account
+  rows in an editable Draft. Other structural changes continue through the
+  controlled workbook or JSON definition.
 - Validation findings and GL execution/reconciliation preview.
 - Draft cloning, publication, default selection, and layout activation controls.
+- JSON and workbook export of any version.
 - Layout-specific audit events.
 
-It intentionally does not permit direct row editing. Structural changes are
-prepared in the controlled workbook or JSON definition and imported as Draft
-content.
+Protected standards are clone-only. An authorised user first clones the
+standard into an editable tenant Draft and leaves the protected source intact.
 
 ## Authorisation
 
 All template, preview, commit, and legacy-migration endpoints require
 `Finance.Reports.Layouts.Manage`. Publication separately requires
-`Finance.Reports.Layouts.Publish`. The register, detail, and audit endpoints
-require `Finance.Read`. The workspace hides management and publication actions
-when the signed-in user lacks the corresponding permission.
+`Finance.Reports.Layouts.Publish`. Preview and published execution require
+`Finance.Reports.Run`. The register, detail, audit, and version-export endpoints
+require `Finance.Read`. The workspace hides management, preview, and publication
+actions when the signed-in user lacks the corresponding permission.
 
 ## API workflow
 
 Routes are under `/api/finance/financial-statement-layouts`.
 
 - `GET /import-template` downloads the controlled `.xlsx` template.
+- `GET /versions/{versionId}/exports/json` exports a version as contract v2.
+- `GET /versions/{versionId}/exports/workbook` exports a version as contract v2.
+- `POST /{layoutId}/clone-standard` clones a protected standard into a Draft.
 - `POST /imports/workbook/preview` validates an uploaded workbook.
 - `POST /imports/workbook/commit` commits the same workbook with the
   `expectedDefinitionHash` returned by preview.
@@ -63,7 +70,8 @@ commit fails and a new preview is required.
 
 One definition row containing template version, optional target layout/draft,
 layout code and name, statement type, accounting book, effective dates, and
-notes.
+notes. The current template/JSON contract version is `2`; version 1 inputs are
+rejected rather than reinterpreted.
 
 For a new layout, leave target identifiers blank. To replace an existing draft,
 provide `TargetLayoutId`, `TargetVersionId`, and
@@ -83,14 +91,33 @@ Mappings reference their statement `RowCode`.
 - `Account`: use `AccountNumber`.
 - `AccountHierarchy`: use the hierarchy root `AccountNumber`.
 - `AccountRange`: use `FromAccountNumber` and `ToAccountNumber`.
+- `Classification`: use the exact stable `ClassificationCode` from the selected
+  book and set `IncludeClassificationDescendants` explicitly.
 
 Account numbers are resolved only against accounts enabled for the selected
-tenant accounting book.
+tenant accounting book. Classification display names are explanatory only;
+free-text classification values and codes from another book are rejected.
 
 ### Lookups
 
-Read-only tenant accounting-book and GL-account reference information used to
-prepare the import.
+Read-only tenant accounting-book, GL-account, and stable classification-code
+reference information used to prepare the import.
+
+## Publication and reproducibility
+
+Draft validation and preview resolve classification membership from the live
+hierarchy. Publication runs in one transaction with its audit event and stores
+an immutable membership snapshot containing the exact tenant book, row/mapping
+lineage, resolved account identity, frozen classification explanation, and
+deterministic hierarchy/resolution fingerprints.
+
+Published and retired versions execute only from that snapshot. Renaming or
+reparenting a classification, reclassifying an account, disabling an account
+mapping, or editing a later Draft does not change historical execution. A
+fingerprint mismatch fails closed as snapshot tampering. Existing published
+versions created before snapshot schema v1 cannot be executed through the new
+path; during the approved development reset they must be recreated and
+published, not silently backfilled from current hierarchy state.
 
 ## Legacy migration behaviour
 
@@ -116,7 +143,8 @@ Record evidence for each accounting book and statement type.
 - Confirm parent-child hierarchy and visible row sequence.
 - Confirm headings, totals, formulas, sign presentation, bold/underline rules,
   zero suppression, and account-detail settings.
-- Confirm exact, range, and hierarchy mappings resolve as intended.
+- Confirm exact, range, account-hierarchy, and classification-hierarchy mappings
+  resolve only inside the selected accounting book.
 - Resolve every duplicate-account validation error.
 - Review all unmapped accounts; require zero unmapped non-zero accounts unless
   an exception is documented and approved.
@@ -134,6 +162,13 @@ Record evidence for each accounting book and statement type.
 - Confirm changing the workbook or JSON after preview requires a new preview.
 - Confirm publishing retires the previously published version and leaves it
   visible in version and audit history.
+- After publication, rename/reparent a classification, reclassify one account,
+  and disable one live mapping in a test tenant; confirm the Draft preview moves
+  with live configuration while published/retired execution remains unchanged.
+- Confirm the publication hierarchy and resolution fingerprints are stable for
+  identical ordered evidence and that altered snapshot evidence is rejected.
+- Confirm protected standards cannot be edited, retired, or published in place
+  and their clones are ordinary editable tenant Drafts.
 
 ## Sign-off record
 

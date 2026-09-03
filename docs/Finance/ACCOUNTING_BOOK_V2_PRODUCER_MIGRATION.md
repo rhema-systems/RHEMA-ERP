@@ -205,3 +205,12 @@ For each module, record the named owner, commit, tests and agreed integration wi
 coordination ledger. V1 removal is allowed only after a repository scan and contract tests prove no
 active producer remains. Temporary coexistence is for stacked integration branches only, not the final
 target architecture.
+
+## Phase 3 reporting note
+
+Classification-driven financial-statement layouts and immutable publication
+snapshots are Finance-owned reporting configuration. External posting producers
+continue to submit only the concrete V2 `AccountingBookCode`; they must never
+submit a classification, report row, layout, or publication-snapshot identifier.
+Phase 3 therefore adds no producer implementation change. The existing owner
+actions and coordinated V1 removal gate above remain unchanged.
