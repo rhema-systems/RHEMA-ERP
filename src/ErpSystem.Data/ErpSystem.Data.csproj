@@ -6,8 +6,10 @@
     <Nullable>enable</Nullable>
     <!--
       Debug builds use lightweight migration metadata so routine solution
-      builds do not parse every historical EF target model. Release and custom
-      verification configurations retain the complete migration history.
+      builds do not parse every historical EF target model. The authoritative
+      current snapshot remains compiled so no-build EF drift checks compare the
+      runtime model against the latest migration. Release and custom verification
+      configurations retain the complete migration history.
       Pass -p:TdcFastEfBuild=false to request a full Debug migration build.
     -->
     <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == '' and '$(Configuration)' == 'Debug' and '$(Tdc0402FocusedEfBuild)' != 'true' and '$(TdcFocusedEfToolingBuild)' != 'true'">true</TdcFastEfBuild>
@@ -72,10 +74,9 @@
       attribute to FastBuildMigrationMetadata.cs before merging.
     -->
     <Compile Remove="Migrations\*.Designer.cs" />
-    <!-- The model snapshot is needed by EF tooling, not by runtime migration
-         discovery. Excluding it keeps normal Debug builds on the intended
-         lightweight path; Release/full verification still compiles it. -->
-    <Compile Remove="Migrations\ApplicationDbContextModelSnapshot.cs" />
+    <!-- Keep the current model snapshot in the lightweight assembly. Historical
+         designers remain excluded, while no-build EF commands can still
+         perform an authoritative pending-model-changes comparison. -->
     <Compile Include="Migrations\FastBuildMigrationMetadata.cs" />
   </ItemGroup>
 
