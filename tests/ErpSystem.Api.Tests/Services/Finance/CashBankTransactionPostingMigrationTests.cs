@@ -802,6 +802,16 @@ public sealed class CashBankTransactionPostingMigrationTests
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -855,6 +865,15 @@ public sealed class CashBankTransactionPostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            IsEnabled = true
+        });
         return account;
     }
 
