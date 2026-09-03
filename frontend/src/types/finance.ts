@@ -206,6 +206,7 @@ export interface AccountClassification {
     status: 'Draft' | 'Active' | 'Retired';
     displayOrder: number;
     childCount: number;
+    nonRetiredChildCount: number;
     totalAccountCount: number;
     enabledAccountCount: number;
     isLeaf: boolean;

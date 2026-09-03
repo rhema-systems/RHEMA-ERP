@@ -4,13 +4,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { ArrowUpRight, ArrowDownRight, DollarSign, CreditCard, Wallet, TrendingUp, CheckCircle2, Clock, ChevronRight, Loader2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, DollarSign, CreditCard, Wallet, TrendingUp, CheckCircle2, Clock, ChevronRight, Loader2, AlertTriangle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { Account, JournalEntry } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { filterDashboardEvidence, resolveDashboardBook } from '@/components/finance/dashboard-authority';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -30,6 +32,8 @@ export default function FinanceDashboardPage() {
     const [pendingApprovals, setPendingApprovals] = useState<JournalEntry[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [loading, setLoading] = useState(true);
+    const [bookCode, setBookCode] = useState<string>();
+    const [authorityError, setAuthorityError] = useState<string>();
 
     useEffect(() => {
         let cancelled = false;
@@ -37,16 +41,25 @@ export default function FinanceDashboardPage() {
         async function loadDashboardData() {
             try {
                 setLoading(true);
-                const [journalEntries, chartAccounts, approvalEntries] = await Promise.all([
+                const [journalEntries, chartAccounts, approvalEntries, books] = await Promise.all([
                     financeDataService.getJournalEntries(),
                     financeDataService.getAccounts(),
                     financeDataService.getPendingJournalApprovals().catch(() => []),
+                    financeDataService.getAccountingBooks(true),
                 ]);
 
                 if (!cancelled) {
-                    setEntries(journalEntries || []);
-                    setAccounts(chartAccounts || []);
-                    setPendingApprovals(approvalEntries || []);
+                    const authority = resolveDashboardBook(books || []);
+                    setBookCode(authority.code);
+                    setAuthorityError(authority.error);
+                    if (authority.code) {
+                        const evidence = filterDashboardEvidence(journalEntries || [], chartAccounts || [], authority.code);
+                        setEntries(evidence.entries);
+                        setAccounts(evidence.accounts);
+                        setPendingApprovals((approvalEntries || []).filter(entry => entry.bookClassification === authority.code));
+                    } else {
+                        setEntries([]); setAccounts([]); setPendingApprovals([]);
+                    }
                 }
             } catch (err: any) {
                 if (!cancelled) {
@@ -107,9 +120,8 @@ export default function FinanceDashboardPage() {
                     const amount = debit - credit;
                     expenses += amount;
                     monthly[month].expenses += amount;
-                    const defaultMapping = account?.accountingBooks?.find(mapping => mapping.isEnabled && mapping.accountingBookIsDefault)
-                        ?? account?.accountingBooks?.find(mapping => mapping.isEnabled);
-                    const groupName = defaultMapping?.accountClassificationName || account?.accountName || 'Unclassified expenses';
+                    const authoritativeMapping = account?.accountingBooks?.find(mapping => mapping.accountingBookCode === bookCode);
+                    const groupName = authoritativeMapping?.accountClassificationName || account?.accountName || 'Unclassified expenses';
                     expenseBreakdown.set(groupName, (expenseBreakdown.get(groupName) || 0) + amount);
                 }
             }
@@ -158,7 +170,7 @@ export default function FinanceDashboardPage() {
                 .sort((a, b) => getEntryDate(b).getTime() - getEntryDate(a).getTime())
                 .slice(0, 5),
         };
-    }, [accounts, entries, pendingApprovals]);
+    }, [accounts, bookCode, entries, pendingApprovals]);
 
     return (
         <div className="space-y-6">
@@ -193,6 +205,8 @@ export default function FinanceDashboardPage() {
                 <div className="flex min-h-[240px] items-center justify-center rounded-lg border bg-card">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
+            ) : authorityError ? (
+                <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Dashboard unavailable</AlertTitle><AlertDescription>{authorityError}</AlertDescription></Alert>
             ) : (
                 <>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

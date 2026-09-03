@@ -17,6 +17,8 @@ import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { AccountClassification, AccountClassificationWhereUsed, AccountingBook, AccountType, SaveAccountClassification } from '@/types/finance';
 import { filterClassificationHierarchy, flattenClassificationHierarchy } from '@/components/finance/classifications/classification-hierarchy';
+import { canConfigureClassifications } from '@/components/finance/classifications/classification-access';
+import { useAuth } from '@/hooks/use-auth';
 
 const accountTypes: AccountType[] = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
 const systemRoles = ['Cash', 'Bank', 'ReceivableControl', 'PayableControl', 'InventoryControl', 'FixedAssetCost', 'AccumulatedDepreciation', 'AssetUnderConstruction', 'InputTax', 'OutputTax', 'WhtReceivable', 'WhtPayable'];
@@ -30,6 +32,8 @@ const blankForm = (bookId = ''): SaveAccountClassification => ({
 
 export default function AccountClassificationsPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canConfigure = canConfigureClassifications(hasPermission);
     const [books, setBooks] = useState<AccountingBook[]>([]);
     const [bookId, setBookId] = useState('');
     const [items, setItems] = useState<AccountClassification[]>([]);
@@ -118,7 +122,7 @@ export default function AccountClassificationsPage() {
                 <h1 className="flex items-center gap-2 text-2xl font-semibold"><Tags className="h-6 w-6" />Account classifications</h1>
                 <p className="text-muted-foreground">Configure book-specific hierarchy, presentation and default accounting behavior.</p>
             </div>
-            <Button onClick={() => openEditor()} disabled={!bookId}><Plus className="mr-2 h-4 w-4" />New classification</Button>
+            {canConfigure && <Button onClick={() => openEditor()} disabled={!bookId}><Plus className="mr-2 h-4 w-4" />New classification</Button>}
         </div>
 
         <Card><CardHeader><CardTitle>Classification hierarchy</CardTitle><CardDescription>Accounts can be assigned only to active posting leaves compatible with their core account type.</CardDescription></CardHeader>
@@ -138,8 +142,8 @@ export default function AccountClassificationsPage() {
                         <Badge variant={item.status === 'Active' ? 'default' : 'secondary'}>{item.status}</Badge>
                         <Badge variant="outline">{item.isLeaf && item.isPostingClassification ? 'Posting leaf' : `${item.childCount} children`}</Badge>
                         <Button variant="ghost" size="sm" onClick={() => void showUsage(item)}>{item.enabledAccountCount}/{item.totalAccountCount} used</Button>
-                        <Button variant="ghost" size="icon" aria-label={`Edit ${item.code}`} disabled={item.status === 'Retired'} onClick={() => openEditor(item)}><Pencil className="h-4 w-4" /></Button>
-                        {item.status !== 'Retired' && <Button variant="outline" size="sm" disabled={!item.canRetire} onClick={() => setRetiring(item)}>Retire</Button>}
+                        {canConfigure && <Button variant="ghost" size="icon" aria-label={`Edit ${item.code}`} disabled={item.status === 'Retired'} onClick={() => openEditor(item)}><Pencil className="h-4 w-4" /></Button>}
+                        {canConfigure && item.status !== 'Retired' && <Button variant="outline" size="sm" disabled={!item.canRetire} onClick={() => setRetiring(item)}>Retire</Button>}
                     </div>)}
                 </div>}
             </CardContent>
