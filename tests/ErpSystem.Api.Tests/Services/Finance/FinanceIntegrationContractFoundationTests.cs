@@ -64,7 +64,8 @@ public sealed class FinanceIntegrationContractFoundationTests
                 FinanceDimensionRouteId.ManualJournalEntry,
                 FinanceDimensionRouteId.FinanceApVendorInvoice,
                 FinanceDimensionRouteId.FinanceApSupplierDebitNote,
-                FinanceDimensionRouteId.FinanceArCustomerInvoice
+                FinanceDimensionRouteId.FinanceArCustomerInvoice,
+                FinanceDimensionRouteId.FinanceArCustomerPayment
             ]);
 
         var sales = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.SalesCreditNote);
@@ -72,7 +73,14 @@ public sealed class FinanceIntegrationContractFoundationTests
         sales.PostingSourceModule.Should().Be("AR");
         sales.DefaultState.Should().Be(FinanceDimensionCertificationState.CaptureOptional);
         sales.Notes.Should().Contain("contract only");
-        routes.Should().NotContain(route => route.DocumentType == "CustomerPayment");
+        var customerPayment = routes.Should()
+            .ContainSingle(route => route.DocumentType == "CustomerPayment")
+            .Which;
+        customerPayment.Id.Should().Be(FinanceDimensionRouteId.FinanceArCustomerPayment);
+        customerPayment.ProducerModule.Should().Be("Finance");
+        customerPayment.PostingSourceModule.Should().Be("AR");
+        customerPayment.SourceRoute.Should().Be("finance.ar.customer-payments.manual");
+        customerPayment.Owner.Should().Be("Finance / Accounts Receivable");
     }
 
     [Fact]
