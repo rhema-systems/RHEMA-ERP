@@ -13,14 +13,19 @@ namespace ErpSystem.Api.Controllers.HR;
 /// commit, watch progress, collect the follow-up list.
 /// </summary>
 /// <remarks>
-/// Admin-gated like the single-record <c>POST api/hr/Employees/import</c> it wraps: accepting staff
-/// numbers as given bypasses the register's numbering rule, which is a different privilege from
-/// adding one new hire. See <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c>.
+/// <para><b>Write-gated, not admin-gated</b> (decided 2026-09-03). Creating and amending employee
+/// records is what the write tier means in the permission catalogue, and the HR role holds write
+/// but not admin — admin-gating hid the screen from every HR desk user and the demo's head of HR.
+/// The single-record <c>POST api/hr/Employees/import</c> stays admin-gated on the argument that
+/// accepting a staff number as given bypasses the numbering rule; in a manual register (TDC's) an
+/// HR officer types the number with write anyway, and the bulk path advances the counter past every
+/// number it loads, so the rule is not bypassed here.</para>
+/// <para>See <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c>.</para>
 /// </remarks>
 [ApiController]
 [Route("api/hr/employees/import-sessions")]
 [Authorize(Policy = "InternalOnly")]
-[Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+[Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
 public sealed class EmployeeImportSessionsController : ControllerBase
 {
     private const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

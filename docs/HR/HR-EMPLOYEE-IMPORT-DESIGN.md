@@ -276,7 +276,10 @@ HR does yet (name/code lookups with suggestions).
 Throughput note: `CreateWithNumberAsync` runs five uniqueness queries per row. At 8,000 rows that
 is a few minutes, which is why commit is a background job with progress rather than a request.
 
-### 6.3 Endpoints (`EmployeeImportController`, `api/hr/employees/import-sessions`, `EmployeeAdminPolicy`)
+### 6.3 Endpoints (`EmployeeImportSessionsController`, `api/hr/employees/import-sessions`, `EmployeeWritePolicy`)
+
+> Tier changed 2026-09-03 from Admin to **Write** (option 2 of the tier decision in §8): the HR
+> role holds Write but not Admin, so the admin tier hid the screen from every HR desk user.
 
 | Verb | Route | Purpose |
 |---|---|---|
@@ -454,7 +457,7 @@ counter reconcile ran as "nothing to do" (`counterReconciliation: []`). Both are
 harness asserts only when the tenant has the data; TDC's real tenant will. Load the salary scale and
 a rule before the UAT run and the same harness covers them.
 
-**Wizard (phase 2)** at `/hr/employees/import` (sidebar: HR → Employees → Import, `HR.Employee.Admin`):
+**Wizard (phase 2)** at `/hr/employees/import` (sidebar: HR → Employees → Import, `HR.Employee.Write` since the tier decision below; was Admin):
 - `import/page.tsx` — sessions list with counts and status; template download; New import.
 - `import/new/page.tsx` — step 1 template + column guide (read from the API, so the identification
   columns are the tenant's), step 2 drop zone; a rejected workbook shows the file-level reasons and
@@ -509,6 +512,23 @@ position change made through an update, including the edit form's, failed on
 rather than `Guid.Empty` as the create path already does. Needs a build and a re-run.
 
 Rebuilt and re-run: **`run-update.mjs` 52/52, `run-smoke.mjs` 74/74.** Phase 4 done.
+
+### 2026-09-03 — permission tier: Admin → Write
+
+The user ran the app as an HR-role account and the Import entry was not there. Cause: the screen
+and the endpoints were **admin-gated**, mirroring the single-record import door, and in this
+database `HR.Employee.Admin` is held by SuperAdmin and TenantAdmin only — the HR role has Read and
+Write. Every HR desk user, and the runbook's head of HR, was locked out; the harnesses ran as
+`admin` and never noticed (⚠ a two-actor gap in the harness — it has no plain-HR login to prove
+the tier from the other side).
+
+Two options were put: grant Admin to the HR role (which also unlocks deleting employees and
+reference data, the tier's actual meaning), or move the import to Write. **Decided: Write.**
+Loading and amending employee records is what the write tier means in the permission catalogue;
+in a manual register an HR officer types the staff number with Write anyway, and the bulk path
+advances the counter past every number it loads, so the numbering rule is not bypassed. The
+single-record door stays Admin as its author argued. Changed: the controller's class attribute,
+the sidebar entry, the runbook's warning box, this document.
 
 **Still owed:** the one-time conversion of TDC's real register once it arrives; a browser walk of
 the wizard.

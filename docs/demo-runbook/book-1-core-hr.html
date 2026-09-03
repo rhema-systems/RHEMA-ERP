@@ -104,7 +104,7 @@
   <tr><td>7</td><td>The result</td><td>Tiles turn to <b>Created · Failed at write · Not imported · Skipped</b>; the <b>Profiles to complete</b> table lists the warned people with a link into each new profile and a workbook download. Open one: staff number exactly as it was on the sheet.</td></tr>
 </table>
 <div class="box aside">Staff numbers are accepted as given and the register's counter is moved past them at the end, so the next real hire is not handed a number somebody already holds. Managers named by staff number inside the same file are linked once both rows exist. The uploaded workbook is kept in the document store against the session.</div>
-<div class="box warn">Run the import on the <b>UAT database only</b>, with the demo pack's file — it creates real employee rows. The tenant must have a salary structure and a numbering rule loaded for the level/notch and counter parts to show anything; without them those steps are silently "nothing to do". If <b>Import</b> is missing from the Employees menu, the persona lacks <code>HR.Employee.Admin</code> — the screen is admin-tier, like accepting a staff number by hand.</div>
+<div class="box warn">Run the import on the <b>UAT database only</b>, with the demo pack's file — it creates real employee rows. The tenant must have a salary structure and a numbering rule loaded for the level/notch and counter parts to show anything; without them those steps are silently "nothing to do". If <b>Import</b> is missing from the Employees menu, the persona lacks <code>HR.Employee.Write</code> — the same permission as the create form; <b>hr.head</b> has it.</div>
 
 <h2 class="pb">2. Organisation and the organogram</h2>
 <div class="who">hr.head</div>
@@ -121,7 +121,7 @@
   <tr><td>1</td><td>Levels</td><td>Governance · Executive · Directorate · Department/Unit · Section. Each level says whether it must have a head and whether employees may sit at it directly.</td></tr>
   <tr><td>2</td><td>Units</td><td>The 41 units with code, parent and head. Open <b>SEC-HRA-SHE Safety, Health &amp; Environment</b>: parent HR/Administration Department, head Josephine Appiah.</td></tr>
   <tr><td>3</td><td>Unit change log</td><td><code>/unit-history</code>: every rename, re-parenting and head change is dated and attributed.</td></tr>
-  <tr><td>4</td><td>Locations</td><td><code>/administration/hr/location/locations</code>: Tema Head Office and the community offices (Community 2, 24, 26, Ashaiman, Sebrepor), in a location hierarchy with a country.</td></tr>
+  <tr><td>4</td><td>Locations</td><td><code>/administration/hr/location/locations</code>: Tema Head Office and the community offices (Community 2, 24, 26, Ashaiman, Sebrepor), in a location hierarchy with a country. Open <b>Tema Head Office</b>: under <b>Map &amp; Attendance Zone</b> the site is pinned on the map and the linked zone <b>Tema Head Office — 200 m</b> is drawn in orange round it. Say: "Every site has a pin; the zone is what phones are checked against when staff clock in." The pins are approximate — do not drag them during the demo.</td></tr>
 </table>
 
 <h3>2.2 The establishment</h3>

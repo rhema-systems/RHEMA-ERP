@@ -837,14 +837,14 @@ export const navigationItems: NavItem[] = [
             icon: BadgeAlert,
             permissions: ['HR.Employee.Read'],
           },
-          // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md). Admin-gated like the
-          // single-record import door it wraps: staff numbers are accepted as given, which bypasses
-          // the register's numbering rule — a different privilege from adding one hire.
+          // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md). Write-gated, the same
+          // tier as the create form: loading and amending employee records is what Write means,
+          // and the HR role holds Write but not Admin — Admin hid this from every HR desk user.
           {
             title: 'Import',
             href: '/hr/employees/import',
             icon: Upload,
-            permissions: ['HR.Employee.Admin'],
+            permissions: ['HR.Employee.Write'],
           },
           // Read-only view of the org's own records. Lives here rather than under Administration
           // because it is looked at daily, not configured — and the administration tree is gated to

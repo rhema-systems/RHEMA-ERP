@@ -14,7 +14,7 @@ import type {
 } from '@/types/hr/employee-import';
 
 /**
- * Employee bulk import. Backend route: `api/hr/employees/import-sessions` (EmployeeAdmin tier).
+ * Employee bulk import. Backend route: `api/hr/employees/import-sessions` (EmployeeWrite tier).
  *
  * The shape is template → upload (checked, nothing written) → review → commit (background) →
  * progress → follow-up. Every download is streamed with the bearer token: the template, the

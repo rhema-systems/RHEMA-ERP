@@ -105,7 +105,7 @@
 <div class="who">staff</div>
 <p class="path"><b>Time, Leave &amp; Pay → My Attendance</b> · <code>/me/attendance</code></p>
 <table class="steps">
-  <tr><td>1</td><td>Clock in</td><td>She clocked in this morning (the dataset does it). Click <b>Clock out</b>. The day's row shows in and out times and hours worked. Say: "Clock-in is the token — she cannot clock in for anybody else, and a device or geofence can be required."</td></tr>
+  <tr><td>1</td><td>Clock in</td><td>She clocked in this morning (the dataset does it, from the head-office compound). Click <b>Clock out</b>: the browser asks for her position, and the green result card says <b>Location verified — Tema Head Office — 200 m</b>. The day's row shows in and out times and hours worked. Say: "Clock-in is the token — she cannot clock in for anybody else — and it is checked against the zone drawn round her work location. This one warns; a zone can be set to refuse." <i>If the demo laptop is not at Tema, the card will instead say "Outside work zone (Tema Head Office — 200 m) — punch recorded with a location warning" — that is the point, not a fault.</i></td></tr>
   <tr><td>2</td><td>Overtime</td><td>Her two overtime requests: one <b>Approved</b> (drawings for the board pack, 3 hours), one <b>Pending</b> (Saturday site inspection). Raise a third if the room wants to see it.</td></tr>
   <tr><td>3</td><td>Remote work</td><td>A pending remote-working request for two days at Sakumono, equipment confirmed.</td></tr>
 </table>
@@ -115,13 +115,14 @@
 </table>
 <div class="who">hr.head</div>
 <table class="steps">
-  <tr><td>5</td><td>Daily attendance</td><td><code>/hr/attendance/daily</code>: today's rows — five people clocked in, late arrivals flagged against the 08:00 schedule, exceptions to resolve.</td></tr>
-  <tr><td>6</td><td>Punch logs</td><td><code>/hr/attendance/logs</code>: raw punches from the portal, devices and imports, processed into daily rows.</td></tr>
+  <tr><td>5</td><td>Daily attendance</td><td><code>/hr/attendance/daily</code>: today's rows — five people clocked in, late arrivals flagged against the 08:00 schedule, exceptions to resolve. Open <b>Kojo Ansah</b>'s day: his clock-in location status is <b>Outside Zone</b> — he punched from Ashaiman Market, 3.5 km from the head-office fence.</td></tr>
+  <tr><td>6</td><td>Punch logs</td><td><code>/hr/attendance/logs</code>: raw punches from the portal, devices and imports, each with the coordinates it arrived with, processed into daily rows.</td></tr>
   <tr><td>7</td><td>Regularisations</td><td><code>/hr/attendance/regularizations</code>: an employee's request to correct a missed punch, approved by the manager.</td></tr>
   <tr><td>8</td><td>Monthly summaries and exports</td><td><code>/hr/attendance/summaries</code> then <code>/hr/attendance/payroll-exports</code>: the month is finalised and locked before the export to payroll.</td></tr>
-  <tr><td>9</td><td>Work schedules and shifts</td><td><code>/administration/hr/attendance/work-schedules</code>: "TDC Standard Office Hours" 08:00–17:00, 40 hours; the Day Shift; 40 staff assigned. Also shift rotations, devices, geofence zones, alert rules, overtime policies, pay periods.</td></tr>
+  <tr><td>9</td><td>Work schedules and shifts</td><td><code>/administration/hr/attendance/work-schedules</code>: "TDC Standard Office Hours" 08:00–17:00, 40 hours; the Day Shift; 40 staff assigned. Also shift rotations, devices, alert rules, overtime policies, pay periods.</td></tr>
+  <tr><td>10</td><td>Geofence zones</td><td><code>/administration/hr/attendance/geofence-zones</code>: <b>Tema Head Office — 200 m</b>, a circle round the compound, soft enforcement. Click <b>Edit</b>: the zone is drawn on a map — drag the pin, slide the radius, or switch the shape to <b>Polygon</b> and click the corners of the compound. Say: "HR draws the fence on the map or stands at the gate and presses <i>Use my position</i>; a zone can warn or refuse, and it is linked to the work location so it follows the staff posted there."</td></tr>
 </table>
-<div class="box aside">Punch → log → daily attendance → monthly summary → payroll export is a pipeline with a lock at the summary; nothing after the lock can change what was exported. Biometric devices sync into the same log table, so a device is just another source of punches.</div>
+<div class="box aside">Punch → log → daily attendance → monthly summary → payroll export is a pipeline with a lock at the summary; nothing after the lock can change what was exported. Biometric devices sync into the same log table, so a device is just another source of punches — and a device proves location by where it is bolted, so the zone check is for phones, not readers.</div>
 
 <h2 class="pb">3. Staff travel</h2>
 <div class="who">hr.head</div>

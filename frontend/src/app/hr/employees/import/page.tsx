@@ -7,8 +7,8 @@
  * bad rows fixed or skipped — before anything is written to the register. This list is every
  * session the tenant has run; the per-session page is where the review, commit and follow-up live.
  *
- * ⚠ Admin-tier, like the single-record import door it wraps: accepting staff numbers as given
- * bypasses the register's numbering rule, which is a different privilege from adding a hire.
+ * Write-tier, the same permission as the create form: loading and amending employee records is
+ * what the write tier means, and the HR role holds write but not admin.
  */
 
 import { useState } from 'react';
