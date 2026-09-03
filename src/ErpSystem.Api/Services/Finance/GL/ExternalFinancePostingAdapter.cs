@@ -38,22 +38,43 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
         FinanceExternalPostingEnvelopeDto envelope,
         CancellationToken cancellationToken = default)
     {
-        var validated = await ValidateEnvelopeAsync(envelope, cancellationToken);
+        var validated = await ValidateEnvelopeAsync(envelope, FinanceExternalPostingEvidence.Compute(envelope), "v1", cancellationToken);
+        return await EnsureFrozenDimensionsAsync(validated, envelope, "dimension capture", cancellationToken);
+    }
+
+    public async Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
+        FinanceExternalPostingEnvelopeV2Dto envelope,
+        CancellationToken cancellationToken = default)
+    {
+        var validated = await ValidateEnvelopeAsync(envelope, FinanceExternalPostingEvidence.Compute(envelope), "v2", cancellationToken);
         return await EnsureFrozenDimensionsAsync(validated, envelope, "dimension capture", cancellationToken);
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
         FinanceExternalPostingEnvelopeDto envelope,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await PostCoreAsync(envelope, envelope.BookClassification, FinanceExternalPostingEvidence.Compute(envelope), "v1", cancellationToken);
+
+    public async Task<FinancePostingResultDto> PostAsync(
+        FinanceExternalPostingEnvelopeV2Dto envelope,
+        CancellationToken cancellationToken = default) =>
+        await PostCoreAsync(envelope, envelope.AccountingBookCode, FinanceExternalPostingEvidence.Compute(envelope), "v2", cancellationToken);
+
+    private async Task<FinancePostingResultDto> PostCoreAsync(
+        FinanceExternalPostingEnvelopeBaseDto envelope,
+        string accountingBookCode,
+        string expectedEvidenceHash,
+        string contractVersion,
+        CancellationToken cancellationToken)
     {
         // Reject malformed/cross-tenant input before opening a transaction. Revalidate under the
         // transaction below so account and route evidence cannot change between validation/posting.
-        _ = await ValidateEnvelopeAsync(envelope, cancellationToken);
+        _ = await ValidateEnvelopeAsync(envelope, expectedEvidenceHash, contractVersion, cancellationToken);
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-            var validated = await ValidateEnvelopeAsync(envelope, cancellationToken);
+            var validated = await ValidateEnvelopeAsync(envelope, expectedEvidenceHash, contractVersion, cancellationToken);
             await EnsureFrozenDimensionsAsync(validated, envelope, "posting capture", cancellationToken);
 
             var postingLines = new List<FinancePostingLineDto>(envelope.Lines.Count);
@@ -70,7 +91,7 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
                 postingLines.Add(CloneLine(line, resolved));
             }
 
-            var result = await _posting.PostAsync(new FinancePostingRequestDto
+            var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
             {
                 SourceModule = validated.Route.PostingSourceModule,
                 OriginModuleCode = ResolveOriginModule(validated.Route.ProducerModule),
@@ -82,7 +103,7 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
                 Description = envelope.Description.Trim(),
                 PostingDate = envelope.PostingDate,
                 JournalType = envelope.JournalType.Trim(),
-                BookClassification = envelope.BookClassification.Trim(),
+                AccountingBookCode = accountingBookCode.Trim().ToUpperInvariant(),
                 FunctionalCurrencyCode = envelope.FunctionalCurrencyCode.Trim().ToUpperInvariant(),
                 IdempotencyKey = $"{validated.Route.SourceRoute}:{envelope.TenantId:N}:{envelope.SourceDocumentId:N}:{envelope.IdempotencyKey.Trim()}",
                 ReturnExistingOnDuplicate = true,
@@ -94,7 +115,9 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
     }
 
     private async Task<ValidatedEnvelope> ValidateEnvelopeAsync(
-        FinanceExternalPostingEnvelopeDto envelope,
+        FinanceExternalPostingEnvelopeBaseDto envelope,
+        string expectedEvidenceHash,
+        string contractVersion,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(envelope);
@@ -112,7 +135,6 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
             throw new ArgumentException("Approval timestamp must be a valid UTC timestamp.");
         if (!Sha256.IsMatch(envelope.SourceEvidenceHash ?? string.Empty))
             throw new ArgumentException("Source evidence hash must be a SHA-256 hexadecimal value.");
-        var expectedEvidenceHash = FinanceExternalPostingEvidence.Compute(envelope);
         if (!string.Equals(expectedEvidenceHash, envelope.SourceEvidenceHash, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("External Finance source evidence does not match the approved payload hash.");
         if (envelope.PostingDate == default) throw new ArgumentException("Posting date is required.");
@@ -120,7 +142,7 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
         if (currency.Length != 3 || !currency.All(char.IsLetter))
             throw new ArgumentException("Functional currency must be a three-letter code.");
         if (!string.Equals(envelope.PostingAction, "Post", StringComparison.Ordinal))
-            throw new ArgumentException("The v1 external adapter accepts only the Post action; reversals require an explicit compensating contract.");
+            throw new ArgumentException($"The {contractVersion} external adapter accepts only the Post action; reversals require an explicit compensating contract.");
         if (envelope.Lines is not { Count: >= 2 })
             throw new ArgumentException("A balanced external posting requires at least two lines.");
 
@@ -166,7 +188,7 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
 
     private async Task<FinanceSourceDocumentDimensionDto> EnsureFrozenDimensionsAsync(
         ValidatedEnvelope validated,
-        FinanceExternalPostingEnvelopeDto envelope,
+        FinanceExternalPostingEnvelopeBaseDto envelope,
         string operation,
         CancellationToken cancellationToken)
     {

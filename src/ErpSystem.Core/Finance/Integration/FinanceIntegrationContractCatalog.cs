@@ -8,6 +8,7 @@ namespace ErpSystem.Core.Finance.Integration;
 public enum FinanceIntegrationContractStatus
 {
     Available,
+    Deprecated,
     Planned,
     DecisionRequired,
     RequirementsClarification
@@ -56,11 +57,22 @@ public static class FinanceIntegrationContractCatalog
             "Calling module",
             "Finance / General Ledger",
             FinanceIntegrationContractStatus.Available,
+            "2.0",
+            "IFinancePostingEngine.PostAsync(FinancePostingRequestV2Dto, FinancePostingProducerContext)",
+            "Defined by the calling adapter",
+            null,
+            "AccountingBookCode selects one canonical book. Detailed AccountClassificationId is Finance-owned and cannot be producer supplied. Use only after producer approval; Finance owns book membership, period, balance, currency, idempotency and canonical evidence."),
+        new(
+            "FIN-INT-001-V1",
+            "Deprecated BookClassification posting boundary",
+            "Calling module",
+            "Finance / General Ledger",
+            FinanceIntegrationContractStatus.Deprecated,
             "1.2",
             "IFinancePostingEngine.PostAsync(FinancePostingRequestDto, FinancePostingProducerContext)",
             "Defined by the calling adapter",
             null,
-            "Use only after the producer has completed its own approval; Finance owns period, balance, currency, idempotency, canonical dimension-set resolution and line-specific historical evidence. Structured dimensions remain additive; trusted route identity comes from a compiled FinancePostingProducerContext and required enforcement follows tenant certification."),
+            "Temporary coordinated-migration boundary only. BookClassification means an accounting-book code, has a distinct V1 evidence domain and must be removed after all named external producers adopt V2."),
         new(
             "FIN-INT-002",
             "Accepted procurement stock receipt to inventory and GRV accrual",

@@ -6,7 +6,7 @@ namespace ErpSystem.Core.DTOs.Finance;
 /// Additive server-to-server envelope. The producer owns approval and source facts; Finance owns
 /// account/dimension validation, canonical sets, frozen evidence, idempotency and GL persistence.
 /// </summary>
-public sealed class FinanceExternalPostingEnvelopeDto
+public abstract class FinanceExternalPostingEnvelopeBaseDto
 {
     public FinanceExternalProducerContractId ContractId { get; set; }
     public Guid TenantId { get; set; }
@@ -16,7 +16,6 @@ public sealed class FinanceExternalPostingEnvelopeDto
     public DateTime PostingDate { get; set; }
     public string PostingAction { get; set; } = "Post";
     public string JournalType { get; set; } = "System Generated";
-    public string BookClassification { get; set; } = "IFRS";
     public string FunctionalCurrencyCode { get; set; } = string.Empty;
     public string IdempotencyKey { get; set; } = string.Empty;
     public bool SourceApproved { get; set; }
@@ -26,4 +25,20 @@ public sealed class FinanceExternalPostingEnvelopeDto
     public string SourceEvidenceHash { get; set; } = string.Empty;
     public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
+}
+
+/// <summary>Deprecated V1 external envelope retained during the coordinated producer migration.</summary>
+[Obsolete("Use FinanceExternalPostingEnvelopeV2Dto with AccountingBookCode.")]
+public sealed class FinanceExternalPostingEnvelopeDto : FinanceExternalPostingEnvelopeBaseDto
+{
+    public string BookClassification { get; set; } = "IFRS";
+}
+
+public sealed class FinanceExternalPostingEnvelopeV2Dto : FinanceExternalPostingEnvelopeBaseDto
+{
+    /// <summary>
+    /// Canonical accounting-book code. Producers never submit a detailed AccountClassificationId;
+    /// Finance resolves classification from each account/book assignment.
+    /// </summary>
+    public string AccountingBookCode { get; set; } = "IFRS";
 }

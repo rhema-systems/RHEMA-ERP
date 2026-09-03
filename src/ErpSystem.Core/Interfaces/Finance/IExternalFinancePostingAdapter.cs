@@ -15,4 +15,12 @@ public interface IExternalFinancePostingAdapter
     Task<FinancePostingResultDto> PostAsync(
         FinanceExternalPostingEnvelopeDto envelope,
         CancellationToken cancellationToken = default);
+
+    Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
+        FinanceExternalPostingEnvelopeV2Dto envelope,
+        CancellationToken cancellationToken = default);
+
+    Task<FinancePostingResultDto> PostAsync(
+        FinanceExternalPostingEnvelopeV2Dto envelope,
+        CancellationToken cancellationToken = default);
 }

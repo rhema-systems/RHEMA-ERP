@@ -9,12 +9,46 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Moq;
+using System.Text.Json;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ExternalFinanceDimensionAdapterContractTests
 {
+    [Fact]
+    public void V2_json_and_evidence_have_unambiguous_accounting_book_contract()
+    {
+        var envelope = GoldenV2Envelope();
+        var json = JsonSerializer.Serialize(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        json.Should().Contain("\"accountingBookCode\":\"IFRS\"")
+            .And.NotContain("bookClassification")
+            .And.NotContain("accountClassificationId");
+        FinanceExternalPostingEvidence.Compute(envelope).Should().Be(
+            "44ab534f1faaa03e6c3ad7b51e137eb06b39d32140a28acf2b322cd6cd887c4e");
+        FinanceExternalPostingEvidence.Canonicalize(envelope).Should().Be(
+            "30:RHEMA-FIN-EXTERNAL-POSTING|2.0|1:3|3:2.0|36:11111111-1111-1111-1111-111111111111|36:22222222-2222-2222-2222-222222222222|8:DISP-001|26:Approved disposal proceeds|28:2026-09-03T00:00:00.0000000Z|4:Post|16:System Generated|4:IFRS|3:GHS|20:disposal-proceeds-v2|1:1|36:33333333-3333-3333-3333-333333333333|28:2026-09-02T12:34:56.0000000Z|6:WF-001|1:0|36:44444444-4444-4444-4444-444444444444|36:55555555-5555-5555-5555-555555555555|10:Bank debit|3:100|1:0|0:|0:|0:|0:|0:|0:|0:|0:|0:|1:1|0:|0:|0:|36:66666666-6666-6666-6666-666666666666|36:77777777-7777-7777-7777-777777777777|15:Disposal credit|1:0|3:100|0:|0:|0:|0:|0:|0:|0:|0:|0:|1:2|0:|0:|0:|");
+    }
+
+    [Fact]
+    public void V1_and_V2_evidence_domains_are_distinct()
+    {
+        var v2 = GoldenV2Envelope();
+        var v1 = new FinanceExternalPostingEnvelopeDto
+        {
+            ContractId = v2.ContractId, TenantId = v2.TenantId, SourceDocumentId = v2.SourceDocumentId,
+            SourceDocumentReference = v2.SourceDocumentReference, Description = v2.Description,
+            PostingDate = v2.PostingDate, PostingAction = v2.PostingAction, JournalType = v2.JournalType,
+            BookClassification = v2.AccountingBookCode, FunctionalCurrencyCode = v2.FunctionalCurrencyCode,
+            IdempotencyKey = v2.IdempotencyKey, SourceApproved = v2.SourceApproved,
+            ApprovedByUserId = v2.ApprovedByUserId, ApprovedAtUtc = v2.ApprovedAtUtc,
+            ApprovalReference = v2.ApprovalReference, Lines = v2.Lines
+        };
+
+        FinanceExternalPostingEvidence.Compute(v1).Should().NotBe(FinanceExternalPostingEvidence.Compute(v2));
+    }
+
     [Fact]
     public void Every_external_contract_maps_to_a_distinct_non_finance_capture_optional_route()
     {
@@ -219,6 +253,38 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
             }
         ]
     });
+
+    private static FinanceExternalPostingEnvelopeV2Dto GoldenV2Envelope() => new()
+    {
+        ContractId = FinanceExternalProducerContractId.InventoryDisposalProceeds,
+        TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+        SourceDocumentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+        SourceDocumentReference = "DISP-001",
+        Description = "Approved disposal proceeds",
+        PostingDate = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc),
+        AccountingBookCode = "IFRS",
+        FunctionalCurrencyCode = "GHS",
+        IdempotencyKey = "disposal-proceeds-v2",
+        SourceApproved = true,
+        ApprovedByUserId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        ApprovedAtUtc = new DateTime(2026, 9, 2, 12, 34, 56, DateTimeKind.Utc),
+        ApprovalReference = "WF-001",
+        Lines =
+        [
+            new FinancePostingLineDto
+            {
+                SourceDocumentLineId = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+                AccountId = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+                Description = "Bank debit", DebitAmount = 100m, LineNumber = 1
+            },
+            new FinancePostingLineDto
+            {
+                SourceDocumentLineId = Guid.Parse("66666666-6666-6666-6666-666666666666"),
+                AccountId = Guid.Parse("77777777-7777-7777-7777-777777777777"),
+                Description = "Disposal credit", CreditAmount = 100m, LineNumber = 2
+            }
+        ]
+    };
 
     private static FinanceExternalPostingEnvelopeDto WithEvidence(FinanceExternalPostingEnvelopeDto envelope)
     {

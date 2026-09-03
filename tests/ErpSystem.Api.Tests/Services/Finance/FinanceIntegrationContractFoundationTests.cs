@@ -32,15 +32,17 @@ public sealed class FinanceIntegrationContractFoundationTests
     }
 
     [Fact]
-    public void PostingContractShouldExposeOptionalStructuredDimensionsAsAdditiveVersion()
+    public void PostingContractShouldExposeCanonicalAccountingBookV2AndDeprecatedV1()
     {
         var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-001");
 
         contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
-        contract.Version.Should().Be("1.2");
+        contract.Version.Should().Be("2.0");
         contract.EntryPoint.Should().Contain(nameof(FinancePostingProducerContext));
-        contract.Notes.Should().Contain("Structured dimensions remain additive");
-        contract.Notes.Should().Contain("compiled FinancePostingProducerContext");
+        contract.EntryPoint.Should().Contain(nameof(FinancePostingRequestV2Dto));
+        contract.Notes.Should().Contain(nameof(FinancePostingRequestV2Dto.AccountingBookCode));
+        FinanceIntegrationContractCatalog.GetRequired("FIN-INT-001-V1").Status
+            .Should().Be(FinanceIntegrationContractStatus.Deprecated);
         typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.Dimensions)).Should().NotBeNull();
         typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.FinanceDimensionSetId)).Should().NotBeNull();
         typeof(FinanceSourceLineDimensionInputDto)
