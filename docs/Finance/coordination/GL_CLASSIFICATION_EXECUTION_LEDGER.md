@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 4 — book-specific revaluation policy and execution |
-| Status | `IMPLEMENTING` |
+| Status | `WAITING_FOR_CONNECTIVITY` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Branch | `codex/finance-revaluation-policy-phase4` |
@@ -20,8 +20,8 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Implementation active; independent review pending handoff |
-| Connectivity state | Online at activation |
+| Review status | Partial implementation remains uncommitted in the isolated worktree; independent review has not begun |
+| Connectivity state | Implementer turn interrupted by transient Codex service `404 Not Found`; safe retry deferred to the next heartbeat |
 
 ## Authoritative inputs
 
@@ -78,8 +78,8 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 3 is independently approved and integrated, and its coordination checkpoint is committed at primary HEAD `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. Phase 4 was dispatched to the implementing task from that exact base using the dedicated branch/worktree recorded above, and the task reports active. The publication-snapshot migration and all earlier migrations remain unapplied; no persistent database was mutated.
+Last verified durable point: Phase 3 is independently approved and integrated, and its coordination checkpoint is committed at primary HEAD `a4ea150a7f8bd6fd7fec343bc1baed83f8fa030d`. Phase 4 began from that exact base and produced an uncommitted Finance-only policy foundation in its isolated worktree. The implementer reported Core compilation complete and Data/API compilation in progress before its turn failed with a transient Codex service `404 Not Found`. The isolated edits are preserved untouched; no migration or persistent database was applied, reset, seeded or mutated.
 
 ## Next action
 
-Monitor the Phase 4 implementation handoff, perform independent accounting/schema/security review, send any corrections directly, and integrate only a clean approved stack. Then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
+On the next heartbeat, first reconcile the implementing task and isolated Git state. If connectivity has recovered, resume Phase 4 from the preserved worktree without restarting or discarding work. After a clean handoff, perform independent accounting/schema/security review, send corrections directly, and integrate only an approved stack. Then immediately activate Phase 5 from the resulting exact primary checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
