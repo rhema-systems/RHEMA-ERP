@@ -123,7 +123,10 @@ public sealed class AccountingBookClassificationAuthorityTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var book = SeedBook(db, tenantId);
+        var root = SeedClassification(db, tenantId, book.Id, "EXPENSE_ROOT", AccountType.Expense);
+        root.IsPostingClassification = false;
         var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        classification.ParentClassificationId = root.Id;
         var account = SeedAccount(db, tenantId, "6100", AccountType.Expense);
         db.AccountAccountingBooks.Add(new AccountAccountingBook
         {
@@ -554,12 +557,70 @@ public sealed class AccountingBookClassificationAuthorityTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var book = SeedBook(db, tenantId);
+        var root = SeedClassification(db, tenantId, book.Id, "EXPENSE_ROOT", AccountType.Expense);
+        root.IsPostingClassification = false;
         var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        classification.ParentClassificationId = root.Id;
         var active = SeedAccount(db, tenantId, "6100", AccountType.Expense);
         var historical = SeedAccount(db, tenantId, "6200", AccountType.Expense);
         db.AccountAccountingBooks.AddRange(
             new AccountAccountingBook { TenantId = tenantId, AccountId = active.Id, AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = true },
             new AccountAccountingBook { TenantId = tenantId, AccountId = historical.Id, AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = false });
+        var layout = new FinancialStatementLayout
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IS_USAGE", Name = "Usage layout",
+            StatementType = FinancialStatementType.IncomeStatement, AccountingBookId = book.Id,
+            IsActive = true, Revision = 1
+        };
+        var draft = new FinancialStatementLayoutVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementLayoutId = layout.Id,
+            VersionNumber = 1, Status = FinancialStatementLayoutVersionStatus.Draft, Revision = 1
+        };
+        var row = new FinancialStatementRow
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementLayoutVersionId = draft.Id,
+            RowCode = "EXPENSE", Label = "Expense", RowType = FinancialStatementRowType.Account,
+            DisplayOrder = 10, IsVisible = true, SignMultiplier = 1
+        };
+        row.Mappings.Add(new FinancialStatementRowMapping
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementRowId = row.Id,
+            MappingType = FinancialStatementRowMappingType.Classification,
+            AccountClassificationId = root.Id, IncludeClassificationDescendants = true
+        });
+        draft.Rows.Add(row);
+        layout.Versions.Add(draft);
+        var published = new FinancialStatementLayoutVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementLayoutId = layout.Id,
+            VersionNumber = 2, Status = FinancialStatementLayoutVersionStatus.Published, Revision = 1
+        };
+        var publishedRow = new FinancialStatementRow
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementLayoutVersionId = published.Id,
+            RowCode = "EXPENSE", Label = "Expense", RowType = FinancialStatementRowType.Account,
+            DisplayOrder = 10, IsVisible = true, SignMultiplier = 1
+        };
+        publishedRow.Mappings.Add(new FinancialStatementRowMapping
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementRowId = publishedRow.Id,
+            MappingType = FinancialStatementRowMappingType.Classification,
+            AccountClassificationId = root.Id, IncludeClassificationDescendants = true
+        });
+        published.Rows.Add(publishedRow);
+        layout.Versions.Add(published);
+        db.FinancialStatementLayouts.Add(layout);
+        db.FinancialStatementPublicationAccounts.Add(new FinancialStatementPublicationAccount
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinancialStatementLayoutVersionId = published.Id,
+            FinancialStatementRowId = publishedRow.Id, FinancialStatementRowMappingId = publishedRow.Mappings.Single().Id,
+            MappingType = FinancialStatementRowMappingType.Classification, AccountId = active.Id,
+            RowCode = row.RowCode, AccountNumber = active.AccountNumber, AccountName = active.AccountName,
+            AccountType = active.AccountType, AccountingBookId = book.Id, AccountingBookCode = book.Code,
+            AccountClassificationId = classification.Id, ClassificationCode = classification.Code,
+            ClassificationName = classification.Name, ClassificationPath = classification.Code
+        });
         await db.SaveChangesAsync();
         var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
 
@@ -569,6 +630,18 @@ public sealed class AccountingBookClassificationAuthorityTests
         usage.EnabledMappings.Should().Be(1);
         usage.Mappings.Should().Contain(item => item.AccountCode == "6100" && item.IsEnabled);
         usage.Mappings.Should().Contain(item => item.AccountCode == "6200" && !item.IsEnabled);
+        usage.DraftLayoutReferences.Should().Be(1);
+        usage.PublishedLayoutReferences.Should().Be(1);
+        usage.LayoutReferences.Should().Contain(item => item.LayoutCode == "IS_USAGE" && !item.IsHistoricalSnapshot);
+        usage.LayoutReferences.Should().Contain(item => item.LayoutCode == "IS_USAGE" && item.IsHistoricalSnapshot);
+
+        var rootUsage = await service.GetWhereUsedAsync(root.Id);
+        rootUsage.DraftLayoutReferences.Should().Be(1);
+        rootUsage.PublishedLayoutReferences.Should().Be(1);
+
+        var reparent = () => service.UpdateAsync(classification.Id, Request(classification, book.Id));
+        await reparent.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*draft financial-statement layout*");
     }
 
     [Fact]
@@ -712,6 +785,10 @@ public sealed class AccountingBookClassificationAuthorityTests
                 || statement.Contains("CREATE TABLE \"AccountClassifications\"", StringComparison.Ordinal)
                 || (includeMappings && statement.Contains("CREATE TABLE \"Accounts\"", StringComparison.Ordinal))
                 || (includeMappings && statement.Contains("CREATE TABLE \"AccountAccountingBooks\"", StringComparison.Ordinal))
+                || (includeMappings && statement.Contains("CREATE TABLE \"FinancialStatementLayouts\"", StringComparison.Ordinal))
+                || (includeMappings && statement.Contains("CREATE TABLE \"FinancialStatementLayoutVersions\"", StringComparison.Ordinal))
+                || (includeMappings && statement.Contains("CREATE TABLE \"FinancialStatementRows\"", StringComparison.Ordinal))
+                || (includeMappings && statement.Contains("CREATE TABLE \"FinancialStatementRowMappings\"", StringComparison.Ordinal))
                 || (includeRoleIndex && statement.Contains(
                     "IX_AccountClassifications_TenantId_AccountingBookId_SystemRole", StringComparison.Ordinal)));
         foreach (var statement in statements)

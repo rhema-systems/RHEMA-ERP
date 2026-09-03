@@ -63,13 +63,61 @@ public sealed class AccountClassificationService : IAccountClassificationService
                 AccountingBookCode = item.AccountingBook.Code,
                 IsEnabled = item.IsEnabled
             }).ToListAsync(cancellationToken);
+        var draftSelectorIds = await GetDraftSelectorIdsAsync(classification, cancellationToken);
+        var draftReferences = await _db.FinancialStatementRowMappings.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.AccountClassificationId.HasValue
+                && (item.AccountClassificationId == id
+                    || (item.IncludeClassificationDescendants && draftSelectorIds.Contains(item.AccountClassificationId.Value)))
+                && !item.IsDeleted
+                && !item.FinancialStatementRow.IsDeleted
+                && item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                && !item.FinancialStatementRow.FinancialStatementLayoutVersion.IsDeleted)
+            .Select(item => new AccountClassificationLayoutUsageDto
+            {
+                LayoutId = item.FinancialStatementRow.FinancialStatementLayoutVersion.FinancialStatementLayoutId,
+                LayoutCode = item.FinancialStatementRow.FinancialStatementLayoutVersion.FinancialStatementLayout.Code,
+                LayoutName = item.FinancialStatementRow.FinancialStatementLayoutVersion.FinancialStatementLayout.Name,
+                VersionId = item.FinancialStatementRow.FinancialStatementLayoutVersionId,
+                VersionNumber = item.FinancialStatementRow.FinancialStatementLayoutVersion.VersionNumber,
+                VersionStatus = "Draft", RowCode = item.FinancialStatementRow.RowCode,
+                IsHistoricalSnapshot = false
+            }).ToListAsync(cancellationToken);
+        var publishedReferenceRows = await _db.FinancialStatementPublicationAccounts.AsNoTracking()
+            .Where(item => item.TenantId == TenantId
+                && (item.AccountClassificationId == id
+                    || item.FinancialStatementRowMapping.AccountClassificationId == id)
+                && !item.IsDeleted)
+            .Select(item => new
+            {
+                LayoutId = item.FinancialStatementLayoutVersion.FinancialStatementLayoutId,
+                LayoutCode = item.FinancialStatementLayoutVersion.FinancialStatementLayout.Code,
+                LayoutName = item.FinancialStatementLayoutVersion.FinancialStatementLayout.Name,
+                VersionId = item.FinancialStatementLayoutVersionId,
+                VersionNumber = item.FinancialStatementLayoutVersion.VersionNumber,
+                VersionStatus = item.FinancialStatementLayoutVersion.Status,
+                item.RowCode
+            }).Distinct().ToListAsync(cancellationToken);
+        var publishedReferences = publishedReferenceRows.Select(item => new AccountClassificationLayoutUsageDto
+        {
+            LayoutId = item.LayoutId,
+            LayoutCode = item.LayoutCode,
+            LayoutName = item.LayoutName,
+            VersionId = item.VersionId,
+            VersionNumber = item.VersionNumber,
+            VersionStatus = item.VersionStatus.ToString(),
+            RowCode = item.RowCode,
+            IsHistoricalSnapshot = true
+        }).ToList();
         return new AccountClassificationWhereUsedDto
         {
             ClassificationId = classification.Id,
             ClassificationCode = classification.Code,
             TotalMappings = mappings.Count,
             EnabledMappings = mappings.Count(item => item.IsEnabled),
-            Mappings = mappings
+            Mappings = mappings,
+            DraftLayoutReferences = draftReferences.Count,
+            PublishedLayoutReferences = publishedReferences.Count,
+            LayoutReferences = draftReferences.Concat(publishedReferences).ToList()
         };
     }
 
@@ -119,6 +167,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
             && item.IsEnabled
             && !item.IsDeleted,
             cancellationToken);
+        var usedByDraftLayout = await HasDraftLayoutReferenceAsync(entity, cancellationToken);
         if (used && (entity.AccountingBookId != request.AccountingBookId
             || !string.Equals(entity.Code, NormalizeCode(request.Code), StringComparison.Ordinal)
             || entity.CoreAccountType != parsed.AccountType))
@@ -127,6 +176,13 @@ public sealed class AccountClassificationService : IAccountClassificationService
             && (parsed.Status != AccountClassificationStatus.Active || !request.IsPostingClassification))
             throw new InvalidOperationException(
                 "A classification used by enabled account-book assignments must remain active and posting-enabled.");
+        if (usedByDraftLayout && (entity.AccountingBookId != request.AccountingBookId
+            || !string.Equals(entity.Code, NormalizeCode(request.Code), StringComparison.Ordinal)
+            || entity.CoreAccountType != parsed.AccountType
+            || entity.ParentClassificationId != request.ParentClassificationId
+            || parsed.Status != AccountClassificationStatus.Active
+            || !request.IsPostingClassification))
+            throw new InvalidOperationException("A classification referenced by a draft financial-statement layout cannot be structurally changed; update the draft mapping first.");
         if (parsed.Status == AccountClassificationStatus.Retired)
             throw new InvalidOperationException("Use the governed retirement operation to retire a classification.");
         entity.AccountingBookId = request.AccountingBookId;
@@ -174,6 +230,8 @@ public sealed class AccountClassificationService : IAccountClassificationService
                 && !item.IsDeleted,
                 cancellationToken))
             throw new InvalidOperationException("A classification with non-retired children cannot be retired.");
+        if (await HasDraftLayoutReferenceAsync(entity, cancellationToken))
+            throw new InvalidOperationException("A classification referenced by a draft financial-statement layout cannot be retired; update the draft mapping first.");
         entity.Status = AccountClassificationStatus.Retired;
         entity.RetirementReason = request.Reason.Trim();
         entity.RetiredAtUtc = DateTime.UtcNow;
@@ -284,6 +342,42 @@ public sealed class AccountClassificationService : IAccountClassificationService
             cursor = await _db.AccountClassifications.AsNoTracking().Where(item => item.Id == cursor.Value && item.TenantId == TenantId && !item.IsDeleted).Select(item => item.ParentClassificationId).SingleOrDefaultAsync(cancellationToken);
         }
         return false;
+    }
+
+    private async Task<bool> HasDraftLayoutReferenceAsync(
+        AccountClassification classification,
+        CancellationToken cancellationToken)
+    {
+        var selectorIds = await GetDraftSelectorIdsAsync(classification, cancellationToken);
+        return await _db.FinancialStatementRowMappings.AnyAsync(item => item.TenantId == TenantId
+            && item.AccountClassificationId.HasValue
+            && (item.AccountClassificationId == classification.Id
+                || (item.IncludeClassificationDescendants && selectorIds.Contains(item.AccountClassificationId.Value)))
+            && !item.IsDeleted
+            && !item.FinancialStatementRow.IsDeleted
+            && item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+            && !item.FinancialStatementRow.FinancialStatementLayoutVersion.IsDeleted,
+            cancellationToken);
+    }
+
+    private async Task<Guid[]> GetDraftSelectorIdsAsync(
+        AccountClassification classification,
+        CancellationToken cancellationToken)
+    {
+        var hierarchy = await _db.AccountClassifications.AsNoTracking()
+            .Where(item => item.TenantId == TenantId
+                && item.AccountingBookId == classification.AccountingBookId
+                && !item.IsDeleted)
+            .Select(item => new { item.Id, item.ParentClassificationId })
+            .ToDictionaryAsync(item => item.Id, item => item.ParentClassificationId, cancellationToken);
+        var selectors = new HashSet<Guid>();
+        Guid? current = classification.Id;
+        while (current.HasValue && selectors.Add(current.Value)
+            && hierarchy.TryGetValue(current.Value, out var parent))
+        {
+            current = parent;
+        }
+        return selectors.ToArray();
     }
 
     private void ApplyRowVersion(AccountClassification entity, string? value)

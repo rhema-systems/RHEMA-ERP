@@ -28,6 +28,11 @@ public interface IFinancialStatementLayoutService
         UpdateFinancialStatementLayoutDto request,
         CancellationToken cancellationToken = default);
 
+    Task<FinancialStatementLayoutDto> CloneProtectedStandardAsync(
+        Guid sourceLayoutId,
+        CloneFinancialStatementLayoutDto request,
+        CancellationToken cancellationToken = default);
+
     Task<FinancialStatementLayoutVersionDto> CreateDraftVersionAsync(
         Guid layoutId,
         CreateFinancialStatementLayoutVersionDto request,

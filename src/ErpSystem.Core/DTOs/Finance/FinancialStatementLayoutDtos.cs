@@ -15,6 +15,8 @@ public class FinancialStatementLayoutSummaryDto
     public string AccountingBookName { get; set; } = string.Empty;
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; }
+    public bool IsProtectedStandard { get; set; }
+    public Guid? StandardSourceLayoutId { get; set; }
     public int Revision { get; set; }
     public int LatestVersionNumber { get; set; }
     public int? PublishedVersionNumber { get; set; }
@@ -39,6 +41,13 @@ public sealed class FinancialStatementLayoutVersionDto
     public string? PublishedByName { get; set; }
     public string? Notes { get; set; }
     public int Revision { get; set; }
+    public string? PublicationSnapshotSchemaVersion { get; set; }
+    public Guid? PublishedAccountingBookId { get; set; }
+    public string? PublishedAccountingBookCode { get; set; }
+    public string? PublishedAccountingBookName { get; set; }
+    public string? HierarchyFingerprint { get; set; }
+    public string? ResolutionFingerprint { get; set; }
+    public int PublicationAccountCount { get; set; }
     public IReadOnlyList<FinancialStatementRowDto> Rows { get; set; }
         = Array.Empty<FinancialStatementRowDto>();
 }
@@ -69,10 +78,15 @@ public sealed class FinancialStatementRowMappingDto
     public Guid Id { get; set; }
     public FinancialStatementRowMappingType MappingType { get; set; }
     public Guid? AccountId { get; set; }
+
     public string? AccountNumber { get; set; }
     public string? AccountName { get; set; }
     public string? FromAccountNumber { get; set; }
     public string? ToAccountNumber { get; set; }
+    public Guid? AccountClassificationId { get; set; }
+    public string? AccountClassificationCode { get; set; }
+    public string? AccountClassificationName { get; set; }
+    public bool IncludeClassificationDescendants { get; set; }
 }
 
 public sealed class CreateFinancialStatementLayoutDto
@@ -133,6 +147,17 @@ public sealed class CreateFinancialStatementLayoutVersionDto
     public string? Notes { get; set; }
 }
 
+public sealed class CloneFinancialStatementLayoutDto
+{
+    [Required, MaxLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [Required, MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+
+    public Guid AccountingBookId { get; set; }
+}
+
 public sealed class ReplaceFinancialStatementRowsDto
 {
     [Range(1, int.MaxValue)]
@@ -190,10 +215,17 @@ public sealed class FinancialStatementRowMappingInputDto
     public Guid? AccountId { get; set; }
 
     [MaxLength(100)]
+    public string? AccountNumber { get; set; }
+
+    [MaxLength(100)]
     public string? FromAccountNumber { get; set; }
 
     [MaxLength(100)]
     public string? ToAccountNumber { get; set; }
+    public Guid? AccountClassificationId { get; set; }
+    [MaxLength(50)]
+    public string? AccountClassificationCode { get; set; }
+    public bool IncludeClassificationDescendants { get; set; } = true;
 }
 
 public sealed class PublishFinancialStatementLayoutVersionDto
@@ -354,7 +386,7 @@ public sealed class FinancialStatementLayoutUnmappedAccountDto
 
 public sealed class FinancialStatementLayoutImportDefinitionDto
 {
-    public string TemplateVersion { get; set; } = "1";
+    public string TemplateVersion { get; set; } = "2";
 
     public Guid? TargetLayoutId { get; set; }
 

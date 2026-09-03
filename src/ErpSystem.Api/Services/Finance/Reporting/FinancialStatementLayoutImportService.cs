@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Services.Finance.Reporting;
 public sealed class FinancialStatementLayoutImportService
     : IFinancialStatementLayoutImportService
 {
-    private const string TemplateVersion = "1";
+    private const string TemplateVersion = "2";
     private const int MaximumFileBytes = 5 * 1024 * 1024;
     private const int MaximumRows = 2_000;
     private const int MaximumMappings = 10_000;
@@ -73,6 +73,110 @@ public sealed class FinancialStatementLayoutImportService
         };
     }
 
+    public async Task<FinancialStatementLayoutImportDefinitionDto> ExportDefinitionAsync(
+        Guid versionId,
+        CancellationToken cancellationToken = default)
+    {
+        var version = await _context.FinancialStatementLayoutVersions.AsNoTracking().AsSplitQuery()
+            .Include(item => item.FinancialStatementLayout)
+            .Include(item => item.Rows.Where(row => !row.IsDeleted))
+                .ThenInclude(row => row.Mappings.Where(mapping => !mapping.IsDeleted))
+                    .ThenInclude(mapping => mapping.AccountClassification)
+            .Include(item => item.Rows.Where(row => !row.IsDeleted))
+                .ThenInclude(row => row.Mappings.Where(mapping => !mapping.IsDeleted))
+                    .ThenInclude(mapping => mapping.Account)
+            .SingleOrDefaultAsync(item => item.Id == versionId && item.TenantId == TenantId
+                && !item.IsDeleted && !item.FinancialStatementLayout.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("Financial statement layout version was not found.");
+        var codesById = version.Rows.ToDictionary(item => item.Id, item => item.RowCode);
+        return new FinancialStatementLayoutImportDefinitionDto
+        {
+            TemplateVersion = TemplateVersion,
+            TargetLayoutId = version.FinancialStatementLayoutId,
+            TargetVersionId = version.Status == FinancialStatementLayoutVersionStatus.Draft ? version.Id : null,
+            ExpectedTargetVersionRevision = version.Status == FinancialStatementLayoutVersionStatus.Draft ? version.Revision : null,
+            Code = version.FinancialStatementLayout.Code,
+            Name = version.FinancialStatementLayout.Name,
+            Description = version.FinancialStatementLayout.Description,
+            StatementType = version.FinancialStatementLayout.StatementType,
+            AccountingBookId = version.FinancialStatementLayout.AccountingBookId,
+            IsDefault = version.FinancialStatementLayout.IsDefault,
+            EffectiveFrom = version.EffectiveFrom,
+            EffectiveTo = version.EffectiveTo,
+            Notes = version.Notes,
+            Rows = version.Rows.OrderBy(row => row.DisplayOrder).ThenBy(row => row.RowCode).Select(row => new FinancialStatementRowInputDto
+            {
+                RowCode = row.RowCode,
+                ParentRowCode = row.ParentRowId.HasValue && codesById.TryGetValue(row.ParentRowId.Value, out var parent) ? parent : null,
+                Label = row.Label, RowType = row.RowType, DisplayOrder = row.DisplayOrder, Formula = row.Formula,
+                SignMultiplier = row.SignMultiplier, IsVisible = row.IsVisible, SuppressIfZero = row.SuppressIfZero,
+                ShowAccountDetails = row.ShowAccountDetails, IsBold = row.IsBold, IsItalic = row.IsItalic,
+                IsUnderlined = row.IsUnderlined, IndentLevel = row.IndentLevel,
+                Mappings = row.Mappings.Where(mapping => !mapping.IsDeleted).Select(mapping => new FinancialStatementRowMappingInputDto
+                {
+                    MappingType = mapping.MappingType, AccountId = mapping.AccountId,
+                    AccountNumber = mapping.Account?.AccountNumber,
+                    FromAccountNumber = mapping.FromAccountNumber, ToAccountNumber = mapping.ToAccountNumber,
+                    AccountClassificationId = mapping.AccountClassificationId,
+                    AccountClassificationCode = mapping.AccountClassification?.Code,
+                    IncludeClassificationDescendants = mapping.IncludeClassificationDescendants
+                }).ToList()
+            }).ToList()
+        };
+    }
+
+    public async Task<FinancialStatementLayoutFileDto> ExportWorkbookAsync(
+        Guid versionId,
+        CancellationToken cancellationToken = default)
+    {
+        var definition = await ExportDefinitionAsync(versionId, cancellationToken);
+        using var workbook = new XLWorkbook();
+        AddInstructionsSheet(workbook);
+        AddMetadataSheet(workbook);
+        AddRowsSheet(workbook);
+        AddMappingsSheet(workbook);
+        PopulateWorkbook(workbook, definition);
+        await AddLookupsSheetAsync(workbook, cancellationToken);
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return new FinancialStatementLayoutFileDto
+        {
+            Content = stream.ToArray(),
+            FileName = $"{definition.Code.ToLowerInvariant()}-v{TemplateVersion}.xlsx"
+        };
+    }
+
+    private static void PopulateWorkbook(XLWorkbook workbook, FinancialStatementLayoutImportDefinitionDto definition)
+    {
+        var metadata = workbook.Worksheet("Metadata");
+        object?[] values = { TemplateVersion, definition.TargetLayoutId, definition.TargetVersionId,
+            definition.SourceVersionId, definition.ExpectedTargetVersionRevision, definition.Code,
+            definition.Name, definition.Description, definition.StatementType.ToString(), definition.AccountingBookId,
+            definition.IsDefault, definition.EffectiveFrom, definition.EffectiveTo, definition.Notes };
+        for (var index = 0; index < values.Length; index++) metadata.Cell(2, index + 1).Value = XLCellValue.FromObject(values[index]);
+        var rows = workbook.Worksheet("Rows");
+        var rowNumber = 2;
+        foreach (var row in definition.Rows)
+        {
+            object?[] rowValues = { row.RowCode, row.ParentRowCode, row.Label, row.RowType.ToString(), row.DisplayOrder,
+                row.Formula, row.SignMultiplier, row.IsVisible, row.SuppressIfZero, row.ShowAccountDetails,
+                row.IsBold, row.IsItalic, row.IsUnderlined, row.IndentLevel };
+            for (var index = 0; index < rowValues.Length; index++) rows.Cell(rowNumber, index + 1).Value = XLCellValue.FromObject(rowValues[index]);
+            rowNumber++;
+        }
+        var mappings = workbook.Worksheet("Mappings");
+        rowNumber = 2;
+        foreach (var row in definition.Rows)
+        foreach (var mapping in row.Mappings)
+        {
+            object?[] mappingValues = { row.RowCode, mapping.MappingType.ToString(), mapping.AccountNumber,
+                mapping.FromAccountNumber, mapping.ToAccountNumber, mapping.AccountClassificationCode,
+                mapping.IncludeClassificationDescendants };
+            for (var index = 0; index < mappingValues.Length; index++) mappings.Cell(rowNumber, index + 1).Value = XLCellValue.FromObject(mappingValues[index]);
+            rowNumber++;
+        }
+    }
+
     public async Task<FinancialStatementLayoutImportPreviewDto>
         PreviewDefinitionAsync(
             FinancialStatementLayoutImportDefinitionDto definition,
@@ -86,6 +190,7 @@ public sealed class FinancialStatementLayoutImportService
             normalized,
             validation,
             cancellationToken);
+        await ResolveJsonClassificationMappingsAsync(normalized, validation, cancellationToken);
 
         if (Enum.IsDefined(normalized.StatementType) &&
             normalized.AccountingBookId != Guid.Empty &&
@@ -113,6 +218,52 @@ public sealed class FinancialStatementLayoutImportService
             MappingCount = normalized.Rows.Sum(row => row.Mappings.Count),
             Validation = validation
         };
+    }
+
+    private async Task ResolveJsonClassificationMappingsAsync(
+        FinancialStatementLayoutImportDefinitionDto definition,
+        FinancialStatementLayoutValidationResultDto validation,
+        CancellationToken cancellationToken)
+    {
+        var mappings = definition.Rows.SelectMany(row => row.Mappings.Select(mapping => new { row.RowCode, Mapping = mapping }))
+            .Where(item => item.Mapping.MappingType == FinancialStatementRowMappingType.Classification)
+            .ToList();
+        if (mappings.Count == 0 || definition.AccountingBookId == Guid.Empty) return;
+
+        var codes = mappings.Where(item => !string.IsNullOrWhiteSpace(item.Mapping.AccountClassificationCode))
+            .Select(item => item.Mapping.AccountClassificationCode!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var ids = mappings.Where(item => item.Mapping.AccountClassificationId.HasValue)
+            .Select(item => item.Mapping.AccountClassificationId!.Value).Distinct().ToArray();
+        var available = await _context.AccountClassifications.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.AccountingBookId == definition.AccountingBookId
+                && !item.IsDeleted && (codes.Contains(item.Code) || ids.Contains(item.Id)))
+            .Select(item => new { item.Id, item.Code })
+            .ToListAsync(cancellationToken);
+        var byCode = available.ToDictionary(item => item.Code, StringComparer.OrdinalIgnoreCase);
+        var byId = available.ToDictionary(item => item.Id);
+
+        foreach (var item in mappings)
+        {
+            var mapping = item.Mapping;
+            if (mapping.AccountClassificationId.HasValue)
+            {
+                if (byId.TryGetValue(mapping.AccountClassificationId.Value, out var selected)
+                    && !string.IsNullOrWhiteSpace(mapping.AccountClassificationCode)
+                    && !selected.Code.Equals(mapping.AccountClassificationCode, StringComparison.OrdinalIgnoreCase))
+                    AddIssue(validation, "MAPPING_CLASSIFICATION_MISMATCH",
+                        $"Classification id and stable code '{mapping.AccountClassificationCode}' do not identify the same classification in the selected accounting book.", item.RowCode);
+                continue;
+            }
+            if (!string.IsNullOrWhiteSpace(mapping.AccountClassificationCode)
+                && byCode.TryGetValue(mapping.AccountClassificationCode, out var resolved))
+            {
+                mapping.AccountClassificationId = resolved.Id;
+                mapping.AccountClassificationCode = resolved.Code;
+            }
+            else if (!string.IsNullOrWhiteSpace(mapping.AccountClassificationCode))
+                AddIssue(validation, "MAPPING_CLASSIFICATION_UNKNOWN",
+                    $"Classification code '{mapping.AccountClassificationCode}' is not defined in template version 2 for the selected tenant accounting book. Free-text classification labels are not compatible.", item.RowCode);
+        }
     }
 
     public async Task<FinancialStatementLayoutImportResultDto>
@@ -1081,7 +1232,10 @@ public sealed class FinancialStatementLayoutImportService
                         sheet,
                         rowNumber,
                         columns,
-                        "ToAccountNumber"))));
+                        "ToAccountNumber")),
+                NullIfBlank(Cell(sheet, rowNumber, columns, "ClassificationCode")),
+                ParseBool(Cell(sheet, rowNumber, columns, "IncludeDescendants"), true, issues,
+                    "INCLUDE_DESCENDANTS_INVALID", rowCode)));
         }
 
         var accounts = definition.AccountingBookId == Guid.Empty
@@ -1114,6 +1268,14 @@ public sealed class FinancialStatementLayoutImportService
                 group => group.Key,
                 group => group.First(),
                 StringComparer.OrdinalIgnoreCase);
+        var classificationCodes = rawMappings.Where(item => item.ClassificationCode != null)
+            .Select(item => item.ClassificationCode!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var classifications = definition.AccountingBookId == Guid.Empty
+            ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            : await _context.AccountClassifications.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == definition.AccountingBookId
+                    && !item.IsDeleted && classificationCodes.Contains(item.Code))
+                .ToDictionaryAsync(item => item.Code, item => item.Id, StringComparer.OrdinalIgnoreCase, cancellationToken);
         foreach (var raw in rawMappings)
         {
             if (!rowsByCode.TryGetValue(raw.RowCode, out var row))
@@ -1127,6 +1289,7 @@ public sealed class FinancialStatementLayoutImportService
             }
 
             Guid? accountId = null;
+            Guid? classificationId = null;
             if (raw.MappingType is
                     FinancialStatementRowMappingType.Account or
                     FinancialStatementRowMappingType.AccountHierarchy)
@@ -1147,12 +1310,25 @@ public sealed class FinancialStatementLayoutImportService
                     accountId = resolvedAccountId;
                 }
             }
+            else if (raw.MappingType == FinancialStatementRowMappingType.Classification)
+            {
+                if (raw.ClassificationCode == null || !classifications.TryGetValue(raw.ClassificationCode, out var resolvedClassificationId))
+                {
+                    AddIssue(issues, "MAPPING_CLASSIFICATION_UNKNOWN",
+                        $"Classification code '{raw.ClassificationCode}' is not defined in template version 2 for the selected tenant accounting book. Free-text classification labels are not compatible.", raw.RowCode);
+                }
+                else classificationId = resolvedClassificationId;
+            }
 
             row.Mappings.Add(
                 new FinancialStatementRowMappingInputDto
                 {
                     MappingType = raw.MappingType,
                     AccountId = accountId,
+                    AccountNumber = raw.AccountNumber,
+                    AccountClassificationId = classificationId,
+                    AccountClassificationCode = raw.ClassificationCode?.ToUpperInvariant(),
+                    IncludeClassificationDescendants = raw.IncludeDescendants,
                     FromAccountNumber = raw.FromAccountNumber,
                     ToAccountNumber = raw.ToAccountNumber
                 });
@@ -1173,7 +1349,11 @@ public sealed class FinancialStatementLayoutImportService
                 "AccountingBookName",
                 "AccountNumber",
                 "AccountName",
-                "AccountType"
+                "AccountType",
+                "ClassificationCode",
+                "ClassificationName",
+                "ClassificationStatus",
+                "IsPostingClassification"
             });
         var books = await _context.AccountingBooks
             .AsNoTracking()
@@ -1190,7 +1370,11 @@ public sealed class FinancialStatementLayoutImportService
                 !account.IsDeleted)
             .OrderBy(account => account.AccountNumber)
             .ToListAsync(cancellationToken);
-        var count = Math.Max(books.Count, accounts.Count);
+        var classifications = await _context.AccountClassifications.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+            .OrderBy(item => item.AccountingBookId).ThenBy(item => item.DisplayOrder).ThenBy(item => item.Code)
+            .ToListAsync(cancellationToken);
+        var count = Math.Max(Math.Max(books.Count, accounts.Count), classifications.Count);
         for (var index = 0; index < count; index++)
         {
             var row = index + 2;
@@ -1208,6 +1392,13 @@ public sealed class FinancialStatementLayoutImportService
                     accounts[index].AccountName;
                 sheet.Cell(row, 6).Value =
                     accounts[index].AccountType.ToString();
+            }
+            if (index < classifications.Count)
+            {
+                sheet.Cell(row, 7).Value = classifications[index].Code;
+                sheet.Cell(row, 8).Value = classifications[index].Name;
+                sheet.Cell(row, 9).Value = classifications[index].Status.ToString();
+                sheet.Cell(row, 10).Value = classifications[index].IsPostingClassification;
             }
         }
         if (sheet.LastCellUsed() != null)
@@ -1227,7 +1418,7 @@ public sealed class FinancialStatementLayoutImportService
             ("Required sheets", "Metadata, Rows, Mappings"),
             ("Safety", "Do not rename sheets or headers. Formulas in workbook cells, macros, and external links are rejected."),
             ("Row formula syntax", "Formula text may contain row references, parentheses, +/-, and SUM(FIRST:LAST)."),
-            ("Mappings", "Use AccountNumber for Account or AccountHierarchy mappings; use FromAccountNumber and ToAccountNumber for AccountRange."),
+            ("Mappings", "Use AccountNumber for Account or AccountHierarchy, a range for AccountRange, or an exact stable ClassificationCode for Classification. Free-text labels are rejected."),
             ("Production", "Import never publishes a version or makes a new layout the default.")
         };
         for (var index = 0; index < instructions.Length; index++)
@@ -1309,7 +1500,9 @@ public sealed class FinancialStatementLayoutImportService
                 "MappingType",
                 "AccountNumber",
                 "FromAccountNumber",
-                "ToAccountNumber"
+                "ToAccountNumber",
+                "ClassificationCode",
+                "IncludeDescendants"
             });
         sheet.Cell(2, 2).Value = "Account";
     }
@@ -1405,6 +1598,10 @@ public sealed class FinancialStatementLayoutImportService
                                         mapping.MappingType,
                                     AccountId =
                                         NonEmpty(mapping.AccountId),
+                                    AccountNumber = NullIfBlank(mapping.AccountNumber),
+                                    AccountClassificationId = NonEmpty(mapping.AccountClassificationId),
+                                    AccountClassificationCode = NullIfBlank(mapping.AccountClassificationCode)?.ToUpperInvariant(),
+                                    IncludeClassificationDescendants = mapping.IncludeClassificationDescendants,
                                     FromAccountNumber =
                                         NullIfBlank(
                                             mapping
@@ -1687,7 +1884,9 @@ public sealed class FinancialStatementLayoutImportService
         FinancialStatementRowMappingType MappingType,
         string? AccountNumber,
         string? FromAccountNumber,
-        string? ToAccountNumber);
+        string? ToAccountNumber,
+        string? ClassificationCode,
+        bool IncludeDescendants);
 
     private sealed record LegacyAccount(
         Guid Id,

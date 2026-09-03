@@ -21,6 +21,53 @@ public sealed class FinancialStatementLayoutImportServiceTests
 {
     [Fact]
     [Trait("Category", "Reporting")]
+    public async Task ClassificationImport_ShouldRequireV2StableCodeAndRoundTripIt()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var classification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "CASH", Name = "Cash and cash equivalents", CoreAccountType = AccountType.Asset,
+            Status = AccountClassificationStatus.Active, IsPostingClassification = true
+        };
+        context.AccountClassifications.Add(classification);
+        await context.SaveChangesAsync();
+        var fixture = CreateServices(context, tenantId);
+        var definition = new FinancialStatementLayoutImportDefinitionDto
+        {
+            TemplateVersion = "2", Code = "BS_CLASS_IMPORT", Name = "Classified Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id,
+            Rows =
+            {
+                new FinancialStatementRowInputDto
+                {
+                    RowCode = "CASH", Label = "Cash", RowType = FinancialStatementRowType.Account,
+                    DisplayOrder = 10, SignMultiplier = 1, IsVisible = true,
+                    Mappings = { new FinancialStatementRowMappingInputDto
+                    {
+                        MappingType = FinancialStatementRowMappingType.Classification,
+                        AccountClassificationCode = "CASH", IncludeClassificationDescendants = true
+                    } }
+                }
+            }
+        };
+
+        var preview = await fixture.Import.PreviewDefinitionAsync(definition);
+        preview.Validation.IsValid.Should().BeTrue();
+        preview.Definition.Rows.Single().Mappings.Single().AccountClassificationId.Should().Be(classification.Id);
+        preview.Definition.Rows.Single().Mappings.Single().AccountClassificationCode.Should().Be("CASH");
+
+        definition.TemplateVersion = "1";
+        definition.Rows.Single().Mappings.Single().AccountClassificationCode = "Cash and cash equivalents";
+        var incompatible = await fixture.Import.PreviewDefinitionAsync(definition);
+        incompatible.Validation.Issues.Should().Contain(item => item.Code == "TEMPLATE_VERSION_INVALID");
+        incompatible.Validation.Issues.Should().Contain(item => item.Code == "MAPPING_CLASSIFICATION_UNKNOWN");
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
     [Trait("Category", "Spreadsheet")]
     public async Task JsonImport_ShouldRequirePreviewHashAndCreateDraftOnly()
     {

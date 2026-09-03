@@ -46,6 +46,21 @@ public sealed class AccountClassificationWhereUsedDto
     public int TotalMappings { get; set; }
     public int EnabledMappings { get; set; }
     public IReadOnlyList<AccountClassificationUsageDto> Mappings { get; set; } = [];
+    public int DraftLayoutReferences { get; set; }
+    public int PublishedLayoutReferences { get; set; }
+    public IReadOnlyList<AccountClassificationLayoutUsageDto> LayoutReferences { get; set; } = [];
+}
+
+public sealed class AccountClassificationLayoutUsageDto
+{
+    public Guid LayoutId { get; set; }
+    public string LayoutCode { get; set; } = string.Empty;
+    public string LayoutName { get; set; } = string.Empty;
+    public Guid VersionId { get; set; }
+    public int VersionNumber { get; set; }
+    public string VersionStatus { get; set; } = string.Empty;
+    public string RowCode { get; set; } = string.Empty;
+    public bool IsHistoricalSnapshot { get; set; }
 }
 
 public sealed class SaveAccountClassificationDto

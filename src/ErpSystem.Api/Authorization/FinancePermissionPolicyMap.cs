@@ -619,14 +619,14 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "PublishVersion" => One(FinancePermissions.PublishFinancialStatementLayouts),
-            "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "ReplaceDraftRows"
-                or "PreviewVersion" or "DownloadImportTemplate"
+            "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "CloneProtectedStandard" or "ReplaceDraftRows"
+                or "DownloadImportTemplate"
                 or "PreviewJsonImport" or "CommitJsonImport"
                 or "PreviewWorkbookImport" or "CommitWorkbookImport"
                 or "PreviewLegacyMigration" or "CommitLegacyMigration" =>
                 One(FinancePermissions.ManageFinancialStatementLayouts),
             "ValidateVersion" => One(FinancePermissions.ManageFinancialStatementLayouts),
-            "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
+            "PreviewVersion" or "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
         };
 

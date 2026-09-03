@@ -128,6 +128,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinancialStatementLayoutVersion> FinancialStatementLayoutVersions { get; set; }
     public DbSet<FinancialStatementRow> FinancialStatementRows { get; set; }
     public DbSet<FinancialStatementRowMapping> FinancialStatementRowMappings { get; set; }
+    public DbSet<FinancialStatementPublicationAccount> FinancialStatementPublicationAccounts { get; set; }
     public DbSet<AccountSegmentValue> AccountSegmentValues { get; set; }
     public DbSet<FinanceSettings> FinanceSettings { get; set; }
     public DbSet<FinanceAccessScopeGrant> FinanceAccessScopeGrants { get; set; }
@@ -2880,6 +2881,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Name).HasMaxLength(150).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.StandardSourceLayout)
+                .WithMany()
+                .HasForeignKey(e => e.StandardSourceLayoutId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.AccountingBook)
                 .WithMany()
                 .HasForeignKey(e => e.AccountingBookId)
@@ -2897,6 +2902,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.Status, e.EffectiveFrom, e.EffectiveTo });
             entity.Property(e => e.PublishedByName).HasMaxLength(200);
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.PublicationSnapshotSchemaVersion).HasMaxLength(20);
+            entity.Property(e => e.PublishedAccountingBookCode).HasMaxLength(20);
+            entity.Property(e => e.PublishedAccountingBookName).HasMaxLength(100);
+            entity.Property(e => e.HierarchyFingerprint).HasMaxLength(64);
+            entity.Property(e => e.ResolutionFingerprint).HasMaxLength(64);
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne(e => e.FinancialStatementLayout)
                 .WithMany(layout => layout.Versions)
@@ -2935,6 +2945,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("FinancialStatementRowMappings");
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementRowId });
             entity.HasIndex(e => new { e.TenantId, e.AccountId });
+            entity.HasIndex(e => new { e.TenantId, e.AccountClassificationId });
             entity.Property(e => e.FromAccountNumber).HasMaxLength(100);
             entity.Property(e => e.ToAccountNumber).HasMaxLength(100);
             entity.HasOne(e => e.FinancialStatementRow)
@@ -2945,6 +2956,41 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountClassification)
+                .WithMany()
+                .HasForeignKey(e => e.AccountClassificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinancialStatementPublicationAccount>(entity =>
+        {
+            entity.ToTable("FinancialStatementPublicationAccounts");
+            entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutVersionId, e.AccountId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.AccountClassificationId });
+            entity.Property(e => e.RowCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AccountNumber).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.AccountName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.AccountingBookCode).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ClassificationCode).HasMaxLength(50);
+            entity.Property(e => e.ClassificationName).HasMaxLength(200);
+            entity.Property(e => e.ClassificationPath).HasMaxLength(1000);
+            entity.Property(e => e.MappingSelector).HasMaxLength(500);
+            entity.HasOne(e => e.FinancialStatementLayoutVersion)
+                .WithMany(e => e.PublicationAccounts)
+                .HasForeignKey(e => e.FinancialStatementLayoutVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.FinancialStatementRow)
+                .WithMany()
+                .HasForeignKey(e => e.FinancialStatementRowId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.FinancialStatementRowMapping)
+                .WithMany()
+                .HasForeignKey(e => e.FinancialStatementRowMappingId)
+                .OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)

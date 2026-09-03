@@ -169,6 +169,7 @@
     <Compile Include="Services\Finance\FinanceDemoPrerequisiteSeederTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSpreadsheetServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
+    <Compile Include="Services\Finance\FinancialStatementClassificationLayoutPhase3Tests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <!-- FIN-INT-012/013 is an inter-team callable promise. Keep its fail-closed ownership,

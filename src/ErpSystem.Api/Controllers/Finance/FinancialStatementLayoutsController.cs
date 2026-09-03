@@ -138,6 +138,28 @@ public sealed class FinancialStatementLayoutsController : ControllerBase
         }
     }
 
+    [HttpPost("{layoutId:guid}/clone")]
+    [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
+    public async Task<ActionResult<FinancialStatementLayoutDto>> CloneProtectedStandard(
+        Guid layoutId,
+        [FromBody] CloneFinancialStatementLayoutDto request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var layout = await _service.CloneProtectedStandardAsync(layoutId, request, cancellationToken);
+            return CreatedAtAction(nameof(GetLayout), new { layoutId = layout.Id }, layout);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpPut("versions/{versionId:guid}/rows")]
     [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
     public async Task<ActionResult<FinancialStatementLayoutVersionDto>> ReplaceDraftRows(
@@ -219,7 +241,7 @@ public sealed class FinancialStatementLayoutsController : ControllerBase
     }
 
     [HttpPost("versions/{versionId:guid}/preview")]
-    [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
+    [Authorize(Policy = FinancePermissions.RunFinanceReports)]
     public async Task<ActionResult<FinancialStatementLayoutExecutionDto>> PreviewVersion(
         Guid versionId,
         [FromBody] FinancialStatementLayoutPreviewRequestDto request,
@@ -280,6 +302,28 @@ public sealed class FinancialStatementLayoutsController : ControllerBase
         var file = await _importService.CreateWorkbookTemplateAsync(
             cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
+    }
+
+    [HttpGet("versions/{versionId:guid}/exports/json")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<ActionResult<FinancialStatementLayoutImportDefinitionDto>> ExportJson(
+        Guid versionId, CancellationToken cancellationToken = default)
+    {
+        try { return Ok(await _importService.ExportDefinitionAsync(versionId, cancellationToken)); }
+        catch (KeyNotFoundException exception) { return NotFound(new { message = exception.Message }); }
+    }
+
+    [HttpGet("versions/{versionId:guid}/exports/workbook")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> ExportWorkbook(
+        Guid versionId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var file = await _importService.ExportWorkbookAsync(versionId, cancellationToken);
+            return File(file.Content, file.ContentType, file.FileName);
+        }
+        catch (KeyNotFoundException exception) { return NotFound(new { message = exception.Message }); }
     }
 
     [HttpPost("imports/json/preview")]
