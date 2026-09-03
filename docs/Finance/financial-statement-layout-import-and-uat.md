@@ -92,7 +92,11 @@ Mappings reference their statement `RowCode`.
 - `AccountHierarchy`: use the hierarchy root `AccountNumber`.
 - `AccountRange`: use `FromAccountNumber` and `ToAccountNumber`.
 - `Classification`: use the exact stable `ClassificationCode` from the selected
-  book and set `IncludeClassificationDescendants` explicitly.
+  book and set `IncludeClassificationDescendants` explicitly. Version 2 JSON
+  imports require the stable code even when an internal classification ID is
+  supplied. An optional ID must resolve to the same tenant/book classification
+  as the code; IDs alone are rejected because they are not portable. Finance
+  JSON exports omit tenant-local classification IDs and carry the stable code.
 
 Account numbers are resolved only against accounts enabled for the selected
 tenant accounting book. Classification display names are explanatory only;
@@ -115,7 +119,7 @@ Published and retired versions execute only from that snapshot. Renaming or
 reparenting a classification, reclassifying an account, disabling an account
 mapping, or editing a later Draft does not change historical execution. A
 fingerprint mismatch fails closed as snapshot tampering. Existing published
-versions created before snapshot schema v1 cannot be executed through the new
+versions created before snapshot schema v2 cannot be executed through the new
 path; during the approved development reset they must be recreated and
 published, not silently backfilled from current hierarchy state.
 

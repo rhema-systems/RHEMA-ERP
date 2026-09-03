@@ -320,6 +320,39 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
 
     [Fact]
     [Trait("Category", "Reporting")]
+    public async Task ExecutePublished_ShouldFailClosedWhenFrozenBookEvidenceIsTampered()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        var layout = SeedLayout(context, tenantId, book, FinancialStatementType.BalanceSheet,
+            FinancialStatementLayoutVersionStatus.Published);
+        var version = layout.Versions.Single();
+        AddRow(version, tenantId, "CASH", "Cash", FinancialStatementRowType.Account, 10,
+            mapping: ExactMapping(tenantId, cash.Id));
+        FreezeExactSnapshot(version, book, cash);
+        await context.SaveChangesAsync();
+
+        version.PublishedAccountingBookName = "Tampered book name";
+        await context.SaveChangesAsync();
+
+        var execute = () => CreateService(context, tenantId).ExecutePublishedAsync(
+            new FinancialStatementLayoutExecutionRequestDto
+            {
+                StatementType = FinancialStatementType.BalanceSheet,
+                AccountingBookId = book.Id,
+                PeriodEnd = new DateTime(2026, 8, 31)
+            });
+
+        var error = await execute.Should().ThrowAsync<FinancialStatementLayoutValidationException>();
+        error.Which.Validation.Issues.Should().ContainSingle(item =>
+            item.Code == "PUBLICATION_SNAPSHOT_TAMPERED"
+            && item.Severity == FinancialStatementLayoutValidationSeverity.Error);
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
     public async Task PreviewVersion_ShouldApplySelectedAccountFilters()
     {
         var tenantId = Guid.NewGuid();
@@ -737,7 +770,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             version.TenantId, book.Id, hierarchy ?? Array.Empty<AccountClassification>());
         version.PublicationAccounts.Add(snapshot);
         version.ResolutionFingerprint = FinancialStatementPublicationFingerprint.Resolution(
-            version.TenantId, version.Id, book.Id, book.Code, version.HierarchyFingerprint, version.PublicationAccounts);
+            version.TenantId, version.Id, book.Id, book.Code, book.Name,
+            version.HierarchyFingerprint, version.PublicationAccounts);
     }
 
     private static void SeedPostedTransaction(

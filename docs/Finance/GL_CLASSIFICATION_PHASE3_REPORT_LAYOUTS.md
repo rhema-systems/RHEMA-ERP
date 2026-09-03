@@ -20,14 +20,15 @@ supported.
 ## Immutable publication evidence
 
 Publishing a Draft resolves every contributing mapping and persists snapshot
-schema `1` evidence in the same serializable transaction as the version state,
+schema `2` evidence in the same serializable transaction as the version state,
 prior-version retirement, and Finance audit event. Each captured account records:
 
-- exact accounting-book ID, stable code, and frozen name;
+- exact accounting-book ID and stable code on every captured row;
 - row and source-mapping identity plus a readable frozen selector;
 - account ID, number, name, and core account type;
 - classification ID, stable code, frozen name, and frozen hierarchy path;
-- deterministic hierarchy and resolution fingerprints on the version;
+- deterministic hierarchy and resolution fingerprints on the version, including
+  the frozen header book ID, stable code, and name;
 - publication actor and timestamp on the version.
 
 An audit or snapshot write failure rolls back publication. Published and retired
@@ -48,9 +49,12 @@ publication, never mutation of an old snapshot.
   mappings on Draft account rows.
 - Published snapshot count and fingerprints are visible in version inspection.
 - Contract/template version `2` adds `ClassificationCode` and
-  `IncludeClassificationDescendants`. Version 1 and unknown/free-text values
-  fail with compatibility errors.
+  `IncludeClassificationDescendants`. JSON imports require the stable code;
+  an optional ID must identify the same exact-book classification. ID-only,
+  version 1, unknown, mismatched, and free-text values fail with compatibility
+  errors.
 - JSON and XLSX exports preserve stable classification selectors.
+  JSON definitions deliberately omit tenant-local classification IDs.
 - Protected Balance Sheet and Income Statement standards are seeded per active,
   posting-enabled canonical book. They are clone-only and never edited,
   retired, or published in place.
@@ -59,10 +63,11 @@ publication, never mutation of an old snapshot.
   are blocked by live Draft references; historical snapshots remain visible but
   do not weaken Phase 2 lifecycle controls.
 
-Permissions remain split: `Finance.Read` for browsing/audit/export,
-`Finance.Reports.Run` for preview and published execution,
-`Finance.Reports.Layouts.Manage` for Draft mutation/import/clone, and
-`Finance.Reports.Layouts.Publish` for publication.
+Permissions remain split: `Finance.Read` is the prerequisite for workspace
+browsing, loading, audit, and export. `Finance.Reports.Run`,
+`Finance.Reports.Layouts.Manage`, and
+`Finance.Reports.Layouts.Publish` are additional action gates and never
+substitute for read access.
 
 ## Migration and existing data
 
@@ -75,7 +80,7 @@ untouched.
 
 Preexisting Published or Retired versions have no trustworthy historic resolved
 membership to backfill. They therefore fail closed until recreated and published
-under snapshot schema 1. This is compatible with the approved pre-live reset and
+under snapshot schema 2. This is compatible with the approved pre-live reset and
 avoids fabricating historical evidence from today's hierarchy.
 
 ## Legacy consumer inventory and cutover boundary

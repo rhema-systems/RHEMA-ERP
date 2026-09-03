@@ -32,11 +32,38 @@ public sealed class FinancialStatementClassificationLayoutPhase3Tests
 
         var first = Snapshot(tenantId, versionId, bookId, "1000", "Cash");
         var second = Snapshot(tenantId, versionId, bookId, "1100", "Receivable");
-        var fingerprint = FinancialStatementPublicationFingerprint.Resolution(tenantId, versionId, bookId, "IFRS", firstHierarchy, new[] { second, first });
-        FinancialStatementPublicationFingerprint.Resolution(tenantId, versionId, bookId, "IFRS", firstHierarchy, new[] { first, second })
+        FinancialStatementPublicationFingerprint.SnapshotSchemaVersion.Should().Be("2");
+        var fingerprint = FinancialStatementPublicationFingerprint.Resolution(
+            tenantId, versionId, bookId, "IFRS", "IFRS Primary", firstHierarchy, new[] { second, first });
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, bookId, "IFRS", "IFRS Primary", firstHierarchy, new[] { first, second })
             .Should().Be(fingerprint);
+
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, Guid.NewGuid(), "IFRS", "IFRS Primary", firstHierarchy, new[] { first, second })
+            .Should().NotBe(fingerprint, "the frozen header book id is evidence");
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, bookId, "LOCAL", "IFRS Primary", firstHierarchy, new[] { first, second })
+            .Should().NotBe(fingerprint, "the frozen header book code is evidence");
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, bookId, "IFRS", "Renamed book", firstHierarchy, new[] { first, second })
+            .Should().NotBe(fingerprint, "the frozen header book name is evidence");
+
+        var originalRowBookId = second.AccountingBookId;
+        second.AccountingBookId = Guid.NewGuid();
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, bookId, "IFRS", "IFRS Primary", firstHierarchy, new[] { first, second })
+            .Should().NotBe(fingerprint, "each frozen row book id is evidence");
+        second.AccountingBookId = originalRowBookId;
+        second.AccountingBookCode = "LOCAL";
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, bookId, "IFRS", "IFRS Primary", firstHierarchy, new[] { first, second })
+            .Should().NotBe(fingerprint, "each frozen row book code is evidence");
+        second.AccountingBookCode = "IFRS";
+
         second.AccountName = "Tampered receivable";
-        FinancialStatementPublicationFingerprint.Resolution(tenantId, versionId, bookId, "IFRS", firstHierarchy, new[] { first, second })
+        FinancialStatementPublicationFingerprint.Resolution(
+                tenantId, versionId, bookId, "IFRS", "IFRS Primary", firstHierarchy, new[] { first, second })
             .Should().NotBe(fingerprint);
         child.Name = "Renamed cash";
         FinancialStatementPublicationFingerprint.Hierarchy(tenantId, bookId, new[] { parent, child })

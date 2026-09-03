@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Reporting;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -74,7 +75,8 @@ public sealed class FinancialStatementLayoutServiceTests
         published.Rows.Select(row => row.RowCode)
             .Should().ContainInOrder("1000", "1100", "1200", "1900");
         published.PublishedAt.Should().NotBeNull();
-        published.PublicationSnapshotSchemaVersion.Should().Be("1");
+        published.PublicationSnapshotSchemaVersion.Should().Be(
+            FinancialStatementPublicationFingerprint.SnapshotSchemaVersion);
         published.PublicationAccountCount.Should().Be(2);
         published.HierarchyFingerprint.Should().HaveLength(64);
         published.ResolutionFingerprint.Should().HaveLength(64);

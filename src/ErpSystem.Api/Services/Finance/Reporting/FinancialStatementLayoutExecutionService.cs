@@ -799,7 +799,8 @@ public sealed class FinancialStatementLayoutExecutionService
         }
         var actual = FinancialStatementPublicationFingerprint.Resolution(
             version.TenantId, version.Id, version.PublishedAccountingBookId.Value,
-            version.PublishedAccountingBookCode, version.HierarchyFingerprint,
+            version.PublishedAccountingBookCode, version.PublishedAccountingBookName,
+            version.HierarchyFingerprint,
             version.PublicationAccounts.Where(item => !item.IsDeleted));
         if (!actual.Equals(version.ResolutionFingerprint, StringComparison.Ordinal))
         {

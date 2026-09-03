@@ -117,7 +117,10 @@ public sealed class FinancialStatementLayoutImportService
                     MappingType = mapping.MappingType, AccountId = mapping.AccountId,
                     AccountNumber = mapping.Account?.AccountNumber,
                     FromAccountNumber = mapping.FromAccountNumber, ToAccountNumber = mapping.ToAccountNumber,
-                    AccountClassificationId = mapping.AccountClassificationId,
+                    // Stable codes are the portable import/export authority.
+                    // Database ids are tenant-local and must not leak into a
+                    // definition intended to move between environments.
+                    AccountClassificationId = null,
                     AccountClassificationCode = mapping.AccountClassification?.Code,
                     IncludeClassificationDescendants = mapping.IncludeClassificationDescendants
                 }).ToList()
@@ -228,41 +231,45 @@ public sealed class FinancialStatementLayoutImportService
         var mappings = definition.Rows.SelectMany(row => row.Mappings.Select(mapping => new { row.RowCode, Mapping = mapping }))
             .Where(item => item.Mapping.MappingType == FinancialStatementRowMappingType.Classification)
             .ToList();
-        if (mappings.Count == 0 || definition.AccountingBookId == Guid.Empty) return;
+        if (mappings.Count == 0) return;
+
+        foreach (var item in mappings.Where(item => string.IsNullOrWhiteSpace(item.Mapping.AccountClassificationCode)))
+            AddIssue(validation, "MAPPING_CLASSIFICATION_CODE_REQUIRED",
+                "Template version 2 requires a stable AccountClassificationCode for every Classification mapping; an id alone is not portable and cannot substitute for the code.", item.RowCode);
+
+        if (definition.AccountingBookId == Guid.Empty) return;
 
         var codes = mappings.Where(item => !string.IsNullOrWhiteSpace(item.Mapping.AccountClassificationCode))
             .Select(item => item.Mapping.AccountClassificationCode!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var ids = mappings.Where(item => item.Mapping.AccountClassificationId.HasValue)
-            .Select(item => item.Mapping.AccountClassificationId!.Value).Distinct().ToArray();
         var available = await _context.AccountClassifications.AsNoTracking()
             .Where(item => item.TenantId == TenantId && item.AccountingBookId == definition.AccountingBookId
-                && !item.IsDeleted && (codes.Contains(item.Code) || ids.Contains(item.Id)))
+                && !item.IsDeleted && codes.Contains(item.Code))
             .Select(item => new { item.Id, item.Code })
             .ToListAsync(cancellationToken);
         var byCode = available.ToDictionary(item => item.Code, StringComparer.OrdinalIgnoreCase);
-        var byId = available.ToDictionary(item => item.Id);
 
         foreach (var item in mappings)
         {
             var mapping = item.Mapping;
-            if (mapping.AccountClassificationId.HasValue)
+            if (string.IsNullOrWhiteSpace(mapping.AccountClassificationCode))
+                continue;
+
+            if (!byCode.TryGetValue(mapping.AccountClassificationCode, out var resolved))
             {
-                if (byId.TryGetValue(mapping.AccountClassificationId.Value, out var selected)
-                    && !string.IsNullOrWhiteSpace(mapping.AccountClassificationCode)
-                    && !selected.Code.Equals(mapping.AccountClassificationCode, StringComparison.OrdinalIgnoreCase))
-                    AddIssue(validation, "MAPPING_CLASSIFICATION_MISMATCH",
-                        $"Classification id and stable code '{mapping.AccountClassificationCode}' do not identify the same classification in the selected accounting book.", item.RowCode);
+                AddIssue(validation, "MAPPING_CLASSIFICATION_UNKNOWN",
+                    $"Stable classification code '{mapping.AccountClassificationCode}' is not defined in template version 2 for the selected tenant accounting book. Display names and free-text labels are not compatible.", item.RowCode);
                 continue;
             }
-            if (!string.IsNullOrWhiteSpace(mapping.AccountClassificationCode)
-                && byCode.TryGetValue(mapping.AccountClassificationCode, out var resolved))
+
+            if (mapping.AccountClassificationId.HasValue && mapping.AccountClassificationId.Value != resolved.Id)
             {
-                mapping.AccountClassificationId = resolved.Id;
-                mapping.AccountClassificationCode = resolved.Code;
+                AddIssue(validation, "MAPPING_CLASSIFICATION_MISMATCH",
+                    $"Classification id and stable code '{mapping.AccountClassificationCode}' do not identify the same classification in the selected tenant accounting book.", item.RowCode);
+                continue;
             }
-            else if (!string.IsNullOrWhiteSpace(mapping.AccountClassificationCode))
-                AddIssue(validation, "MAPPING_CLASSIFICATION_UNKNOWN",
-                    $"Classification code '{mapping.AccountClassificationCode}' is not defined in template version 2 for the selected tenant accounting book. Free-text classification labels are not compatible.", item.RowCode);
+
+            mapping.AccountClassificationId = resolved.Id;
+            mapping.AccountClassificationCode = resolved.Code;
         }
     }
 

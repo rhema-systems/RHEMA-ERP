@@ -64,6 +64,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financialStatementLayoutDataService } from '@/services/finance/financial-statement-layout-data.service';
+import { resolveFinancialStatementLayoutPermissions } from './permissions';
 import type {
     AccountingBook,
     AccountClassification,
@@ -82,10 +83,6 @@ import type {
     LegacyFinancialStatementLayoutMigrationRequestDto,
 } from '@/types/finance';
 
-const MANAGE_PERMISSION = 'Finance.Reports.Layouts.Manage';
-const PUBLISH_PERMISSION = 'Finance.Reports.Layouts.Publish';
-const RUN_PERMISSION = 'Finance.Reports.Run';
-const VIEW_PERMISSION = 'Finance.Read';
 const today = new Date().toISOString().slice(0, 10);
 const yearStart = `${new Date().getFullYear()}-01-01`;
 
@@ -1165,10 +1162,8 @@ function LayoutDetailDialog({
 export default function FinancialStatementLayoutsPage() {
     const { toast } = useToast();
     const { hasPermission, isLoading: authLoading } = useAuth();
-    const canManage = hasPermission(MANAGE_PERMISSION);
-    const canPublish = hasPermission(PUBLISH_PERMISSION);
-    const canRun = hasPermission(RUN_PERMISSION);
-    const canView = hasPermission(VIEW_PERMISSION) || canManage || canPublish || canRun;
+    const { canRead, canManage, canPublish, canRun } =
+        resolveFinancialStatementLayoutPermissions(hasPermission);
     const [layouts, setLayouts] = useState<FinancialStatementLayoutSummaryDto[]>([]);
     const [books, setBooks] = useState<AccountingBook[]>([]);
     const [statementType, setStatementType] = useState<'all' | FinancialStatementType>('all');
@@ -1181,7 +1176,7 @@ export default function FinancialStatementLayoutsPage() {
     const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
 
     const load = useCallback(async () => {
-        if (!canView) {
+        if (!canRead) {
             setLoading(false);
             return;
         }
@@ -1209,7 +1204,7 @@ export default function FinancialStatementLayoutsPage() {
         } finally {
             setLoading(false);
         }
-    }, [bookId, canView, includeInactive, statementType, toast]);
+    }, [bookId, canRead, includeInactive, statementType, toast]);
 
     useEffect(() => {
         if (!authLoading) void load();
@@ -1235,12 +1230,12 @@ export default function FinancialStatementLayoutsPage() {
         return <div className="flex min-h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
     }
 
-    if (!canView) {
+    if (!canRead) {
         return (
             <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Access restricted</AlertTitle>
-                <AlertDescription>You need Finance.Read or a financial-statement layout permission to open this workspace.</AlertDescription>
+                <AlertDescription>You need Finance.Read to browse financial-statement layouts. Action permissions do not grant read access.</AlertDescription>
             </Alert>
         );
     }

@@ -537,7 +537,8 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
                 version.PublicationAccounts = snapshot.Accounts;
                 version.ResolutionFingerprint = FinancialStatementPublicationFingerprint.Resolution(
                     TenantId, version.Id, version.PublishedAccountingBookId.Value,
-                    version.PublishedAccountingBookCode, version.HierarchyFingerprint, snapshot.Accounts);
+                    version.PublishedAccountingBookCode, version.PublishedAccountingBookName,
+                    version.HierarchyFingerprint, snapshot.Accounts);
                 version.Revision++;
                 version.UpdatedAt = now;
                 version.UpdatedBy = UserName;
