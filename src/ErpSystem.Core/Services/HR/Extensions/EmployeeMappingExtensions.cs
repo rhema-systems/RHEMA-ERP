@@ -100,6 +100,8 @@ public static class EmployeeMappingExtensions
             LocationLevelId = e.LocationLevelId,
             LocationId = e.LocationId,
             CountryId = e.CountryId,
+            // The edit form re-opens its address cascade from this id.
+            GeoAreaId = e.GeoAreaId,
             // Detail fields
             DateOfBirth = e.DateOfBirth,
             MaritalStatus = e.MaritalStatus,
@@ -323,11 +325,15 @@ public static class EmployeeMappingExtensions
             DateEmployed = dto.DateEmployed,
 
             Address = dto.Address,
+            // ⚠ City/State are written here from whatever the caller sent, then OVERWRITTEN by the
+            // service when GeoAreaId is set — see EmployeeService.ApplyGeoAreaSnapshotAsync. The
+            // tree wins; these two are a snapshot of it.
             City = dto.City,
             State = dto.State,
             PostalCode = dto.PostalCode,
             DigitalAddress = dto.DigitalAddress,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
             EmailAddress = dto.EmailAddress,
             TelephoneNumber = dto.TelephoneNumber,
             BusinessNumber = dto.BusinessNumber,
@@ -407,6 +413,14 @@ public static class EmployeeMappingExtensions
         if (dto.PostalCode != null) e.PostalCode = dto.PostalCode;
         if (dto.DigitalAddress != null) e.DigitalAddress = dto.DigitalAddress;
         if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
+
+        // ⚠ ClearGeoArea is checked FIRST and wins. A nullable id cannot say both "leave it alone"
+        // and "remove it", and every other optional field here reads null as "not supplied" — so
+        // without the explicit flag, emptying the region picker would save successfully and change
+        // nothing. The snapshot columns are left alone on a clear: the record still has to say
+        // where the person lives, even once the structured link is gone.
+        if (dto.ClearGeoArea) e.GeoAreaId = null;
+        else if (dto.GeoAreaId.HasValue) e.GeoAreaId = dto.GeoAreaId;
 
         // null = not supplied; blank = clear (email is optional since 2026-09-03). The service
         // re-applies the normalised value after this; kept here so Apply stays self-consistent.

@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { useQuery } from '@tanstack/react-query';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { AddressFields } from '@/components/reference/AddressFields';
 import { employeeService } from '@/services/hr/employee.service';
 import { referenceDimensionService } from '@/services/hr/lookup.service';
 import {
@@ -58,10 +59,15 @@ export const employeeSchema = z.object({
   mobileNumber: opt,
   telephoneNumber: opt,
   address: opt,
+  // ⚠ Snapshot fields since 2026-09-03. When geoAreaId is set the server overwrites both from the
+  // geography tree, so what is typed here only survives for a country with no scheme loaded.
   city: opt,
   state: opt,
   postalCode: opt,
   digitalAddress: opt,
+  countryId: opt,
+  /** The deepest administrative area chosen — one id, whatever the scheme's depth. */
+  geoAreaId: opt,
   positionId: z.string().min(1, 'Position is required'),
   organizationUnitId: z.string().min(1, 'Select a position to set the organization unit'),
   locationId: z.string().min(1, 'Location is required'),
@@ -132,6 +138,8 @@ export const emptyEmployee: EmployeeFormValues = {
   state: '',
   postalCode: '',
   digitalAddress: '',
+  countryId: '',
+  geoAreaId: '',
   positionId: '',
   organizationUnitId: '',
   locationId: '',
@@ -303,6 +311,8 @@ export function EmployeeForm({
 
   const positionId = form.watch('positionId');
   const locationId = form.watch('locationId');
+  const countryId = form.watch('countryId') ?? '';
+  const geoAreaId = form.watch('geoAreaId') ?? '';
   const isOnPayroll = form.watch('isOnPayroll');
   const managerId = form.watch('managerId') || null;
   const selectedPosition = positions.find((p) => p.id === positionId);
@@ -544,25 +554,56 @@ export function EmployeeForm({
                 <Input id="telephoneNumber" {...form.register('telephoneNumber')} />
               </Field>
             </div>
-            <div className={GRID3}>
-              <Field label="Address" htmlFor="address" className="sm:col-span-2">
-                <Input id="address" {...form.register('address')} />
-              </Field>
-              <Field label="City" htmlFor="city">
-                <Input id="city" {...form.register('city')} />
-              </Field>
-            </div>
-            <div className={GRID3}>
-              <Field label="State / Region" htmlFor="state">
-                <Input id="state" {...form.register('state')} />
-              </Field>
-              <Field label="Postal Code" htmlFor="postalCode">
-                <Input id="postalCode" {...form.register('postalCode')} />
-              </Field>
-              <Field label="Digital Address" htmlFor="digitalAddress">
-                <Input id="digitalAddress" {...form.register('digitalAddress')} />
-              </Field>
-            </div>
+            {/*
+              The address cascade. Its dropdown LABELS come from the selected country's scheme —
+              Region / District / Town / Community for Ghana — so this block carries no
+              country-specific code and never should.
+
+              ⚠ City and Region below are only editable when the country has no scheme loaded.
+              With one, the server rewrites both from the chosen area, so an editable box would be
+              a field that silently discards what you type.
+            */}
+            <AddressFields
+              countryId={countryId}
+              onCountryChange={(value) =>
+                form.setValue('countryId', value, { shouldValidate: true, shouldDirty: true })
+              }
+              geoAreaId={geoAreaId}
+              onGeoAreaChange={(value) =>
+                form.setValue('geoAreaId', value, { shouldValidate: true, shouldDirty: true })
+              }
+              fallback={(schemeLoaded) => (
+                <>
+                  <div className={`${GRID3} mt-4`}>
+                    <Field label="Address" htmlFor="address" className="sm:col-span-2">
+                      <Input id="address" {...form.register('address')} />
+                    </Field>
+                    <Field
+                      label="City / Town"
+                      htmlFor="city"
+                      hint={schemeLoaded ? 'Set from the address above' : undefined}
+                    >
+                      <Input id="city" {...form.register('city')} readOnly={schemeLoaded} disabled={schemeLoaded} />
+                    </Field>
+                  </div>
+                  <div className={GRID3}>
+                    <Field
+                      label="State / Region"
+                      htmlFor="state"
+                      hint={schemeLoaded ? 'Set from the address above' : undefined}
+                    >
+                      <Input id="state" {...form.register('state')} readOnly={schemeLoaded} disabled={schemeLoaded} />
+                    </Field>
+                    <Field label="Postal Code" htmlFor="postalCode">
+                      <Input id="postalCode" {...form.register('postalCode')} />
+                    </Field>
+                    <Field label="Digital Address" htmlFor="digitalAddress">
+                      <Input id="digitalAddress" {...form.register('digitalAddress')} />
+                    </Field>
+                  </div>
+                </>
+              )}
+            />
           </Section>
 
           {/* Employment */}

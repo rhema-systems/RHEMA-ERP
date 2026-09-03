@@ -1273,6 +1273,27 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(m => m.DirectReports)
                 .HasForeignKey(e => e.ManagerId)
                 .OnDelete(DeleteBehavior.NoAction); // Prevent cascading deletes
+
+            // Where the employee lives, in the shared administrative-geography tree (phase 2 of
+            // docs/GEOGRAPHY-REFERENCE-DESIGN.md).
+            //
+            // ⚠ Configured explicitly with .WithMany() and no inverse collection. GeoArea has no
+            // Employees navigation on purpose — every module will point at this tree, and a
+            // collection per consumer would turn a reference table into a hub — but an unpaired
+            // navigation left to convention mints a shadow FK (GeoAreaId1) beside this column.
+            //
+            // Restrict, not SetNull: deleting an area out from under the people who live in it must
+            // fail loudly. The service refuses it anyway with a message that points at end-dating;
+            // this is the backstop for anything that bypasses the service.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // "Everyone in the Ashanti Region" reads this, and it is the whole reporting argument
+            // for the column.
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_Employee_Tenant_GeoArea");
         });
 
         builder.Entity<EmployeeContact>(entity =>

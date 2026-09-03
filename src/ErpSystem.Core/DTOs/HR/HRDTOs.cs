@@ -62,6 +62,13 @@ public class EmployeeDetailDto : EmployeeDto
     public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where the employee lives, as one reference to the geography tree — the lowest tier known.
+    /// The edit form re-opens its cascade from this by asking for the area's ancestors.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
     public Guid? ShiftId { get; set; }
 
     public DateOnly? DateOfBirth { get; set; }
@@ -82,11 +89,24 @@ public class EmployeeDetailDto : EmployeeDto
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
     public string? Address { get; set; }
+
+    /// <summary>⚠ A display snapshot resolved from <c>GeoAreaId</c> when one is set — see the entity.</summary>
     public string? City { get; set; }
+
+    /// <summary>⚠ A display snapshot resolved from <c>GeoAreaId</c> when one is set — see the entity.</summary>
     public string? State { get; set; }
+
     public string? PostalCode { get; set; }
     public string? DigitalAddress { get; set; }
     public string? CountryName { get; set; }
+
+    // ⚠ No GeoAreaName / GeoAreaFullPath here, deliberately. Either would be null on every read
+    // whose query did not Include the navigation — the always-null-field shape this module has
+    // met repeatedly — and Include depth would have to be right in a dozen places. Lists print
+    // State and City, which is exactly what the snapshot columns are kept for; the edit form
+    // resolves the display chain from GeoAreaId through the geography service's ancestors
+    // endpoint, which it has to call anyway to re-open its cascade.
+
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }
     public string? Extension { get; set; }
@@ -200,11 +220,26 @@ public class CreateEmployeeDto
 
     // Contact Information
     public string? Address { get; set; }
+
+    /// <summary>
+    /// ⚠ Overwritten by the resolved town or district when <see cref="GeoAreaId"/> is supplied.
+    /// Only what a caller sends with no area survives.
+    /// </summary>
     public string? City { get; set; }
+
+    /// <summary>⚠ Overwritten by the resolved region when <see cref="GeoAreaId"/> is supplied.</summary>
     public string? State { get; set; }
+
     public string? PostalCode { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where the employee lives, as one reference to the geography tree — the lowest tier the
+    /// caller knows. When set, the service resolves the region and town from it and writes them
+    /// into <see cref="State"/> and <see cref="City"/>, so the two can never disagree.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
 
     /// <summary>Optional (2026-09-03). Format-checked and unique when supplied; blank means none.</summary>
     [ErpSystem.Core.Validation.OptionalEmailAddress]
@@ -297,11 +332,35 @@ public class UpdateEmployeeDto
 
     // Contact Information
     public string? Address { get; set; }
+
+    /// <summary>⚠ Overwritten by the resolved town or district when <see cref="GeoAreaId"/> is supplied.</summary>
     public string? City { get; set; }
+
+    /// <summary>⚠ Overwritten by the resolved region when <see cref="GeoAreaId"/> is supplied.</summary>
     public string? State { get; set; }
+
     public string? PostalCode { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where the employee lives. Supplying it also rewrites <see cref="State"/> and
+    /// <see cref="City"/> from the tree.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Following this DTO's convention, <c>null</c> means "not supplied" and leaves whatever the
+    /// record already had — the same limitation <c>CountryId</c> has. **To remove an area, send
+    /// <see cref="ClearGeoArea"/>**; a null on its own cannot mean both "leave it" and "clear it",
+    /// and without the flag a user who emptied the region picker would watch the save do nothing.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <summary>
+    /// Removes the employee's area. Wins over <see cref="GeoAreaId"/> if both are sent. The
+    /// snapshot columns are left as they are — the record still has to say where the person lives.
+    /// </summary>
+    public bool ClearGeoArea { get; set; }
+
     public string? EmailAddress { get; set; }
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }

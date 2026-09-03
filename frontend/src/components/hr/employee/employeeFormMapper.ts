@@ -32,10 +32,19 @@ export function employeeFormToRequest(values: EmployeeFormValues): CreateEmploye
     isFullTime: values.isFullTime,
     dateEmployed: s(values.dateEmployed),
     address: s(values.address),
+    // ⚠ Still sent, and still meaningful — but only for a country with no division scheme. When
+    // geoAreaId is set the server overwrites both from the tree, deliberately, so the structured
+    // link and the printed text can never disagree.
     city: s(values.city),
     state: s(values.state),
     postalCode: s(values.postalCode),
     digitalAddress: s(values.digitalAddress),
+    countryId: s(values.countryId),
+    geoAreaId: s(values.geoAreaId),
+    // ⚠ A null geoAreaId means "not supplied" to the update DTO, so emptying the picker has to say
+    // so explicitly or the save would succeed and change nothing. Only meaningful on update; the
+    // create DTO ignores it.
+    clearGeoArea: !values.geoAreaId,
     emailAddress: s(values.emailAddress),
     telephoneNumber: s(values.telephoneNumber),
     mobileNumber: s(values.mobileNumber),

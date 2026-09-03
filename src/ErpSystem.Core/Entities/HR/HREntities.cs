@@ -99,9 +99,19 @@ public class Employee : TenantEntity
     [MaxLength(500)]
     public string? Address { get; set; }
 
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since 2026-09-03, not the source of truth. When
+    /// <see cref="GeoAreaId"/> is set the service overwrites this with the resolved town or
+    /// district name. Kept because reports, integrations and ported rows read it, and because an
+    /// employee whose address predates the geography tree still has to say something.
+    /// </summary>
     [MaxLength(100)]
     public string? City { get; set; }
 
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since 2026-09-03 — see <see cref="City"/>. Overwritten with the
+    /// resolved region name when <see cref="GeoAreaId"/> is set.
+    /// </summary>
     [MaxLength(50)]
     public string? State { get; set; }
 
@@ -112,6 +122,23 @@ public class Employee : TenantEntity
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this employee lives, as one reference to the administrative geography tree.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ One FK, not one per tier.</b> It points at the <i>lowest</i> tier known — a
+    /// community if that is what was chosen, a district if not — and the ancestors come from
+    /// <c>GeoArea.Path</c>. That is what lets Ghana's scheme gain a fifth tier, or a second country
+    /// arrive with a different depth, without a migration on this table. A
+    /// <c>RegionId</c>/<c>DistrictId</c>/<c>TownId</c> trio would have to be migrated the day
+    /// either happened.</para>
+    ///
+    /// <para>Nullable and expected to stay null on plenty of rows: the register predates the
+    /// geography tree, and <see cref="State"/> / <see cref="City"/> carry whatever those rows
+    /// already said. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     /// <summary>
     /// Optional since 2026-09-03. A register never has an address for every driver, carpenter or
@@ -372,6 +399,10 @@ public class Employee : TenantEntity
     public virtual WorkStation? Station { get; set; }
     public virtual EmployeePosition Position { get; set; } = null!;
     public virtual Country? Country { get; set; }
+
+    /// <summary>The administrative area this employee lives in. See <see cref="GeoAreaId"/>.</summary>
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
+
     public virtual Employee? Manager { get; set; }
     public virtual LocationLevel? LocationLevel { get; set; }
     public virtual Location? Location { get; set; }

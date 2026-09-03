@@ -47,6 +47,10 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     state: d.state ?? '',
     postalCode: d.postalCode ?? '',
     digitalAddress: d.digitalAddress ?? '',
+    // The cascade re-opens itself from this one id by asking the geography service for its
+    // ancestors — which is why the DTO carries no per-tier ids to seed it with.
+    countryId: d.countryId ?? '',
+    geoAreaId: d.geoAreaId ?? '',
     positionId: d.positionId,
     organizationUnitId: d.organizationUnitId ?? '',
     locationId: d.locationId ?? '',

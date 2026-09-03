@@ -151,7 +151,7 @@ back into them (`Employee.State` ← region name, `Employee.City` ← town name)
 | Phase | Work | Notes |
 | --- | --- | --- |
 | **1** | ✅ **complete 2026-09-03** — entities, DbContext config, DTOs, service, 24 endpoints, admin screens, migration, Ghana seed pack | see §6.1 and §6.2 |
-| **2** | Shared `<AddressFields>` component reading the scheme for the selected country; wire **Employee** first | retires the free-text `State` input; closes the deferred Country→Region cascade |
+| **2** | ✅ **complete 2026-09-03** — `Employee.GeoAreaId`, snapshot write-back, shared `<AddressFields>`, Employee form wired, migration applied, 25 assertions green | see §6.4 |
 | **3** | Backfill pass + employee import catalogue gains Region / District / Town columns resolving by name-within-parent | unresolved values surface in the existing per-row diff rather than failing the import |
 | **4** | `Location.GeoAreaId`, `CompanyProfile`, medical facilities, travel destinations | |
 | **5** | Offer to other modules | Estate's `Region`/`District`/`Town` triple is the obvious first external taker |
@@ -240,6 +240,54 @@ against the API in Staging. Covers the by-country lookup, the four-tier cascade,
 alias resolution, the tree, and the refusals. Two of its assertions guard the pieces most likely to
 be regressed into: a dissolved region must be **withheld from the cascade but findable by
 `resolve`**, and a country with no scheme must answer **204, not 404**.
+
+### 6.4 Phase 2 — Employee on the tree (2026-09-03)
+
+| Layer | Change |
+| --- | --- |
+| Entity | `Employee.GeoAreaId` + nav; `State`/`City` re-documented as **display snapshots** |
+| EF | FK `Restrict`, explicit `.WithMany()`, index `IX_Employee_Tenant_GeoArea` |
+| Service | `IGeographyService.GetAddressSnapshotAsync` + `EmployeeService.ApplyGeoAreaSnapshotAsync` on both write paths |
+| DTOs | `GeoAreaId` on detail/create/update; `ClearGeoArea` on update |
+| Frontend | `components/reference/AddressFields.tsx`; `EmployeeForm` address block replaced; `countryId` now settable at all |
+
+**The tree wins over the text.** When `GeoAreaId` is set the service rewrites `State` and `City`
+from it, on create *before the insert* and on update *after `Apply`*. A caller sending both its own
+spelling and an area does not get to keep the spelling — otherwise the two drift and nobody can say
+which is right, which is the condition this module exists to end. A **null** area leaves both
+columns untouched: most of the register predates the tree and the free text is the only address
+those rows have.
+
+**⚠ `ClearGeoArea` exists because a nullable id cannot mean two things.** Every optional field on
+`UpdateEmployeeDto` reads `null` as "not supplied" (the same limitation `CountryId` has). Without
+an explicit flag, a user who emptied the region picker would watch the save succeed and change
+nothing — a silent no-op, the exact defect shape this module keeps finding in ported code.
+
+**⚠ No `GeoAreaName` on the DTO, deliberately.** It would be null on every read whose query did not
+`Include` the navigation, and the Include depth would have to be right in a dozen places. Lists
+print `State`/`City` — which is what the snapshot is *for* — and the edit form resolves the display
+chain from `GeoAreaId` through the ancestors endpoint it must call anyway to re-open its cascade.
+
+**Two gaps this closed on the way past:** the employee form had no country selector at all, so
+`Employee.CountryId` could never be set from the UI despite existing on the entity and both DTOs;
+and `State` was free text with no relationship to anything.
+
+**⚠ Deleting an area in use is refused by the SERVICE, not the foreign key.** Geography deletes are
+soft, so no constraint is ever consulted — an area with an employee living in it deleted cleanly,
+disappeared from every read, and took the address with it while leaving a dangling id. Found by the
+phase-2 harness on 2026-09-03. Each consumer now registers an `IGeoAreaConsumer` probe
+(`EmployeeGeoAreaConsumer` is the first) and `DeleteAreaAsync` asks them all. **A module that gains
+a `GeoAreaId` and does not register a probe gets no protection whatsoever** — phase 4 must add one
+per consumer, not just the column.
+
+**⚠ The legacy `api/Employees` controller bypasses `EmployeeService`** — AutoMapper writes straight
+to the entity, so it skips staff numbering, payroll validation and the snapshot write-back.
+`GeoAreaId` is therefore `Ignore()`d in both mapping profiles: the link is settable only through
+`api/hr/Employees`, which goes through the service. The wider problem — two employee write paths,
+one skipping every service rule — is pre-existing and out of this slice's scope.
+
+**Verified 2026-09-03:** migration applied; `run-phase2.mjs` in the geography harness —
+**25 assertions, 0 failures**, on top of phase 1's 42. The screens have not been browser-walked.
 
 ## 7. Conventions this build must honour
 

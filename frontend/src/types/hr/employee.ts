@@ -184,6 +184,8 @@ export interface EmployeeDetail extends Employee {
   managerId?: string | null;
   locationLevelId?: string | null;
   countryId?: string | null;
+  /** The deepest administrative area on record — one id whatever the scheme's depth. */
+  geoAreaId?: string | null;
   shiftId?: string | null;
   dateOfBirth?: string | null;
   maritalStatus?: MaritalStatus | null;
@@ -260,11 +262,20 @@ export interface CreateEmployeeRequest {
   isFullTime: boolean;
   dateEmployed?: string | null;
   address?: string | null;
+  /** ⚠ Overwritten by the resolved town/district when `geoAreaId` is sent. */
   city?: string | null;
+  /** ⚠ Overwritten by the resolved region when `geoAreaId` is sent. */
   state?: string | null;
   postalCode?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /** The deepest administrative area chosen. Sending it also rewrites `city` and `state`. */
+  geoAreaId?: string | null;
+  /**
+   * Removes the area on an update. Needed because a null `geoAreaId` reads as "not supplied" —
+   * without this, clearing the picker would save and change nothing. Ignored on create.
+   */
+  clearGeoArea?: boolean;
   emailAddress?: string | null;
   telephoneNumber?: string | null;
   mobileNumber?: string | null;

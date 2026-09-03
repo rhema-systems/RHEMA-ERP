@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Reference;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -59,6 +60,21 @@ public interface IGeographyService
     Task<IEnumerable<GeoAreaOptionDto>> GetAncestorsAsync(Guid areaId, CancellationToken ct = default);
 
     /// <summary>
+    /// The free-text address snapshot a consumer writes alongside its <c>GeoAreaId</c> — the
+    /// region name for its <c>State</c> column and the town (or district) name for its <c>City</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Exists so every consumer spells the snapshot the same way. HR is the first caller;
+    /// the employee import is the second, and CompanyProfile and the medical facilities follow in
+    /// phase 4. A consumer computing this for itself is how the four different spellings of
+    /// "region" got here in the first place.</para>
+    ///
+    /// <para>Returns <c>(null, null)</c> when the area cannot be read, so a caller can leave what
+    /// the record already said rather than blanking it.</para>
+    /// </remarks>
+    Task<(string? Region, string? City)> GetAddressSnapshotAsync(Guid geoAreaId, CancellationToken ct = default);
+
+    /// <summary>
     /// Resolve a name to an area, by name then by alias. Used by imports and by backfill, which is
     /// why it matches aliases: a spreadsheet that still says "Brong Ahafo" must resolve.
     /// </summary>
@@ -82,13 +98,25 @@ public class GeographyService : IGeographyService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<GeographyService> _logger;
 
+    /// <summary>
+    /// Every module that stores a <c>GeoAreaId</c>, so an area in use cannot be deleted.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Empty is a legitimate state — a deployment with no consumer wired yet — but it means the
+    /// only protection is the children/successor check below. See <see cref="IGeoAreaConsumer"/>
+    /// for why the foreign key does not cover this.
+    /// </remarks>
+    private readonly IEnumerable<IGeoAreaConsumer> _consumers;
+
     public GeographyService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IEnumerable<IGeoAreaConsumer> consumers,
         ILogger<GeographyService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _consumers = consumers;
         _logger = logger;
     }
 
@@ -651,6 +679,45 @@ public class GeographyService : IGeographyService
         }).ToList();
     }
 
+    public async Task<(string? Region, string? City)> GetAddressSnapshotAsync(
+        Guid geoAreaId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        List<GeoArea> chain;
+        try
+        {
+            chain = await LoadAncestorChainAsync(geoAreaId, tenantId, ct);
+        }
+        catch (ArgumentException)
+        {
+            // Not found, or another tenant's. The caller keeps whatever the record already said
+            // rather than having it blanked by a bad id.
+            return (null, null);
+        }
+
+        var levelIds = chain.Select(a => a.GeoLevelId).Distinct().ToList();
+        var levels = await _unitOfWork.Repository<GeoLevel>().GetQueryable()
+            .Where(l => levelIds.Contains(l.Id))
+            .Select(l => new { l.Id, l.LevelNumber })
+            .ToListAsync(ct);
+
+        var depthOf = levels.ToDictionary(l => l.Id, l => l.LevelNumber);
+        string? NameAtDepth(int depth) =>
+            chain.FirstOrDefault(a => depthOf.TryGetValue(a.GeoLevelId, out var d) && d == depth)?.Name;
+
+        // Region is always tier 1 — the broadest tier of any scheme.
+        var region = NameAtDepth(1);
+
+        // City is the town where the scheme has one, and the district where it does not. A
+        // three-tier country therefore writes its town, a four-tier one writes its town rather than
+        // the community, and a two-tier one writes its district — each the nearest thing that
+        // reads like a city on a printed address.
+        var city = NameAtDepth(3) ?? NameAtDepth(2);
+
+        return (region, city);
+    }
+
     /// <summary>Broadest first, ending with the area itself.</summary>
     private async Task<List<GeoArea>> LoadAncestorChainAsync(Guid areaId, Guid tenantId, CancellationToken ct)
     {
@@ -846,6 +913,25 @@ public class GeographyService : IGeographyService
             throw new InvalidOperationException(
                 $"'{entity.Name}' is named as the successor of {supersedes} historical "
                 + $"area{(supersedes == 1 ? "" : "s")}, so it cannot be removed without breaking that trail.");
+
+        // ⚠ The foreign keys do NOT cover this, and assuming they did cost a seeded community and
+        // an employee's address on 2026-09-03. Deletes here are SOFT, so no constraint is ever
+        // consulted: the row is flagged, vanishes from every read, and each record pointing at it
+        // keeps a dangling id while silently losing the address it resolved to. Each consumer
+        // answers for itself — see IGeoAreaConsumer for why this is inverted.
+        var inUse = new List<string>();
+        foreach (var consumer in _consumers)
+        {
+            var count = await consumer.CountUsagesAsync(id, tenantId, ct);
+            if (count > 0)
+                inUse.Add($"{count} {(count == 1 ? consumer.ResourceName.TrimEnd('s') : consumer.ResourceName)}");
+        }
+
+        if (inUse.Count > 0)
+            throw new InvalidOperationException(
+                $"'{entity.Name}' is the recorded location of {string.Join(" and ", inUse)}, so it cannot be "
+                + "removed. Move them somewhere else first. If the area has genuinely ceased to exist, "
+                + "end-date it instead — that keeps every record which already points at it resolvable.");
 
         await _unitOfWork.Repository<GeoArea>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);

@@ -1027,6 +1027,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.Reference.IGeographyService,
                                ErpSystem.Core.Services.Reference.GeographyService>();
 
+            // Every module that stores a GeoAreaId registers a probe here, so the geography service
+            // can refuse to delete an area still in use without having to know what a module is.
+            // ⚠ A consumer that gains a GeoAreaId and forgets this line gets NO protection: the
+            // deletes are soft, so the foreign key never fires. Phase 4 adds Location,
+            // CompanyProfile, the medical facilities and travel destinations here.
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeGeoAreaConsumer>();
+
             // Lane 3a-ii. The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
                                ErpSystem.Core.Services.HR.CompanySealAssetService>();

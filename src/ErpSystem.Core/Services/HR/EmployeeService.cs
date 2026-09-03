@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -33,11 +34,13 @@ public class EmployeeService : IEmployeeService
         HrCurrencyBridge currencies,
         IStaffNumberService staffNumbers,
         IPayrollMembershipService payrollMembership,
+        IGeographyService geography,
         ILogger<EmployeeService> logger)
     {
         _currencies = currencies;
         _staffNumbers = staffNumbers;
         _payrollMembership = payrollMembership;
+        _geography = geography;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -61,6 +64,44 @@ public class EmployeeService : IEmployeeService
     // Whether the person is paid through the payroll run is HR's statement; whether payroll runs
     // them is payroll's. This is the bridge, and the only place HR reaches into payroll.
     private readonly IPayrollMembershipService _payrollMembership;
+
+    // Shared reference data, not HR's: the administrative-geography tree that Estate, Sales and
+    // Procurement will read too. HR only asks it to resolve an area into the region/town names the
+    // snapshot columns carry, so the two can never disagree.
+    private readonly IGeographyService _geography;
+
+    /// <summary>
+    /// Rewrites <c>State</c> and <c>City</c> from the employee's area, so the free-text snapshot
+    /// always agrees with the structured link.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The tree wins. If a caller sends both a <c>GeoAreaId</c> and its own spelling of
+    /// State, the tree's spelling replaces it — otherwise the two drift and nobody can tell which
+    /// is right, which is the state the whole geography module exists to end.</para>
+    ///
+    /// <para>A <c>null</c> area leaves both columns exactly as they were. Most of the register
+    /// predates the tree and has only the free text; blanking it here would destroy the only
+    /// address those rows have.</para>
+    /// </remarks>
+    private async Task ApplyGeoAreaSnapshotAsync(Employee employee, CancellationToken cancellationToken)
+    {
+        if (employee.GeoAreaId is not { } areaId) return;
+
+        var (region, city) = await _geography.GetAddressSnapshotAsync(areaId, cancellationToken);
+
+        // (null, null) means the area could not be read — another tenant's, or deleted between the
+        // form loading and the save. Leave what the record said rather than blanking it.
+        if (region is null && city is null)
+        {
+            _logger.LogWarning(
+                "Employee {EmployeeId} references geo area {GeoAreaId}, which could not be resolved; "
+                + "the address snapshot was left unchanged.", employee.Id, areaId);
+            return;
+        }
+
+        if (region is not null) employee.State = region;
+        if (city is not null) employee.City = city;
+    }
 
     private Guid GetTenantId()
     {
@@ -204,6 +245,10 @@ public class EmployeeService : IEmployeeService
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
         employeeEntity.TenantId = GetTenantId();
+
+        // Before the insert: State and City are written from the tree so the row is never
+        // persisted with a snapshot that disagrees with its own GeoAreaId, not even briefly.
+        await ApplyGeoAreaSnapshotAsync(employeeEntity, cancellationToken);
 
         // Persist the employee and its initial position-history row atomically:
         // both commit together, or neither does. Prevents an orphaned employee
@@ -374,6 +419,11 @@ public class EmployeeService : IEmployeeService
         // null = not supplied; "" = clear. Before 2026-09-03 an email could never be removed.
         if (dto.EmailAddress != null)
             employee.EmailAddress = NormalizeEmail(dto.EmailAddress);
+
+        // ⚠ AFTER Apply, on purpose. Apply has just written whatever State/City the caller sent;
+        // this overwrites them from the area so the snapshot cannot be left disagreeing with the
+        // link. Running it before Apply would let a stale form field win.
+        await ApplyGeoAreaSnapshotAsync(employee, cancellationToken);
 
         await ApplyPayrollMembershipAsync(employee, dto, wasOnPayroll, willBeOnPayroll, cancellationToken);
 
