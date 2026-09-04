@@ -455,7 +455,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
             NullLogger<AccountService>.Instance, new AccountSegmentIdentityService(db));
         var untrustedDate = DateTime.UnixEpoch;
 
-        await service.UpdateAsync(new AccountUpdateDto
+        var response = await service.UpdateAsync(new AccountUpdateDto
         {
             Id = account.Id, AccountCode = "6100", AccountNumber = "tdc-6100", AccountName = account.AccountName,
             AccountType = account.AccountType.ToString(), AccountCategory = account.AccountCategory,
@@ -470,6 +470,19 @@ public sealed class AccountSegmentIdentityPhase5Tests
                     EffectiveDate = untrustedDate, EndDate = untrustedDate.AddDays(1) }
             ]
         });
+
+        response.AccountNumber.Should().Be("TDC-6100");
+        var responseRows = response.SegmentValues.ToList();
+        responseRows.Should().HaveCount(2);
+        responseRows.Select(item => item.SegmentPosition).Should().Equal(1, 2);
+        responseRows.Select(item => item.SegmentValue).Should().Equal("TDC", "6100");
+        responseRows.Select(item => item.SegmentStructureId)
+            .Should().Equal(fixture.Company.Id, fixture.Natural.Id);
+        responseRows[0].SegmentLookupValueId.Should().Be(fixture.CompanyValue.Id);
+        responseRows[1].SegmentLookupValueId.Should().BeNull();
+        responseRows.Should().OnlyContain(item => item.AccountId == account.Id
+            && item.TenantId == fixture.TenantId && !item.IsLocked && item.EndDate == null);
+
         await unitOfWork.SaveChangesAsync();
         db.ChangeTracker.Clear();
 

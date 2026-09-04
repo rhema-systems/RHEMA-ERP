@@ -363,6 +363,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                     };
 
                     await _unitOfWork.Repository<AccountSegmentValue>().AddAsync(segEntity);
+                    // DbSet relationship fix-up normally attaches the new row to the tracked account.
+                    // Keep the response projection deterministic even for repository implementations
+                    // that do not perform fix-up until DetectChanges runs.
+                    if (!account.SegmentValues.Contains(segEntity))
+                        account.SegmentValues.Add(segEntity);
                 }
 
                 account.AccountNumber = identity.AccountNumber;
@@ -490,6 +495,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 (account.ExpirationDate == null || account.ExpirationDate > DateTime.UtcNow);
 
             dto.SegmentValues = account.SegmentValues
+                .Where(v => !v.IsDeleted)
                 .OrderBy(v => v.SegmentPosition)
                 .Select(v => new AccountSegmentValueDto
                 {
