@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 5 — account segments versus transaction dimensions |
-| Status | `CORRECTING` |
+| Status | `REVIEWING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
 | Branch | `codex/finance-segments-dimensions-seed-phase5` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | `CHANGES_REQUIRED`; one P2 response regression sent directly for correction |
+| Review status | Final clean correction at `4d2891e6`; independent re-review active |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -90,10 +90,11 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 |---|---|---|---|---|
 | 1 | `8b45c555dcd88cb47cb4c4b3c9d26c4c421b7f9e` | `CHANGES_REQUIRED` | P1: bulk combinations bypass full Alpha/Alphanumeric and normalization validation; Freeze checks only segment IDs rather than complete persisted identity readiness; cross-tenant persisted assignments lack sufficient migration/schema/runtime protection. P2: account update validates canonical identity but persists raw client rows; delete/reorder lack stale-write tokens and the reorder API text contradicts the actual lifecycle. Independent checks passed 12 backend and 8 frontend tests, ESLint, EF no-pending-model and diff checks. All five corrections and regression gates were sent directly. | Not integrated |
 | 2 | `45fa499901f35821c655b82966dc86a6d2bf260b` | `CHANGES_REQUIRED` | The original five findings are closed, but one P2 regression remains: account update persists normalized rows, then maps the stale tracked navigation and can return soft-deleted raw rows instead of the new canonical identity. Independent gates passed 29 backend and 8 frontend tests, ESLint, EF no-pending-model and diff checks. A narrow response-reload/synchronization fix and direct returned-DTO assertion were sent to the implementer. | Not integrated |
+| 3 | `4d2891e676a82c912c54c61abcf488379c70f244` | Independent re-review active | Narrow correction `4d2891e6` returns only the canonical active account identity after update and adds direct returned-DTO regression coverage. | Pending |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 5 re-review at clean HEAD `45fa4999` closed the original five findings and identified one remaining returned-DTO regression. The narrow correction is active in the same isolated worktree. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: the final narrow Phase 5 correction is committed and clean at `4d2891e6`; independent re-review is active. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
