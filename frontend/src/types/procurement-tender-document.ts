@@ -84,6 +84,7 @@ export interface ProcurementTenderDocumentTemplate
   sourceConfigurationProfileId: string;
   contentReference: string;
   contentWorkflowEvidenceDocumentId?: string;
+  eligibleContentEvidenceDocumentIds?: string[];
   contentFileUploadRecordId?: string;
   contentChecksumSha256: string;
   workflowDefinitionId: string;

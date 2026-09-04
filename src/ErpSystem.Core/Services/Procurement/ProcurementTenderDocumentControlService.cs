@@ -2,7 +2,9 @@ using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -24,6 +26,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
     private const string ApprovePermission = "procurement.tender.approve";
     private const string ObservePermission = "procurement.tender.observe";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions WorkflowConfigJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(item => $"DEC-{item:000}").ToArray();
 
@@ -160,7 +166,30 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         CancellationToken cancellationToken = default)
     {
         EnsureInternalReader();
-        return MapTemplate(await LoadTemplateAsync(id, tracked: false, cancellationToken));
+        var template = await LoadTemplateAsync(id, tracked: false, cancellationToken);
+        var detail = MapTemplate(template);
+        if (template.Status != ProcurementTenderDocumentTemplateStatus.PendingApproval ||
+            !template.WorkflowInstanceId.HasValue)
+            return detail;
+
+        var stepIds = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.WorkflowInstanceId == template.WorkflowInstanceId.Value)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        var candidates = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                stepIds.Contains(item.StepInstanceId) && item.IsCurrent &&
+                item.MalwareScanStatus == WorkflowMalwareScanStatus.Clean &&
+                item.VerificationStatus != WorkflowEvidenceVerificationStatus.Rejected)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var artifact in candidates)
+        {
+            if ((!artifact.ExpiryDate.HasValue || artifact.ExpiryDate.Value >= DateTime.UtcNow) &&
+                (artifact.VerificationStatus == WorkflowEvidenceVerificationStatus.Verified ||
+                 await HasConfiguredContentReviewAsync(template, artifact, cancellationToken)))
+                detail.EligibleContentEvidenceDocumentIds.Add(artifact.Id);
+        }
+        return detail;
     }
 
     public async Task<IReadOnlyList<ProcurementTenderDocumentWorkflowOptionDto>> GetTemplateWorkflowOptionsAsync(
@@ -357,7 +386,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
 
         await ValidateTemplateContentArtifactAsync(
             artifact.Id, null, artifact.FilePath, artifact.Sha256,
-            requireApproved: true, cancellationToken);
+            entity, requireApproved: true, cancellationToken);
         var before = TemplateSnapshot(entity);
         entity.ContentWorkflowEvidenceDocumentId = artifact.Id;
         entity.ContentFileUploadRecordId = null;
@@ -373,7 +402,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordTemplateEventAsync(entity, "ContentAttached", ProcurementControlEventResult.Succeeded,
                 before, TemplateSnapshot(entity),
-                "Verified, scan-clean content attached from the exact sourcing approval workflow.",
+                "Scan-clean content satisfying the configured review policy attached from the exact sourcing approval workflow.",
                 ContentEvidence(entity), correlation, now, cancellationToken);
             return MapTemplate(entity);
         }, cancellationToken);
@@ -1902,7 +1931,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         await ValidateTemplateForSubmissionAsync(template, cancellationToken);
         await ValidateTemplateContentArtifactAsync(
             template.ContentWorkflowEvidenceDocumentId, template.ContentFileUploadRecordId,
-            template.ContentReference, template.ContentChecksumSha256, requireApproved: true, cancellationToken);
+            template.ContentReference, template.ContentChecksumSha256, template, requireApproved: true, cancellationToken);
         if (!template.WorkflowInstanceId.HasValue)
             throw Conflict("TENDER_DOCUMENT_WORKFLOW_NOT_STARTED",
                 "The configured shared workflow was not started.");
@@ -1985,6 +2014,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         Guid? fileUploadRecordId,
         string contentReference,
         string checksumSha256,
+        ProcurementTenderDocumentTemplateVersion template,
         bool requireApproved,
         CancellationToken cancellationToken)
     {
@@ -2002,6 +2032,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (!artifact.IsCurrent)
             throw Conflict("TENDER_DOCUMENT_CONTENT_ARTIFACT_SUPERSEDED",
                 "The workflow evidence document is no longer the current content artifact.");
+        if (artifact.ExpiryDate.HasValue && artifact.ExpiryDate.Value < DateTime.UtcNow)
+            throw Conflict("TENDER_DOCUMENT_CONTENT_ARTIFACT_EXPIRED",
+                "The controlled content artifact has expired.");
         if (!string.Equals(artifact.FilePath, contentReference.Trim(), StringComparison.Ordinal))
             throw Validation("TENDER_DOCUMENT_CONTENT_REFERENCE_MISMATCH",
                 "ContentReference must exactly match the controlled evidence document path.");
@@ -2014,11 +2047,135 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (artifact.VerificationStatus == WorkflowEvidenceVerificationStatus.Rejected)
             throw Conflict("TENDER_DOCUMENT_CONTENT_VERIFICATION_REJECTED",
                 "The controlled content artifact was rejected during verification.");
-        if (requireApproved &&
-            (artifact.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified ||
-             artifact.MalwareScanStatus != WorkflowMalwareScanStatus.Clean))
+        if (requireApproved && (artifact.MalwareScanStatus != WorkflowMalwareScanStatus.Clean ||
+            (artifact.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified &&
+             !await HasConfiguredContentReviewAsync(template, artifact, cancellationToken))))
             throw Conflict("TENDER_DOCUMENT_CONTENT_NOT_APPROVED",
-                "The controlled content artifact must be verified and malware-scan clean before publication.");
+                "The controlled content artifact must be malware-scan clean and independently verified, " +
+                "unless its recorded approval policy explicitly permits completed independent workflow review instead.");
+    }
+
+    private async Task<bool> HasConfiguredContentReviewAsync(
+        ProcurementTenderDocumentTemplateVersion template,
+        WorkflowEvidenceDocument artifact,
+        CancellationToken cancellationToken)
+    {
+        // Absence of a recorded, explicit policy is deliberately strict for existing workflows.
+        // A live/default policy must never retroactively weaken an already-started approval route.
+        if (!template.WorkflowInstanceId.HasValue || string.IsNullOrWhiteSpace(artifact.RequirementKey) ||
+            artifact.VerificationStatus != WorkflowEvidenceVerificationStatus.Pending)
+            return false;
+        var workflow = await WorkflowInstanceRows.GetQueryable(item =>
+                item.Id == template.WorkflowInstanceId.Value && item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted && item.EntityId == template.Id &&
+                item.WorkflowDefinitionId == template.WorkflowDefinitionId &&
+                item.Status == WorkflowInstanceStatus.Completed)
+            .Include(item => item.EntityType).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (workflow == null || !await WorkflowDefinitions.GetQueryable(item =>
+                item.Id == workflow.WorkflowDefinitionId && item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published)
+            .AnyAsync(cancellationToken))
+            return false;
+        var steps = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.WorkflowInstanceId == workflow.Id && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.WorkflowStep).Include(item => item.Approvals)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        if (!steps.Any(item => item.Id == artifact.StepInstanceId))
+            return false;
+        var approvalSteps = steps.Where(item => item.WorkflowStep != null &&
+            item.WorkflowStep.StepType == WorkflowStepType.Approval).ToList();
+        if (approvalSteps.Count == 0)
+            return false;
+        var policyActivities = await _unitOfWork.Repository<WorkflowActivityLog>().GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.WorkflowInstanceId == workflow.Id && item.PerformedById == null &&
+                item.ActivityType == WorkflowActivityType.DataUpdated && item.Title == "Approval policy applied")
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var matchedWaiver = false;
+        foreach (var step in approvalSteps)
+        {
+            if (step.WorkflowStep.TenantId != _currentUser.TenantId || step.WorkflowStep.IsDeleted ||
+                step.WorkflowStep.WorkflowDefinitionId != template.WorkflowDefinitionId ||
+                step.Status != WorkflowStepInstanceStatus.Completed ||
+                !step.Approvals.Any(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                    item.Status == WorkflowApprovalStatus.Approved && item.ProcessedById.HasValue &&
+                    item.ProcessedById.Value != artifact.UploadedById &&
+                    item.ProcessedDate.HasValue && item.ProcessedDate.Value >= artifact.UploadedAt))
+                return false;
+            try
+            {
+                using var result = JsonDocument.Parse(step.ResultData ?? "{}");
+                if (result.RootElement.ValueKind != JsonValueKind.Object || HasAmbiguousJsonProperties(result.RootElement) ||
+                    !result.RootElement.TryGetProperty("appliedApprovalPolicySetId", out var appliedId) ||
+                    appliedId.ValueKind != JsonValueKind.String || !appliedId.TryGetGuid(out var policyId))
+                    return false;
+                var startedAt = workflow.StartedDate ?? workflow.CreatedDate;
+                // ResultData can include caller input. Only the separate, server-written event
+                // corroborates which policy the engine actually applied to this exact step.
+                var appliedEvents = policyActivities.Where(item => item.StepInstanceId == step.Id).ToList();
+                if (appliedEvents.Count != 1 || appliedEvents[0].ActivityDate < startedAt ||
+                    appliedEvents[0].ActivityDate < step.CreatedDate ||
+                    !step.Approvals.Any(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                        item.Status == WorkflowApprovalStatus.Approved && item.ProcessedById.HasValue &&
+                        item.ProcessedById.Value != artifact.UploadedById &&
+                        item.ProcessedDate.HasValue && item.ProcessedDate.Value >= artifact.UploadedAt &&
+                        item.ProcessedDate.Value >= appliedEvents[0].ActivityDate))
+                    return false;
+                using var provenance = JsonDocument.Parse(appliedEvents[0].Data ?? "{}");
+                if (provenance.RootElement.ValueKind != JsonValueKind.Object ||
+                    HasAmbiguousJsonProperties(provenance.RootElement) ||
+                    !provenance.RootElement.TryGetProperty("PolicySetId", out var recordedId) ||
+                    recordedId.ValueKind != JsonValueKind.String || !recordedId.TryGetGuid(out var recordedPolicyId) ||
+                    recordedPolicyId != policyId ||
+                    !provenance.RootElement.TryGetProperty("PolicyCode", out var recordedCode) ||
+                    recordedCode.ValueKind != JsonValueKind.String)
+                    return false;
+                var policy = await _unitOfWork.Repository<WorkflowApprovalPolicySet>().GetQueryable(item =>
+                        item.Id == policyId && item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                        item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                        item.EffectiveFrom <= startedAt && (!item.EffectiveTo.HasValue || item.EffectiveTo.Value >= startedAt))
+                    .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+                if (policy == null || !string.Equals(policy.Code, recordedCode.GetString(), StringComparison.Ordinal) ||
+                    (!string.IsNullOrWhiteSpace(policy.EntityType) &&
+                    !string.Equals(policy.EntityType.Trim(), workflow.EntityType?.Name, StringComparison.OrdinalIgnoreCase)))
+                    return false;
+                using var configuration = JsonDocument.Parse(policy.ApprovalConfiguration);
+                if (HasAmbiguousJsonProperties(configuration.RootElement))
+                    return false;
+                var config = JsonSerializer.Deserialize<WorkflowApprovalConfigDto>(
+                    policy.ApprovalConfiguration, WorkflowConfigJsonOptions);
+                if (config?.EvidenceRequirements == null)
+                    return false;
+                var requirements = config.EvidenceRequirements.Where(item => item != null &&
+                    string.Equals(item.RequirementKey?.Trim(), artifact.RequirementKey.Trim(),
+                        StringComparison.OrdinalIgnoreCase)).ToList();
+                if (requirements.Count == 0)
+                    continue;
+                if (requirements.Count != 1 || requirements[0].RequireVerification ||
+                    requirements[0].MinimumDocuments != 1 ||
+                    (!string.IsNullOrWhiteSpace(requirements[0].DocumentType) &&
+                     !string.Equals(requirements[0].DocumentType.Trim(), artifact.DocumentType?.Trim(),
+                         StringComparison.OrdinalIgnoreCase)))
+                    return false;
+                matchedWaiver = true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+        return matchedWaiver;
+    }
+
+    private static bool HasAmbiguousJsonProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+            return element.EnumerateArray().Any(HasAmbiguousJsonProperties);
+        if (element.ValueKind != JsonValueKind.Object)
+            return false;
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return element.EnumerateObject().Any(item =>
+            !names.Add(item.Name) || HasAmbiguousJsonProperties(item.Value));
     }
 
     private async Task<List<ProcurementTenderDocumentChangeRecipient>> BuildChangeRecipientsAsync(
@@ -2839,7 +2996,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             blocked.Add("A replacement version requires a change summary.");
         if (!item.ContentWorkflowEvidenceDocumentId.HasValue)
             blocked.Add(item.Status == ProcurementTenderDocumentTemplateStatus.PendingApproval
-                ? "Upload, independently verify, and attach one scan-clean content document from this exact approval workflow before publication."
+                ? "Upload and attach one scan-clean content document from this exact approval workflow; the configured policy determines whether separate verification is required."
                 : "Controlled content must be attached before publication.");
         return new ProcurementTenderDocumentTemplateDto
         {

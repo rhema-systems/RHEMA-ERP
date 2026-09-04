@@ -117,6 +117,13 @@ export const validateTenderDocumentTemplate = (
   return undefined;
 };
 
+/** Use only the server's source-specific recommendation; never guess from the first option. */
+export const suggestedTenderDocumentSelection = (
+  current: string,
+  suggestedId: string | undefined,
+  available: ReadonlyArray<{ id: string }>
+): string => current || (suggestedId && available.some(item => item.id === suggestedId) ? suggestedId : '');
+
 export const isTenderDocumentContentArtifactApproved = (
   artifact: ProcurementTenderDocumentContentArtifactOption
 ) =>

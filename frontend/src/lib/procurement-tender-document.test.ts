@@ -5,6 +5,7 @@ import {
   hasTenderDocumentAction,
   isTenderDocumentContentArtifactApproved,
   pendingMandatoryAcknowledgements,
+  suggestedTenderDocumentSelection,
   validateTenderDocumentChange,
   validateTenderDocumentIssue,
   validateTenderDocumentTemplate,
@@ -15,6 +16,19 @@ import type {
   ProcurementTenderDocumentChange,
   SaveProcurementTenderDocumentTemplate,
 } from '@/types/procurement-tender-document';
+
+describe('source-specific reusable template default', () => {
+  it('selects only the available server recommendation', () => {
+    expect(suggestedTenderDocumentSelection('', 'eligible', [{ id: 'unrelated' }, { id: 'eligible' }])).toBe('eligible');
+  });
+  it('does not overwrite an explicit user choice', () => {
+    expect(suggestedTenderDocumentSelection('chosen', 'eligible', [{ id: 'eligible' }])).toBe('chosen');
+  });
+  it('does not fall back to an unrelated template', () => {
+    expect(suggestedTenderDocumentSelection('', 'missing', [{ id: 'unrelated' }])).toBe('');
+    expect(suggestedTenderDocumentSelection('', undefined, [{ id: 'unrelated' }])).toBe('');
+  });
+});
 
 const template = (): SaveProcurementTenderDocumentTemplate => ({
   templateCode: 'TDC-NCT-GOODS',

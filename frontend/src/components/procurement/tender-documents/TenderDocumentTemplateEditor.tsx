@@ -49,6 +49,17 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { TenderDocumentContentArtifactField } from './TenderDocumentContentArtifactField';
+import {
+  TenderDocumentEvidenceReview,
+  isTemplateWorkflowCompleted,
+} from './TenderDocumentEvidenceReview';
+import { TenderDocumentWorkflowReview } from './TenderDocumentWorkflowReview';
+import {
+  buildTenderDocumentLifecycleEvidence,
+  buildTenderDocumentLifecycleRequest,
+  usesAttachedPublicationEvidence,
+  type TenderDocumentLifecycleAction,
+} from './tender-document-lifecycle';
 import { useAuth } from '@/hooks/use-auth';
 import {
   hasAnyTenderDocumentAction,
@@ -92,8 +103,7 @@ const toForm = (
   policySetVersion: template.policySetVersion,
   sourceConfigurationProfileId: template.sourceConfigurationProfileId,
   contentReference: template.contentReference,
-  contentWorkflowEvidenceDocumentId:
-    template.contentWorkflowEvidenceDocumentId,
+  contentWorkflowEvidenceDocumentId: template.contentWorkflowEvidenceDocumentId,
   contentFileUploadRecordId: template.contentFileUploadRecordId,
   contentChecksumSha256: template.contentChecksumSha256,
   workflowDefinitionId: template.workflowDefinitionId,
@@ -102,7 +112,7 @@ const toForm = (
   rowVersion: template.rowVersion,
 });
 
-type LifecycleAction = 'submit' | 'publish' | 'reject' | 'retire';
+type LifecycleAction = TenderDocumentLifecycleAction;
 
 export function TenderDocumentTemplateEditor({ id }: { id: string }) {
   const queryClient = useQueryClient();
@@ -196,8 +206,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
     () =>
       contentWorkflow.data?.steps.find(
         (step) =>
-          step.stepInstanceId ===
-          contentWorkflow.data?.currentStepInstanceId
+          step.stepInstanceId === contentWorkflow.data?.currentStepInstanceId
       ),
     [contentWorkflow.data]
   );
@@ -205,7 +214,14 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
     currentContentStep?.stepName.trim().toLowerCase() === 'submitted';
 
   const refresh = async () => {
-    await Promise.all([template.refetch(), audit.refetch()]);
+    await Promise.all([
+      template.refetch(),
+      audit.refetch(),
+      ...(template.data?.workflowInstanceId &&
+      template.data.status === 'PendingApproval'
+        ? [contentWorkflow.refetch()]
+        : []),
+    ]);
   };
 
   const run = async (
@@ -269,7 +285,18 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
       form?.contentWorkflowEvidenceDocumentId;
     if (!template.data || !contentWorkflowEvidenceDocumentId) {
       toast.error(
-        'Select verified, scan-clean content from this approval workflow.'
+        'Select eligible, scan-clean content from this approval workflow.'
+      );
+      return;
+    }
+    if (
+      template.data.eligibleContentEvidenceDocumentIds !== undefined &&
+      !template.data.eligibleContentEvidenceDocumentIds.includes(
+        contentWorkflowEvidenceDocumentId
+      )
+    ) {
+      toast.error(
+        'The selected document is no longer eligible. Refresh and review the file before attaching.'
       );
       return;
     }
@@ -280,7 +307,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           contentWorkflowEvidenceDocumentId,
           rowVersion: template.data.rowVersion,
         }),
-      'Verified workflow content attached'
+      'Eligible workflow content attached'
     );
   };
 
@@ -301,6 +328,9 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         contentWorkflow.refetch(),
         queryClient.invalidateQueries({
           queryKey: ['procurement-tender-document-content-artifacts'],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['tender-document-evidence-review'],
         }),
       ]);
     } catch (error) {
@@ -348,8 +378,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
       policySetId,
       policySetCode: policy?.code ?? '',
       policySetVersion: policy?.version ?? 0,
-      sourceConfigurationProfileId:
-        policy?.sourceConfigurationProfileId ?? '',
+      sourceConfigurationProfileId: policy?.sourceConfigurationProfileId ?? '',
     });
   };
 
@@ -365,22 +394,22 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
 
   const lifecycle = async () => {
     if (!template.data || !lifecycleAction) return false;
-    if (!evidenceReference.trim()) {
-      toast.error('Shared approval evidence reference is required.');
+    let request: ProcurementTenderDocumentLifecycleRequest;
+    try {
+      request = buildTenderDocumentLifecycleRequest(
+        lifecycleAction,
+        template.data,
+        comment,
+        evidenceReference
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Shared approval evidence reference is required.'
+      );
       return false;
     }
-    const request: ProcurementTenderDocumentLifecycleRequest = {
-      rowVersion: template.data.rowVersion,
-      comment: comment.trim() || undefined,
-      evidence: [
-        {
-          referenceKind: 'ExternalReference',
-          reference: evidenceReference.trim(),
-          label: `${lifecycleAction} tender-document version`,
-          requirementKey: 'SRC-006',
-        },
-      ],
-    };
     const calls = {
       submit: () => service.submitTemplate(id, request),
       publish: () => service.publishTemplate(id, request),
@@ -418,9 +447,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         service.cloneTemplate(id, {
           rowVersion: currentTemplate.rowVersion,
           effectiveFromUtc: new Date(cloneFrom).toISOString(),
-          effectiveToUtc: cloneTo
-            ? new Date(cloneTo).toISOString()
-            : undefined,
+          effectiveToUtc: cloneTo ? new Date(cloneTo).toISOString() : undefined,
           changeSummary: cloneSummary,
         }),
       'New Draft version cloned'
@@ -432,14 +459,14 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
     return completed;
   };
 
-  if (template.isLoading || !form)
+  if (template.isLoading || (!template.isError && template.data && !form))
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <Loader2 className="h-7 w-7 animate-spin" />
       </div>
     );
 
-  if (template.isError || !template.data)
+  if (template.isError || !template.data || !form)
     return (
       <div className="space-y-4 p-6">
         <Button asChild variant="ghost">
@@ -450,14 +477,24 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         <Alert variant="destructive">
           <AlertTitle>Controlled template unavailable</AlertTitle>
           <AlertDescription>
-            The record is missing, outside the current tenant, or not visible
-            to this account.
+            The record is missing, outside the current tenant, or not visible to
+            this account.
           </AlertDescription>
         </Alert>
       </div>
     );
 
   const item = template.data;
+  const usesAttachedEvidence = usesAttachedPublicationEvidence(
+    lifecycleAction,
+    item.contentWorkflowEvidenceDocumentId
+  );
+  const hasLifecycleEvidence =
+    buildTenderDocumentLifecycleEvidence(
+      lifecycleAction,
+      item.contentWorkflowEvidenceDocumentId,
+      evidenceReference
+    ).length > 0;
 
   return (
     <div
@@ -477,14 +514,20 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           <p className="text-sm text-muted-foreground">{item.name}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={item.status === 'Published' ? 'default' : 'secondary'}>
+          <Badge
+            variant={item.status === 'Published' ? 'default' : 'secondary'}
+          >
             {tenderDocumentTemplateStatusLabel[item.status]}
           </Badge>
           <Button variant="outline" size="sm" onClick={() => void refresh()}>
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh
           </Button>
           {editable && (
-            <Button size="sm" disabled={busy !== null} onClick={() => void save()}>
+            <Button
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => void save()}
+            >
               <Save className="mr-2 h-4 w-4" /> Save Draft
             </Button>
           )}
@@ -505,16 +548,22 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         </Alert>
       )}
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Summary label="Template family" value={item.templateKey} />
+      <div className="grid gap-3 md:grid-cols-2">
         <Summary
           label="Policy"
           value={`${item.policySetCode} · v${item.policySetVersion}`}
         />
-        <Summary label="Source configuration" value={item.sourceConfigurationProfileId} />
         <Summary
-          label="Integrity"
-          value={`${item.integrityHash.slice(0, 16)}…`}
+          label="Next stage"
+          value={
+            item.status === 'Published'
+              ? 'Reuse this approved version on compatible tenders'
+              : item.status === 'PendingApproval'
+                ? 'Complete file review, attachment and publication below'
+                : item.status === 'Retired'
+                  ? 'Clone a new Draft to make changes'
+                  : 'Save this setup, then submit for approval'
+          }
         />
       </div>
 
@@ -566,11 +615,50 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
               </Field>
             </div>
             <div className="md:col-span-2">
+              {item.status === 'PendingApproval' &&
+                !contentWorkflow.isError &&
+                contentWorkflow.data && (
+                  <TenderDocumentEvidenceReview
+                    key={contentWorkflow.data.id}
+                    workflow={contentWorkflow.data}
+                    attachedEvidenceId={item.contentWorkflowEvidenceDocumentId}
+                    eligibleContentEvidenceDocumentIds={
+                      item.eligibleContentEvidenceDocumentIds
+                    }
+                    disabled={busy !== null}
+                    onUpdated={refresh}
+                  />
+                )}
+              {item.status === 'PendingApproval' &&
+                !contentWorkflow.isError &&
+                contentWorkflow.data &&
+                !isTemplateWorkflowCompleted(contentWorkflow.data.status) &&
+                !isSubmittedContentStep && (
+                  <TenderDocumentWorkflowReview
+                    key={`review-${contentWorkflow.data.id}`}
+                    templateId={item.id}
+                    templateCode={item.templateCode}
+                    templateStatus={item.status}
+                    workflow={contentWorkflow.data}
+                    disabled={busy !== null}
+                    onUpdated={refresh}
+                  />
+                )}
+              {item.status === 'PendingApproval' && contentWorkflow.isError && (
+                <p role="alert" className="mb-3 text-sm text-destructive">
+                  This template&apos;s approval workflow could not be loaded.
+                  Refresh this page to retry; file review is unavailable until
+                  it loads.
+                </p>
+              )}
               <TenderDocumentContentArtifactField
                 value={form.contentWorkflowEvidenceDocumentId}
                 workflowInstanceId={item.workflowInstanceId}
                 contentReference={form.contentReference}
                 checksumSha256={form.contentChecksumSha256}
+                eligibleContentEvidenceDocumentIds={
+                  item.eligibleContentEvidenceDocumentIds
+                }
                 disabled={!contentAttachable}
                 onSelect={(artifact) =>
                   setForm((current) =>
@@ -582,12 +670,6 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
               />
               {contentAttachable && (
                 <div className="mt-3 space-y-3">
-                  {contentWorkflow.isError && (
-                    <p className="text-sm text-destructive">
-                      The exact approval workflow could not be loaded. Refresh
-                      the template and check the tenant session.
-                    </p>
-                  )}
                   {isSubmittedContentStep && (
                     <div className="space-y-3 rounded-md border bg-muted/30 p-3">
                       <div>
@@ -620,7 +702,8 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                         <Button
                           type="button"
                           disabled={
-                            busy !== null || currentContentStep.evidence.total < 1
+                            busy !== null ||
+                            currentContentStep.evidence.total < 1
                           }
                           onClick={() => void sendContentForApproval()}
                         >
@@ -629,24 +712,21 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                       </div>
                     </div>
                   )}
-                  {!contentWorkflow.isLoading && !isSubmittedContentStep && (
-                    <Button asChild type="button" variant="outline">
-                      <Link href="/workflow/inbox">
-                        Open independent approval inbox
-                      </Link>
-                    </Button>
-                  )}
                   <Button
                     type="button"
                     disabled={
                       busy !== null ||
                       !form.contentWorkflowEvidenceDocumentId ||
+                      (item.eligibleContentEvidenceDocumentIds !== undefined &&
+                        !item.eligibleContentEvidenceDocumentIds.includes(
+                          form.contentWorkflowEvidenceDocumentId
+                        )) ||
                       form.contentWorkflowEvidenceDocumentId ===
                         item.contentWorkflowEvidenceDocumentId
                     }
                     onClick={() => void attachContent()}
                   >
-                    Attach verified content
+                    Attach eligible content
                   </Button>
                 </div>
               )}
@@ -656,7 +736,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
 
         <Card>
           <CardHeader>
-            <CardTitle>Approval and effective lineage</CardTitle>
+            <CardTitle>Approval setup and validity</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="md:col-span-2">
@@ -742,16 +822,30 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                 />
               </Field>
             </div>
-            <Line label="Workflow instance" value={item.workflowInstanceId} />
-            <Line
-              label="Approval evidence"
-              value={item.approvalEvidenceReference}
-            />
             <Line label="Submitted" value={formatDate(item.submittedAtUtc)} />
             <Line label="Published" value={formatDate(item.publishedAtUtc)} />
           </CardContent>
         </Card>
       </div>
+
+      <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          Technical control references
+        </summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <Line label="Template family" value={item.templateKey} />
+          <Line
+            label="Source configuration"
+            value={item.sourceConfigurationProfileId}
+          />
+          <Line label="Workflow instance" value={item.workflowInstanceId} />
+          <Line
+            label="Approval evidence"
+            value={item.approvalEvidenceReference}
+          />
+          <Line label="Integrity hash" value={item.integrityHash} />
+        </div>
+      </details>
 
       <Card>
         <CardHeader>
@@ -802,7 +896,9 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                     <Badge variant="outline">{event.result}</Badge>
                   </TableCell>
                   <TableCell>{event.actorName}</TableCell>
-                  <TableCell className="max-w-80">{event.reason || '—'}</TableCell>
+                  <TableCell className="max-w-80">
+                    {event.reason || '—'}
+                  </TableCell>
                   <TableCell>{formatDate(event.occurredAtUtc)}</TableCell>
                   <TableCell className="font-mono text-xs">
                     {event.integrityHash.slice(0, 12)}…
@@ -860,7 +956,10 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         {canApprove &&
           allows('Retire', 'RetireTemplate') &&
           item.status === 'Published' && (
-            <Button variant="outline" onClick={() => setLifecycleAction('retire')}>
+            <Button
+              variant="outline"
+              onClick={() => setLifecycleAction('retire')}
+            >
               Retire version
             </Button>
           )}
@@ -896,11 +995,18 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                 : 'Lifecycle action'}
             </DialogTitle>
             <DialogDescription>
-              Reference evidence already managed by the shared evidence or
-              workflow platform.
+              {usesAttachedEvidence
+                ? 'Attached document is used as publication evidence. The configured approval and publication checks still apply.'
+                : 'Reference evidence already managed by the shared evidence or workflow platform.'}
             </DialogDescription>
           </DialogHeader>
-          <Field label="Shared evidence reference">
+          <Field
+            label={
+              usesAttachedEvidence
+                ? 'Additional external reference (optional)'
+                : 'Shared evidence reference'
+            }
+          >
             <Input
               value={evidenceReference}
               onChange={(event) => setEvidenceReference(event.target.value)}
@@ -918,7 +1024,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
             </Button>
             <Button
               variant={lifecycleAction === 'reject' ? 'destructive' : 'default'}
-              disabled={busy !== null || !evidenceReference.trim()}
+              disabled={busy !== null || !hasLifecycleEvidence}
               onClick={() => void lifecycle()}
             >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -933,8 +1039,8 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           <DialogHeader>
             <DialogTitle>Clone new controlled Draft</DialogTitle>
             <DialogDescription>
-              The stable template family is retained while approval and
-              evidence reset for the next version.
+              The stable template family is retained while approval and evidence
+              reset for the next version.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 md:grid-cols-2">
@@ -965,10 +1071,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
             <Button variant="outline" onClick={() => setCloneOpen(false)}>
               Cancel
             </Button>
-            <Button
-              disabled={busy !== null}
-              onClick={() => void clone()}
-            >
+            <Button disabled={busy !== null} onClick={() => void clone()}>
               Clone Draft
             </Button>
           </DialogFooter>
@@ -1014,9 +1117,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         <Field label="Shared deletion evidence reference">
           <Input
             value={deleteEvidenceReference}
-            onChange={(event) =>
-              setDeleteEvidenceReference(event.target.value)
-            }
+            onChange={(event) => setDeleteEvidenceReference(event.target.value)}
           />
         </Field>
       </ConfirmationDialog>

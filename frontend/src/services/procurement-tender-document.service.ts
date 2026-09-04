@@ -45,6 +45,7 @@ export const procurementTenderDocumentService = {
   contentArtifactOptions: async (workflowInstanceId?: string) => {
     const instances = await workflowApiService.getWorkflowEvidenceReviewInstances({
       pageSize: 100,
+      workflowInstanceId,
     });
     const steps = instances
       .filter(
@@ -102,6 +103,7 @@ export const procurementTenderDocumentService = {
     const instances =
       await workflowApiService.getWorkflowEvidenceReviewInstances({
         pageSize: 100,
+        workflowInstanceId,
       });
     const instance = instances.find((item) => item.id === workflowInstanceId);
     if (!instance) {

@@ -73,6 +73,8 @@ public sealed class ProcurementTenderDocumentTemplateDto
     public string ContentChecksumSha256 { get; set; } = string.Empty;
     public Guid WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
+    /// <summary>Server-validated content choices, populated by the template detail endpoint.</summary>
+    public List<Guid> EligibleContentEvidenceDocumentIds { get; set; } = new();
     public Guid? SupersedesVersionId { get; set; }
     public string? ChangeSummary { get; set; }
     public string? ApprovalEvidenceReference { get; set; }

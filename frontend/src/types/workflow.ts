@@ -792,6 +792,8 @@ export interface WorkflowEvidenceDocumentDto {
   verifiedById?: string;
   verifiedAt?: string;
   verificationNotes?: string;
+  canVerify?: boolean;
+  verificationBlockedReason?: string;
   malwareScanStatus: number;
   retainUntil: string;
   isLegalHold: boolean;
