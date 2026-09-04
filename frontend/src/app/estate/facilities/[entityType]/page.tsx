@@ -26,6 +26,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { ProcedureCaseWorkspace } from '@/components/procedures/ProcedureCaseWorkspace';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -332,14 +333,10 @@ function FacilitiesWorkflowOverview({
             <div className="text-2xl font-semibold">
               {workspace.stages.length}
             </div>
-            <div className="text-sm text-muted-foreground">
-              workflow stages
-            </div>
+            <div className="text-sm text-muted-foreground">workflow stages</div>
           </div>
           <div className="rounded-md border border-border bg-background p-4">
-            <div className="text-2xl font-semibold">
-              {mandatoryDocuments}
-            </div>
+            <div className="text-2xl font-semibold">{mandatoryDocuments}</div>
             <div className="text-sm text-muted-foreground">
               mandatory documents
             </div>
@@ -482,6 +479,84 @@ function FacilitiesWorkflowOverview({
   );
 }
 
+function FacilitiesMaintenanceWorkspace({
+  workspace,
+  operationalHandoff,
+  canOpenOperationalHandoff,
+}: {
+  workspace: FacilitiesProcedureWorkspace;
+  operationalHandoff: OperationalHandoff | null;
+  canOpenOperationalHandoff: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      {workspace.stages.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border bg-muted/40 p-4">
+          <div className="font-medium">Workflow not configured</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            Configure and publish the Facilities workflow for this entity type.
+          </div>
+        </div>
+      ) : null}
+
+      {operationalHandoff ? (
+        <Card className="border-border bg-card text-card-foreground">
+          <CardHeader>
+            <CardTitle>Maintenance Handoff</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!canOpenOperationalHandoff ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                Maintenance access is required for job cards and work orders.
+              </div>
+            ) : null}
+            <Button
+              asChild={canOpenOperationalHandoff}
+              disabled={!canOpenOperationalHandoff}
+              className="w-full"
+            >
+              {canOpenOperationalHandoff ? (
+                <Link href={operationalHandoff.primaryAction.href}>
+                  {operationalHandoff.primaryAction.label}
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              ) : (
+                <span>
+                  {operationalHandoff.primaryAction.label}
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </span>
+              )}
+            </Button>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {operationalHandoff.secondaryActions.map((action) => (
+                <Button
+                  key={action.href}
+                  asChild={canOpenOperationalHandoff}
+                  disabled={!canOpenOperationalHandoff}
+                  variant="outline"
+                  size="sm"
+                >
+                  {canOpenOperationalHandoff ? (
+                    <Link href={action.href}>
+                      {action.label}
+                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                    </Link>
+                  ) : (
+                    <span>
+                      {action.label}
+                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
 function dateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -597,16 +672,26 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Property / Site Operating View Handoff',
       description:
         'Estate / Facilities keeps the operating view for sites, buildings, floors, common areas, occupancy impact, service zones, responsible officers, access, and site operating documents. Property Management remains the register owner for property/unit commercial records, leases, occupants, and availability.',
-      sourceLabel: 'Source: Property Management / Project Handover -> Estate / Facilities',
+      sourceLabel:
+        'Source: Property Management / Project Handover -> Estate / Facilities',
       icon: Database,
       primaryAction: {
         label: 'Open Property & Units',
         href: '/estate/property-management/EstatePropertyManagementPropertyUnit',
       },
       secondaryActions: [
-        { label: 'Property Dashboard', href: '/estate/property-management/dashboard' },
-        { label: 'Occupancy / Availability', href: '/estate/property-management/EstatePropertyManagementOccupancyAvailability' },
-        { label: 'Move-in / Handover', href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover' },
+        {
+          label: 'Property Dashboard',
+          href: '/estate/property-management/dashboard',
+        },
+        {
+          label: 'Occupancy / Availability',
+          href: '/estate/property-management/EstatePropertyManagementOccupancyAvailability',
+        },
+        {
+          label: 'Move-in / Handover',
+          href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover',
+        },
         { label: 'Central DMS', href: '/document-management' },
       ],
       checkpoints: [
@@ -631,9 +716,18 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
         href: '/estate/property-management/EstatePropertyManagementLease',
       },
       secondaryActions: [
-        { label: 'Tenant / Occupant Register', href: '/estate/property-management/EstatePropertyManagementTenantOccupant' },
-        { label: 'Move-in / Handover', href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover' },
-        { label: 'Property Billing', href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge' },
+        {
+          label: 'Tenant / Occupant Register',
+          href: '/estate/property-management/EstatePropertyManagementTenantOccupant',
+        },
+        {
+          label: 'Move-in / Handover',
+          href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover',
+        },
+        {
+          label: 'Property Billing',
+          href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
+        },
         { label: 'Finance AR', href: '/finance/ar/invoices' },
       ],
       checkpoints: [
@@ -970,7 +1064,9 @@ export default function FacilitiesProcedureWorkspacePage() {
     }
 
     if (!dutyRosterForm.serviceAreaName.trim()) {
-      setDutyRosterError('Apartment, unit, floor, block, or common area is required.');
+      setDutyRosterError(
+        'Apartment, unit, floor, block, or common area is required.'
+      );
       return;
     }
 
@@ -1015,7 +1111,8 @@ export default function FacilitiesProcedureWorkspacePage() {
           qualityStatus: item.qualityStatus || 'Pending inspection',
           linkedMaintenanceReference: item.linkedMaintenanceReference || null,
           linkedComplaintReference: item.linkedComplaintReference || null,
-          notes: 'Marked completed from Facilities Staff & Cleaner Duties workspace.',
+          notes:
+            'Marked completed from Facilities Staff & Cleaner Duties workspace.',
         }
       );
       setDutyRosterItems((current) =>
@@ -1282,17 +1379,22 @@ export default function FacilitiesProcedureWorkspacePage() {
     hasAnyPermission(['maintenance.access']);
   const hasConfiguredWorkflow = workspace.stages.length > 0;
   const showServiceProviderRegister =
-    hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityServiceProvider';
+    hasConfiguredWorkflow &&
+    procedure.entityType === 'EstateFacilityServiceProvider';
   const showStaffCleanerRegister =
     procedure.entityType === 'EstateFacilityStaffCleaner';
   const showAssetOperationsRegister =
-    hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityAssetRegister';
+    hasConfiguredWorkflow &&
+    procedure.entityType === 'EstateFacilityAssetRegister';
   const showBillingServiceChargeRegister =
-    hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityBillingServiceCharge';
+    hasConfiguredWorkflow &&
+    procedure.entityType === 'EstateFacilityBillingServiceCharge';
   const showDocumentIndexRegister =
     hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityDocument';
   const showMaintenanceIntakeRegister =
-    hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityMaintenance';
+    hasConfiguredWorkflow &&
+    procedure.entityType === 'EstateFacilityMaintenance';
+  const useMaintenanceWorkspace = showMaintenanceIntakeRegister;
   const showComplaintIntakeRegister =
     hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityComplaint';
 
@@ -1325,9 +1427,25 @@ export default function FacilitiesProcedureWorkspacePage() {
         </div>
       </div>
 
-      <FacilitiesWorkflowOverview workspace={workspace} />
+      {useMaintenanceWorkspace ? (
+        <>
+          <ProcedureCaseWorkspace
+            module="Facilities"
+            entityType={procedure.entityType}
+            defaultTitle={procedure.title}
+            workspaceType="Case Workflow"
+          />
+          <FacilitiesMaintenanceWorkspace
+            workspace={workspace}
+            operationalHandoff={operationalHandoff}
+            canOpenOperationalHandoff={canOpenOperationalHandoff}
+          />
+        </>
+      ) : (
+        <FacilitiesWorkflowOverview workspace={workspace} />
+      )}
 
-      {operationalHandoff ? (
+      {operationalHandoff && !useMaintenanceWorkspace ? (
         <Card className="border-border bg-card text-card-foreground">
           <CardHeader>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1365,9 +1483,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                 This handoff opens the Maintenance Management module. Your
                 current user does not have Maintenance access, so the
                 Maintenance route would redirect to the main dashboard. Ask an
-                administrator to grant <code>maintenance.access</code>, or use
-                a Maintenance-authorized user to continue the job card/work
-                order flow.
+                administrator to grant <code>maintenance.access</code>, or use a
+                Maintenance-authorized user to continue the job card/work order
+                flow.
               </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
@@ -1386,8 +1504,8 @@ export default function FacilitiesProcedureWorkspacePage() {
                     </Link>
                   ) : (
                     <span>
-                    {action.label}
-                    <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                      {action.label}
+                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
                     </span>
                   )}
                 </Button>
@@ -1449,7 +1567,7 @@ export default function FacilitiesProcedureWorkspacePage() {
         </Card>
       ) : null}
 
-      {showMaintenanceIntakeRegister ? (
+      {showMaintenanceIntakeRegister && !useMaintenanceWorkspace ? (
         <Card className="border-border bg-card text-card-foreground">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -1608,21 +1726,28 @@ export default function FacilitiesProcedureWorkspacePage() {
             </div>
             <div className="rounded-md border border-border bg-background p-4">
               <div className="mb-3">
-                <div className="font-medium">Cleaner Timetable / Duty Roster</div>
+                <div className="font-medium">
+                  Cleaner Timetable / Duty Roster
+                </div>
                 <p className="text-sm text-muted-foreground">
-                  Assign cleaners or Facilities staff to apartments, units, floors,
-                  blocks, routes, or common areas. HR remains the employee source;
-                  Maintenance and Helpdesk are linked by reference when a duty
-                  creates a repair or complaint follow-up.
+                  Assign cleaners or Facilities staff to apartments, units,
+                  floors, blocks, routes, or common areas. HR remains the
+                  employee source; Maintenance and Helpdesk are linked by
+                  reference when a duty creates a repair or complaint follow-up.
                 </p>
               </div>
-              <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={createDutyRosterItem}>
+              <form
+                className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
+                onSubmit={createDutyRosterItem}
+              >
                 <div className="space-y-1">
                   <Label htmlFor="duty-staff-name">Cleaner / staff name</Label>
                   <Input
                     id="duty-staff-name"
                     value={dutyRosterForm.staffName}
-                    onChange={(event) => updateDutyRosterForm('staffName', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('staffName', event.target.value)
+                    }
                     placeholder="Name from HR"
                   />
                 </div>
@@ -1631,7 +1756,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-employee-number"
                     value={dutyRosterForm.employeeNumber || ''}
-                    onChange={(event) => updateDutyRosterForm('employeeNumber', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('employeeNumber', event.target.value)
+                    }
                     placeholder="Optional HR reference"
                   />
                 </div>
@@ -1640,7 +1767,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-property"
                     value={dutyRosterForm.propertyReference || ''}
-                    onChange={(event) => updateDutyRosterForm('propertyReference', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm(
+                        'propertyReference',
+                        event.target.value
+                      )
+                    }
                     placeholder="Estate, block, or property"
                   />
                 </div>
@@ -1649,7 +1781,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-unit"
                     value={dutyRosterForm.propertyUnit || ''}
-                    onChange={(event) => updateDutyRosterForm('propertyUnit', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('propertyUnit', event.target.value)
+                    }
                     placeholder="Apartment, unit, floor, route"
                   />
                 </div>
@@ -1658,7 +1792,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-area-type"
                     value={dutyRosterForm.serviceAreaType}
-                    onChange={(event) => updateDutyRosterForm('serviceAreaType', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm(
+                        'serviceAreaType',
+                        event.target.value
+                      )
+                    }
                     placeholder="Apartment, floor, common area"
                   />
                 </div>
@@ -1667,7 +1806,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-area-name"
                     value={dutyRosterForm.serviceAreaName}
-                    onChange={(event) => updateDutyRosterForm('serviceAreaName', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm(
+                        'serviceAreaName',
+                        event.target.value
+                      )
+                    }
                     placeholder="Area / route / room"
                   />
                 </div>
@@ -1676,7 +1820,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-type"
                     value={dutyRosterForm.dutyType}
-                    onChange={(event) => updateDutyRosterForm('dutyType', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('dutyType', event.target.value)
+                    }
                     placeholder="Cleaning, sanitation, inspection"
                   />
                 </div>
@@ -1685,7 +1831,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-frequency"
                     value={dutyRosterForm.frequency}
-                    onChange={(event) => updateDutyRosterForm('frequency', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('frequency', event.target.value)
+                    }
                     placeholder="Daily, weekly, one-off"
                   />
                 </div>
@@ -1694,7 +1842,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-day-pattern"
                     value={dutyRosterForm.dayPattern || ''}
-                    onChange={(event) => updateDutyRosterForm('dayPattern', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('dayPattern', event.target.value)
+                    }
                     placeholder="Mon-Fri / Sat / one-off"
                   />
                 </div>
@@ -1704,7 +1854,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                     id="duty-start-date"
                     type="date"
                     value={dutyRosterForm.startDate}
-                    onChange={(event) => updateDutyRosterForm('startDate', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('startDate', event.target.value)
+                    }
                   />
                 </div>
                 <div className="space-y-1">
@@ -1713,7 +1865,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                     id="duty-shift-start"
                     type="time"
                     value={dutyRosterForm.shiftStart}
-                    onChange={(event) => updateDutyRosterForm('shiftStart', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('shiftStart', event.target.value)
+                    }
                   />
                 </div>
                 <div className="space-y-1">
@@ -1722,7 +1876,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                     id="duty-shift-end"
                     type="time"
                     value={dutyRosterForm.shiftEnd}
-                    onChange={(event) => updateDutyRosterForm('shiftEnd', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('shiftEnd', event.target.value)
+                    }
                   />
                 </div>
                 <div className="space-y-1">
@@ -1730,7 +1886,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-supervisor"
                     value={dutyRosterForm.supervisorName || ''}
-                    onChange={(event) => updateDutyRosterForm('supervisorName', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('supervisorName', event.target.value)
+                    }
                     placeholder="Facilities supervisor"
                   />
                 </div>
@@ -1739,7 +1897,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-maintenance"
                     value={dutyRosterForm.linkedMaintenanceReference || ''}
-                    onChange={(event) => updateDutyRosterForm('linkedMaintenanceReference', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm(
+                        'linkedMaintenanceReference',
+                        event.target.value
+                      )
+                    }
                     placeholder="Optional work order"
                   />
                 </div>
@@ -1748,7 +1911,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-complaint"
                     value={dutyRosterForm.linkedComplaintReference || ''}
-                    onChange={(event) => updateDutyRosterForm('linkedComplaintReference', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm(
+                        'linkedComplaintReference',
+                        event.target.value
+                      )
+                    }
                     placeholder="Optional complaint"
                   />
                 </div>
@@ -1757,7 +1925,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-tools"
                     value={dutyRosterForm.toolsIssued || ''}
-                    onChange={(event) => updateDutyRosterForm('toolsIssued', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('toolsIssued', event.target.value)
+                    }
                     placeholder="Mop, bins, PPE"
                   />
                 </div>
@@ -1766,7 +1936,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Textarea
                     id="duty-checklist"
                     value={dutyRosterForm.checklist || ''}
-                    onChange={(event) => updateDutyRosterForm('checklist', event.target.value)}
+                    onChange={(event) =>
+                      updateDutyRosterForm('checklist', event.target.value)
+                    }
                     placeholder="Cleaning checklist and reporting notes"
                   />
                 </div>
@@ -1774,11 +1946,17 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Button type="submit" disabled={isSavingDutyRoster}>
                     {isSavingDutyRoster ? 'Saving duty...' : 'Add duty roster'}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => void loadDutyRoster()}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadDutyRoster()}
+                  >
                     Refresh roster
                   </Button>
                   {dutyRosterError ? (
-                    <span className="text-sm text-destructive">{dutyRosterError}</span>
+                    <span className="text-sm text-destructive">
+                      {dutyRosterError}
+                    </span>
                   ) : null}
                 </div>
               </form>
@@ -1812,7 +1990,8 @@ export default function FacilitiesProcedureWorkspacePage() {
                           </div>
                           <div className="text-sm text-muted-foreground">
                             {item.rosterReference} | {item.dutyType} |{' '}
-                            {item.frequency} {item.dayPattern ? `(${item.dayPattern})` : ''}
+                            {item.frequency}{' '}
+                            {item.dayPattern ? `(${item.dayPattern})` : ''}
                           </div>
                           <div className="text-sm text-muted-foreground">
                             {item.propertyReference || 'No property ref'} /{' '}
@@ -1822,8 +2001,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <Badge variant="secondary">{item.attendanceStatus}</Badge>
-                          <Badge variant="outline">{item.completionStatus}</Badge>
+                          <Badge variant="secondary">
+                            {item.attendanceStatus}
+                          </Badge>
+                          <Badge variant="outline">
+                            {item.completionStatus}
+                          </Badge>
                           <Badge variant="outline">{item.qualityStatus}</Badge>
                         </div>
                       </div>

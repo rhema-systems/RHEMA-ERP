@@ -116,7 +116,8 @@ namespace ErpSystem.Web.Services
             IReadOnlyList<string> Documents,
             string TaskActionType = "estate-sop-example",
             string DocumentType = "EstateSopEvidence",
-            string? Instructions = null);
+            string? Instructions = null,
+            IReadOnlyList<string>? FieldKeys = null);
 
         public DatabaseSeedingService(
             ApplicationDbContext context,
@@ -823,6 +824,17 @@ namespace ErpSystem.Web.Services
                         })
                         .ToList()
                 },
+                FormFields = step.FieldKeys?
+                    .Where(field => !string.IsNullOrWhiteSpace(field))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(field => new WorkflowFormFieldDto
+                    {
+                        Name = field.Trim(),
+                        Label = field.Trim(),
+                        FieldType = WorkflowFieldType.Text,
+                        IsRequired = false
+                    })
+                    .ToList(),
                 TaskConfig = new WorkflowTaskConfigDto
                 {
                     TaskActionType = step.TaskActionType,
@@ -934,8 +946,61 @@ namespace ErpSystem.Web.Services
                     ["Approved report pack", "Central DMS reference"])
             };
 
+            var facilitiesMaintenanceSteps = new[]
+            {
+                Step("Facilities Intake", WorkflowStepType.Manual, "Facilities Officer",
+                    ["Requester, contact, property/unit, issue type, and priority are confirmed", "Service impact, target date, and access notes are recorded", "Maintenance job card need is assessed"],
+                    [],
+                    fieldKeys:
+                    [
+                        "issueType",
+                        "priority",
+                        "serviceImpact",
+                        "targetDate",
+                        "preferredVisitDate",
+                        "accessInstructions",
+                        "issueDescription"
+                    ]),
+                Step("Maintenance Handoff Review", WorkflowStepType.Manual, "Facilities Supervisor",
+                    ["Maintenance routing decision is recorded", "Safety, access, and SLA context are confirmed", "Requester update has been issued"],
+                    [],
+                    fieldKeys:
+                    [
+                        "priority",
+                        "serviceImpact",
+                        "targetDate",
+                        "accessInstructions",
+                        "closureNotes"
+                    ]),
+                Step("Maintenance Closeout", WorkflowStepType.Approval, "Facilities Manager",
+                    ["Job card or work order reference is recorded where required", "Inspection, requester feedback, and completion outcome are reviewed", "Facilities case is ready for closeout"],
+                    [],
+                    fieldKeys:
+                    [
+                        "maintenanceJobCardReference",
+                        "maintenanceWorkOrderReference",
+                        "requesterFeedbackStatus",
+                        "closureNotes"
+                    ])
+            };
+
+            var facilitiesComplaintSteps = new[]
+            {
+                Step("Facilities Complaint Intake", WorkflowStepType.Manual, "Facilities Officer",
+                    ["Complainant, property/unit, category, and impact are confirmed", "Complaint details and target response date are recorded", "Helpdesk escalation need is assessed"],
+                    []),
+                Step("Complaint Resolution Review", WorkflowStepType.Manual, "Facilities Supervisor",
+                    ["Resolution action or escalation path is recorded", "Customer communication status is updated", "Evidence and service-impact notes are reviewed"],
+                    []),
+                Step("Complaint Closeout", WorkflowStepType.Approval, "Facilities Manager",
+                    ["Resolution outcome and requester feedback are confirmed", "Any Helpdesk or Maintenance reference is captured", "Facilities complaint is ready for closeout"],
+                    [])
+            };
+
             return
             [
+                Spec("EstateFacilityMaintenance", "Maintenance Intake", facilitiesMaintenanceSteps),
+                Spec("EstateFacilityComplaint", "Complaint Management", facilitiesComplaintSteps),
                 Spec("EstateRegistrySecretariat", "Secretarial and Estates Registry", registryToManager),
                 Spec("EstateRecordsManagement", "Estate Records Management", registryToManager),
                 Spec("EstateInspection", "Land and Landed Property Inspection", registryToManager),
@@ -965,8 +1030,9 @@ namespace ErpSystem.Web.Services
                 WorkflowStepType type,
                 string role,
                 IReadOnlyList<string> checks,
-                IReadOnlyList<string> documents)
-                => new(name, type, role, string.Join(" ", checks), checks, documents);
+                IReadOnlyList<string> documents,
+                IReadOnlyList<string>? fieldKeys = null)
+                => new(name, type, role, string.Join(" ", checks), checks, documents, FieldKeys: fieldKeys);
 
             static EstateSopWorkflowSeedSpec Spec(
                 string entityCode,
@@ -7299,6 +7365,10 @@ namespace ErpSystem.Web.Services
                 new { Department = "Estate Management", Code = "LA-EST", Username = "estate.manager", First = "Akosua", Last = "Manager", Role = "Estate Manager", Number = "LA-EST-003" },
                 new { Department = "Estate Management", Code = "LA-EST", Username = "acquisition.committee", First = "Kwame", Last = "Committee", Role = "Acquisition Committee", Number = "LA-EST-004" },
 
+                new { Department = "Facilities", Code = "FAC", Username = "facilities.officer", First = "Kofi", Last = "Facilities", Role = "Facilities Officer", Number = "FAC-001" },
+                new { Department = "Facilities", Code = "FAC", Username = "facilities.supervisor", First = "Abena", Last = "Supervisor", Role = "Facilities Supervisor", Number = "FAC-002" },
+                new { Department = "Facilities", Code = "FAC", Username = "facilities.manager", First = "Yaw", Last = "Facilities", Role = "Facilities Manager", Number = "FAC-003" },
+
                 new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "survey.officer1", First = "Yaw", Last = "Survey", Role = "Survey Officer", Number = "LA-SUR-001" },
                 new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "survey.officer2", First = "Esi", Last = "Survey", Role = "Survey Officer", Number = "LA-SUR-002" },
                 new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "senior.surveyor1", First = "Kofi", Last = "Surveyor", Role = "Senior Surveyor", Number = "LA-SUR-003" },
@@ -7997,6 +8067,9 @@ namespace ErpSystem.Web.Services
                 new { Name = "Planning Officer", Description = "Planning/site-plan coordination role for Estate SOP handoffs" },
                 new { Name = "Estate Officer", Description = "Captures and submits land identification records" },
                 new { Name = "Estate Manager", Description = "Reviews land suitability assessments" },
+                new { Name = "Facilities Officer", Description = "Captures Facilities intake, maintenance handoffs, site service updates, and case closeout records" },
+                new { Name = "Facilities Supervisor", Description = "Reviews Facilities intake triage, maintenance routing, SLA follow-up, and service completion controls" },
+                new { Name = "Facilities Manager", Description = "Approves Facilities escalations, dashboards, provider decisions, billing coordination, and closeout governance" },
                 new { Name = PropertyManagementRoles.Officer, Description = "Handles Property Management intake, handoffs, and customer updates" },
                 new { Name = PropertyManagementRoles.Supervisor, Description = "Reviews Property Management availability and commercial terms" },
                 new { Name = PropertyManagementRoles.Manager, Description = "Approves Property Management requests and operating decisions" },
@@ -8241,6 +8314,83 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Mark Land Project Ready",
                     Description = "Approve verified land demarcations for project management handoff",
                     Category = "Estate - Land Management"
+                },
+                new
+                {
+                    Name = "facilities.access",
+                    DisplayName = "Access Facilities",
+                    Description = "Access Estate / Facilities workspaces and navigation",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.dashboard.read",
+                    DisplayName = "View Facilities Dashboard",
+                    Description = "View Estate / Facilities operating dashboard and handoff status",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.read",
+                    DisplayName = "View Facilities Cases",
+                    Description = "View Facilities procedure cases, stages, documents, and activity",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.create",
+                    DisplayName = "Create Facilities Cases",
+                    Description = "Open new Facilities procedure cases and intake records",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.update",
+                    DisplayName = "Update Facilities Cases",
+                    Description = "Update Facilities intake fields, checklists, documents, and notes",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.approve",
+                    DisplayName = "Approve Facilities Cases",
+                    Description = "Approve Facilities stages, exceptions, publishing, and close-out decisions",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.handoff.create",
+                    DisplayName = "Create Facilities Handoffs",
+                    Description = "Create downstream module handoffs from Facilities",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.documents.manage",
+                    DisplayName = "Manage Facilities Documents",
+                    Description = "Manage Facilities document index and DMS readiness controls",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.finance.view",
+                    DisplayName = "View Facilities Finance Context",
+                    Description = "View Facilities billing, arrears, budget, expense, and payment-confirmation context",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.billing.manage",
+                    DisplayName = "Manage Facilities Billing",
+                    Description = "Prepare Facilities billing instruction packages and follow-up records",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "maintenance.access",
+                    DisplayName = "Access Maintenance",
+                    Description = "Access Maintenance Management job cards, work orders, and dashboard handoffs",
+                    Category = "Maintenance"
                 },
                 new
                 {
@@ -8574,14 +8724,76 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.AllNames)
+                    .Concat(new[]
+                    {
+                        "facilities.access",
+                        "facilities.dashboard.read",
+                        "facilities.case.read",
+                        "facilities.case.create",
+                        "facilities.case.update",
+                        "facilities.case.approve",
+                        "facilities.handoff.create",
+                        "facilities.documents.manage",
+                        "facilities.finance.view",
+                        "facilities.billing.manage",
+                        "maintenance.access"
+                    })
                     .ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.AllNames)
+                    .Concat(new[]
+                    {
+                        "facilities.access",
+                        "facilities.dashboard.read",
+                        "facilities.case.read",
+                        "facilities.case.create",
+                        "facilities.case.update",
+                        "facilities.case.approve",
+                        "facilities.handoff.create",
+                        "facilities.documents.manage",
+                        "facilities.finance.view",
+                        "facilities.billing.manage",
+                        "maintenance.access"
+                    })
                     .ToArray(),
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
                 [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
                 [PropertyManagementRoles.Manager] = PropertyManagementPermissions.ManagerNames,
+                ["Facilities Officer"] = new[]
+                {
+                    "facilities.access",
+                    "facilities.case.read",
+                    "facilities.case.create",
+                    "facilities.case.update",
+                    "facilities.handoff.create",
+                    "maintenance.access"
+                },
+                ["Facilities Supervisor"] = new[]
+                {
+                    "facilities.access",
+                    "facilities.dashboard.read",
+                    "facilities.case.read",
+                    "facilities.case.create",
+                    "facilities.case.update",
+                    "facilities.handoff.create",
+                    "facilities.billing.manage",
+                    "maintenance.access"
+                },
+                ["Facilities Manager"] = new[]
+                {
+                    "facilities.access",
+                    "facilities.dashboard.read",
+                    "facilities.case.read",
+                    "facilities.case.create",
+                    "facilities.case.update",
+                    "facilities.case.approve",
+                    "facilities.handoff.create",
+                    "facilities.documents.manage",
+                    "facilities.finance.view",
+                    "facilities.billing.manage",
+                    "maintenance.access"
+                },
                 ["Estate Officer"] = new[]
                 {
                     "estate.land.project-readiness"

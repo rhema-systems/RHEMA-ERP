@@ -211,7 +211,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     }
 
     [HttpGet("/api/estate/external/requests")]
-    public async Task<IActionResult> GetMyRequests(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetMyRequests(
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromQuery] string? source,
+        CancellationToken cancellationToken)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var userId = GetUserId();
@@ -220,18 +224,46 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Ok(new { success = true, data = Array.Empty<object>() });
         }
 
-        var cases = await _db.ProcedureCases
+        var query = _db.ProcedureCases
             .AsNoTracking()
-            .Include(item => item.Fields.Where(field => !field.IsDeleted))
-            .Include(item => item.Documents.Where(document => !document.IsDeleted))
             .Where(item => item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.OpenedById == userId.Value
                 && (item.SourceDepartment == "External Portal"
                     || item.SourceDepartment == "External Portal - Estate Services"
-                    || item.SourceDepartment == "External Portal - Estate Listings"))
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(100)
+                    || item.SourceDepartment == "External Portal - Estate Listings"));
+
+        if (string.Equals(source, "estateServices", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(item =>
+                item.SourceDepartment == "External Portal"
+                || item.SourceDepartment == "External Portal - Estate Services");
+        }
+
+        var usePaging = page.HasValue || pageSize.HasValue;
+        var normalizedPage = Math.Max(1, page ?? 1);
+        var normalizedPageSize = Math.Clamp(pageSize ?? 10, 1, 25);
+        var totalCount = usePaging
+            ? await query.CountAsync(cancellationToken)
+            : 0;
+
+        IQueryable<ProcedureCase> orderedQuery = query
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt);
+        if (usePaging)
+        {
+            orderedQuery = orderedQuery
+                .Skip((normalizedPage - 1) * normalizedPageSize)
+                .Take(normalizedPageSize);
+        }
+        else
+        {
+            orderedQuery = orderedQuery.Take(100);
+        }
+
+        var cases = await orderedQuery
+            .AsSplitQuery()
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
             .ToListAsync(cancellationToken);
 
         var propertyReferences = cases
@@ -297,7 +329,46 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             })
             .ToList();
 
-        return Ok(new { success = true, data = requests });
+        if (!usePaging)
+        {
+            return Ok(new { success = true, data = requests });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            data = requests,
+            pagination = new
+            {
+                page = normalizedPage,
+                pageSize = normalizedPageSize,
+                totalCount,
+                totalPages = (int)Math.Ceiling(totalCount / (double)normalizedPageSize),
+                hasPreviousPage = normalizedPage > 1,
+                hasNextPage = normalizedPage * normalizedPageSize < totalCount
+            }
+        });
+    }
+
+    [HttpGet("/api/estate/external/requests/{requestId:guid}")]
+    public async Task<IActionResult> GetMyRequest(Guid requestId, CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var procedureCase = await LoadOwnedExternalEstateRequestAsync(
+            tenantId,
+            userId.Value,
+            requestId,
+            cancellationToken);
+
+        return procedureCase is null
+            ? NotFound(new { success = false, message = "Estate service request was not found." })
+            : Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
     }
 
     [HttpPost("/api/estate/external/requests/{requestId:guid}/customer-intake-documents/{documentId:guid}/upload")]
@@ -1996,7 +2067,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? "Source: External Portal -> Estate / Facilities"
             : "Source: External Portal -> Estate";
         var roles = definition.Module == "Facilities"
-            ? new[] { "Facilities Manager", "Estate Manager", "Estate Officer" }
+            ? new[] { "Facilities Officer", "Facilities Supervisor", "Facilities Manager", "Estate Manager", "Estate Officer" }
             : new[] { "Estate Manager", "Estate Officer", "Land Registry Officer", "Records Officer" };
 
         try
@@ -2131,6 +2202,25 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.OpenedById == userId
                 && item.SourceDepartment == "External Portal - Estate Listings"
                 && item.EntityType == "EstatePropertyManagementListingApplication",
+                cancellationToken);
+
+    private async Task<ProcedureCase?> LoadOwnedExternalEstateRequestAsync(
+        Guid tenantId,
+        Guid userId,
+        Guid requestId,
+        CancellationToken cancellationToken)
+        => await _db.ProcedureCases
+            .AsNoTracking()
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item =>
+                item.Id == requestId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.OpenedById == userId
+                && (item.SourceDepartment == "External Portal"
+                    || item.SourceDepartment == "External Portal - Estate Services"
+                    || item.SourceDepartment == "External Portal - Estate Listings"),
                 cancellationToken);
 
     private static object ToExternalRequestDto(ProcedureCase procedureCase)
@@ -2752,14 +2842,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["issueDescription"] = request.Description,
             ["complaintDescription"] = request.Description,
             ["serviceImpact"] = request.ServiceImpact,
-            ["priority"] = request.Priority,
+            ["reportedPriority"] = request.Priority,
+            ["customerReportedUrgency"] = request.Priority,
             ["requester"] = request.ApplicantName,
             ["requesterType"] = "Tenant / occupant",
             ["complainantName"] = request.ApplicantName,
             ["complainantType"] = "Client",
             ["issueType"] = request.Category,
             ["complaintCategory"] = request.Category,
-            ["targetDate"] = request.TargetDate?.ToString("yyyy-MM-dd"),
             ["schedule"] = ResolveEstateSchedule(definition),
             ["procedureType"] = definition.Title
         };

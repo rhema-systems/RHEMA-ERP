@@ -4,15 +4,39 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import React from 'react';
 import { useSearchParams } from 'next/navigation';
-import { BookTemplate, CheckCircle2, ExternalLink, Eye, FilePenLine, FileUp, Loader2, Plus, RefreshCw, Save, Send } from 'lucide-react';
+import {
+  BookTemplate,
+  CheckCircle2,
+  ExternalLink,
+  Eye,
+  FilePenLine,
+  FileUp,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Save,
+  Send,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { CentralDocumentViewerDialog } from '@/components/document-management/CentralDocumentViewerDialog';
 import { useToast } from '@/hooks/use-toast';
@@ -29,14 +53,17 @@ import {
 } from '@/services/procedure-case.service';
 import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
 
-const ProcedurePdfViewer = dynamic(() => import('@/components/procedures/ProcedurePdfViewer'), {
-  ssr: false,
-  loading: () => (
-    <div className="rounded-md border border-border bg-background p-4 text-sm text-muted-foreground">
-      Loading PDF viewer...
-    </div>
-  ),
-});
+const ProcedurePdfViewer = dynamic(
+  () => import('@/components/procedures/ProcedurePdfViewer'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-md border border-border bg-background p-4 text-sm text-muted-foreground">
+        Loading PDF viewer...
+      </div>
+    ),
+  }
+);
 
 interface ProcedureCaseWorkspaceProps {
   module: 'Legal' | 'Estate' | 'Facilities' | 'PropertyManagement' | 'Planning';
@@ -56,20 +83,50 @@ const CHANGE_OF_USE_ENTITY_TYPES = new Set(['EstateChangeOfUse']);
 const GENERATED_DOCUMENT_MODULES = new Set(['Estate', 'Legal']);
 const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
   'Legal Intake': ['assignedLegalOfficer'],
-  'Agreement Vetting': ['dueDiligenceStatus', 'scheduleStatus', 'legalVettingStatus', 'closeoutNotes'],
-  'Head of Legal Release': ['signatureStatus', 'sealStatus', 'dispatchStatus', 'estateReturnStatus', 'closeoutNotes'],
+  'Agreement Vetting': [
+    'dueDiligenceStatus',
+    'scheduleStatus',
+    'legalVettingStatus',
+    'closeoutNotes',
+  ],
+  'Head of Legal Release': [
+    'signatureStatus',
+    'sealStatus',
+    'dispatchStatus',
+    'estateReturnStatus',
+    'closeoutNotes',
+  ],
 };
 
 const LEGAL_TRANSFER_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
-  'Head of Legal Minuting': ['assignedLegalOfficer', 'transferFeePayable', 'closeoutNotes'],
+  'Head of Legal Minuting': [
+    'assignedLegalOfficer',
+    'transferFeePayable',
+    'closeoutNotes',
+  ],
   'Client Payment Call': ['closeoutNotes'],
-  'Transfer Drafting': ['draftDocumentReference', 'transferDeclarationReference', 'closeoutNotes'],
-  'Legal Vetting': ['dueDiligenceStatus', 'cadastralPlanStatus', 'scheduleStatus', 'legalVettingStatus', 'closeoutNotes'],
+  'Transfer Drafting': [
+    'draftDocumentReference',
+    'transferDeclarationReference',
+    'closeoutNotes',
+  ],
+  'Legal Vetting': [
+    'dueDiligenceStatus',
+    'cadastralPlanStatus',
+    'scheduleStatus',
+    'legalVettingStatus',
+    'closeoutNotes',
+  ],
   'Client Execution': ['interviewDate', 'signatureStatus', 'closeoutNotes'],
   'Legal Officer Signature': ['closeoutNotes'],
   'Legal Admin Signature': ['signatureStatus', 'sealStatus', 'closeoutNotes'],
   'Head of Legal Signature': ['signatureStatus', 'sealStatus', 'closeoutNotes'],
-  'Legal Admin Closeout': ['dispatchStatus', 'estateReturnStatus', 'distributionStatus', 'closeoutNotes'],
+  'Legal Admin Closeout': [
+    'dispatchStatus',
+    'estateReturnStatus',
+    'distributionStatus',
+    'closeoutNotes',
+  ],
 };
 
 const LEGAL_GENERIC_DOCUMENT_NAMES = new Set([
@@ -94,7 +151,13 @@ const LEGAL_SPECIFIC_DOCUMENT_ENTITY_TYPES = new Set([
 const LEGAL_TRANSFER_DOCUMENT_STAGES: Record<string, string[]> = {
   'Transfer file from Estate': ['Head of Legal Minuting'],
   'Transfer fee payment receipt': ['Client Payment Call', 'Transfer Drafting'],
-  'Draft transfer form': ['Transfer Drafting', 'Legal Vetting', 'Legal Officer Signature', 'Legal Admin Signature', 'Head of Legal Signature'],
+  'Draft transfer form': [
+    'Transfer Drafting',
+    'Legal Vetting',
+    'Legal Officer Signature',
+    'Legal Admin Signature',
+    'Head of Legal Signature',
+  ],
   'Executed transfer form': ['Client Execution', 'Legal Officer Signature'],
   'Signed transfer distribution / Estate return note': ['Legal Admin Closeout'],
 };
@@ -156,10 +219,15 @@ const isPositiveAmount = (value: string) => {
   const parsed = parseAmount(value);
   return parsed !== null && parsed > 0;
 };
-const isOneOf = (...allowed: string[]) => (value: string) =>
-  allowed.some((item) => item.toLowerCase() === value.trim().toLowerCase());
+const isOneOf =
+  (...allowed: string[]) =>
+  (value: string) =>
+    allowed.some((item) => item.toLowerCase() === value.trim().toLowerCase());
 
-const LEGAL_TRANSFER_STAGE_REQUIRED_FIELDS: Record<string, StageFieldRequirement[]> = {
+const LEGAL_TRANSFER_STAGE_REQUIRED_FIELDS: Record<
+  string,
+  StageFieldRequirement[]
+> = {
   'Head of Legal Minuting': [
     {
       key: 'assignedLegalOfficer',
@@ -282,25 +350,37 @@ const formatGhsAmount = (value?: string | null): string => {
   })}`;
 };
 
-const getFinanceStatusBadgeVariant = (status?: string | null): 'default' | 'secondary' | 'destructive' | 'outline' => {
+const getFinanceStatusBadgeVariant = (
+  status?: string | null
+): 'default' | 'secondary' | 'destructive' | 'outline' => {
   const normalized = status?.trim().toLowerCase();
   if (normalized === 'paid') {
     return 'default';
   }
 
-  if (normalized === 'rejected' || normalized === 'cancelled' || normalized === 'overdue') {
+  if (
+    normalized === 'rejected' ||
+    normalized === 'cancelled' ||
+    normalized === 'overdue'
+  ) {
     return 'destructive';
   }
 
-  if (normalized === 'sent' || normalized === 'approved' || normalized === 'partiallypaid') {
+  if (
+    normalized === 'sent' ||
+    normalized === 'approved' ||
+    normalized === 'partiallypaid'
+  ) {
     return 'secondary';
   }
 
   return 'outline';
 };
 
-const formatFinanceStatus = (status?: string | null, fallback = 'Not generated'): string =>
-  status?.trim().replace(/([a-z])([A-Z])/g, '$1 $2') || fallback;
+const formatFinanceStatus = (
+  status?: string | null,
+  fallback = 'Not generated'
+): string => status?.trim().replace(/([a-z])([A-Z])/g, '$1 $2') || fallback;
 
 const isLegalTransferStageSignatureRecorded = (
   procedureCase: ProcedureCaseDetail,
@@ -319,7 +399,9 @@ const isLegalTransferStageSignatureRecorded = (
     case 'Legal Admin Signature':
       return (
         fileName.includes('legal-admin-assistant-signed') ||
-        notes.includes('legal admin assistant signed from legal transfer workspace') ||
+        notes.includes(
+          'legal admin assistant signed from legal transfer workspace'
+        ) ||
         notes.includes('legal admin assistant digitally signed')
       );
     case 'Head of Legal Signature':
@@ -343,14 +425,17 @@ export function ProcedureCaseWorkspace({
   const terminology = getProcedureWorkspaceTerminology(workspaceType);
   const requestedCaseId = searchParams.get('caseId');
   const prefillSignature = searchParams.toString();
-  const prefilledCase = React.useMemo(() => ({
-    title: searchParams.get('title') || defaultTitle,
-    referenceNumber: searchParams.get('referenceNumber') || '',
-    applicantName: searchParams.get('applicantName') || '',
-    sourceDepartment: searchParams.get('sourceDepartment') || '',
-    receivedDate: searchParams.get('receivedDate') || '',
-    description: searchParams.get('description') || '',
-  }), [defaultTitle, prefillSignature, searchParams]);
+  const prefilledCase = React.useMemo(
+    () => ({
+      title: searchParams.get('title') || defaultTitle,
+      referenceNumber: searchParams.get('referenceNumber') || '',
+      applicantName: searchParams.get('applicantName') || '',
+      sourceDepartment: searchParams.get('sourceDepartment') || '',
+      receivedDate: searchParams.get('receivedDate') || '',
+      description: searchParams.get('description') || '',
+    }),
+    [defaultTitle, prefillSignature, searchParams]
+  );
   const prefilledFieldValues = React.useMemo(() => {
     const values: Record<string, string | null> = {};
     searchParams.forEach((value, key) => {
@@ -361,18 +446,30 @@ export function ProcedureCaseWorkspace({
     return values;
   }, [prefillSignature, searchParams]);
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
-  const [selectedCase, setSelectedCase] = React.useState<ProcedureCaseDetail | null>(null);
+  const [selectedCase, setSelectedCase] =
+    React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [documentFiles, setDocumentFiles] = React.useState<Record<string, File | null>>({});
-  const [previewDocumentId, setPreviewDocumentId] = React.useState<string | null>(null);
-  const [generationTemplates, setGenerationTemplates] = React.useState<CentralDocumentGenerationTemplate[]>([]);
-  const [selectedGenerationTemplate, setSelectedGenerationTemplate] = React.useState<string>('');
-  const [generatedDocument, setGeneratedDocument] = React.useState<GeneratedCentralDocumentResult | null>(null);
+  const [documentFiles, setDocumentFiles] = React.useState<
+    Record<string, File | null>
+  >({});
+  const [previewDocumentId, setPreviewDocumentId] = React.useState<
+    string | null
+  >(null);
+  const [generationTemplates, setGenerationTemplates] = React.useState<
+    CentralDocumentGenerationTemplate[]
+  >([]);
+  const [selectedGenerationTemplate, setSelectedGenerationTemplate] =
+    React.useState<string>('');
+  const [generatedDocument, setGeneratedDocument] =
+    React.useState<GeneratedCentralDocumentResult | null>(null);
   const [isGeneratingDocument, setIsGeneratingDocument] = React.useState(false);
-  const [isGeneratedViewerOpen, setIsGeneratedViewerOpen] = React.useState(false);
-  const [signingDocumentId, setSigningDocumentId] = React.useState<string | null>(null);
+  const [isGeneratedViewerOpen, setIsGeneratedViewerOpen] =
+    React.useState(false);
+  const [signingDocumentId, setSigningDocumentId] = React.useState<
+    string | null
+  >(null);
   const [newCase, setNewCase] = React.useState({
     title: prefilledCase.title,
     referenceNumber: prefilledCase.referenceNumber,
@@ -385,29 +482,37 @@ export function ProcedureCaseWorkspace({
   const appliedPrefillSignatureRef = React.useRef('');
   const legalTransferCanGenerateDocument =
     entityType !== 'LegalTransfer' ||
-    Boolean(selectedCase && LEGAL_TRANSFER_GENERATION_STAGES.has(selectedCase.currentStageName));
+    Boolean(
+      selectedCase &&
+        LEGAL_TRANSFER_GENERATION_STAGES.has(selectedCase.currentStageName)
+    );
   const supportsGeneratedDocuments =
     GENERATED_DOCUMENT_MODULES.has(module) &&
     !(module === 'Legal' && entityType === 'LegalPropertyAgreementReview') &&
     !(module === 'Legal' && !legalTransferCanGenerateDocument);
-  const allowsManualCaseCreation = !(module === 'Legal' && entityType === 'LegalPropertyAgreementReview');
+  const allowsManualCaseCreation = !(
+    module === 'Legal' && entityType === 'LegalPropertyAgreementReview'
+  );
   const generatedDocumentSourceLabel =
     module === 'Legal'
       ? 'Source: Legal Department -> Central DMS'
       : 'Source: Estate / Facility -> Central DMS';
   const generatedDocumentPreparedBy =
-    selectedCase?.sourceDepartment || (module === 'Legal' ? 'Legal Department' : 'Estate Section');
+    selectedCase?.sourceDepartment ||
+    (module === 'Legal' ? 'Legal Department' : 'Estate Section');
   const originatingPropertyCaseId = selectedCase?.fields.find(
     (field) => field.key === 'sourceProcedureCaseId'
   )?.value;
-  const isLinkedLegalMatter = module === 'Legal' && Boolean(originatingPropertyCaseId);
+  const isLinkedLegalMatter =
+    module === 'Legal' && Boolean(originatingPropertyCaseId);
   const legalTransferFinanceSnapshot = React.useMemo(() => {
     if (!selectedCase || entityType !== 'LegalTransfer') {
       return null;
     }
 
     const fieldValue = (key: string) =>
-      selectedCase.fields.find((field) => field.key === key)?.value?.trim() ?? '';
+      selectedCase.fields.find((field) => field.key === key)?.value?.trim() ??
+      '';
 
     const snapshot = {
       transferFeePayable: fieldValue('transferFeePayable'),
@@ -419,9 +524,13 @@ export function ProcedureCaseWorkspace({
       invoicePaidAmount: fieldValue('transferFeeInvoicePaidAmount'),
       invoiceBalance: fieldValue('transferFeeInvoiceBalance'),
       paymentStatus: fieldValue('paymentStatus'),
-      receiptReference: fieldValue('paymentReceiptReference') || fieldValue('transferFeeReceipt'),
+      receiptReference:
+        fieldValue('paymentReceiptReference') ||
+        fieldValue('transferFeeReceipt'),
       paymentCheckStatus: fieldValue('transferFeePaymentCheckStatus'),
-      customerNotificationStatus: fieldValue('transferFeeCustomerNotificationStatus'),
+      customerNotificationStatus: fieldValue(
+        'transferFeeCustomerNotificationStatus'
+      ),
     };
 
     const hasFinanceData =
@@ -434,21 +543,21 @@ export function ProcedureCaseWorkspace({
 
     return hasFinanceData ? snapshot : null;
   }, [entityType, selectedCase]);
-  const linkedLegalEditableFields = React.useMemo(
-    () => {
-      const currentStageName = selectedCase?.currentStageName ?? '';
-      const editableFields =
-        entityType === 'LegalTransfer'
-          ? LEGAL_TRANSFER_STAGE_EDITABLE_FIELDS[currentStageName]
-          : LINKED_LEGAL_STAGE_EDITABLE_FIELDS[currentStageName];
+  const linkedLegalEditableFields = React.useMemo(() => {
+    const currentStageName = selectedCase?.currentStageName ?? '';
+    const editableFields =
+      entityType === 'LegalTransfer'
+        ? LEGAL_TRANSFER_STAGE_EDITABLE_FIELDS[currentStageName]
+        : LINKED_LEGAL_STAGE_EDITABLE_FIELDS[currentStageName];
 
-      return new Set(editableFields ?? []);
-    },
-    [entityType, selectedCase?.currentStageName]
-  );
+    return new Set(editableFields ?? []);
+  }, [entityType, selectedCase?.currentStageName]);
 
   const currentStageItems = React.useMemo(
-    () => selectedCase?.checklistItems.filter((item) => item.stageIndex === selectedCase.currentStageIndex) ?? [],
+    () =>
+      selectedCase?.checklistItems.filter(
+        (item) => item.stageIndex === selectedCase.currentStageIndex
+      ) ?? [],
     [selectedCase]
   );
   const visibleDocuments = React.useMemo(() => {
@@ -456,7 +565,10 @@ export function ProcedureCaseWorkspace({
       return [];
     }
 
-    if (module === 'Legal' && LEGAL_SPECIFIC_DOCUMENT_ENTITY_TYPES.has(entityType)) {
+    if (
+      module === 'Legal' &&
+      LEGAL_SPECIFIC_DOCUMENT_ENTITY_TYPES.has(entityType)
+    ) {
       return selectedCase.documents.filter((document) => {
         if (LEGAL_GENERIC_DOCUMENT_NAMES.has(document.name)) {
           return false;
@@ -467,25 +579,35 @@ export function ProcedureCaseWorkspace({
         }
 
         const documentStages = LEGAL_TRANSFER_DOCUMENT_STAGES[document.name];
-        return Boolean(document.fileName) || !documentStages || documentStages.includes(selectedCase.currentStageName);
+        return (
+          Boolean(document.fileName) ||
+          !documentStages ||
+          documentStages.includes(selectedCase.currentStageName)
+        );
       });
     }
 
     return selectedCase.documents;
   }, [entityType, module, selectedCase]);
   const isLegalTransferClientPaymentStage =
-    entityType === 'LegalTransfer' && selectedCase?.currentStageName === 'Client Payment Call';
+    entityType === 'LegalTransfer' &&
+    selectedCase?.currentStageName === 'Client Payment Call';
   const legalTransferPaymentReady = React.useMemo(() => {
     if (!selectedCase || !isLegalTransferClientPaymentStage) {
       return true;
     }
 
     const fieldValue = (key: string) =>
-      selectedCase.fields.find((field) => field.key === key)?.value?.trim() ?? '';
+      selectedCase.fields.find((field) => field.key === key)?.value?.trim() ??
+      '';
     const paymentStatus = fieldValue('paymentStatus').toLowerCase();
-    const hasReceiptReference = Boolean(fieldValue('paymentReceiptReference') || fieldValue('transferFeeReceipt'));
+    const hasReceiptReference = Boolean(
+      fieldValue('paymentReceiptReference') || fieldValue('transferFeeReceipt')
+    );
     const invoiceAmount = parseAmount(fieldValue('transferFeeInvoiceAmount'));
-    const invoicePaidAmount = parseAmount(fieldValue('transferFeeInvoicePaidAmount'));
+    const invoicePaidAmount = parseAmount(
+      fieldValue('transferFeeInvoicePaidAmount')
+    );
     const invoiceBalance = parseAmount(fieldValue('transferFeeInvoiceBalance'));
     const invoiceIsSettled =
       invoiceAmount !== null &&
@@ -494,21 +616,29 @@ export function ProcedureCaseWorkspace({
       invoicePaidAmount + 0.01 >= invoiceAmount &&
       Math.abs(invoiceBalance) < 0.01;
 
-    return paymentStatus === 'paid' && (hasReceiptReference || invoiceIsSettled);
+    return (
+      paymentStatus === 'paid' && (hasReceiptReference || invoiceIsSettled)
+    );
   }, [isLegalTransferClientPaymentStage, selectedCase]);
   const legalTransferRequiredFieldMessages = React.useMemo(() => {
     if (!selectedCase || entityType !== 'LegalTransfer') {
       return [];
     }
 
-    const requiredFields = LEGAL_TRANSFER_STAGE_REQUIRED_FIELDS[selectedCase.currentStageName] ?? [];
+    const requiredFields =
+      LEGAL_TRANSFER_STAGE_REQUIRED_FIELDS[selectedCase.currentStageName] ?? [];
     if (requiredFields.length === 0) {
       return [];
     }
 
-    const fieldValues = new Map(selectedCase.fields.map((field) => [field.key, field.value ?? '']));
+    const fieldValues = new Map(
+      selectedCase.fields.map((field) => [field.key, field.value ?? ''])
+    );
     return requiredFields
-      .filter((requirement) => !requirement.isSatisfied(fieldValues.get(requirement.key) ?? ''))
+      .filter(
+        (requirement) =>
+          !requirement.isSatisfied(fieldValues.get(requirement.key) ?? '')
+      )
       .map((requirement) => requirement.message);
   }, [entityType, selectedCase]);
   const legalTransferRequiredFieldKeys = React.useMemo(() => {
@@ -517,18 +647,67 @@ export function ProcedureCaseWorkspace({
     }
 
     return new Set(
-      (LEGAL_TRANSFER_STAGE_REQUIRED_FIELDS[selectedCase.currentStageName] ?? []).map(
-        (requirement) => requirement.key
-      )
+      (
+        LEGAL_TRANSFER_STAGE_REQUIRED_FIELDS[selectedCase.currentStageName] ??
+        []
+      ).map((requirement) => requirement.key)
     );
   }, [entityType, selectedCase]);
+  const facilitiesMaintenanceCloseoutBlocker = React.useMemo(() => {
+    if (
+      !selectedCase ||
+      module !== 'Facilities' ||
+      entityType !== 'EstateFacilityMaintenance' ||
+      selectedCase.currentStageName !== 'Maintenance Closeout'
+    ) {
+      return null;
+    }
+
+    const fieldValue = (key: string) =>
+      selectedCase.fields.find((field) => field.key === key)?.value?.trim() ??
+      '';
+    const jobCardReference = fieldValue('maintenanceJobCardReference');
+    const executionComplete = fieldValue('maintenanceExecutionComplete');
+    const executionStatus = fieldValue('maintenanceExecutionStatus');
+
+    if (!jobCardReference) {
+      return 'Maintenance closeout cannot be submitted until the Maintenance job card is linked.';
+    }
+
+    if (executionComplete !== 'true') {
+      return executionStatus
+        ? `Maintenance closeout cannot be submitted yet: ${executionStatus}.`
+        : `Maintenance closeout cannot be submitted until job card ${jobCardReference} is completed.`;
+    }
+
+    return null;
+  }, [entityType, module, selectedCase]);
+  const currentStageEditableFieldKeys = React.useMemo(
+    () => new Set(selectedCase?.currentStageFieldKeys ?? []),
+    [selectedCase?.currentStageFieldKeys]
+  );
+  const shouldLockToCurrentStageFields =
+    Boolean(selectedCase?.usesConfiguredWorkflow) &&
+    currentStageEditableFieldKeys.size > 0;
+  const canEditProcedureField = React.useCallback(
+    (key: string) =>
+      Boolean(selectedCase?.canEditCurrentStage) &&
+      (!shouldLockToCurrentStageFields ||
+        currentStageEditableFieldKeys.has(key)),
+    [
+      currentStageEditableFieldKeys,
+      selectedCase?.canEditCurrentStage,
+      shouldLockToCurrentStageFields,
+    ]
+  );
   const isStageSubmitDisabled =
     !selectedCase?.canEditCurrentStage ||
     isSaving ||
     Boolean(signingDocumentId) ||
     currentStageItems.some((item) => !item.isCompleted) ||
     legalTransferRequiredFieldMessages.length > 0 ||
-    !legalTransferPaymentReady;
+    !legalTransferPaymentReady ||
+    Boolean(facilitiesMaintenanceCloseoutBlocker);
 
   const getDocumentManagementRecordId = (fileUrl?: string | null) => {
     const match = fileUrl?.match(/^\/document-management\/records\/([^/?#]+)/i);
@@ -550,11 +729,17 @@ export function ProcedureCaseWorkspace({
       return true;
     }
 
-    const value = `${document.fileName ?? ''} ${document.fileUrl ?? ''}`.toLowerCase();
+    const value =
+      `${document.fileName ?? ''} ${document.fileUrl ?? ''}`.toLowerCase();
     return value.includes('.pdf');
   };
-  const previewDocument = selectedCase?.documents.find((document) => document.id === previewDocumentId) ?? null;
-  const previewDocumentUrl = previewDocument ? getDocumentPreviewUrl(previewDocument) : null;
+  const previewDocument =
+    selectedCase?.documents.find(
+      (document) => document.id === previewDocumentId
+    ) ?? null;
+  const previewDocumentUrl = previewDocument
+    ? getDocumentPreviewUrl(previewDocument)
+    : null;
 
   const loadCases = React.useCallback(async () => {
     setIsLoading(true);
@@ -564,16 +749,19 @@ export function ProcedureCaseWorkspace({
       setCases(data);
 
       // Notifications and handoff links pass caseId so reviewers land on the exact Estate procedure case.
-      const targetCaseId = requestedCaseId && data.some((item) => item.id === requestedCaseId)
-        ? requestedCaseId
-        : data[0]?.id;
+      const targetCaseId =
+        requestedCaseId && data.some((item) => item.id === requestedCaseId)
+          ? requestedCaseId
+          : data[0]?.id;
 
       if (targetCaseId && selectedCase?.id !== targetCaseId) {
         const detail = await procedureCaseService.getCase(targetCaseId);
         setSelectedCase(detail);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load workspace records.');
+      setError(
+        err instanceof Error ? err.message : 'Unable to load workspace records.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -584,7 +772,10 @@ export function ProcedureCaseWorkspace({
   }, [loadCases]);
 
   React.useEffect(() => {
-    if (requestedCaseId || appliedPrefillSignatureRef.current === prefillSignature) {
+    if (
+      requestedCaseId ||
+      appliedPrefillSignatureRef.current === prefillSignature
+    ) {
       return;
     }
 
@@ -601,12 +792,7 @@ export function ProcedureCaseWorkspace({
 
     appliedPrefillSignatureRef.current = prefillSignature;
     setNewCase(prefilledCase);
-  }, [
-    prefillSignature,
-    prefilledCase,
-    prefilledFieldValues,
-    requestedCaseId,
-  ]);
+  }, [prefillSignature, prefilledCase, prefilledFieldValues, requestedCaseId]);
 
   React.useEffect(() => {
     if (!supportsGeneratedDocuments) {
@@ -616,25 +802,34 @@ export function ProcedureCaseWorkspace({
     let mounted = true;
     const loadTemplates = async () => {
       try {
-        const templates = await documentManagementService.getGenerationTemplates(module);
+        const templates =
+          await documentManagementService.getGenerationTemplates(module);
         if (!mounted) {
           return;
         }
 
-        const allowedTemplateCodes = PROCEDURE_GENERATION_TEMPLATE_CODES[entityType];
+        const allowedTemplateCodes =
+          PROCEDURE_GENERATION_TEMPLATE_CODES[entityType];
         const scopedTemplates = allowedTemplateCodes?.length
-          ? templates.filter((template) => allowedTemplateCodes.includes(template.templateCode))
+          ? templates.filter((template) =>
+              allowedTemplateCodes.includes(template.templateCode)
+            )
           : templates;
 
         setGenerationTemplates(scopedTemplates);
         setSelectedGenerationTemplate((current) =>
-          current && scopedTemplates.some((template) => template.templateCode === current)
+          current &&
+          scopedTemplates.some((template) => template.templateCode === current)
             ? current
             : scopedTemplates[0]?.templateCode || ''
         );
       } catch (err) {
         if (mounted) {
-          setError(err instanceof Error ? err.message : `Unable to load ${module} document templates.`);
+          setError(
+            err instanceof Error
+              ? err.message
+              : `Unable to load ${module} document templates.`
+          );
         }
       }
     };
@@ -647,7 +842,11 @@ export function ProcedureCaseWorkspace({
   }, [entityType, module, supportsGeneratedDocuments]);
 
   React.useEffect(() => {
-    if (!selectedCase || (!LAND_FEE_ENTITY_TYPES.has(entityType) && !CHANGE_OF_USE_ENTITY_TYPES.has(entityType))) {
+    if (
+      !selectedCase ||
+      (!LAND_FEE_ENTITY_TYPES.has(entityType) &&
+        !CHANGE_OF_USE_ENTITY_TYPES.has(entityType))
+    ) {
       return;
     }
 
@@ -656,42 +855,79 @@ export function ProcedureCaseWorkspace({
         return current;
       }
 
-      const values = new Map(current.fields.map((field) => [field.key, field.value ?? '']));
+      const values = new Map(
+        current.fields.map((field) => [field.key, field.value ?? ''])
+      );
       const plotSizeAcres = parseAmount(values.get('plotSizeAcres'));
       const lmfRatePerAcre = parseAmount(values.get('lmfRatePerAcre'));
-      const groundRentRatePerAcre = parseAmount(values.get('groundRentRatePerAcre'));
-      const existingLmfRatePerAcre = parseAmount(values.get('existingLmfRatePerAcre'));
+      const groundRentRatePerAcre = parseAmount(
+        values.get('groundRentRatePerAcre')
+      );
+      const existingLmfRatePerAcre = parseAmount(
+        values.get('existingLmfRatePerAcre')
+      );
       const newLmfRatePerAcre = parseAmount(values.get('newLmfRatePerAcre'));
-      const newGroundRentRatePerAcre = parseAmount(values.get('newGroundRentRatePerAcre'));
-
-      const calculatedValues = new Map<string, string>();
-      const plotSizeHectares = plotSizeAcres === null ? null : plotSizeAcres * 0.40468564224;
-      calculatedValues.set('plotSizeHectares', formatCalculatedAmount(plotSizeHectares, 4));
-
-      // Estate manuals require these calculations before proposal letters are generated and sent for payment.
-      const landManagementFee = plotSizeAcres !== null && lmfRatePerAcre !== null
-        ? plotSizeAcres * lmfRatePerAcre
-        : null;
-      calculatedValues.set('landManagementFeePayable', formatCalculatedAmount(landManagementFee));
-
-      const groundRentComputed = plotSizeAcres !== null && groundRentRatePerAcre !== null
-        ? plotSizeAcres * groundRentRatePerAcre
-        : null;
-      calculatedValues.set('groundRentComputed', formatCalculatedAmount(groundRentComputed, 3));
-      calculatedValues.set(
-        'groundRentPayable',
-        formatCalculatedAmount(groundRentComputed === null ? null : Math.ceil(groundRentComputed))
+      const newGroundRentRatePerAcre = parseAmount(
+        values.get('newGroundRentRatePerAcre')
       );
 
-      const changeOfUseFee = plotSizeAcres !== null && existingLmfRatePerAcre !== null && newLmfRatePerAcre !== null
-        ? Math.max((newLmfRatePerAcre - existingLmfRatePerAcre) * plotSizeAcres, 0)
-        : null;
-      calculatedValues.set('changeOfUseFeePayable', formatCalculatedAmount(changeOfUseFee));
+      const calculatedValues = new Map<string, string>();
+      const plotSizeHectares =
+        plotSizeAcres === null ? null : plotSizeAcres * 0.40468564224;
+      calculatedValues.set(
+        'plotSizeHectares',
+        formatCalculatedAmount(plotSizeHectares, 4)
+      );
 
-      const newGroundRent = plotSizeAcres !== null && newGroundRentRatePerAcre !== null
-        ? plotSizeAcres * newGroundRentRatePerAcre
-        : null;
-      calculatedValues.set('newGroundRentPayable', formatCalculatedAmount(newGroundRent === null ? null : Math.ceil(newGroundRent)));
+      // Estate manuals require these calculations before proposal letters are generated and sent for payment.
+      const landManagementFee =
+        plotSizeAcres !== null && lmfRatePerAcre !== null
+          ? plotSizeAcres * lmfRatePerAcre
+          : null;
+      calculatedValues.set(
+        'landManagementFeePayable',
+        formatCalculatedAmount(landManagementFee)
+      );
+
+      const groundRentComputed =
+        plotSizeAcres !== null && groundRentRatePerAcre !== null
+          ? plotSizeAcres * groundRentRatePerAcre
+          : null;
+      calculatedValues.set(
+        'groundRentComputed',
+        formatCalculatedAmount(groundRentComputed, 3)
+      );
+      calculatedValues.set(
+        'groundRentPayable',
+        formatCalculatedAmount(
+          groundRentComputed === null ? null : Math.ceil(groundRentComputed)
+        )
+      );
+
+      const changeOfUseFee =
+        plotSizeAcres !== null &&
+        existingLmfRatePerAcre !== null &&
+        newLmfRatePerAcre !== null
+          ? Math.max(
+              (newLmfRatePerAcre - existingLmfRatePerAcre) * plotSizeAcres,
+              0
+            )
+          : null;
+      calculatedValues.set(
+        'changeOfUseFeePayable',
+        formatCalculatedAmount(changeOfUseFee)
+      );
+
+      const newGroundRent =
+        plotSizeAcres !== null && newGroundRentRatePerAcre !== null
+          ? plotSizeAcres * newGroundRentRatePerAcre
+          : null;
+      calculatedValues.set(
+        'newGroundRentPayable',
+        formatCalculatedAmount(
+          newGroundRent === null ? null : Math.ceil(newGroundRent)
+        )
+      );
 
       let changed = false;
       const fields = current.fields.map((field) => {
@@ -719,7 +955,11 @@ export function ProcedureCaseWorkspace({
       const detail = await procedureCaseService.getCase(id);
       setSelectedCase(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to open the workspace record.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to open the workspace record.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -746,7 +986,11 @@ export function ProcedureCaseWorkspace({
       });
       await loadCases();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create the workspace record.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to create the workspace record.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -760,7 +1004,9 @@ export function ProcedureCaseWorkspace({
 
       return {
         ...current,
-        fields: current.fields.map((field) => (field.key === key ? { ...field, value } : field)),
+        fields: current.fields.map((field) =>
+          field.key === key ? { ...field, value } : field
+        ),
       };
     });
   };
@@ -773,7 +1019,9 @@ export function ProcedureCaseWorkspace({
     setIsSaving(true);
     setError(null);
     try {
-      const fieldValues = Object.fromEntries(selectedCase.fields.map((field) => [field.key, field.value ?? null]));
+      const fieldValues = Object.fromEntries(
+        selectedCase.fields.map((field) => [field.key, field.value ?? null])
+      );
       const updated = await procedureCaseService.updateFields(selectedCase.id, {
         fieldValues,
         referenceNumber: selectedCase.referenceNumber,
@@ -786,13 +1034,18 @@ export function ProcedureCaseWorkspace({
       await loadCases();
       toast({ title: 'Stage updates saved', variant: 'success' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save intake fields.');
+      setError(
+        err instanceof Error ? err.message : 'Unable to save intake fields.'
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
-  const toggleChecklist = async (checklistItemId: string, isCompleted: boolean) => {
+  const toggleChecklist = async (
+    checklistItemId: string,
+    isCompleted: boolean
+  ) => {
     if (!selectedCase) {
       return;
     }
@@ -800,12 +1053,18 @@ export function ProcedureCaseWorkspace({
     setIsSaving(true);
     setError(null);
     try {
-      const updated = await procedureCaseService.updateChecklistItem(selectedCase.id, checklistItemId, isCompleted);
+      const updated = await procedureCaseService.updateChecklistItem(
+        selectedCase.id,
+        checklistItemId,
+        isCompleted
+      );
       setSelectedCase(updated);
       await loadCases();
       toast({ title: 'Checklist updated', variant: 'success' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to update checklist.');
+      setError(
+        err instanceof Error ? err.message : 'Unable to update checklist.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -821,19 +1080,30 @@ export function ProcedureCaseWorkspace({
     try {
       const selectedFile = documentFiles[document.id];
       const updated = selectedFile
-        ? await procedureCaseService.uploadDocument(selectedCase.id, document.id, selectedFile, document.notes)
-        : await procedureCaseService.attachDocument(selectedCase.id, document.id, {
-            fileName: document.fileName,
-            fileUrl: document.fileUrl,
-            notes: document.notes,
-          });
+        ? await procedureCaseService.uploadDocument(
+            selectedCase.id,
+            document.id,
+            selectedFile,
+            document.notes
+          )
+        : await procedureCaseService.attachDocument(
+            selectedCase.id,
+            document.id,
+            {
+              fileName: document.fileName,
+              fileUrl: document.fileUrl,
+              notes: document.notes,
+            }
+          );
 
       setSelectedCase(updated);
       setDocumentFiles((current) => ({ ...current, [document.id]: null }));
       await loadCases();
       toast({
         title: selectedFile ? 'Document uploaded' : 'Document notes saved',
-        description: selectedFile ? 'The document is now attached to this case.' : undefined,
+        description: selectedFile
+          ? 'The document is now attached to this case.'
+          : undefined,
         variant: 'success',
       });
     } catch (err) {
@@ -854,7 +1124,10 @@ export function ProcedureCaseWorkspace({
     }
 
     try {
-      const blob = await procedureCaseService.downloadDocumentContent(selectedCase.id, document.id);
+      const blob = await procedureCaseService.downloadDocumentContent(
+        selectedCase.id,
+        document.id
+      );
       const objectUrl = URL.createObjectURL(blob);
       window.open(objectUrl, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
@@ -896,67 +1169,156 @@ export function ProcedureCaseWorkspace({
         ];
       })
     );
-    const mergeValueByKey = new Map(selectedCase.fields.map((field) => [field.key, field.value ?? '']));
+    const mergeValueByKey = new Map(
+      selectedCase.fields.map((field) => [field.key, field.value ?? ''])
+    );
     const setMergeAlias = (alias: string, ...keys: string[]) => {
-      const value = keys.map((key) => mergeValueByKey.get(key)).find((item) => item);
+      const value = keys
+        .map((key) => mergeValueByKey.get(key))
+        .find((item) => item);
       if (value) {
         mergeValues[alias] = value;
       }
     };
 
     setMergeAlias('ApplicantName', 'applicantName');
-    setMergeAlias('PropertyNumber', 'propertyNumber', 'housePlotShopNumber', 'unitNumber');
-    setMergeAlias('HousePlotShopNumber', 'housePlotShopNumber', 'propertyNumber', 'unitNumber');
+    setMergeAlias(
+      'PropertyNumber',
+      'propertyNumber',
+      'housePlotShopNumber',
+      'unitNumber'
+    );
+    setMergeAlias(
+      'HousePlotShopNumber',
+      'housePlotShopNumber',
+      'propertyNumber',
+      'unitNumber'
+    );
     setMergeAlias('TransferorName', 'transferorName', 'oldLesseeName');
     setMergeAlias('TransfereeName', 'transfereeName', 'newLesseeName');
     setMergeAlias('NewLesseeAddress', 'newLesseeAddress', 'addressOnRecord');
     setMergeAlias('TransferEffectiveDate', 'transferEffectiveDate');
-    setMergeAlias('TransferDeclarationReference', 'transferDeclarationReference');
+    setMergeAlias(
+      'TransferDeclarationReference',
+      'transferDeclarationReference'
+    );
     setMergeAlias('VoluntaryVacationReference', 'voluntaryVacationReference');
     setMergeAlias('HosFormReference', 'hosFormReference');
     setMergeAlias('HouseType', 'houseType');
-    setMergeAlias('PurchaseAmount', 'purchaseAmount', 'sellingPrice', 'considerationAmount');
+    setMergeAlias(
+      'PurchaseAmount',
+      'purchaseAmount',
+      'sellingPrice',
+      'considerationAmount'
+    );
     setMergeAlias('PurchaseDate', 'purchaseDate');
     setMergeAlias('SopSectionReference', 'sopSectionReference');
-    setMergeAlias('ApprovedFeeScheduleReference', 'approvedFeeScheduleReference', 'approvedRateReference');
+    setMergeAlias(
+      'ApprovedFeeScheduleReference',
+      'approvedFeeScheduleReference',
+      'approvedRateReference'
+    );
     setMergeAlias('DocumentTemplateReference', 'documentTemplateReference');
     setMergeAlias('FinanceReference', 'financeReference', 'feeReference');
     setMergeAlias('LegalReference', 'legalReference');
-    setMergeAlias('RecordsReference', 'estateRecordsReference', 'recordsUpdateReference', 'registerReference');
-    setMergeAlias('ReportReference', 'reportingReference', 'quarterlyReportReference', 'boardSubmissionReference');
+    setMergeAlias(
+      'RecordsReference',
+      'estateRecordsReference',
+      'recordsUpdateReference',
+      'registerReference'
+    );
+    setMergeAlias(
+      'ReportReference',
+      'reportingReference',
+      'quarterlyReportReference',
+      'boardSubmissionReference'
+    );
     setMergeAlias('OfferLetterReference', 'offerLetterReference');
     setMergeAlias('RightOfEntryReference', 'rightOfEntryReference');
     setMergeAlias('LeaseRequestFormReference', 'leaseRequestFormReference');
     setMergeAlias('RegisteredLeaseReference', 'registeredLeaseReference');
     setMergeAlias('LandUse', 'landUse');
-    setMergeAlias('Premium', 'landManagementFeePayable', 'renewalPremium', 'transferFeePayable');
+    setMergeAlias(
+      'Premium',
+      'landManagementFeePayable',
+      'renewalPremium',
+      'transferFeePayable'
+    );
     setMergeAlias('GroundRent', 'groundRentPayable', 'improvedGroundRent');
     setMergeAlias('PaymentFrequency', 'paymentFrequency');
     setMergeAlias('LeaseTerm', 'leaseTerm', 'leaseTermYears');
-    setMergeAlias('MoveInDate', 'moveInDate', 'dateOfTenancy', 'leaseCommencementDate');
-    setMergeAlias('OriginalLeaseReference', 'originalLeaseReference', 'registeredLeaseReference');
+    setMergeAlias(
+      'MoveInDate',
+      'moveInDate',
+      'dateOfTenancy',
+      'leaseCommencementDate'
+    );
+    setMergeAlias(
+      'OriginalLeaseReference',
+      'originalLeaseReference',
+      'registeredLeaseReference'
+    );
     setMergeAlias('VariationReason', 'variationReason', 'leaseVariationReason');
     setMergeAlias('VendorName', 'vendorName', 'ownerName');
-    setMergeAlias('AgreedAmount', 'agreedAmount', 'considerationAmount', 'purchaseAmount');
+    setMergeAlias(
+      'AgreedAmount',
+      'agreedAmount',
+      'considerationAmount',
+      'purchaseAmount'
+    );
     setMergeAlias('PaymentBasis', 'paymentBasis', 'vendorPaymentMethod');
-    setMergeAlias('ApprovalReference', 'approvalReference', 'mdApprovalReference');
+    setMergeAlias(
+      'ApprovalReference',
+      'approvalReference',
+      'mdApprovalReference'
+    );
     setMergeAlias('OfferExpiryDate', 'offerExpiryDate', 'paymentDeadline');
     setMergeAlias('CaseReference', 'referenceNumber', 'fileReference');
-    setMergeAlias('InstrumentType', 'instrumentType', 'transferProcessType', 'mortgageType', 'housingRequestType');
+    setMergeAlias(
+      'InstrumentType',
+      'instrumentType',
+      'transferProcessType',
+      'mortgageType',
+      'housingRequestType'
+    );
     setMergeAlias('ScheduleReference', 'scheduleReference');
     setMergeAlias('ClientExecutionDate', 'clientExecutionDate');
     setMergeAlias('MortgageeName', 'mortgageeName');
-    setMergeAlias('PaymentReceiptReference', 'paymentReceiptReference', 'transferFeeReceipt', 'feeReference');
+    setMergeAlias(
+      'PaymentReceiptReference',
+      'paymentReceiptReference',
+      'transferFeeReceipt',
+      'feeReference'
+    );
     setMergeAlias('MortgageLetterReference', 'mortgageLetterReference');
-    setMergeAlias('MdApprovalReference', 'mdApprovalReference', 'approvalReference');
-    setMergeAlias('TransferFeeReceipt', 'transferFeeReceipt', 'paymentReceiptReference');
+    setMergeAlias(
+      'MdApprovalReference',
+      'mdApprovalReference',
+      'approvalReference'
+    );
+    setMergeAlias(
+      'TransferFeeReceipt',
+      'transferFeeReceipt',
+      'paymentReceiptReference'
+    );
     setMergeAlias('TerminationReason', 'terminationReason');
     setMergeAlias('SiteReportReference', 'siteReportReference');
     setMergeAlias('NoticePostingStartDate', 'noticePostingStartDate');
     setMergeAlias('NoticePostingEndDate', 'noticePostingEndDate');
-    setMergeAlias('RecognitionApplicantName', 'recognitionApplicantName', 'applicantName');
-    setMergeAlias('RecognitionPaymentStatus', 'recognitionPaymentStatus', 'paymentStatus');
-    setMergeAlias('RecognitionDocumentReference', 'recognitionDocumentReference');
+    setMergeAlias(
+      'RecognitionApplicantName',
+      'recognitionApplicantName',
+      'applicantName'
+    );
+    setMergeAlias(
+      'RecognitionPaymentStatus',
+      'recognitionPaymentStatus',
+      'paymentStatus'
+    );
+    setMergeAlias(
+      'RecognitionDocumentReference',
+      'recognitionDocumentReference'
+    );
     setMergeAlias('SignatureStatus', 'signatureStatus');
     setMergeAlias('AssignorName', 'assignorName', 'transferorName');
     setMergeAlias('AssigneeName', 'assigneeName', 'transfereeName');
@@ -972,28 +1334,38 @@ export function ProcedureCaseWorkspace({
     setIsGeneratingDocument(true);
     setError(null);
     try {
-      const result = await documentManagementService.generateDocumentFromTemplate({
-        templateCode: selectedGenerationTemplate,
-        sourceModule: module,
-        sourceLabel: generatedDocumentSourceLabel,
-        sourceEntityType: entityType,
-        sourceRecordReference: selectedCase.referenceNumber || selectedCase.title,
-        sourceRecordId: selectedCase.id,
-        caseTitle: selectedCase.title,
-        caseReference: selectedCase.referenceNumber || selectedCase.title,
-        applicantName: selectedCase.applicantName || undefined,
-        preparedBy: generatedDocumentPreparedBy,
-        purpose: selectedCase.currentStageName,
-        mergeValues,
-      });
+      const result =
+        await documentManagementService.generateDocumentFromTemplate({
+          templateCode: selectedGenerationTemplate,
+          sourceModule: module,
+          sourceLabel: generatedDocumentSourceLabel,
+          sourceEntityType: entityType,
+          sourceRecordReference:
+            selectedCase.referenceNumber || selectedCase.title,
+          sourceRecordId: selectedCase.id,
+          caseTitle: selectedCase.title,
+          caseReference: selectedCase.referenceNumber || selectedCase.title,
+          applicantName: selectedCase.applicantName || undefined,
+          preparedBy: generatedDocumentPreparedBy,
+          purpose: selectedCase.currentStageName,
+          mergeValues,
+        });
       setGeneratedDocument(result);
       const refreshedCase = await procedureCaseService.getCase(selectedCase.id);
       setSelectedCase(refreshedCase);
       await loadCases();
       setIsGeneratedViewerOpen(true);
-      toast({ title: 'Document generated', description: 'The generated document is ready to review.', variant: 'success' });
+      toast({
+        title: 'Document generated',
+        description: 'The generated document is ready to review.',
+        variant: 'success',
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Unable to generate ${module} document.`);
+      setError(
+        err instanceof Error
+          ? err.message
+          : `Unable to generate ${module} document.`
+      );
     } finally {
       setIsGeneratingDocument(false);
     }
@@ -1007,7 +1379,9 @@ export function ProcedureCaseWorkspace({
     setIsSaving(true);
     setError(null);
     try {
-      const fieldValues = Object.fromEntries(selectedCase.fields.map((field) => [field.key, field.value ?? null]));
+      const fieldValues = Object.fromEntries(
+        selectedCase.fields.map((field) => [field.key, field.value ?? null])
+      );
       await procedureCaseService.updateFields(selectedCase.id, {
         fieldValues,
         referenceNumber: selectedCase.referenceNumber,
@@ -1016,7 +1390,10 @@ export function ProcedureCaseWorkspace({
         receivedDate: selectedCase.receivedDate,
         description: selectedCase.description,
       });
-      const updated = await procedureCaseService.completeStage(selectedCase.id, 'Stage completed from workspace.');
+      const updated = await procedureCaseService.completeStage(
+        selectedCase.id,
+        'Stage completed from workspace.'
+      );
       setSelectedCase(updated);
       await loadCases();
       toast({
@@ -1028,7 +1405,9 @@ export function ProcedureCaseWorkspace({
         variant: 'success',
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to submit current stage.');
+      setError(
+        err instanceof Error ? err.message : 'Unable to submit current stage.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -1042,29 +1421,48 @@ export function ProcedureCaseWorkspace({
     setIsSaving(true);
     setError(null);
     try {
-      const updated = await procedureCaseService.syncLegalTransferFeePaymentStatus(selectedCase.id);
+      const updated =
+        await procedureCaseService.syncLegalTransferFeePaymentStatus(
+          selectedCase.id
+        );
       setSelectedCase(updated);
       await loadCases();
-      const paymentStatus = updated.fields.find((field) => field.key === 'paymentStatus')?.value ?? 'Pending';
-      const receiptReference = updated.fields.find((field) => field.key === 'paymentReceiptReference')?.value;
+      const paymentStatus =
+        updated.fields.find((field) => field.key === 'paymentStatus')?.value ??
+        'Pending';
+      const receiptReference = updated.fields.find(
+        (field) => field.key === 'paymentReceiptReference'
+      )?.value;
       toast({
-        title: paymentStatus === 'Paid' ? 'Transfer fee payment synced' : 'Transfer fee still pending',
-        description: receiptReference ? `Receipt: ${receiptReference}` : undefined,
+        title:
+          paymentStatus === 'Paid'
+            ? 'Transfer fee payment synced'
+            : 'Transfer fee still pending',
+        description: receiptReference
+          ? `Receipt: ${receiptReference}`
+          : undefined,
         variant: paymentStatus === 'Paid' ? 'success' : 'default',
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sync transfer fee payment status.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to sync transfer fee payment status.'
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
-  const signLegalTransferExecutedForm = async (document: ProcedureCaseDocument) => {
+  const signLegalTransferExecutedForm = async (
+    document: ProcedureCaseDocument
+  ) => {
     if (!selectedCase) {
       return;
     }
 
-    const signatureRole = LEGAL_TRANSFER_SIGNATURE_STAGE_ROLES[selectedCase.currentStageName];
+    const signatureRole =
+      LEGAL_TRANSFER_SIGNATURE_STAGE_ROLES[selectedCase.currentStageName];
     if (!signatureRole) {
       return;
     }
@@ -1072,14 +1470,15 @@ export function ProcedureCaseWorkspace({
     setSigningDocumentId(document.id);
     setError(null);
     try {
-      const updated = await procedureCaseService.signLegalTransferExecutedDocument(
-        selectedCase.id,
-        document.id,
-        {
-          signatureRole,
-          notes: `${signatureRole} signed from Legal transfer workspace.`,
-        }
-      );
+      const updated =
+        await procedureCaseService.signLegalTransferExecutedDocument(
+          selectedCase.id,
+          document.id,
+          {
+            signatureRole,
+            notes: `${signatureRole} signed from Legal transfer workspace.`,
+          }
+        );
       setSelectedCase(updated);
       await loadCases();
       toast({
@@ -1088,7 +1487,11 @@ export function ProcedureCaseWorkspace({
         variant: 'success',
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sign the transfer document.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to sign the transfer document.'
+      );
     } finally {
       setSigningDocumentId(null);
     }
@@ -1096,15 +1499,24 @@ export function ProcedureCaseWorkspace({
 
   const renderField = (field: ProcedureCaseDetail['fields'][number]) => {
     const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
-    const isLinkedLegalReadonly = isLinkedLegalMatter && !linkedLegalEditableFields.has(field.key);
-    const isDisabled = !selectedCase?.canEditCurrentStage || isCalculated || isLinkedLegalReadonly;
+    const isLinkedLegalReadonly =
+      isLinkedLegalMatter && !linkedLegalEditableFields.has(field.key);
+    const isDisabled =
+      !canEditProcedureField(field.key) ||
+      isCalculated ||
+      isLinkedLegalReadonly;
     const isRequiredForStage = legalTransferRequiredFieldKeys.has(field.key);
     const fieldType = field.fieldType.toLowerCase();
     const fieldId = `procedure-field-${field.id}`;
     const label = (
-      <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">
+      <label
+        htmlFor={fieldId}
+        className="text-xs font-medium text-muted-foreground"
+      >
         {field.label}
-        {isRequiredForStage ? <span className="ml-1 text-destructive">*</span> : null}
+        {isRequiredForStage ? (
+          <span className="ml-1 text-destructive">*</span>
+        ) : null}
       </label>
     );
 
@@ -1141,7 +1553,9 @@ export function ProcedureCaseWorkspace({
             placeholder={field.label}
             value={field.value ?? ''}
             disabled={isDisabled}
-            onChange={(event) => updateFieldValue(field.key, event.target.value)}
+            onChange={(event) =>
+              updateFieldValue(field.key, event.target.value)
+            }
           />
         </div>
       );
@@ -1152,11 +1566,21 @@ export function ProcedureCaseWorkspace({
         {label}
         <Input
           id={fieldId}
-          type={fieldType === 'date' ? 'date' : fieldType === 'number' || fieldType === 'currency' ? 'number' : 'text'}
+          type={
+            fieldType === 'date'
+              ? 'date'
+              : fieldType === 'number' || fieldType === 'currency'
+                ? 'number'
+                : 'text'
+          }
           placeholder={field.label}
           value={field.value ?? ''}
           disabled={isDisabled}
-          step={fieldType === 'currency' || fieldType === 'number' ? '0.01' : undefined}
+          step={
+            fieldType === 'currency' || fieldType === 'number'
+              ? '0.01'
+              : undefined
+          }
           onChange={(event) => updateFieldValue(field.key, event.target.value)}
         />
       </div>
@@ -1165,582 +1589,928 @@ export function ProcedureCaseWorkspace({
 
   return (
     <>
-    <Card className="border-border bg-card text-card-foreground">
-      <CardHeader>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle>{terminology.title}</CardTitle>
-          </div>
-          <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
-            {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </div>
-        ) : null}
-        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="space-y-4">
-            <div className="rounded-md border border-border bg-background p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">
-                  {terminology.collectionLabel}
-                </h2>
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-              </div>
-              <div className="space-y-2">
-                {cases.length === 0 && !isLoading ? (
-                  <p className="text-sm text-muted-foreground">
-                    {terminology.emptyMessage}
-                  </p>
-                ) : null}
-                {cases.map((procedureCase) => (
-                  <button
-                    key={procedureCase.id}
-                    type="button"
-                    className={`w-full rounded-md border p-3 text-left text-sm transition-colors ${
-                      selectedCase?.id === procedureCase.id
-                        ? 'border-primary bg-primary/10'
-                        : 'border-border bg-card hover:bg-muted'
-                    }`}
-                    onClick={() => void selectCase(procedureCase.id)}
-                  >
-                    <div className="font-medium">{procedureCase.referenceNumber || procedureCase.title}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{procedureCase.currentStageName}</div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      <Badge variant="outline">{procedureCase.status}</Badge>
-                      {procedureCase.currentAssignedRole ? (
-                        <Badge variant="secondary">{procedureCase.currentAssignedRole}</Badge>
-                      ) : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
+      <Card className="border-border bg-card text-card-foreground">
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle>{terminology.title}</CardTitle>
             </div>
-
-            {allowsManualCaseCreation ? (
-              <div className="rounded-md border border-border bg-background p-4">
-                <h2 className="text-sm font-semibold">
-                  {terminology.createHeading}
-                </h2>
-                <div className="mt-3 space-y-3">
-                  <Input value={newCase.title} onChange={(event) => setNewCase({ ...newCase, title: event.target.value })} />
-                  <Input placeholder="Reference number" value={newCase.referenceNumber} onChange={(event) => setNewCase({ ...newCase, referenceNumber: event.target.value })} />
-                  <Input placeholder="Applicant / party name" value={newCase.applicantName} onChange={(event) => setNewCase({ ...newCase, applicantName: event.target.value })} />
-                  <Input placeholder="Source department" value={newCase.sourceDepartment} onChange={(event) => setNewCase({ ...newCase, sourceDepartment: event.target.value })} />
-                  <Input type="date" value={newCase.receivedDate} onChange={(event) => setNewCase({ ...newCase, receivedDate: event.target.value })} />
-                  <Textarea placeholder="Description" value={newCase.description} onChange={(event) => setNewCase({ ...newCase, description: event.target.value })} />
-                  <Button className="w-full gap-2" onClick={() => void createCase()} disabled={isSaving}>
-                    <Plus className="h-4 w-4" />
-                    {terminology.createLabel}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+            <Badge
+              variant={
+                selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'
+              }
+            >
+              {selectedCase?.usesConfiguredWorkflow
+                ? 'Administration workflow'
+                : 'Procedure stages'}
+            </Badge>
           </div>
-
-          {selectedCase ? (
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </div>
+          ) : null}
+          <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="space-y-4">
               <div className="rounded-md border border-border bg-background p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <h2 className="text-base font-semibold">{selectedCase.referenceNumber || selectedCase.title}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">{selectedCase.currentStageName}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{selectedCase.status}</Badge>
-                    {selectedCase.currentAssignedRole ? <Badge>{selectedCase.currentAssignedRole}</Badge> : null}
-                    <Badge variant={selectedCase.canEditCurrentStage ? 'secondary' : 'outline'}>
-                      {selectedCase.canEditCurrentStage ? 'Editable' : 'Read only'}
-                    </Badge>
-                    {module === 'Legal' && originatingPropertyCaseId ? (
-                      <Button asChild size="sm" variant="outline">
-                        <Link
-                          href={`/estate/property-management/EstatePropertyManagementListingApplication?caseId=${encodeURIComponent(originatingPropertyCaseId)}`}
-                        >
-                          <ExternalLink className="mr-2 h-4 w-4" />
-                          Source property record
-                        </Link>
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-md border border-border bg-background p-4">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold">Intake</h2>
-                  <Button size="sm" variant="outline" className="gap-2" onClick={() => void saveIntake()} disabled={!selectedCase.canEditCurrentStage || isSaving}>
-                    <Save className="h-4 w-4" />
-                    Save
-                  </Button>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label htmlFor="procedure-reference-number" className="text-xs font-medium text-muted-foreground">
-                      Reference number
-                    </label>
-                    <Input id="procedure-reference-number" value={selectedCase.referenceNumber ?? ''} disabled={!selectedCase.canEditCurrentStage || isLinkedLegalMatter} onChange={(event) => setSelectedCase({ ...selectedCase, referenceNumber: event.target.value })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="procedure-applicant-name" className="text-xs font-medium text-muted-foreground">
-                      Applicant / party name
-                    </label>
-                    <Input id="procedure-applicant-name" value={selectedCase.applicantName ?? ''} disabled={!selectedCase.canEditCurrentStage || isLinkedLegalMatter} onChange={(event) => setSelectedCase({ ...selectedCase, applicantName: event.target.value })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="procedure-source-department" className="text-xs font-medium text-muted-foreground">
-                      Source department
-                    </label>
-                    <Input id="procedure-source-department" value={selectedCase.sourceDepartment ?? ''} disabled={!selectedCase.canEditCurrentStage || isLinkedLegalMatter} onChange={(event) => setSelectedCase({ ...selectedCase, sourceDepartment: event.target.value })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="procedure-received-date" className="text-xs font-medium text-muted-foreground">
-                      Received date
-                    </label>
-                    <Input id="procedure-received-date" type="date" value={selectedCase.receivedDate?.slice(0, 10) ?? ''} disabled={!selectedCase.canEditCurrentStage || isLinkedLegalMatter} onChange={(event) => setSelectedCase({ ...selectedCase, receivedDate: event.target.value })} />
-                  </div>
-                  {selectedCase.fields
-                    .filter((field) => entityType !== 'LegalTransfer' || !LEGAL_TRANSFER_FINANCE_FIELD_KEYS.has(field.key))
-                    .map((field) => renderField(field))}
-                </div>
-                <div className="mt-3 space-y-1.5">
-                  <label htmlFor="procedure-description" className="text-xs font-medium text-muted-foreground">
-                    Description
-                  </label>
-                  <Textarea
-                    id="procedure-description"
-                    value={selectedCase.description ?? ''}
-                    disabled={!selectedCase.canEditCurrentStage || isLinkedLegalMatter}
-                    onChange={(event) => setSelectedCase({ ...selectedCase, description: event.target.value })}
-                  />
-                </div>
-              </div>
-
-              {legalTransferFinanceSnapshot ? (
-                <div className="rounded-md border border-border bg-background p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <h2 className="text-sm font-semibold">Finance transfer fee</h2>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Read-only invoice and payment status synced from Finance AR.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant={getFinanceStatusBadgeVariant(legalTransferFinanceSnapshot.invoiceStatus)}>
-                        Invoice {formatFinanceStatus(legalTransferFinanceSnapshot.invoiceStatus)}
-                      </Badge>
-                      <Badge variant={getFinanceStatusBadgeVariant(legalTransferFinanceSnapshot.paymentStatus)}>
-                        Payment {formatFinanceStatus(legalTransferFinanceSnapshot.paymentStatus, 'Pending')}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Transfer fee payable</div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {formatGhsAmount(legalTransferFinanceSnapshot.transferFeePayable)}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Invoice reference</div>
-                      <div className="mt-1 break-words text-sm font-semibold">
-                        {legalTransferFinanceSnapshot.invoiceReference || 'Not generated'}
-                      </div>
-                      {legalTransferFinanceSnapshot.paymentRequestReference ? (
-                        <div className="mt-1 break-words text-xs text-muted-foreground">
-                          {legalTransferFinanceSnapshot.paymentRequestReference}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Invoice total</div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {formatGhsAmount(legalTransferFinanceSnapshot.invoiceAmount)}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Receipt reference</div>
-                      <div className="mt-1 break-words text-sm font-semibold">
-                        {legalTransferFinanceSnapshot.receiptReference || 'Awaiting payment'}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Amount paid</div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {formatGhsAmount(legalTransferFinanceSnapshot.invoicePaidAmount)}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Balance</div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {formatGhsAmount(legalTransferFinanceSnapshot.invoiceBalance)}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Customer notification</div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {legalTransferFinanceSnapshot.customerNotificationStatus || 'Not notified'}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-border bg-card p-3">
-                      <div className="text-xs font-medium text-muted-foreground">Finance check</div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {legalTransferFinanceSnapshot.paymentCheckStatus || 'Awaiting Finance sync'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {isLegalTransferClientPaymentStage ? (
-                    <div className="mt-4 flex justify-end">
-                      <Button
-                        className="gap-2"
-                        variant="outline"
-                        onClick={() => void syncLegalTransferFeePaymentStatus()}
-                        disabled={!selectedCase.canEditCurrentStage || isSaving}
-                      >
-                        {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                        Refresh Finance payment
-                      </Button>
-                    </div>
+                  <h2 className="text-sm font-semibold">
+                    {terminology.collectionLabel}
+                  </h2>
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   ) : null}
                 </div>
-              ) : null}
-
-              {supportsGeneratedDocuments ? (
-                <div className="rounded-md border border-border bg-background p-4">
-                  <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <h2 className="text-sm font-semibold">Generated Documents</h2>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Select
-                        value={selectedGenerationTemplate || undefined}
-                        onValueChange={setSelectedGenerationTemplate}
-                      >
-                        <SelectTrigger className="w-full sm:w-[260px]">
-                          <SelectValue placeholder="Select template" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {generationTemplates.map((template) => (
-                            <SelectItem key={template.templateCode} value={template.templateCode}>
-                              {template.title}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        className="gap-2"
-                        onClick={() => void generateProcedureDocument()}
-                        disabled={!selectedCase.canEditCurrentStage || !selectedGenerationTemplate || isGeneratingDocument}
-                      >
-                        {isGeneratingDocument ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <BookTemplate className="h-4 w-4" />
-                        )}
-                        Generate draft
-                      </Button>
-                    </div>
-                  </div>
-
-                  {generatedDocument ? (
-                    <div className="space-y-3 rounded-md border border-border bg-card p-3">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className="text-sm font-medium">
-                            {generatedDocument.record.title}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {generatedDocument.dmsReference} · {generatedDocument.sourceLabel}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Badge variant="outline">
-                              {generatedDocument.record.lifecycleStatus}
-                            </Badge>
-                            <Badge variant="secondary">
-                              {generatedDocument.record.versionStatus}
-                            </Badge>
-                            {generatedDocument.template.requiresApproval ? (
-                              <Badge variant="outline">
-                                {generatedDocument.template.approvalRole || 'Approval required'}
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-2"
-                            onClick={() => setIsGeneratedViewerOpen(true)}
-                          >
-                            <Eye className="h-4 w-4" />
-                            View
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
+                <div className="space-y-2">
+                  {cases.length === 0 && !isLoading ? (
+                    <p className="text-sm text-muted-foreground">
+                      {terminology.emptyMessage}
+                    </p>
                   ) : null}
-                </div>
-              ) : null}
-
-              <CentralDocumentViewerDialog
-                open={isGeneratedViewerOpen}
-                onOpenChange={setIsGeneratedViewerOpen}
-                file={
-                  generatedDocument
-                    ? {
-                        documentRecordId: generatedDocument.record.id,
-                        versionId: generatedDocument.version.id,
-                        title: generatedDocument.record.title,
-                        fileName: generatedDocument.version.fileName,
-                        repositoryPath: generatedDocument.pdfUrl,
-                        renditionPath: generatedDocument.pdfUrl,
-                        contentType: generatedDocument.version.contentType,
-                        sourceLabel: generatedDocument.sourceLabel,
-                        version: generatedDocument.version.versionNumber,
-                      }
-                    : null
-                }
-              />
-
-              <div className="rounded-md border border-border bg-background p-4">
-                <h2 className="text-sm font-semibold">Current Stage Checklist</h2>
-                <div className="mt-3 space-y-3">
-                  {currentStageItems.map((item) => (
-                    <label key={item.id} className="flex items-start gap-3 rounded-md border border-border bg-card p-3 text-sm">
-                      <Checkbox
-                        checked={item.isCompleted}
-                        disabled={!selectedCase.canEditCurrentStage || isSaving}
-                        onCheckedChange={(checked) => void toggleChecklist(item.id, checked === true)}
-                      />
-                      <span className={item.isCompleted ? 'text-muted-foreground line-through' : ''}>{item.text}</span>
-                    </label>
+                  {cases.map((procedureCase) => (
+                    <button
+                      key={procedureCase.id}
+                      type="button"
+                      className={`w-full rounded-md border p-3 text-left text-sm transition-colors ${
+                        selectedCase?.id === procedureCase.id
+                          ? 'border-primary bg-primary/10'
+                          : 'border-border bg-card hover:bg-muted'
+                      }`}
+                      onClick={() => void selectCase(procedureCase.id)}
+                    >
+                      <div className="font-medium">
+                        {procedureCase.referenceNumber || procedureCase.title}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {procedureCase.currentStageName}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <Badge variant="outline">{procedureCase.status}</Badge>
+                        {procedureCase.currentAssignedRole ? (
+                          <Badge variant="secondary">
+                            {procedureCase.currentAssignedRole}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    </button>
                   ))}
                 </div>
               </div>
 
-              <div className="rounded-md border border-border bg-background p-4">
-                <h2 className="text-sm font-semibold">Documents</h2>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  {visibleDocuments.map((document) => {
-                    const isDmsDocument = isDocumentManagementDocument(document);
-                    const previewUrl = getDocumentPreviewUrl(document);
-                    const sourceLabel =
-                      document.providedBy && document.providedBy !== 'Internal'
-                        ? document.providedBy
-                        : document.requiredFrom;
-                    const isReadOnlyProvidedDocument =
-                      Boolean(document.fileName) &&
-                      (isDmsDocument || (document.providedBy && document.providedBy !== 'Internal'));
-                    const isExternalProviderDocument =
-                      Boolean(document.providedBy) &&
-                      document.providedBy !== 'Internal' &&
-                      document.providedBy !== 'Legal Admin Assistant' &&
-                      document.providedBy !== 'Legal Department';
-                    const isLegalTransferFeeReceiptDocument =
-                      entityType === 'LegalTransfer' &&
-                      document.name === 'Transfer fee payment receipt';
-                    const legalTransferReceiptIsSynced =
-                      isLegalTransferFeeReceiptDocument &&
-                      Boolean(
-                        legalTransferFinanceSnapshot?.receiptReference ||
-                        legalTransferFinanceSnapshot?.paymentStatus?.toLowerCase() === 'paid'
-                      );
-                    const signatureRole = selectedCase
-                      ? LEGAL_TRANSFER_SIGNATURE_STAGE_ROLES[selectedCase.currentStageName]
-                      : undefined;
-                    const legalTransferStageSignatureRecorded =
-                      entityType === 'LegalTransfer' &&
-                      document.name === 'Executed transfer form' &&
-                      Boolean(signatureRole) &&
-                      isLegalTransferStageSignatureRecorded(selectedCase, document);
-                    const canSignLegalTransferExecutedForm =
-                      entityType === 'LegalTransfer' &&
-                      document.name === 'Executed transfer form' &&
-                      !isDmsDocument &&
-                      Boolean(document.fileUrl) &&
-                      Boolean(signatureRole) &&
-                      selectedCase.canEditCurrentStage &&
-                      !legalTransferStageSignatureRecorded;
-                    return (
-                    <div key={document.id} className="rounded-md border border-border bg-card p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium">{document.name}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{sourceLabel}</div>
-                        </div>
-                        <Badge variant={document.isMandatory ? 'default' : 'outline'}>
-                          {document.isMandatory ? 'Required' : 'Optional'}
+              {allowsManualCaseCreation ? (
+                <div className="rounded-md border border-border bg-background p-4">
+                  <h2 className="text-sm font-semibold">
+                    {terminology.createHeading}
+                  </h2>
+                  <div className="mt-3 space-y-3">
+                    <Input
+                      value={newCase.title}
+                      onChange={(event) =>
+                        setNewCase({ ...newCase, title: event.target.value })
+                      }
+                    />
+                    <Input
+                      placeholder="Reference number"
+                      value={newCase.referenceNumber}
+                      onChange={(event) =>
+                        setNewCase({
+                          ...newCase,
+                          referenceNumber: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      placeholder="Applicant / party name"
+                      value={newCase.applicantName}
+                      onChange={(event) =>
+                        setNewCase({
+                          ...newCase,
+                          applicantName: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      placeholder="Source department"
+                      value={newCase.sourceDepartment}
+                      onChange={(event) =>
+                        setNewCase({
+                          ...newCase,
+                          sourceDepartment: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      type="date"
+                      value={newCase.receivedDate}
+                      onChange={(event) =>
+                        setNewCase({
+                          ...newCase,
+                          receivedDate: event.target.value,
+                        })
+                      }
+                    />
+                    <Textarea
+                      placeholder="Description"
+                      value={newCase.description}
+                      onChange={(event) =>
+                        setNewCase({
+                          ...newCase,
+                          description: event.target.value,
+                        })
+                      }
+                    />
+                    <Button
+                      className="w-full gap-2"
+                      onClick={() => void createCase()}
+                      disabled={isSaving}
+                    >
+                      <Plus className="h-4 w-4" />
+                      {terminology.createLabel}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {selectedCase ? (
+              <div className="space-y-4">
+                <div className="rounded-md border border-border bg-background p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold">
+                        {selectedCase.referenceNumber || selectedCase.title}
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {selectedCase.currentStageName}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline">{selectedCase.status}</Badge>
+                      {selectedCase.currentAssignedRole ? (
+                        <Badge>{selectedCase.currentAssignedRole}</Badge>
+                      ) : null}
+                      <Badge
+                        variant={
+                          selectedCase.canEditCurrentStage
+                            ? 'secondary'
+                            : 'outline'
+                        }
+                      >
+                        {selectedCase.canEditCurrentStage
+                          ? 'Editable'
+                          : 'Read only'}
+                      </Badge>
+                      {module === 'Legal' && originatingPropertyCaseId ? (
+                        <Button asChild size="sm" variant="outline">
+                          <Link
+                            href={`/estate/property-management/EstatePropertyManagementListingApplication?caseId=${encodeURIComponent(originatingPropertyCaseId)}`}
+                          >
+                            <ExternalLink className="mr-2 h-4 w-4" />
+                            Source property record
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-border bg-background p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold">Intake</h2>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-2"
+                      onClick={() => void saveIntake()}
+                      disabled={!selectedCase.canEditCurrentStage || isSaving}
+                    >
+                      <Save className="h-4 w-4" />
+                      Save
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="procedure-reference-number"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Reference number
+                      </label>
+                      <Input
+                        id="procedure-reference-number"
+                        value={selectedCase.referenceNumber ?? ''}
+                        disabled={
+                          !canEditProcedureField('referenceNumber') ||
+                          isLinkedLegalMatter
+                        }
+                        onChange={(event) =>
+                          setSelectedCase({
+                            ...selectedCase,
+                            referenceNumber: event.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="procedure-applicant-name"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Applicant / party name
+                      </label>
+                      <Input
+                        id="procedure-applicant-name"
+                        value={selectedCase.applicantName ?? ''}
+                        disabled={
+                          !canEditProcedureField('applicantName') ||
+                          isLinkedLegalMatter
+                        }
+                        onChange={(event) =>
+                          setSelectedCase({
+                            ...selectedCase,
+                            applicantName: event.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="procedure-source-department"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Source department
+                      </label>
+                      <Input
+                        id="procedure-source-department"
+                        value={selectedCase.sourceDepartment ?? ''}
+                        disabled={
+                          !canEditProcedureField('sourceDepartment') ||
+                          isLinkedLegalMatter
+                        }
+                        onChange={(event) =>
+                          setSelectedCase({
+                            ...selectedCase,
+                            sourceDepartment: event.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="procedure-received-date"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Received date
+                      </label>
+                      <Input
+                        id="procedure-received-date"
+                        type="date"
+                        value={selectedCase.receivedDate?.slice(0, 10) ?? ''}
+                        disabled={
+                          !canEditProcedureField('receivedDate') ||
+                          isLinkedLegalMatter
+                        }
+                        onChange={(event) =>
+                          setSelectedCase({
+                            ...selectedCase,
+                            receivedDate: event.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    {selectedCase.fields
+                      .filter(
+                        (field) =>
+                          entityType !== 'LegalTransfer' ||
+                          !LEGAL_TRANSFER_FINANCE_FIELD_KEYS.has(field.key)
+                      )
+                      .map((field) => renderField(field))}
+                  </div>
+                  <div className="mt-3 space-y-1.5">
+                    <label
+                      htmlFor="procedure-description"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Description
+                    </label>
+                    <Textarea
+                      id="procedure-description"
+                      value={selectedCase.description ?? ''}
+                      disabled={
+                        !canEditProcedureField('description') ||
+                        isLinkedLegalMatter
+                      }
+                      onChange={(event) =>
+                        setSelectedCase({
+                          ...selectedCase,
+                          description: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="mt-4 flex justify-end border-t border-border pt-4">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-2"
+                      onClick={() => void saveIntake()}
+                      disabled={!selectedCase.canEditCurrentStage || isSaving}
+                    >
+                      <Save className="h-4 w-4" />
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                {legalTransferFinanceSnapshot ? (
+                  <div className="rounded-md border border-border bg-background p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h2 className="text-sm font-semibold">
+                          Finance transfer fee
+                        </h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Read-only invoice and payment status synced from
+                          Finance AR.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge
+                          variant={getFinanceStatusBadgeVariant(
+                            legalTransferFinanceSnapshot.invoiceStatus
+                          )}
+                        >
+                          Invoice{' '}
+                          {formatFinanceStatus(
+                            legalTransferFinanceSnapshot.invoiceStatus
+                          )}
+                        </Badge>
+                        <Badge
+                          variant={getFinanceStatusBadgeVariant(
+                            legalTransferFinanceSnapshot.paymentStatus
+                          )}
+                        >
+                          Payment{' '}
+                          {formatFinanceStatus(
+                            legalTransferFinanceSnapshot.paymentStatus,
+                            'Pending'
+                          )}
                         </Badge>
                       </div>
-                      <div className="mt-3 space-y-2">
-                        {document.fileName ? (
-                          <div className="rounded-md border border-border bg-background p-2 text-xs">
-                            <div className="font-medium text-foreground">{document.fileName}</div>
-                            {document.fileUrl ? (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {!isDmsDocument ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                                    onClick={() => void openDocument(document)}
-                                  >
-                                    <ExternalLink className="h-3 w-3" />
-                                    Open uploaded file
-                                  </button>
-                                ) : null}
-                                {isPdfDocument(document) ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                                    onClick={() => setPreviewDocumentId(document.id)}
-                                  >
-                                    <Eye className="h-3 w-3" />
-                                    View PDF
-                                  </button>
-                                ) : null}
-                                {canSignLegalTransferExecutedForm ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-                                    disabled={Boolean(signingDocumentId)}
-                                    onClick={() => void signLegalTransferExecutedForm(document)}
-                                  >
-                                    {signingDocumentId === document.id ? (
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <FilePenLine className="h-3 w-3" />
-                                    )}
-                                    Sign document
-                                  </button>
-                                ) : null}
-                                {legalTransferStageSignatureRecorded ? (
-                                  <span className="inline-flex items-center gap-1 text-muted-foreground">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    Signed
-                                  </span>
-                                ) : null}
-                              </div>
-                            ) : null}
-                            {signingDocumentId === document.id ? (
-                              <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-950">
-                                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
-                                <div>
-                                  <div className="font-semibold">Digitally signing transfer document</div>
-                                  <p className="mt-0.5">
-                                    This can take up to a minute while the PDF is signed and saved. Wait for the success message before submitting the stage.
-                                  </p>
-                                </div>
-                              </div>
-                            ) : null}
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Transfer fee payable
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {formatGhsAmount(
+                            legalTransferFinanceSnapshot.transferFeePayable
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Invoice reference
+                        </div>
+                        <div className="mt-1 break-words text-sm font-semibold">
+                          {legalTransferFinanceSnapshot.invoiceReference ||
+                            'Not generated'}
+                        </div>
+                        {legalTransferFinanceSnapshot.paymentRequestReference ? (
+                          <div className="mt-1 break-words text-xs text-muted-foreground">
+                            {
+                              legalTransferFinanceSnapshot.paymentRequestReference
+                            }
                           </div>
                         ) : null}
-                        {legalTransferReceiptIsSynced ? (
-                          <div className="space-y-2 rounded-md border border-border bg-background p-2 text-xs">
-                            <div className="font-medium text-foreground">
-                              {legalTransferFinanceSnapshot?.receiptReference || 'Payment confirmed in Finance'}
-                            </div>
-                            <div className="text-muted-foreground">
-                              Finance has confirmed the transfer-fee payment for this legal matter.
-                            </div>
-                            {legalTransferFinanceSnapshot?.invoiceReference ? (
-                              <div className="text-muted-foreground">
-                                Invoice {legalTransferFinanceSnapshot.invoiceReference}
-                                {legalTransferFinanceSnapshot.invoicePaidAmount
-                                  ? ` · Paid ${formatGhsAmount(legalTransferFinanceSnapshot.invoicePaidAmount)}`
-                                  : ''}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : isReadOnlyProvidedDocument ? (
-                          <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
-                            Submitted from {document.providedBy || 'DMS'}.
-                          </div>
-                        ) : isExternalProviderDocument ? (
-                          <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
-                            Awaiting {document.providedBy}.
-                          </div>
-                        ) : (
-                          <>
-                            <Input
-                              type="file"
-                              accept=".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.ico"
-                              disabled={!selectedCase.canEditCurrentStage || isSaving}
-                              onChange={(event) => selectDocumentFile(document.id, event.target.files?.[0] ?? null)}
-                            />
-                            {documentFiles[document.id] ? (
-                              <div className="text-xs text-muted-foreground">
-                                Selected: {documentFiles[document.id]?.name}
-                              </div>
-                            ) : null}
-                            <Textarea placeholder="Notes" value={document.notes ?? ''} disabled={!selectedCase.canEditCurrentStage} onChange={(event) => updateDocumentNotes(document.id, event.target.value)} />
-                            <Button size="sm" variant="outline" className="w-full gap-2" disabled={!selectedCase.canEditCurrentStage || isSaving} onClick={() => void saveDocument(document)}>
-                              <FileUp className="h-4 w-4" />
-                              {documentFiles[document.id] ? 'Upload document' : 'Save notes'}
-                            </Button>
-                          </>
-                        )}
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Invoice total
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {formatGhsAmount(
+                            legalTransferFinanceSnapshot.invoiceAmount
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Receipt reference
+                        </div>
+                        <div className="mt-1 break-words text-sm font-semibold">
+                          {legalTransferFinanceSnapshot.receiptReference ||
+                            'Awaiting payment'}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Amount paid
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {formatGhsAmount(
+                            legalTransferFinanceSnapshot.invoicePaidAmount
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Balance
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {formatGhsAmount(
+                            legalTransferFinanceSnapshot.invoiceBalance
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Customer notification
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {legalTransferFinanceSnapshot.customerNotificationStatus ||
+                            'Not notified'}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Finance check
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {legalTransferFinanceSnapshot.paymentCheckStatus ||
+                            'Awaiting Finance sync'}
+                        </div>
                       </div>
                     </div>
-                    );
-                  })}
-                </div>
-              </div>
 
-              <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-4 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 text-primary" />
-                  <span>
-                    {legalTransferRequiredFieldMessages.length > 0
-                      ? legalTransferRequiredFieldMessages[0]
-                      : isLegalTransferClientPaymentStage && !legalTransferPaymentReady
-                      ? 'Finance payment must be synced before this stage can be submitted.'
-                      : 'All current-stage checklist items must be complete before submission.'}
-                  </span>
+                    {isLegalTransferClientPaymentStage ? (
+                      <div className="mt-4 flex justify-end">
+                        <Button
+                          className="gap-2"
+                          variant="outline"
+                          onClick={() =>
+                            void syncLegalTransferFeePaymentStatus()
+                          }
+                          disabled={
+                            !selectedCase.canEditCurrentStage || isSaving
+                          }
+                        >
+                          {isSaving ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          Refresh Finance payment
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {supportsGeneratedDocuments ? (
+                  <div className="rounded-md border border-border bg-background p-4">
+                    <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <h2 className="text-sm font-semibold">
+                        Generated Documents
+                      </h2>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Select
+                          value={selectedGenerationTemplate || undefined}
+                          onValueChange={setSelectedGenerationTemplate}
+                        >
+                          <SelectTrigger className="w-full sm:w-[260px]">
+                            <SelectValue placeholder="Select template" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {generationTemplates.map((template) => (
+                              <SelectItem
+                                key={template.templateCode}
+                                value={template.templateCode}
+                              >
+                                {template.title}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          className="gap-2"
+                          onClick={() => void generateProcedureDocument()}
+                          disabled={
+                            !selectedCase.canEditCurrentStage ||
+                            !selectedGenerationTemplate ||
+                            isGeneratingDocument
+                          }
+                        >
+                          {isGeneratingDocument ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <BookTemplate className="h-4 w-4" />
+                          )}
+                          Generate draft
+                        </Button>
+                      </div>
+                    </div>
+
+                    {generatedDocument ? (
+                      <div className="space-y-3 rounded-md border border-border bg-card p-3">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="text-sm font-medium">
+                              {generatedDocument.record.title}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {generatedDocument.dmsReference} ·{' '}
+                              {generatedDocument.sourceLabel}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Badge variant="outline">
+                                {generatedDocument.record.lifecycleStatus}
+                              </Badge>
+                              <Badge variant="secondary">
+                                {generatedDocument.record.versionStatus}
+                              </Badge>
+                              {generatedDocument.template.requiresApproval ? (
+                                <Badge variant="outline">
+                                  {generatedDocument.template.approvalRole ||
+                                    'Approval required'}
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-2"
+                              onClick={() => setIsGeneratedViewerOpen(true)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              View
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <CentralDocumentViewerDialog
+                  open={isGeneratedViewerOpen}
+                  onOpenChange={setIsGeneratedViewerOpen}
+                  file={
+                    generatedDocument
+                      ? {
+                          documentRecordId: generatedDocument.record.id,
+                          versionId: generatedDocument.version.id,
+                          title: generatedDocument.record.title,
+                          fileName: generatedDocument.version.fileName,
+                          repositoryPath: generatedDocument.pdfUrl,
+                          renditionPath: generatedDocument.pdfUrl,
+                          contentType: generatedDocument.version.contentType,
+                          sourceLabel: generatedDocument.sourceLabel,
+                          version: generatedDocument.version.versionNumber,
+                        }
+                      : null
+                  }
+                />
+
+                <div className="rounded-md border border-border bg-background p-4">
+                  <h2 className="text-sm font-semibold">
+                    Current Stage Checklist
+                  </h2>
+                  <div className="mt-3 space-y-3">
+                    {currentStageItems.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-start gap-3 rounded-md border border-border bg-card p-3 text-sm"
+                      >
+                        <Checkbox
+                          checked={item.isCompleted}
+                          disabled={
+                            !selectedCase.canEditCurrentStage || isSaving
+                          }
+                          onCheckedChange={(checked) =>
+                            void toggleChecklist(item.id, checked === true)
+                          }
+                        />
+                        <span
+                          className={
+                            item.isCompleted
+                              ? 'text-muted-foreground line-through'
+                              : ''
+                          }
+                        >
+                          {item.text}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Button className="gap-2" onClick={() => void completeStage()} disabled={isStageSubmitDisabled}>
-                    <Send className="h-4 w-4" />
-                    Submit stage
-                  </Button>
+
+                <div className="rounded-md border border-border bg-background p-4">
+                  <h2 className="text-sm font-semibold">Documents</h2>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {visibleDocuments.map((document) => {
+                      const isDmsDocument =
+                        isDocumentManagementDocument(document);
+                      const previewUrl = getDocumentPreviewUrl(document);
+                      const sourceLabel =
+                        document.providedBy &&
+                        document.providedBy !== 'Internal'
+                          ? document.providedBy
+                          : document.requiredFrom;
+                      const isReadOnlyProvidedDocument =
+                        Boolean(document.fileName) &&
+                        (isDmsDocument ||
+                          (document.providedBy &&
+                            document.providedBy !== 'Internal'));
+                      const isExternalProviderDocument =
+                        Boolean(document.providedBy) &&
+                        document.providedBy !== 'Internal' &&
+                        document.providedBy !== 'Legal Admin Assistant' &&
+                        document.providedBy !== 'Legal Department';
+                      const isLegalTransferFeeReceiptDocument =
+                        entityType === 'LegalTransfer' &&
+                        document.name === 'Transfer fee payment receipt';
+                      const legalTransferReceiptIsSynced =
+                        isLegalTransferFeeReceiptDocument &&
+                        Boolean(
+                          legalTransferFinanceSnapshot?.receiptReference ||
+                            legalTransferFinanceSnapshot?.paymentStatus?.toLowerCase() ===
+                              'paid'
+                        );
+                      const signatureRole = selectedCase
+                        ? LEGAL_TRANSFER_SIGNATURE_STAGE_ROLES[
+                            selectedCase.currentStageName
+                          ]
+                        : undefined;
+                      const legalTransferStageSignatureRecorded =
+                        entityType === 'LegalTransfer' &&
+                        document.name === 'Executed transfer form' &&
+                        Boolean(signatureRole) &&
+                        isLegalTransferStageSignatureRecorded(
+                          selectedCase,
+                          document
+                        );
+                      const canSignLegalTransferExecutedForm =
+                        entityType === 'LegalTransfer' &&
+                        document.name === 'Executed transfer form' &&
+                        !isDmsDocument &&
+                        Boolean(document.fileUrl) &&
+                        Boolean(signatureRole) &&
+                        selectedCase.canEditCurrentStage &&
+                        !legalTransferStageSignatureRecorded;
+                      return (
+                        <div
+                          key={document.id}
+                          className="rounded-md border border-border bg-card p-3"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-medium">
+                                {document.name}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {sourceLabel}
+                              </div>
+                            </div>
+                            <Badge
+                              variant={
+                                document.isMandatory ? 'default' : 'outline'
+                              }
+                            >
+                              {document.isMandatory ? 'Required' : 'Optional'}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {document.fileName ? (
+                              <div className="rounded-md border border-border bg-background p-2 text-xs">
+                                <div className="font-medium text-foreground">
+                                  {document.fileName}
+                                </div>
+                                {document.fileUrl ? (
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {!isDmsDocument ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        onClick={() =>
+                                          void openDocument(document)
+                                        }
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                        Open uploaded file
+                                      </button>
+                                    ) : null}
+                                    {isPdfDocument(document) ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        onClick={() =>
+                                          setPreviewDocumentId(document.id)
+                                        }
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                        View PDF
+                                      </button>
+                                    ) : null}
+                                    {canSignLegalTransferExecutedForm ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                                        disabled={Boolean(signingDocumentId)}
+                                        onClick={() =>
+                                          void signLegalTransferExecutedForm(
+                                            document
+                                          )
+                                        }
+                                      >
+                                        {signingDocumentId === document.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <FilePenLine className="h-3 w-3" />
+                                        )}
+                                        Sign document
+                                      </button>
+                                    ) : null}
+                                    {legalTransferStageSignatureRecorded ? (
+                                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                        <CheckCircle2 className="h-3 w-3" />
+                                        Signed
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {signingDocumentId === document.id ? (
+                                  <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-950">
+                                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+                                    <div>
+                                      <div className="font-semibold">
+                                        Digitally signing transfer document
+                                      </div>
+                                      <p className="mt-0.5">
+                                        This can take up to a minute while the
+                                        PDF is signed and saved. Wait for the
+                                        success message before submitting the
+                                        stage.
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {legalTransferReceiptIsSynced ? (
+                              <div className="space-y-2 rounded-md border border-border bg-background p-2 text-xs">
+                                <div className="font-medium text-foreground">
+                                  {legalTransferFinanceSnapshot?.receiptReference ||
+                                    'Payment confirmed in Finance'}
+                                </div>
+                                <div className="text-muted-foreground">
+                                  Finance has confirmed the transfer-fee payment
+                                  for this legal matter.
+                                </div>
+                                {legalTransferFinanceSnapshot?.invoiceReference ? (
+                                  <div className="text-muted-foreground">
+                                    Invoice{' '}
+                                    {
+                                      legalTransferFinanceSnapshot.invoiceReference
+                                    }
+                                    {legalTransferFinanceSnapshot.invoicePaidAmount
+                                      ? ` · Paid ${formatGhsAmount(legalTransferFinanceSnapshot.invoicePaidAmount)}`
+                                      : ''}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : isReadOnlyProvidedDocument ? (
+                              <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                                Submitted from {document.providedBy || 'DMS'}.
+                              </div>
+                            ) : isExternalProviderDocument ? (
+                              <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                                Awaiting {document.providedBy}.
+                              </div>
+                            ) : (
+                              <>
+                                <Input
+                                  type="file"
+                                  accept=".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.ico"
+                                  disabled={
+                                    !selectedCase.canEditCurrentStage ||
+                                    isSaving
+                                  }
+                                  onChange={(event) =>
+                                    selectDocumentFile(
+                                      document.id,
+                                      event.target.files?.[0] ?? null
+                                    )
+                                  }
+                                />
+                                {documentFiles[document.id] ? (
+                                  <div className="text-xs text-muted-foreground">
+                                    Selected: {documentFiles[document.id]?.name}
+                                  </div>
+                                ) : null}
+                                <Textarea
+                                  placeholder="Notes"
+                                  value={document.notes ?? ''}
+                                  disabled={!selectedCase.canEditCurrentStage}
+                                  onChange={(event) =>
+                                    updateDocumentNotes(
+                                      document.id,
+                                      event.target.value
+                                    )
+                                  }
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full gap-2"
+                                  disabled={
+                                    !selectedCase.canEditCurrentStage ||
+                                    isSaving
+                                  }
+                                  onClick={() => void saveDocument(document)}
+                                >
+                                  <FileUp className="h-4 w-4" />
+                                  {documentFiles[document.id]
+                                    ? 'Upload document'
+                                    : 'Save notes'}
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-primary" />
+                    <span>
+                      {legalTransferRequiredFieldMessages.length > 0
+                        ? legalTransferRequiredFieldMessages[0]
+                        : facilitiesMaintenanceCloseoutBlocker
+                          ? facilitiesMaintenanceCloseoutBlocker
+                        : isLegalTransferClientPaymentStage &&
+                            !legalTransferPaymentReady
+                          ? 'Finance payment must be synced before this stage can be submitted.'
+                          : 'All current-stage checklist items must be complete before submission.'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Button
+                      className="gap-2"
+                      onClick={() => void completeStage()}
+                      disabled={isStageSubmitDisabled}
+                    >
+                      <Send className="h-4 w-4" />
+                      Submit stage
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
-              {terminology.selectMessage}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-    <Dialog open={Boolean(previewDocument && previewDocumentUrl)} onOpenChange={(open) => {
-      if (!open) {
-        setPreviewDocumentId(null);
-      }
-    }}>
-      <DialogContent className="h-[94vh] max-h-[94vh] max-w-[96vw] overflow-hidden p-0 xl:max-w-7xl">
-        <DialogHeader className="border-b border-border px-5 py-4">
-          <DialogTitle>{previewDocument?.name ?? 'Document preview'}</DialogTitle>
-          <DialogDescription>
-            {previewDocument?.fileName ?? 'PDF document'}
-          </DialogDescription>
-        </DialogHeader>
-        {previewDocument && previewDocumentUrl ? (
-          <div className="h-[calc(94vh-92px)] overflow-hidden px-5 pb-5">
-            <ProcedurePdfViewer
-              fileUrl={previewDocumentUrl}
-              fileName={previewDocument.fileName}
-              height="calc(94vh - 150px)"
-            />
+            ) : (
+              <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
+                {terminology.selectMessage}
+              </div>
+            )}
           </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+        </CardContent>
+      </Card>
+      <Dialog
+        open={Boolean(previewDocument && previewDocumentUrl)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewDocumentId(null);
+          }
+        }}
+      >
+        <DialogContent className="h-[94vh] max-h-[94vh] max-w-[96vw] overflow-hidden p-0 xl:max-w-7xl">
+          <DialogHeader className="border-b border-border px-5 py-4">
+            <DialogTitle>
+              {previewDocument?.name ?? 'Document preview'}
+            </DialogTitle>
+            <DialogDescription>
+              {previewDocument?.fileName ?? 'PDF document'}
+            </DialogDescription>
+          </DialogHeader>
+          {previewDocument && previewDocumentUrl ? (
+            <div className="h-[calc(94vh-92px)] overflow-hidden px-5 pb-5">
+              <ProcedurePdfViewer
+                fileUrl={previewDocumentUrl}
+                fileName={previewDocument.fileName}
+                height="calc(94vh - 150px)"
+              />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
