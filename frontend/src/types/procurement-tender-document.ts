@@ -163,6 +163,11 @@ export interface ProcurementTenderDocumentPolicyOption {
   sourceConfigurationProfileCode: string;
 }
 
+export interface AttachProcurementTenderDocumentTemplateContentRequest {
+  contentWorkflowEvidenceDocumentId: string;
+  rowVersion: string;
+}
+
 export interface ProcurementTenderDocumentContentArtifactOption {
   id: string;
   documentName?: string;

@@ -16,7 +16,9 @@ public sealed class ProcurementTenderDocumentTemplateVersionConfiguration :
                 "CK_ProcurementTenderDocumentTemplateVersions_State",
                 "[Version] >= 1 AND [PolicySetVersion] >= 1 AND [Status] BETWEEN 0 AND 3 " +
                 "AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]) " +
-                "AND LEN([ContentChecksumSha256]) = 64 AND LEN([IntegrityHash]) = 64 " +
+                "AND (([Status] IN (0, 1) AND LEN([ContentChecksumSha256]) IN (0, 64)) " +
+                "OR ([Status] IN (2, 3) AND LEN([ContentChecksumSha256]) = 64)) " +
+                "AND LEN([IntegrityHash]) = 64 " +
                 "AND ISJSON([LifecycleSnapshotJson]) = 1");
             table.HasCheckConstraint(
                 "CK_ProcurementTenderDocumentTemplateVersions_ContentEvidence",

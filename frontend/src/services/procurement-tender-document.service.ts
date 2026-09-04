@@ -1,6 +1,7 @@
 import { apiService } from '@/services/api.service';
 import type {
   AcknowledgeProcurementTenderDocumentChangeRequest,
+  AttachProcurementTenderDocumentTemplateContentRequest,
   BindProcurementTenderDocumentRequest,
   CloneProcurementTenderDocumentTemplateRequest,
   CreateProcurementTenderDocumentChangeRequest,
@@ -23,6 +24,7 @@ import type {
   SaveProcurementTenderDocumentTemplate,
 } from '@/types/procurement-tender-document';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { WorkflowStepAction } from '@/types/workflow';
 
 const templateRoot = '/procurement/tender-document-templates';
 const registerRoot = '/procurement/tender-document-register';
@@ -40,15 +42,20 @@ export const procurementTenderDocumentService = {
     apiService.get<ProcurementTenderDocumentPolicyOption[]>(
       `${templateRoot}/policy-options`
     ),
-  contentArtifactOptions: async () => {
+  contentArtifactOptions: async (workflowInstanceId?: string) => {
     const instances = await workflowApiService.getWorkflowEvidenceReviewInstances({
       pageSize: 100,
     });
-    const steps = instances.flatMap((instance) =>
-      instance.steps
-        .filter((step) => step.evidence.total > 0)
-        .map((step) => ({ instance, step }))
-    );
+    const steps = instances
+      .filter(
+        (instance) =>
+          !workflowInstanceId || instance.id === workflowInstanceId
+      )
+      .flatMap((instance) =>
+        instance.steps
+          .filter((step) => step.evidence.total > 0)
+          .map((step) => ({ instance, step }))
+      );
     const evidenceByStep = await Promise.all(
       steps.map(({ step }) =>
         workflowApiService.getWorkflowStepEvidence(step.stepInstanceId)
@@ -91,6 +98,35 @@ export const procurementTenderDocumentService = {
       );
     });
   },
+  templateWorkflowInstance: async (workflowInstanceId: string) => {
+    const instances =
+      await workflowApiService.getWorkflowEvidenceReviewInstances({
+        pageSize: 100,
+      });
+    const instance = instances.find((item) => item.id === workflowInstanceId);
+    if (!instance) {
+      throw new Error(
+        'The exact template approval workflow is not available in the current tenant.'
+      );
+    }
+    return instance;
+  },
+  uploadTemplateWorkflowContent: (
+    stepInstanceId: string,
+    file: File
+  ) =>
+    workflowApiService.uploadStepAttachment(
+      stepInstanceId,
+      file,
+      undefined,
+      'Controlled tender-document content',
+      'Tender document'
+    ),
+  completeTemplateContentStep: (stepInstanceId: string) =>
+    workflowApiService.processStep(stepInstanceId, {
+      action: WorkflowStepAction.Complete,
+      comments: 'Controlled tender-document content uploaded for approval.',
+    }),
   searchTemplates: (request: ProcurementTenderDocumentSearch) =>
     apiService.get<ProcurementTenderDocumentTemplatePage>(
       templateRoot,
@@ -106,6 +142,14 @@ export const procurementTenderDocumentService = {
   ) =>
     apiService.put<ProcurementTenderDocumentTemplate>(
       `${templateRoot}/${id}`,
+      request
+    ),
+  attachTemplateContent: (
+    id: string,
+    request: AttachProcurementTenderDocumentTemplateContentRequest
+  ) =>
+    apiService.post<ProcurementTenderDocumentTemplate>(
+      `${templateRoot}/${id}/content`,
       request
     ),
   submitTemplate: (

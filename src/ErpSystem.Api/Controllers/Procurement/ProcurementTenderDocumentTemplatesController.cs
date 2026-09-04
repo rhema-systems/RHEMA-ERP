@@ -56,6 +56,14 @@ public sealed class ProcurementTenderDocumentTemplatesController : ControllerBas
         ExecuteAsync(async () =>
             Ok(await _service.UpdateTemplateAsync(id, request, CorrelationId, cancellationToken)));
 
+    [HttpPost("{id:guid}/content")]
+    public Task<IActionResult> AttachContent(
+        Guid id,
+        [FromBody] AttachProcurementTenderDocumentTemplateContentRequest request,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+            Ok(await _service.AttachTemplateContentAsync(id, request, CorrelationId, cancellationToken)));
+
     [HttpPost("{id:guid}/submit")]
     public Task<IActionResult> Submit(
         Guid id,

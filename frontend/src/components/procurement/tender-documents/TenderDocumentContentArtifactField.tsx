@@ -21,6 +21,7 @@ import type { ProcurementTenderDocumentContentArtifactOption } from '@/types/pro
 
 interface TenderDocumentContentArtifactFieldProps {
   value?: string;
+  workflowInstanceId?: string;
   contentReference: string;
   checksumSha256: string;
   disabled?: boolean;
@@ -45,14 +46,22 @@ const malwareLabel = (status: number) =>
 
 export function TenderDocumentContentArtifactField({
   value,
+  workflowInstanceId,
   contentReference,
   checksumSha256,
   disabled = false,
   onSelect,
 }: TenderDocumentContentArtifactFieldProps) {
   const artifacts = useQuery({
-    queryKey: ['procurement-tender-document-content-artifacts'],
-    queryFn: procurementTenderDocumentService.contentArtifactOptions,
+    queryKey: [
+      'procurement-tender-document-content-artifacts',
+      workflowInstanceId ?? 'all',
+    ],
+    queryFn: () =>
+      procurementTenderDocumentService.contentArtifactOptions(
+        workflowInstanceId
+      ),
+    enabled: Boolean(workflowInstanceId),
   });
   const selected = useMemo(
     () => artifacts.data?.find((artifact) => artifact.id === value),
@@ -68,7 +77,12 @@ export function TenderDocumentContentArtifactField({
         <div className="min-w-0 flex-1 space-y-2">
           <Label>Controlled workflow evidence document</Label>
           <Select
-            disabled={disabled || artifacts.isLoading || artifacts.isError}
+            disabled={
+              disabled ||
+              !workflowInstanceId ||
+              artifacts.isLoading ||
+              artifacts.isError
+            }
             value={value || undefined}
             onValueChange={(artifactId) => {
               const artifact = artifacts.data?.find(
@@ -139,8 +153,9 @@ export function TenderDocumentContentArtifactField({
         !artifacts.isError &&
         !artifacts.data?.length && (
           <p className="text-sm text-muted-foreground">
-            No current workflow evidence is available. Upload, malware-scan, and
-            verify the source document in Workflow evidence governance first.
+            {workflowInstanceId
+              ? 'No verified content is available in this approval workflow yet. Upload the tender document on its workflow task, then have a different authorized reviewer verify it.'
+              : 'Content can be attached after this Draft starts its exact approval workflow.'}
           </p>
         )}
       {selected && (

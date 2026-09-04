@@ -119685,7 +119685,8 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("TenantId", "SourcingReleaseId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [Status] IN (0, 1)");
 
                     b.HasIndex("TenantId", "Status");
 
@@ -124287,7 +124288,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementTenderDocumentTemplateVersions_ContentEvidence", "([ContentWorkflowEvidenceDocumentId] IS NULL OR [ContentFileUploadRecordId] IS NULL)");
 
-                            t.HasCheckConstraint("CK_ProcurementTenderDocumentTemplateVersions_State", "[Version] >= 1 AND [PolicySetVersion] >= 1 AND [Status] BETWEEN 0 AND 3 AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]) AND LEN([ContentChecksumSha256]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1");
+                            t.HasCheckConstraint("CK_ProcurementTenderDocumentTemplateVersions_State", "[Version] >= 1 AND [PolicySetVersion] >= 1 AND [Status] BETWEEN 0 AND 3 AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]) AND (([Status] IN (0, 1) AND LEN([ContentChecksumSha256]) IN (0, 64)) OR ([Status] IN (2, 3) AND LEN([ContentChecksumSha256]) = 64)) AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);

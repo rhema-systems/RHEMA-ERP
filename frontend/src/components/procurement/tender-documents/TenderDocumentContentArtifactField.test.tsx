@@ -94,6 +94,7 @@ describe('TenderDocumentContentArtifactField', () => {
     const onSelect = vi.fn();
     render(
       <TenderDocumentContentArtifactField
+        workflowInstanceId="instance-1"
         contentReference="workflow-evidence/default/existing.docx"
         checksumSha256={'c'.repeat(64)}
         onSelect={onSelect}

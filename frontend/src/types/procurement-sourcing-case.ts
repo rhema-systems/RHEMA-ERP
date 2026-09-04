@@ -9,13 +9,19 @@ import type {
 import type { PurchaseRequisitionSourcingReleaseDto } from '@/services/purchasingService';
 
 export type ProcurementSourcingCaseStatus =
-  'Ready' | 'InProgress' | 'Closed' | 'Cancelled';
+  | 'Ready'
+  | 'InProgress'
+  | 'Closed'
+  | 'Cancelled';
 
 export type ProcurementSourcingCaseSourceRequestStatus =
-  'Planned' | 'Created' | 'Cancelled';
+  | 'Planned'
+  | 'Created'
+  | 'Cancelled';
 
 export type ProcurementSourcingMethodSelectionBasis =
-  'AutomaticRecommendation' | 'ApprovedOverride';
+  | 'AutomaticRecommendation'
+  | 'ApprovedOverride';
 
 export interface ProcurementSourcingMethodOverrideReadiness {
   isRequested: boolean;

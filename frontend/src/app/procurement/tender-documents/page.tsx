@@ -48,13 +48,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { TenderDocumentContentArtifactField } from '@/components/procurement/tender-documents/TenderDocumentContentArtifactField';
 import { useAuth } from '@/hooks/use-auth';
 import {
   procurementMethodLabel,
   tenderDocumentTemplateStatusLabel,
   validateTenderDocumentTemplate,
-  applyTenderDocumentContentArtifact,
 } from '@/lib/procurement-tender-document';
 import { procurementTenderDocumentService as service } from '@/services/procurement-tender-document.service';
 import type {
@@ -83,7 +81,7 @@ const emptyForm = (): SaveProcurementTenderDocumentTemplate => ({
   name: '',
   description: '',
   documentTypeCode: 'TENDER-DOCUMENT',
-  effectiveFromUtc: localInput(new Date(Date.now() + 60 * 60 * 1000)),
+  effectiveFromUtc: localInput(new Date(Date.now() - 60 * 1000)),
   policySetId: '',
   policySetCode: '',
   policySetVersion: 0,
@@ -159,7 +157,9 @@ export default function TenderDocumentTemplatesPage() {
     }));
 
   const create = async () => {
-    const validation = validateTenderDocumentTemplate(form);
+    const validation = validateTenderDocumentTemplate(form, {
+      requireContent: false,
+    });
     if (validation) {
       toast.error(validation);
       return;
@@ -455,8 +455,9 @@ export default function TenderDocumentTemplatesPage() {
           <DialogHeader>
             <DialogTitle>Create controlled tender-document Draft</DialogTitle>
             <DialogDescription>
-              Store shared content references and immutable lineage only. Upload
-              and workflow execution remain owned by the shared platforms.
+              Create the controlled metadata first. Submission starts the exact
+              approval workflow where the tender document is uploaded and
+              independently verified before publication.
             </DialogDescription>
           </DialogHeader>
 
@@ -549,17 +550,11 @@ export default function TenderDocumentTemplatesPage() {
                 </Select>
               </Field>
             </div>
-            <div className="md:col-span-2">
-              <TenderDocumentContentArtifactField
-                value={form.contentWorkflowEvidenceDocumentId}
-                contentReference={form.contentReference}
-                checksumSha256={form.contentChecksumSha256}
-                onSelect={(artifact) =>
-                  setForm((current) =>
-                    applyTenderDocumentContentArtifact(current, artifact)
-                  )
-                }
-              />
+            <div className="md:col-span-2 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              After creation, submit this Draft to start the exact approval
+              workflow. Upload the tender document on that workflow task; a
+              different authorized reviewer must verify it before the content
+              can be attached and published.
             </div>
             <div className="md:col-span-2 space-y-2">
               <Label>Applicable procurement methods</Label>

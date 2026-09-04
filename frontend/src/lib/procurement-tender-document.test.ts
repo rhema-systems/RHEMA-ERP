@@ -80,6 +80,28 @@ describe('controlled tender document presentation', () => {
     ).toContain('invalid');
   });
 
+  it('allows metadata-only Draft creation while retaining strict publication validation', () => {
+    const metadataOnly = {
+      ...template(),
+      contentWorkflowEvidenceDocumentId: undefined,
+      contentReference: '',
+      contentChecksumSha256: '',
+    };
+
+    expect(
+      validateTenderDocumentTemplate(metadataOnly, { requireContent: false })
+    ).toBeUndefined();
+    expect(validateTenderDocumentTemplate(metadataOnly)).toContain(
+      'workflow evidence document'
+    );
+    expect(
+      validateTenderDocumentTemplate(
+        { ...metadataOnly, contentReference: 'partial/path' },
+        { requireContent: false }
+      )
+    ).toContain('workflow evidence document');
+  });
+
   it('derives the immutable content ID, path, and checksum from one approved artifact', () => {
     const artifact = {
       id: 'evidence-2',

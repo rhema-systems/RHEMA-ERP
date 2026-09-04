@@ -249,6 +249,35 @@ public sealed class ProcurementSourcingCaseServiceTests
     }
 
     [Fact]
+    public async Task CancelledCaseIsRetainedWhileSuccessorLocksTheSameImmutableRelease()
+    {
+        await using var fixture = new Fixture();
+        var first = await fixture.Service.CreateAsync(fixture.ValidRequest(), "trace-first-attempt");
+        var cancelled = await fixture.Service.CancelAsync(first.Id,
+            new ProcurementSourcingCaseActionRequest
+            {
+                RowVersion = first.RowVersion,
+                Reason = "Replace the cancelled sourcing attempt under current controls."
+            },
+            "trace-cancel-first-attempt");
+
+        var option = (await fixture.Service.GetSourceOptionsAsync()).Should().ContainSingle().Which;
+        var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
+        var successor = await fixture.Service.CreateAsync(fixture.ValidRequest(), "trace-successor-attempt");
+
+        cancelled.Status.Should().Be(ProcurementSourcingCaseStatus.Cancelled);
+        option.CurrentCaseId.Should().BeNull();
+        readiness.CanCreate.Should().BeTrue();
+        readiness.CurrentCase.Should().BeNull();
+        successor.Id.Should().NotBe(first.Id);
+        successor.CaseNumber.Should().Be("SC-PR-CASE-0001-A2");
+        successor.SourcingReleaseId.Should().Be(first.SourcingReleaseId);
+        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(2);
+        (await fixture.Context.ProcurementSourcingCases.SingleAsync(item => item.Id == first.Id))
+            .Status.Should().Be(ProcurementSourcingCaseStatus.Cancelled);
+    }
+
+    [Fact]
     public async Task LotCoverageRejectsMissingDuplicateOrMismatchedValueLines()
     {
         await using var fixture = new Fixture();
@@ -525,8 +554,9 @@ public sealed class ProcurementSourcingCaseServiceTests
         await fixture.Service.Invoking(service => service.EnforceSourceEntryAsync(
                 fixture.Requisition.Id, ProcurementMethodType.RequestForQuotation,
                 "RequestForQuotation", "RFQ-STALE", "trace-stale"))
-            .Should().ThrowAsync<ProcurementRequisitionSourcingValidationException>()
-            .Where(exception => exception.Code == "SOURCING_CASE_POLICY_STALE");
+            .Should().ThrowAsync<ProcurementSourcingCaseConflictException>()
+            .Where(exception => exception.Code == "SOURCING_CASE_ACTIVE_RELEASE_CONFLICT" &&
+                exception.Message.Contains(created.CaseNumber));
 
         fixture.TenantId = Guid.NewGuid();
         await fixture.Service.Invoking(service => service.GetAsync(created.Id))

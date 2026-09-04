@@ -29,7 +29,9 @@ public sealed class ProcurementSourcingCaseConfiguration : IEntityTypeConfigurat
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.HasIndex(item => new { item.TenantId, item.CaseNumber }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.PurchaseRequisitionId, item.CaseSequence }).IsUnique();
-        builder.HasIndex(item => new { item.TenantId, item.SourcingReleaseId }).IsUnique();
+        builder.HasIndex(item => new { item.TenantId, item.SourcingReleaseId })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Status] IN (0, 1)");
         builder.HasIndex(item => new { item.TenantId, item.Status });
         builder.HasOne(item => item.PurchaseRequisition).WithMany(item => item.SourcingCases)
             .HasForeignKey(item => item.PurchaseRequisitionId).OnDelete(DeleteBehavior.Restrict);
