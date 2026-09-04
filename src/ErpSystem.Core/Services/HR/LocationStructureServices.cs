@@ -386,12 +386,17 @@ public class LocationService : ILocationService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationService> _logger;
 
+    // Shared reference data, not HR's. A site says which administrative area it stands in; this
+    // resolves that into the City text the address prints, so the two cannot disagree.
+    private readonly ErpSystem.Core.Services.Reference.IGeographyService _geography;
+
     public LocationService(
         ILocationRepository repository,
         ILocationLevelRepository levelRepository,
         IGeofenceZoneRepository geofenceZoneRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ErpSystem.Core.Services.Reference.IGeographyService geography,
         ILogger<LocationService> logger)
     {
         _repository = repository;
@@ -399,6 +404,7 @@ public class LocationService : ILocationService
         _geofenceZoneRepository = geofenceZoneRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _geography = geography;
         _logger = logger;
     }
 
@@ -621,12 +627,38 @@ public class LocationService : ILocationService
             entity.Path = $"/{entity.Id}";
         }
 
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
+
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Location created: {Id}", entity.Id);
 
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Rewrites <c>City</c> from the site's administrative area, so the printed address and the
+    /// structured link cannot disagree. A null area leaves the text exactly as it was — most sites
+    /// predate the tree and that text is the only address they have.
+    /// </summary>
+    private async Task ApplyGeoAreaSnapshotAsync(Location entity, CancellationToken cancellationToken)
+    {
+        if (entity.GeoAreaId is not { } areaId) return;
+
+        var (_, city) = await _geography.GetAddressSnapshotAsync(areaId, cancellationToken);
+
+        // (null, null) means the area could not be read — another tenant's, or removed between the
+        // form loading and the save. Leave what the record said rather than blanking it.
+        if (city is null)
+        {
+            _logger.LogWarning(
+                "Location {LocationId} references geo area {GeoAreaId}, which could not be resolved to a "
+                + "city; the address was left unchanged.", entity.Id, areaId);
+            return;
+        }
+
+        entity.City = city;
     }
 
     public async Task<LocationDto> UpdateAsync(UpdateLocationDto updateDto, CancellationToken cancellationToken = default)
@@ -702,6 +734,9 @@ public class LocationService : ILocationService
         await ValidateGeoAsync(updateDto.Latitude, updateDto.Longitude, updateDto.GeofenceZoneId, entity.TenantId);
 
         updateDto.UpdateEntity(entity);
+
+        // ⚠ AFTER UpdateEntity, which has just written whatever City the caller sent. The tree wins.
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

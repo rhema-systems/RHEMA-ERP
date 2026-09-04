@@ -21,6 +21,7 @@ public sealed class EmployeeGeoAreaConsumer : IGeoAreaConsumer
     public EmployeeGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
 
     public string ResourceName => "employees";
+    public string ResourceNameSingular => "employee";
 
     public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
         => _unitOfWork.Repository<Employee>().GetQueryable()

@@ -25,6 +25,9 @@ public class HealthcareFacilityDto : BaseDto
     public string? City { get; set; }
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>Administrative area the facility stands in; City is a snapshot of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string? PrimaryPhone { get; set; }
     public string? EmergencyPhone { get; set; }
@@ -106,6 +109,9 @@ public class CreateHealthcareFacilityDto : CreateDtoBase
     [MaxLength(70)]
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>Administrative area the facility stands in; City is a snapshot of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     [MaxLength(50)]
     public string? PrimaryPhone { get; set; }
     [MaxLength(50)]
@@ -175,6 +181,9 @@ public class UpdateHealthcareFacilityDto : UpdateDtoBase
     [MaxLength(70)]
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>Administrative area the facility stands in; City is a snapshot of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     [MaxLength(50)]
     public string? PrimaryPhone { get; set; }
     [MaxLength(50)]

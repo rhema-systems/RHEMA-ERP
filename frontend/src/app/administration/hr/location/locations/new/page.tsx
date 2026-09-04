@@ -60,6 +60,7 @@ export default function NewLocationPage() {
         addressLine1: s(values.addressLine1),
         addressLine2: s(values.addressLine2),
         city: s(values.city),
+        geoAreaId: s(values.geoAreaId),
         postalCode: s(values.postalCode),
         countryId: values.countryId || null,
         digitalAddress: s(values.digitalAddress),

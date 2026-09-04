@@ -78,6 +78,9 @@ export interface HealthcareFacility extends HealthcareFacilitySummary {
   physicalAddress: string;
   digitalAddress?: string | null;
   postalCode?: string | null;
+  countryId?: string | null;
+  /** Administrative area the facility stands in; city is a snapshot of it. */
+  geoAreaId?: string | null;
   emergencyPhone?: string | null;
   email?: string | null;
   website?: string | null;
@@ -116,6 +119,9 @@ export interface HealthcareFacilityCreateRequest {
   physicalAddress: string;
   digitalAddress?: string | null;
   city?: string | null;
+  countryId?: string | null;
+  /** Administrative area the facility stands in; city is a snapshot of it. */
+  geoAreaId?: string | null;
   primaryPhone?: string | null;
   emergencyPhone?: string | null;
   email?: string | null;

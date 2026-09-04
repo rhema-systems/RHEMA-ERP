@@ -24,9 +24,19 @@ public interface IGeoAreaConsumer
 {
     /// <summary>
     /// What the records are called, in the plural and in the words a user would recognise —
-    /// "employees", "sites", "medical facilities". Used to build the refusal message.
+    /// "employees", "sites", "healthcare facilities". Used to build the refusal message.
     /// </summary>
     string ResourceName { get; }
+
+    /// <summary>
+    /// The same thing in the singular — "employee", "site", "healthcare facility".
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Stated, not derived. Trimming an "s" off the plural produced "1 healthcare facilitie" in
+    /// a refusal a user was meant to act on. English pluralisation cannot be computed, and a
+    /// message that tells someone their data is in use is the last place to be sloppy about it.
+    /// </remarks>
+    string ResourceNameSingular { get; }
 
     /// <summary>How many of this consumer's live records point at <paramref name="geoAreaId"/>.</summary>
     Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default);

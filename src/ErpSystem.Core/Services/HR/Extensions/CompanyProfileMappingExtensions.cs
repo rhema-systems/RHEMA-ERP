@@ -34,6 +34,7 @@ public static class CompanyProfileMappingExtensions
             City                        = entity.City,
             Region                      = entity.Region,
             CountryId                   = entity.CountryId,
+            GeoAreaId                   = entity.GeoAreaId,
             CountryName                 = entity.Country?.Name,
             PostalCode                  = entity.PostalCode,
             PhonePrimary                = entity.PhonePrimary,
@@ -71,6 +72,7 @@ public static class CompanyProfileMappingExtensions
         entity.City                        = dto.City?.Trim();
         entity.Region                      = dto.Region?.Trim();
         entity.CountryId                   = dto.CountryId;
+        entity.GeoAreaId                   = dto.GeoAreaId;
         entity.PostalCode                  = dto.PostalCode?.Trim();
         entity.PhonePrimary                = dto.PhonePrimary?.Trim();
         entity.HrEmail                     = dto.HrEmail?.Trim();

@@ -1081,6 +1081,18 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(e => e.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Where this site stands, in the shared administrative-geography tree (phase 4 of
+            // docs/GEOGRAPHY-REFERENCE-DESIGN.md). Explicit .WithMany() with no inverse collection,
+            // for the same reason as Employee: GeoArea must not grow a navigation per consumer, and
+            // an unpaired navigation left to convention mints a shadow FK beside this column.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_Location_Tenant_GeoArea");
+
             // Employees collection
             entity.HasMany(e => e.Employees)
                 .WithOne(e => e.Location)
@@ -3700,6 +3712,14 @@ private void ConfigureHREntities(ModelBuilder builder)
                   .WithMany()
                   .HasForeignKey(x => x.CountryOfIncorporationId)
                   .OnDelete(DeleteBehavior.Restrict);
+
+            // Phase 4 of docs/GEOGRAPHY-REFERENCE-DESIGN.md — see the Location configuration for
+            // why this is spelled out rather than left to convention. No index: there is at most
+            // one profile per tenant, so nothing ever scans this column.
+            entity.HasOne(x => x.GeoArea)
+                  .WithMany()
+                  .HasForeignKey(x => x.GeoAreaId)
+                  .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<CompanyHrPolicySettings>(entity =>
@@ -5849,6 +5869,16 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Phase 4 of docs/GEOGRAPHY-REFERENCE-DESIGN.md — see the Location configuration for
+            // why this is spelled out rather than left to convention.
+            entity.HasOne(x => x.GeoArea)
+                .WithMany()
+                .HasForeignKey(x => x.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => new { x.TenantId, x.GeoAreaId })
+                .HasDatabaseName("IX_HealthcareFacility_Tenant_GeoArea");
 
             entity.HasOne(x => x.Bank)
                 .WithMany()

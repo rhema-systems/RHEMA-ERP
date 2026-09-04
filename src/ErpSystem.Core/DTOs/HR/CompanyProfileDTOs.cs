@@ -30,6 +30,8 @@ public class CompanyProfileDto : BaseDto
     public string? City { get; set; }
     public string? Region { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>Administrative area of the registered address; City/Region are snapshots of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string? PostalCode { get; set; }
     public string? PhonePrimary { get; set; }
@@ -73,6 +75,8 @@ public class UpdateCompanyProfileDto
     [MaxLength(100)] public string? DigitalAddress { get; set; }
     [MaxLength(100)] public string? City { get; set; }
     [MaxLength(100)] public string? Region { get; set; }
+    /// <summary>Administrative area of the registered address. City and Region are rewritten from it.</summary>
+    public Guid? GeoAreaId { get; set; }
     public Guid? CountryId { get; set; }
     [MaxLength(20)] public string? PostalCode { get; set; }
     [MaxLength(50)] public string? PhonePrimary { get; set; }

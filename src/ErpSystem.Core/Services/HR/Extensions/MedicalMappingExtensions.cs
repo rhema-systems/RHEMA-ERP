@@ -75,6 +75,7 @@ public static class MedicalMappingExtensions
         dto.City = entity.City;
         dto.PostalCode = entity.PostalCode;
         dto.CountryId = entity.CountryId;
+        dto.GeoAreaId = entity.GeoAreaId;
         dto.CountryName = entity.Country?.Name;
         dto.PrimaryPhone = entity.PrimaryPhone;
         dto.EmergencyPhone = entity.EmergencyPhone;
@@ -159,6 +160,7 @@ public static class MedicalMappingExtensions
             City = dto.City,
             PostalCode = dto.PostalCode,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
             PrimaryPhone = dto.PrimaryPhone,
             EmergencyPhone = dto.EmergencyPhone,
             Email = dto.Email,
@@ -204,6 +206,7 @@ public static class MedicalMappingExtensions
         entity.City = dto.City;
         entity.PostalCode = dto.PostalCode;
         entity.CountryId = dto.CountryId;
+        entity.GeoAreaId = dto.GeoAreaId;
         entity.PrimaryPhone = dto.PrimaryPhone;
         entity.EmergencyPhone = dto.EmergencyPhone;
         entity.Email = dto.Email;

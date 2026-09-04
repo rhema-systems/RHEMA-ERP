@@ -26,12 +26,17 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<HealthcareFacilityService> _logger;
 
+    // Shared reference data. A facility says which administrative area it stands in; this resolves
+    // that into the City text its address prints, so the two cannot disagree.
+    private readonly ErpSystem.Core.Services.Reference.IGeographyService _geography;
+
     public HealthcareFacilityService(
         IHealthcareFacilityRepository facilityRepository,
         IPhysicianRepository physicianRepository,
         IFacilityServiceRepository facilityServiceRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ErpSystem.Core.Services.Reference.IGeographyService geography,
         ILogger<HealthcareFacilityService> logger)
     {
         _facilityRepository = facilityRepository;
@@ -39,7 +44,28 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         _facilityServiceRepository = facilityServiceRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _geography = geography;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Rewrites <c>City</c> from the facility's administrative area. A null area leaves the text as
+    /// it was — most of the register predates the tree.
+    /// </summary>
+    private async Task ApplyGeoAreaSnapshotAsync(HealthcareFacility entity, CancellationToken ct)
+    {
+        if (entity.GeoAreaId is not { } areaId) return;
+
+        var (_, city) = await _geography.GetAddressSnapshotAsync(areaId, ct);
+        if (city is null)
+        {
+            _logger.LogWarning(
+                "Healthcare facility references geo area {GeoAreaId}, which could not be resolved to a "
+                + "city; the address was left unchanged.", areaId);
+            return;
+        }
+
+        entity.City = city;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
@@ -157,6 +183,7 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _facilityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -174,6 +201,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        // ⚠ after UpdateEntity — the tree wins over whatever City the caller sent.
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _facilityRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

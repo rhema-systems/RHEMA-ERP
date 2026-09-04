@@ -29,6 +29,7 @@ import type { Country } from '@/types/hr/country';
 import type { GeofenceZoneSummary } from '@/types/hr/attendance';
 import { GeoPicker } from '@/components/hr/common/geo/GeoPicker';
 import { isValidLat, isValidLng, parsePolygonJson, toNumberOrNull } from '@/components/hr/common/geo/geo';
+import { AddressFields } from '@/components/reference/AddressFields';
 
 const NONE = 'none';
 const opt = z.string().max(500).optional().or(z.literal(''));
@@ -47,6 +48,8 @@ export const locationSchema = z.object({
   addressLine1: opt,
   addressLine2: opt,
   city: z.string().max(100).optional().or(z.literal('')),
+  /** The administrative area this site stands in; City is a snapshot of it. */
+  geoAreaId: z.string().optional().or(z.literal('')),
   postalCode: z.string().max(20).optional().or(z.literal('')),
   countryId: z.string().optional().or(z.literal('')),
   digitalAddress: z.string().max(50).optional().or(z.literal('')),
@@ -89,6 +92,7 @@ export const emptyLocation: LocationFormValues = {
   addressLine1: '',
   addressLine2: '',
   city: '',
+  geoAreaId: '',
   postalCode: '',
   countryId: '',
   digitalAddress: '',
@@ -309,39 +313,43 @@ export function LocationForm({
                 <Input id="addressLine2" {...form.register('addressLine2')} />
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="space-y-2">
-                <Label htmlFor="city">City</Label>
-                <Input id="city" {...form.register('city')} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="postalCode">Postal Code</Label>
-                <Input id="postalCode" {...form.register('postalCode')} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="countryId">Country</Label>
-                <Select
-                  value={form.watch('countryId') || NONE}
-                  onValueChange={(v) => form.setValue('countryId', v === NONE ? '' : v)}
-                >
-                  <SelectTrigger id="countryId">
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>None</SelectItem>
-                    {countries.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="digitalAddress">Digital Address</Label>
-                <Input id="digitalAddress" {...form.register('digitalAddress')} />
-              </div>
-            </div>
+            {/*
+              Which administrative area this site stands in. The dropdown labels come from the
+              selected country's scheme, so there is no country-specific code here.
+
+              ⚠ City is read-only once a scheme is loaded: the server rewrites it from the chosen
+              area, so an editable box would silently discard what you type.
+            */}
+            <AddressFields
+              countryId={form.watch('countryId') || ''}
+              onCountryChange={(v) => form.setValue('countryId', v, { shouldDirty: true })}
+              geoAreaId={form.watch('geoAreaId') || ''}
+              onGeoAreaChange={(v) => form.setValue('geoAreaId', v, { shouldDirty: true })}
+              fallback={(schemeLoaded) => (
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="city">City / Town</Label>
+                    <Input
+                      id="city"
+                      {...form.register('city')}
+                      readOnly={schemeLoaded}
+                      disabled={schemeLoaded}
+                    />
+                    {schemeLoaded && (
+                      <p className="text-muted-foreground text-xs">Set from the address above.</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="postalCode">Postal Code</Label>
+                    <Input id="postalCode" {...form.register('postalCode')} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="digitalAddress">Digital Address</Label>
+                    <Input id="digitalAddress" {...form.register('digitalAddress')} />
+                  </div>
+                </div>
+              )}
+            />
           </section>
 
           {/* Map & attendance zone */}

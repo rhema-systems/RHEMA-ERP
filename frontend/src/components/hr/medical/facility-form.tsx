@@ -10,6 +10,7 @@ import {
   DateField,
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
+import { AddressFields } from '@/components/reference/AddressFields';
 import { HEALTH_FACILITY_TYPE_OPTIONS } from '@/types/hr/medical';
 import type { HealthcareFacility } from '@/types/hr/medical';
 
@@ -54,6 +55,9 @@ export const facilitySchema = z.object({
   physicalAddress: z.string().min(1, 'Required').max(500),
   digitalAddress: z.string().max(50).optional(),
   city: z.string().max(100).optional(),
+  countryId: z.string().optional(),
+  /** Administrative area the facility stands in; city is a snapshot of it. */
+  geoAreaId: z.string().optional(),
   primaryPhone: z.string().max(50).optional(),
   emergencyPhone: z.string().max(50).optional(),
   email: z.string().email('Not a valid email').max(255).optional().or(z.literal('')),
@@ -90,6 +94,8 @@ export const emptyFacility: FacilityForm = {
   physicalAddress: '',
   digitalAddress: '',
   city: '',
+  countryId: '',
+  geoAreaId: '',
   primaryPhone: '',
   emergencyPhone: '',
   email: '',
@@ -123,6 +129,8 @@ export function facilityFormToRequest(values: FacilityForm) {
     licenseNumber: blank(v.licenseNumber),
     digitalAddress: blank(v.digitalAddress),
     city: blank(v.city),
+    countryId: blank(v.countryId),
+    geoAreaId: blank(v.geoAreaId),
     primaryPhone: blank(v.primaryPhone),
     emergencyPhone: blank(v.emergencyPhone),
     email: blank(v.email),
@@ -150,6 +158,8 @@ export function facilityToForm(f: HealthcareFacility): FacilityForm {
     physicalAddress: f.physicalAddress,
     digitalAddress: f.digitalAddress ?? '',
     city: f.city ?? '',
+    countryId: f.countryId ?? '',
+    geoAreaId: f.geoAreaId ?? '',
     primaryPhone: f.primaryPhone ?? '',
     emergencyPhone: f.emergencyPhone ?? '',
     email: f.email ?? '',
@@ -198,10 +208,31 @@ export function FacilityFormFields({ form }: { form: UseFormReturn<FacilityForm>
         required
         placeholder="e.g. Liberation Road, Airport Residential Area"
       />
-      <FieldRow>
-        <TextField form={form} name="city" label="City" />
-        <TextField form={form} name="digitalAddress" label="Digital address (GhanaPost GPS)" />
-      </FieldRow>
+      {/*
+        Where the facility stands, so "which hospitals are in this district" is answerable. The
+        country picker arrives with this component — the form never had one, so a facility's
+        CountryId could not be set at all before now.
+
+        ⚠ City is read-only once a scheme is loaded: the server rewrites it from the chosen area.
+      */}
+      <AddressFields
+        countryId={form.watch('countryId') || ''}
+        onCountryChange={(v) => form.setValue('countryId', v, { shouldDirty: true })}
+        geoAreaId={form.watch('geoAreaId') || ''}
+        onGeoAreaChange={(v) => form.setValue('geoAreaId', v, { shouldDirty: true })}
+        fallback={(schemeLoaded) => (
+          <FieldRow>
+            <TextField
+              form={form}
+              name="city"
+              label="City / Town"
+              disabled={schemeLoaded}
+              hint={schemeLoaded ? 'Set from the address above' : undefined}
+            />
+            <TextField form={form} name="digitalAddress" label="Digital address (GhanaPost GPS)" />
+          </FieldRow>
+        )}
+      />
       <FieldRow>
         <TextField form={form} name="primaryPhone" label="Primary phone" />
         <TextField form={form} name="emergencyPhone" label="Emergency phone" />

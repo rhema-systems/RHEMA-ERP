@@ -80,6 +80,8 @@ export interface Location extends AuditFields {
   city?: string | null;
   postalCode?: string | null;
   countryId?: string | null;
+  /** The administrative area this site stands in; city is a snapshot of it. */
+  geoAreaId?: string | null;
   countryName?: string | null;
   digitalAddress?: string | null;
   /** Map pin. Both set or both null. Until 2026-09-03 the API dropped these on every read and write. */
@@ -103,6 +105,8 @@ export interface LocationSummary {
   code: string;
   levelName?: string | null;
   city?: string | null;
+  /** The administrative area this site stands in; city is a snapshot of it. */
+  geoAreaId?: string | null;
   countryName?: string | null;
   isActive: boolean;
 }
@@ -119,6 +123,8 @@ export interface CreateLocationRequest {
   city?: string | null;
   postalCode?: string | null;
   countryId?: string | null;
+  /** The administrative area this site stands in; city is a snapshot of it. */
+  geoAreaId?: string | null;
   digitalAddress?: string | null;
   latitude?: number | null;
   longitude?: number | null;

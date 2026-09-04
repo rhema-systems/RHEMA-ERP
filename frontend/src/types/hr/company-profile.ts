@@ -57,6 +57,8 @@ export interface CompanyProfile {
   city: string | null;
   region: string | null;
   countryId: string | null;
+  /** Administrative area of the registered address; city and region are snapshots of it. */
+  geoAreaId: string | null;
   countryName: string | null;
   postalCode: string | null;
   phonePrimary: string | null;
@@ -103,6 +105,8 @@ export interface UpdateCompanyProfileRequest {
   city: string | null;
   region: string | null;
   countryId: string | null;
+  /** Administrative area of the registered address; city and region are snapshots of it. */
+  geoAreaId: string | null;
   postalCode: string | null;
   phonePrimary: string | null;
   hrEmail: string | null;

@@ -924,14 +924,21 @@ public class GeographyService : IGeographyService
         {
             var count = await consumer.CountUsagesAsync(id, tenantId, ct);
             if (count > 0)
-                inUse.Add($"{count} {(count == 1 ? consumer.ResourceName.TrimEnd('s') : consumer.ResourceName)}");
+                inUse.Add($"{count} {(count == 1 ? consumer.ResourceNameSingular : consumer.ResourceName)}");
         }
 
         if (inUse.Count > 0)
+        {
+            // "1 site, 1 company profile and 1 healthcare facility" — not "a and b and c".
+            var listed = inUse.Count == 1
+                ? inUse[0]
+                : $"{string.Join(", ", inUse.Take(inUse.Count - 1))} and {inUse[^1]}";
+
             throw new InvalidOperationException(
-                $"'{entity.Name}' is the recorded location of {string.Join(" and ", inUse)}, so it cannot be "
+                $"'{entity.Name}' is the recorded location of {listed}, so it cannot be "
                 + "removed. Move them somewhere else first. If the area has genuinely ceased to exist, "
                 + "end-date it instead — that keeps every record which already points at it resolvable.");
+        }
 
         await _unitOfWork.Repository<GeoArea>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);

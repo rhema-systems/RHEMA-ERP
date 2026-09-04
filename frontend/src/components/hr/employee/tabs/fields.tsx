@@ -51,11 +51,31 @@ export function TextField<T extends FieldValues>({
   placeholder,
   required,
   type = 'text',
-}: BaseProps<T> & { type?: 'text' | 'email' | 'tel' }) {
+  disabled,
+  hint,
+}: BaseProps<T> & {
+  type?: 'text' | 'email' | 'tel';
+  /**
+   * Greys the box out. The value still registers and still submits — which is the point where a
+   * field is derived server-side: the record keeps saying what it says, the user just cannot type
+   * over something the server is about to overwrite.
+   */
+  disabled?: boolean;
+  /** Small note under the field, hidden while an error is showing. */
+  hint?: string;
+}) {
   return (
     <div className="space-y-2">
       <FieldLabel htmlFor={name} label={label} required={required} />
-      <Input id={name} type={type} placeholder={placeholder} {...form.register(name)} />
+      <Input
+        id={name}
+        type={type}
+        placeholder={placeholder}
+        readOnly={disabled}
+        disabled={disabled}
+        {...form.register(name)}
+      />
+      {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
       <FieldError form={form} name={name} />
     </div>
   );

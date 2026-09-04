@@ -85,6 +85,7 @@ export function toUpdateRequest(profile: CompanyProfile): UpdateCompanyProfileRe
     city: profile.city,
     region: profile.region,
     countryId: profile.countryId,
+    geoAreaId: profile.geoAreaId,
     postalCode: profile.postalCode,
     phonePrimary: profile.phonePrimary,
     hrEmail: profile.hrEmail,

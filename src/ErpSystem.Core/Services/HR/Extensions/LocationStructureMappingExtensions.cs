@@ -220,6 +220,7 @@ public static class LocationStructureMappingExtensions
             City = entity.City,
             PostalCode = entity.PostalCode,
             CountryId = entity.CountryId,
+            GeoAreaId = entity.GeoAreaId,
             CountryName = entity.Country?.Name,
             DigitalAddress = entity.DigitalAddress,
             Latitude = entity.Latitude,
@@ -274,6 +275,7 @@ public static class LocationStructureMappingExtensions
             City = entity.City,
             PostalCode = entity.PostalCode,
             CountryId = entity.CountryId,
+            GeoAreaId = entity.GeoAreaId,
             CountryName = entity.Country?.Name,
             DigitalAddress = entity.DigitalAddress,
             Latitude = entity.Latitude,
@@ -333,6 +335,7 @@ public static class LocationStructureMappingExtensions
             ParentLocationName = entity.ParentLocation?.Name,
             City = entity.City,
             CountryId = entity.CountryId,
+            GeoAreaId = entity.GeoAreaId,
             CountryName = entity.Country?.Name,
             Path = entity.Path,
             Sequence = entity.Sequence,
@@ -360,6 +363,7 @@ public static class LocationStructureMappingExtensions
             City = dto.City,
             PostalCode = dto.PostalCode,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
             DigitalAddress = dto.DigitalAddress,
             Latitude = dto.Latitude,
             Longitude = dto.Longitude,
@@ -386,6 +390,7 @@ public static class LocationStructureMappingExtensions
         entity.City = dto.City;
         entity.PostalCode = dto.PostalCode;
         entity.CountryId = dto.CountryId;
+        entity.GeoAreaId = dto.GeoAreaId;
         entity.DigitalAddress = dto.DigitalAddress;
         entity.Latitude = dto.Latitude;
         entity.Longitude = dto.Longitude;

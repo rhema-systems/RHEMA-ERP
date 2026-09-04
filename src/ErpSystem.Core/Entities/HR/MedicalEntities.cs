@@ -48,6 +48,16 @@ public class HealthcareFacility : TenantEntity
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
 
+    /// <summary>
+    /// Which administrative area the facility stands in, so "which hospitals are in this district"
+    /// is answerable. <see cref="City"/> becomes a display snapshot once this is set.
+    /// See docs/GEOGRAPHY-REFERENCE-DESIGN.md.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
+
     [MaxLength(50)]
     public string? PrimaryPhone { get; set; }
 

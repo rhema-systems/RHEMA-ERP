@@ -22,18 +22,45 @@ public class CompanyProfileService : ICompanyProfileService
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<CompanyProfileService> _logger;
 
+    // Shared reference data. Resolves the registered address's area into the Region and City text
+    // the profile prints, so the two cannot disagree.
+    private readonly ErpSystem.Core.Services.Reference.IGeographyService _geography;
+
     public CompanyProfileService(
         IGenericRepository<CompanyProfile> repository,
         ICompanyProfileProvider provider,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
+        ErpSystem.Core.Services.Reference.IGeographyService geography,
         ILogger<CompanyProfileService> logger)
     {
         _repository = repository;
         _provider = provider;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _geography = geography;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Rewrites <c>Region</c> and <c>City</c> from the profile's administrative area. A null area
+    /// leaves both exactly as they were.
+    /// </summary>
+    private async Task ApplyGeoAreaSnapshotAsync(CompanyProfile entity, CancellationToken ct)
+    {
+        if (entity.GeoAreaId is not { } areaId) return;
+
+        var (region, city) = await _geography.GetAddressSnapshotAsync(areaId, ct);
+        if (region is null && city is null)
+        {
+            _logger.LogWarning(
+                "Company profile references geo area {GeoAreaId}, which could not be resolved; the "
+                + "address was left unchanged.", areaId);
+            return;
+        }
+
+        if (region is not null) entity.Region = region;
+        if (city is not null) entity.City = city;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -76,6 +103,7 @@ public class CompanyProfileService : ICompanyProfileService
         {
             entity = new CompanyProfile { TenantId = tenantId };
             entity.ApplyUpdate(dto);
+            await ApplyGeoAreaSnapshotAsync(entity, cancellationToken); // ⚠ after Apply — the tree wins
             entity.StampCreated(_currentUser);
             await _repository.AddAsync(entity);
             _logger.LogInformation("Company profile created for tenant {TenantId}", entity.TenantId);
@@ -83,6 +111,7 @@ public class CompanyProfileService : ICompanyProfileService
         else
         {
             entity.ApplyUpdate(dto);
+            await ApplyGeoAreaSnapshotAsync(entity, cancellationToken); // ⚠ after Apply — the tree wins
             entity.StampUpdated(_currentUser);
             await _repository.UpdateAsync(entity);
             _logger.LogInformation("Company profile updated for tenant {TenantId}", entity.TenantId);

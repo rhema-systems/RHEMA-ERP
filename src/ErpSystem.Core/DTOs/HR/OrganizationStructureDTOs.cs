@@ -640,6 +640,8 @@ public class LocationDto : BaseDto
     public string? City { get; set; }
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>The administrative area this site stands in.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string? DigitalAddress { get; set; }
     /// <summary>Map pin of the site. Both coordinates are set together or not at all.</summary>
@@ -693,6 +695,9 @@ public class CreateLocationDto : CreateDtoBase
     public string? PostalCode { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>The administrative area this site stands in. City is rewritten from it on save.</summary>
+    public Guid? GeoAreaId { get; set; }
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
@@ -760,6 +765,9 @@ public class UpdateLocationDto : UpdateDtoBase
     public string? PostalCode { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>The administrative area this site stands in. City is rewritten from it on save.</summary>
+    public Guid? GeoAreaId { get; set; }
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
@@ -852,6 +860,8 @@ public class LocationHierarchyDto
     public string? ParentLocationName { get; set; }
     public string? City { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>The administrative area this site stands in.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string Path { get; set; } = string.Empty;
     public int Sequence { get; set; }

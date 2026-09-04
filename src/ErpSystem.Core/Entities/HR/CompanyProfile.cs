@@ -88,6 +88,16 @@ public class CompanyProfile : TenantEntity
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
 
+    /// <summary>
+    /// The administrative area of the registered address. <see cref="Region"/> and
+    /// <see cref="City"/> become display snapshots the service rewrites from the tree once this is
+    /// set. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
+
     [MaxLength(20)]
     public string? PostalCode { get; set; }
 

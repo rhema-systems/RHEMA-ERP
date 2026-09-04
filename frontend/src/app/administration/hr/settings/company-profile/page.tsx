@@ -28,6 +28,7 @@ import {
   type CompanySealAssetKind,
 } from '@/types/hr/company-profile';
 import { Badge } from '@/components/ui/badge';
+import { AddressFields } from '@/components/reference/AddressFields';
 
 /**
  * The tenant's company (legal-employer) profile.
@@ -60,6 +61,8 @@ const profileSchema = z.object({
   city: z.string().trim().max(100).optional(),
   region: z.string().trim().max(100).optional(),
   countryId: z.string().optional(),
+  /** Administrative area of the registered address; city and region are snapshots of it. */
+  geoAreaId: z.string().optional(),
   postalCode: z.string().trim().max(20).optional(),
   phonePrimary: z.string().trim().max(50).optional(),
   hrEmail: z.string().trim().max(200).email('Enter a valid email address.').optional().or(z.literal('')),
@@ -129,6 +132,7 @@ export default function CompanyProfilePage() {
       city: data.city ?? '',
       region: data.region ?? '',
       countryId: data.countryId ?? '',
+      geoAreaId: data.geoAreaId ?? '',
       postalCode: data.postalCode ?? '',
       phonePrimary: data.phonePrimary ?? '',
       hrEmail: data.hrEmail ?? '',
@@ -165,6 +169,7 @@ export default function CompanyProfilePage() {
         city: orNull(values.city),
         region: orNull(values.region),
         countryId: orNull(values.countryId),
+        geoAreaId: orNull(values.geoAreaId),
         postalCode: orNull(values.postalCode),
         phonePrimary: orNull(values.phonePrimary),
         hrEmail: orNull(values.hrEmail),
@@ -290,20 +295,39 @@ export default function CompanyProfilePage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <TextareaField form={form} name="registeredAddress" label="Registered address" rows={2} />
+
+            {/*
+              ⚠ City and Region are read-only once the country has a division scheme: the server
+              rewrites both from the chosen area, so editable boxes would discard what you type.
+              They stay editable for a country with no scheme, which is what letters fall back to.
+            */}
+            <AddressFields
+              countryId={form.watch('countryId') || ''}
+              onCountryChange={(v) => form.setValue('countryId', v, { shouldDirty: true })}
+              geoAreaId={form.watch('geoAreaId') || ''}
+              onGeoAreaChange={(v) => form.setValue('geoAreaId', v, { shouldDirty: true })}
+              fallback={(schemeLoaded) => (
+                <FieldRow>
+                  <TextField
+                    form={form}
+                    name="city"
+                    label="City"
+                    disabled={schemeLoaded}
+                    hint={schemeLoaded ? 'Set from the address above' : undefined}
+                  />
+                  <TextField
+                    form={form}
+                    name="region"
+                    label="Region"
+                    disabled={schemeLoaded}
+                    hint={schemeLoaded ? 'Set from the address above' : undefined}
+                  />
+                </FieldRow>
+              )}
+            />
+
             <FieldRow>
               <TextField form={form} name="digitalAddress" label="Digital address (GhanaPost GPS)" />
-              <TextField form={form} name="city" label="City" />
-            </FieldRow>
-            <FieldRow>
-              <TextField form={form} name="region" label="Region" />
-              <SelectField
-                form={form}
-                name="countryId"
-                label="Country"
-                options={countryOptions}
-                allowEmpty
-                emptyLabel="Not set"
-              />
             </FieldRow>
             <FieldRow>
               <TextField form={form} name="phonePrimary" label="Primary phone" type="tel" />

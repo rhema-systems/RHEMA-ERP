@@ -153,7 +153,7 @@ back into them (`Employee.State` ← region name, `Employee.City` ← town name)
 | **1** | ✅ **complete 2026-09-03** — entities, DbContext config, DTOs, service, 24 endpoints, admin screens, migration, Ghana seed pack | see §6.1 and §6.2 |
 | **2** | ✅ **complete 2026-09-03** — `Employee.GeoAreaId`, snapshot write-back, shared `<AddressFields>`, Employee form wired, migration applied, 25 assertions green | see §6.4 |
 | **3** | ✅ **complete 2026-09-04** — employee import resolves Region / City to a `GeoAreaId`. **Backfill dropped: it had no input** | see §6.5 |
-| **4** | `Location.GeoAreaId`, `CompanyProfile`, medical facilities, travel destinations | |
+| **4** | ✅ **complete 2026-09-04** — `Location`, `CompanyProfile`, `HealthcareFacility` + their probes + three screens. **Travel deliberately excluded** | see §6.6 |
 | **5** | Offer to other modules | Estate's `Region`/`District`/`Town` triple is the obvious first external taker |
 
 ### 6.1 What phase 1 landed (2026-09-03)
@@ -329,6 +329,40 @@ unknown city kept as text but still placed at its region; region-only placement.
 dissolved area is inactive *by definition* — so no retired area ever loaded and the successor
 message could not fire. The query now decides what is *known*; the live/retired split decides what
 can be *resolved to*.
+
+### 6.6 Phase 4 — the company's own places (2026-09-04)
+
+`Location` (sites), `CompanyProfile` (the registered address) and `HealthcareFacility` each gained a
+`GeoAreaId`, an `IGeoAreaConsumer` probe, service write-back and a screen wired to
+`<AddressFields>`. Migration `20260904005351_AddGeoAreaToLocationCompanyAndFacility`.
+
+**⚠ The rule that decided the scope, and it is not "everything with a City column":**
+
+> A `GeoAreaId` belongs on a record whose address is a property of a **place**. It does not belong
+> on a record that merely **mentions** a city.
+
+Sites, the company's seat and hospitals are places. `StaffTravelHotelBooking`,
+`StaffTravelPerDiemRate` and `StaffTravelAlert` mention cities — usually foreign ones the Ghana
+scheme cannot hold — and keying a per-diem rate by area is a rate-model change, not an address.
+Columns that would stay permanently null are a false promise of coverage.
+`MedicalInsuranceProvider` was left for the same reason: nothing reads its address geographically.
+
+**⚠ Four consumers now means four probes.** The foreign keys protect nothing on their own: these
+deletes are soft, so no constraint is consulted. `GeoAreaConsumers.cs` carries all three new probes
+beside the employee one, and its header states the rule for whoever adds the fifth.
+
+**A gap closed on the way past:** the healthcare-facility form had no country field at all, so
+`HealthcareFacility.CountryId` could not be set from the UI — the same gap the employee form had.
+`<AddressFields>` brings a country picker with it, so wiring it closed both.
+
+**Verified 2026-09-04** — `run-phase4.mjs`, **15 assertions**: all three write-backs rewrite City
+from the tree over deliberately-wrong text, the profile rewrites Region too, and the delete refusal
+names all three consumers by count. Phase 1, 2 and 4 green together (42 + 25 + 15).
+
+**⚠ A bug this found in phase 2's code:** the refusal message derived its singular by trimming an
+"s", producing "1 healthcare facilitie". `IGeoAreaConsumer` now states the singular rather than
+computing it — English pluralisation cannot be derived, and a message telling someone their data is
+in use is the last place to guess.
 
 ## 7. Conventions this build must honour
 
