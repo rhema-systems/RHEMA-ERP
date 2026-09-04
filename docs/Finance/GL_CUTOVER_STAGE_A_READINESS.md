@@ -1,8 +1,45 @@
 # GL cutover Stage A readiness and producer inventory
 
-Status: review required
+Status: Stage A.1 review required
 
-Exact base: `3c5620a3de9c5d3038be4b07b5026149815f4296`
+Stage A.1 exact base: `7bc24b22c0624aec9acae580ba8049d5f5a83425`
+
+## Stage A.1 correction and rehearsal result
+
+Stage A.1 repaired the three independently verified deployment blockers and then followed every newly
+exposed clean-chain failure to a deterministic, data-preserving correction. The application
+`apply-migrations` command now registers `IHttpContextAccessor` before the audited DbContext dependencies.
+The singleton-role index uses SQL Server-supported predicates while retaining the exact rule: Cash and Bank
+may repeat; every other non-null role is unique per tenant/book. The historical clean chain now reconciles
+the redundant empty CRM graph before promotion, preserves the vendor-invoice table through its missing
+rename, and corrects two AR compatibility batches which previously referenced columns outside the actual
+`BusinessPartner` model or altered a column after creating its dependent index.
+
+The clean reset also exposed two deterministic Finance seed defects. Payroll accounts were added after
+mandatory COMPANY/NATURAL_ACCOUNT identity assignment, and the protected balance-sheet layouts requested
+obsolete root codes. Payroll accounts now enter the same canonical identity pass as the standard chart,
+and protected layouts use the manifest's stable `ASSETS`, `LIABILITIES`, and `EQUITY_ROOT` codes.
+
+Final fresh rehearsal `RHEMAERP_GL_REHEARSAL_EMPTY_A4` completed all 448 migrations through
+`20260904003118_AddGovernedAccountSegmentIdentity`, exercised the real application `apply-migrations`
+command, and completed two real `seed-db` passes from the final committed code. Both Finance invariant snapshots had SHA-256
+`35B42B901960D551CE92CDFCCA8BA69B1CE10D29FB95E79772C6C3CDFE0E69B3`. The independent SQL Server
+full-chain regression also passed.
+
+Representative clone `RHEMAERP_GL_REHEARSAL_CLONE_A1` was created from a `COPY_ONLY`, checksum-protected
+backup, verified, restored, and checked with `DBCC CHECKDB ... PHYSICAL_ONLY`. SQL Server Express rejected
+backup compression, so the successful retry deliberately omitted only `COMPRESSION`; `COPY_ONLY` and
+`CHECKSUM` remained enforced. Phase 1, Phase 2, and Phase 3 applied on the clone. Phase 4 then stopped exactly
+as designed because one historical FX revaluation batch lacks the immutable book-scoped policy evidence
+that cannot be fabricated. Clone history at the stop contained 449 rows and ended at
+`20260903130000_AddFinancialStatementClassificationSnapshots`; the extra count includes the source's three
+orphan historical IDs documented below.
+
+The configured `RhemaERP` source fingerprint was identical before and after the clone rehearsal:
+`446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28` (migration count, maximum applied
+ID, live FX batches, active currency links, journal entries). No source migration, seed, or data mutation
+was executed. All rehearsal databases and the temporary backup were removed after prefix revalidation; a
+final server query returned zero `RHEMAERP_GL_REHEARSAL_*` databases.
 
 This stage rehearses the migration/reset path and inventories the remaining V1 producers. It does not
 change a producer, remove V1, or authorize a developer to point the rehearsal tooling at `RhemaERP`.
@@ -125,7 +162,7 @@ Finance manifest for every active tenant. That is a cutover limitation: either o
 reset, or a separately reviewed all-active-tenant Finance provisioning orchestration is required before a
 multi-tenant reset.
 
-### Actual empty rehearsal result
+### Original Stage A empty rehearsal result (superseded by Stage A.1)
 
 The empty rehearsal did **not** reach seeding. After materializing the consolidated baseline and successfully
 applying the first three forward migrations, `20260317115118_AddCrmEntities` failed. The baseline/preceding
@@ -135,7 +172,7 @@ This is an exact-base historical migration-chain defect outside the Finance impl
 historical migration was edited or silently stamped. Repeat-seed idempotency and Finance invariant validation
 remain blocked until the migration owner supplies and reviews a supported empty-chain repair/baseline.
 
-### Actual representative-clone result
+### Original Stage A representative-clone result (superseded by Stage A.1)
 
 SQL Server reported backup and restore support, so Stage A created a `COPY_ONLY`, checksum-protected backup of
 `RhemaERP`, restored it only as `RHEMAERP_GL_REHEARSAL_CLONE_20260904A`, removed the temporary backup, and ran

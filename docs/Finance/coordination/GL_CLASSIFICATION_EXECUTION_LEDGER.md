@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage A.1 — migration-chain and deployment correction |
-| Status | `IN_PROGRESS` |
+| Phase | Post-Phase-6 Stage A.1 — migration/reset/reseed rehearsal corrections |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `7bc24b22` (resolve to full hash in the implementing worktree) |
+| Exact base | `7bc24b22c0624aec9acae580ba8049d5f5a83425` |
 | Branch | `codex/finance-gl-cutover-rehearsal-corrections` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-rehearsal-corrections` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `7bc24b22` |
+| Primary HEAD at activation | `7bc24b22c0624aec9acae580ba8049d5f5a83425` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Stage A.1 `CHANGES_REQUIRED`; authorized corrections are in progress |
-| Connectivity state | Available; implementer resumed from the clean reviewed checkpoint |
+| Review status | Stage A.1 implementation complete; independent review pending |
+| Connectivity state | Available; rehearsal evidence captured and disposable targets removed |
 
 ## Authoritative inputs
 
@@ -125,11 +125,26 @@ account-writer inventory were verified. The three Stage A commits were integrate
 table collision, Phase 2 filtered-index syntax and `apply-migrations` DI registration are corrected and
 both guarded rehearsals reach their required terminal gates.
 
+## Post-Phase-6 Stage A.1 rehearsal corrections
+
+Stage A.1 repaired the CRM clean-chain collision, SQL Server singleton-role filter, and application
+`apply-migrations` DI registration. Continuing the guarded fresh rehearsal exposed and corrected a missing
+vendor-invoice compatibility rename, two invalid AR compatibility batches, payroll accounts bypassing the
+canonical segment-identity seed pass, and protected balance-sheet layouts using obsolete root codes.
+
+`RHEMAERP_GL_REHEARSAL_EMPTY_A4` applied all 448 migrations from an empty database, ran the real seed path twice from the final committed code, and produced the
+same canonical invariant hash on both passes. A separate SQL Server full-chain regression passed. The
+checksum-verified COPY_ONLY clone `RHEMAERP_GL_REHEARSAL_CLONE_A1` applied through Phase 3, then stopped at
+the intended Phase 4 guard because its one historical FX batch has no truthful immutable policy evidence.
+The configured source fingerprint remained unchanged. Both databases and the temporary backup were removed;
+zero rehearsal-prefixed databases remain.
+
 ## Connectivity checkpoint
 
-Last verified durable point: Stage A is ready for independent review. The configured development database
-was read only; all disposable rehearsal targets were dropped. Migration-chain blockers prevent reset/reseed
-approval and Phase B must not start until the reviewed migration corrections pass both rehearsals.
+Last verified durable point: Stage A.1 corrections pass the guarded fresh rehearsal and preserve the
+expected Phase 4 clone hard stop. The configured development database was read only; all disposable
+rehearsal targets and backup artifacts were dropped. Phase B must not start before independent review and
+coordinator integration.
 
 Stage A.1 candidate `f911931255dd8fc400c2e0d41fc388e529c5aab9` repaired the forward chain sufficiently for
 an empty 448-migration/two-pass seed rehearsal, while the representative clone reached the deliberate
@@ -173,6 +188,7 @@ configured `RHEMAERP` remain blocked pending a clean corrected handoff and satis
 
 ## Next action
 
-Complete deterministic data-preserving CRM/Projects Up/Down behavior, populated failure-safety and downgrade
-tests with the required owner-facing comments. Correct the superseded deployment documentation, then rerun
-both guarded rehearsals. Do not authorize Phase B or reset `RHEMAERP` until independently approved.
+Independently review the Stage A.1 migration/deployment corrections, successful 448-migration empty rehearsal,
+double-seed invariant evidence, and representative clone's intentional Phase 4 evidence stop. If approved,
+integrate this stack and authorize the separately coordinated Phase B owner packets; retain the approved
+clean reset/reseed route rather than fabricating immutable evidence for the configured development database.
