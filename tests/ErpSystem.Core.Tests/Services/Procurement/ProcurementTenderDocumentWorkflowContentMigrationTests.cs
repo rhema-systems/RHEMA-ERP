@@ -33,13 +33,60 @@ public sealed class ProcurementTenderDocumentWorkflowContentMigrationTests
         var sql = MigrationSql(new AllowTenderDocumentWorkflowContentBinding(), "Up");
 
         sql.Should().Contain("OBJECT_DEFINITION")
-            .And.Contain("@lockedMatches <> 1 OR @lineageMatches <> 1")
-            .And.Contain("single expected source shape")
+            .And.Contain("recognized governed source variant")
+            .And.Contain("DECLARE @lockedOldGrouped")
+            .And.Contain("DECLARE @lockedOldDirect")
+            .And.Contain("SET @lockedOldDirect = REPLACE(@lockedOldDirect, CHAR(13) + CHAR(10), CHAR(10))")
+            .And.Contain("SET @lineageOld = REPLACE(@lineageOld, CHAR(13) + CHAR(10), CHAR(10))")
+            .And.Contain("@groupedMatches + @directMatches <> 1")
+            .And.Contain("@lineageMatches <> 1")
+            .And.Contain("REPLACE(")
+            .And.Contain("TDC-F05B-CONTENT-BINDING-LOCK-BEGIN")
+            .And.Contain("TDC-F05B-CONTENT-BINDING-LINEAGE-BEGIN")
+            .And.Contain("@hasLockedMarker = 0")
+            .And.Contain("incomplete content-binding upgrade")
             .And.Contain("@updated = @definition")
             .And.Contain("could not be upgraded safely")
+            .And.Contain("UNICODE(LEFT(@executable, 1)) IN (9, 10, 13, 32)")
+            .And.Contain("SET @header = REPLACE(REPLACE(REPLACE(@header, CHAR(9), N' '), CHAR(10), N' '), CHAR(13), N' ')")
+            .And.Contain("WHILE CHARINDEX(N'  ', @header) > 0")
+            .And.Contain("@header LIKE N'create trigger %'")
+            .And.Contain("@header NOT LIKE N'create or alter trigger %'")
+            .And.Contain("@header NOT LIKE N'alter trigger %'")
+            .And.Contain("SET @executable = N'ALTER' + SUBSTRING(@executable, 7, LEN(@executable))")
+            .And.Contain("unsupported statement header")
             .And.Contain("d.ContentWorkflowEvidenceDocumentId IS NULL")
             .And.Contain("contentStep.WorkflowInstanceId = i.WorkflowInstanceId")
             .And.Contain("i.Status IN (2, 3) AND i.ContentWorkflowEvidenceDocumentId IS NULL");
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Both_known_legacy_lock_shapes_transform_to_the_same_hardened_clause(
+        bool grouped,
+        bool windowsLineEndings)
+    {
+        const string direct = "where d.status in (1, 2)\n          and exists (";
+        const string groupedSource = "where (d.status in (1, 2)\n               or (d.status = 0 and i.status <> 0))\n          and exists (";
+        const string canonical = "where ((d.status in (1, 2) and not (workflow content binding))\n               or (d.status = 0 and i.status <> 0))\n          and exists (";
+        var source = "before\n" + (grouped ? groupedSource : direct) + "\nafter";
+        if (windowsLineEndings)
+        {
+            source = source.Replace("\n", "\r\n", StringComparison.Ordinal);
+        }
+
+        source = source.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        var groupedMatches = source.Split(groupedSource, StringSplitOptions.None).Length - 1;
+        var directMatches = source.Split(direct, StringSplitOptions.None).Length - 1;
+        (groupedMatches + directMatches).Should().Be(1);
+
+        var matched = groupedMatches == 1 ? groupedSource : direct;
+        source.Replace(matched, canonical, StringComparison.Ordinal).Should()
+            .Be("before\n" + canonical + "\nafter");
     }
 
     [Fact]
@@ -48,9 +95,19 @@ public sealed class ProcurementTenderDocumentWorkflowContentMigrationTests
         var sql = MigrationSql(new AllowTenderDocumentWorkflowContentBinding(), "Down");
 
         sql.Should().Contain("Cannot restore the former tender-document constraint")
-            .And.Contain("single expected upgraded shape")
+            .And.Contain("recognized upgraded source shape")
             .And.Contain("could not be restored safely")
+            .And.Contain("DECLARE @lockedOld nvarchar(max)")
+            .And.Contain("DECLARE @lineageOld nvarchar(max) = N'           OR LEN")
+            .And.Contain("OR (d.Status = 0 AND i.Status <> 0)")
+            .And.Contain("STUFF(")
+            .And.Contain("UNICODE(LEFT(@executable, 1)) IN (9, 10, 13, 32)")
+            .And.Contain("@header LIKE N'create trigger %'")
+            .And.Contain("@header NOT LIKE N'create or alter trigger %'")
+            .And.Contain("@header NOT LIKE N'alter trigger %'")
             .And.Contain("LEN(ContentChecksumSha256) <> 64");
+
+        sql.Should().NotContain("DECLARE @lockedOldDirect");
     }
 
     private static MigrationBuilder Operations(Migration migration, string methodName)
