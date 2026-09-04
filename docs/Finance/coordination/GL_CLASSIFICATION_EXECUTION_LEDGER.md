@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 5 — account segments versus transaction dimensions |
-| Status | `REVIEWING` |
+| Status | `CORRECTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
 | Branch | `codex/finance-segments-dimensions-seed-phase5` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Independent review active at clean implementer HEAD `8b45c555` |
+| Review status | `CHANGES_REQUIRED`; five findings sent directly to the implementer |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -88,12 +88,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | `8b45c555dcd88cb47cb4c4b3c9d26c4c421b7f9e` | Independent review active | Clean three-commit implementation (`9c206ca2`, `0434bb6d`, `8b45c555`) delivered from exact base `290377a2`. The coordinator re-requested the structured handoff because its final text was not surfaced, and independent review is examining segment equality, deterministic identity, lifecycle/concurrency/audit, seeds, UI, migration/model/startup SQL, and cross-module boundaries. | Pending |
+| 1 | `8b45c555dcd88cb47cb4c4b3c9d26c4c421b7f9e` | `CHANGES_REQUIRED` | P1: bulk combinations bypass full Alpha/Alphanumeric and normalization validation; Freeze checks only segment IDs rather than complete persisted identity readiness; cross-tenant persisted assignments lack sufficient migration/schema/runtime protection. P2: account update validates canonical identity but persists raw client rows; delete/reorder lack stale-write tokens and the reorder API text contradicts the actual lifecycle. Independent checks passed 12 backend and 8 frontend tests, ESLint, EF no-pending-model and diff checks. All five corrections and regression gates were sent directly. | Not integrated |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 5 is committed and clean at implementer HEAD `8b45c555` on exact base `290377a2`. Its structured handoff has been re-requested and independent review is active. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Phase 5 review at clean HEAD `8b45c555` returned `CHANGES_REQUIRED`. Five bounded validation, tenant-lineage, canonical-persistence and concurrency corrections were sent directly to the implementer in the same isolated worktree. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
-Reconcile the Phase 5 structured handoff with independent Git review, send corrections directly as needed, integrate only after approval, and then immediately activate Phase 6 from the new exact checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
+Review the corrected Phase 5 handoff when delivered, repeat independent verification, integrate only after approval, and then immediately activate Phase 6 from the new exact checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
