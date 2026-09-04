@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage A — migration/reset rehearsal and V1 inventory |
-| Status | `APPROVED_WITH_BLOCKERS` |
+| Phase | Post-Phase-6 Stage A.1 — migration-chain and deployment correction |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
-| Branch | `codex/finance-gl-cutover-readiness` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-readiness` |
+| Exact base | `7bc24b22` (resolve to full hash in the implementing worktree) |
+| Branch | `codex/finance-gl-cutover-rehearsal-corrections` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-rehearsal-corrections` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
+| Primary HEAD at activation | `7bc24b22` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Stage A independently approved as an accurate readiness/blocker package |
-| Connectivity state | Available; all Stage A work is durably committed before handoff |
+| Review status | Stage A independently approved and integrated; Stage A.1 awaiting handoff |
+| Connectivity state | Available; implementing task reactivated for corrections |
 
 ## Authoritative inputs
 
@@ -117,6 +117,13 @@ The exact V1 inventory records five active request paths: two Procurement, one I
 (including the reversal path). HR/Payroll has no V1 posting constructor, but it and Procurement each retain
 a direct Finance `Account` writer. Owner-scoped Phase B packets are documented in
 `docs/Finance/GL_CUTOVER_STAGE_A_READINESS.md`.
+
+Independent review approved Stage A HEAD `1722866c55e2f7b94bd2391ccc3a89eb3a1c8442` as an accurate
+readiness/blocker package. Safety refusals, 448-migration discovery, EF no-drift, V1 inventory and direct
+account-writer inventory were verified. The three Stage A commits were integrated as `78b5d5e0`,
+`fa385c0e` and `7bc24b22`. Approval explicitly does not authorize reset/reseed or Phase B until the CRM
+table collision, Phase 2 filtered-index syntax and `apply-migrations` DI registration are corrected and
+both guarded rehearsals reach their required terminal gates.
 
 ## Connectivity checkpoint
 
