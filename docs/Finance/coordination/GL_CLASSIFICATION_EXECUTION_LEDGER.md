@@ -1,6 +1,6 @@
 # GL Classification and Revaluation Refactor — Execution Ledger
 
-Last reconciled: 2026-09-03 (Africa/Accra)
+Last reconciled: 2026-09-04 (Africa/Accra)
 
 ## Objective
 
@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Phase 6 — journal usability and account inquiry |
-| Status | `COMPLETE` |
+| Phase | Post-Phase-6 Integration Stage A — migration/reset rehearsal and V1 producer inventory |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
-| Branch | `codex/finance-account-inquiry-journal-ux-phase6` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-account-inquiry-journal-ux-phase6` |
+| Exact base | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
+| Branch | `codex/finance-gl-cutover-readiness` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-readiness` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
+| Primary HEAD at activation | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | `APPROVED`; all Phase 6 findings closed and integrated |
-| Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
+| Recovery heartbeat | Not active; previous Phase 1A–6 heartbeat was retired after completion |
+| Review status | Awaiting Stage A handoff and independent review |
+| Connectivity state | Connected; implementing task reactivated |
 
 ## Authoritative inputs
 
@@ -41,7 +41,7 @@ The user authorized the coordinator to:
 
 The implementing task should not be left idle between these approved phases. User intervention is reserved for the escalation gates below or an unrecoverable blocker.
 
-The coordinator must stop at the escalation gates in the coordination protocol, including migrations/database mutations, cross-module implementation changes, destructive actions, conflicts with concurrent work, pushes, and PR operations.
+On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. The configured `RHEMAERP` database remains protected until rehearsal, preflight, backup/restore and independent-review gates pass. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
 
 ## Phase 1A review checklist
 
@@ -105,4 +105,15 @@ Last verified durable point: Phase 6 is independently approved and integrated th
 
 ## Next action
 
-Stop for user authorization before the database migration/reset and deterministic reseed rehearsal, cross-module producer V2 cutover, destructive worktree cleanup, push, or PR action. Report the completed implementation phases, integrated commits, outstanding unapplied migrations, known baseline failures, and recommended gated sequence.
+Complete Stage A in an isolated worktree: reconcile the configured database read-only, prove empty-database migration and deterministic reseed idempotency using disposable databases only, assess a non-destructive forward-migration clone, and publish the exact active V1 producer/direct-account-writer inventory. Independently review the handoff before issuing owner-scoped cross-module conversions.
+
+## Post-Phase-6 integration stages
+
+### Stage A — migration and producer-cutover readiness
+
+- User authorization recorded: 2026-09-04, “proceed,” in direct response to the proposed database rehearsal/reset and separate cross-module V2 producer cutover.
+- Implementing task reactivated on exact primary base `3c5620a3de9c5d3038be4b07b5026149815f4296`.
+- Configured database migration history was queried read-only. The first three previously noted Finance migrations are already applied: `20260902070000_AddFinanceSourceLineReadinessEvidence`, `20260902080000_AddRecurringJournalAutomaticReversalControl`, and `20260902140000_AddFixedAssetDepreciationConventionEvidence`.
+- Five migrations are currently reported pending against configured `RHEMAERP`: `20260903044911_FinanceBookClassificationFoundation`, `20260903120000_EnforceFinanceClassificationSystemRoleCardinality`, `20260903130000_AddFinancialStatementClassificationSnapshots`, `20260903190453_AddBookScopedFxRevaluationPolicy`, and `20260904003118_AddGovernedAccountSegmentIdentity`.
+- Persistent target rule: Stage A may mutate only disposable local databases whose exact names begin `RHEMAERP_GL_REHEARSAL_`; configured `RHEMAERP` is read-only until rehearsal and restore-point gates pass.
+- Cross-module production implementation is inventory-only during Stage A. Owner-scoped changes begin only after the readiness handoff is independently approved.
