@@ -137,6 +137,7 @@
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\AccountCurrencyLinkPersistenceTests.cs" />
+    <Compile Include="Services\Finance\AccountTransactionInquiryPhase6Tests.cs" />
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetControlServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />

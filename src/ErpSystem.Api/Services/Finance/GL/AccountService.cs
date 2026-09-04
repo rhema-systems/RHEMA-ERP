@@ -90,6 +90,119 @@ namespace ErpSystem.Api.Services.Finance.GL
             return account == null ? null : MapToDto(account);
         }
 
+        public async Task<AccountTransactionInquiryPageDto> GetTransactionsAsync(
+            Guid accountId,
+            string accountingBookCode,
+            int page = 1,
+            int pageSize = 10,
+            CancellationToken cancellationToken = default)
+        {
+            if (accountId == Guid.Empty)
+                throw new ArgumentException("Account ID is required.", nameof(accountId));
+            if (string.IsNullOrWhiteSpace(accountingBookCode))
+                throw new ArgumentException("An accounting book code is required.", nameof(accountingBookCode));
+            if (page < 1)
+                throw new ArgumentOutOfRangeException(nameof(page), "Page must be at least 1.");
+            if (pageSize is < 1 or > 100)
+                throw new ArgumentOutOfRangeException(nameof(pageSize), "Page size must be between 1 and 100.");
+
+            var tenantId = TenantId;
+            var normalizedBookCode = accountingBookCode.Trim().ToUpperInvariant();
+            var accountExists = await _unitOfWork.Repository<Account>()
+                .GetQueryable(item => item.TenantId == tenantId && item.Id == accountId && !item.IsDeleted)
+                .AsNoTracking()
+                .AnyAsync(cancellationToken);
+            if (!accountExists)
+                throw new KeyNotFoundException($"Account with ID {accountId} was not found.");
+
+            var books = await _unitOfWork.Repository<AccountingBook>()
+                .GetQueryable(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.Code == normalizedBookCode)
+                .AsNoTracking()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (books.Count == 0)
+                throw new KeyNotFoundException($"Accounting book '{normalizedBookCode}' was not found.");
+            if (books.Count > 1)
+                throw new InvalidOperationException($"Accounting book code '{normalizedBookCode}' is ambiguous.");
+
+            var book = books[0];
+            if (!book.IsActive)
+                throw new InvalidOperationException($"Accounting book '{book.Code}' is inactive.");
+
+            var mappings = await _unitOfWork.Repository<AccountAccountingBook>()
+                .GetQueryable(item => item.TenantId == tenantId
+                    && item.AccountId == accountId
+                    && item.AccountingBookId == book.Id
+                    && !item.IsDeleted)
+                .AsNoTracking()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (mappings.Count == 0)
+                throw new KeyNotFoundException("The account is not assigned to the requested accounting book.");
+            if (mappings.Count > 1)
+                throw new InvalidOperationException("The account's accounting-book authority is ambiguous.");
+            if (!mappings[0].IsEnabled)
+                throw new InvalidOperationException("The account is disabled for the requested accounting book.");
+
+            var transactions = _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.AccountId == accountId
+                    && item.BookClassification == book.Code
+                    && item.PostingStatus == "Posted"
+                    && item.JournalEntry.TenantId == tenantId
+                    && !item.JournalEntry.IsDeleted)
+                .AsNoTracking();
+
+            var totalCount = await transactions.CountAsync(cancellationToken);
+            var rows = await transactions
+                .Include(item => item.JournalEntry)
+                .Include(item => item.FinanceDimensionSnapshot)!
+                    .ThenInclude(snapshot => snapshot!.Items)
+                .Include(item => item.FinanceDimensionSet)!
+                    .ThenInclude(set => set!.Items)
+                .OrderByDescending(item => item.PostedDate ?? item.TransactionDate)
+                .ThenByDescending(item => item.JournalEntry.JournalEntryNumber)
+                .ThenByDescending(item => item.LineNumber)
+                .ThenByDescending(item => item.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken);
+
+            var journalEntryIds = rows.Select(item => item.JournalEntryId).Distinct().ToList();
+            var postingEvents = journalEntryIds.Count == 0
+                ? new Dictionary<Guid, FinancePostingEvent>()
+                : (await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(item => item.TenantId == tenantId
+                        && !item.IsDeleted
+                        && item.JournalEntryId.HasValue
+                        && journalEntryIds.Contains(item.JournalEntryId.Value)
+                        && item.PostingStatus == "Posted")
+                    .AsNoTracking()
+                    .OrderByDescending(item => item.PostedAt ?? item.PostingDate)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(cancellationToken))
+                    .GroupBy(item => item.JournalEntryId!.Value)
+                    .ToDictionary(group => group.Key, group => group.First());
+
+            return new AccountTransactionInquiryPageDto
+            {
+                Items = rows.Select(row => MapInquiryItem(
+                    row,
+                    book,
+                    postingEvents.GetValueOrDefault(row.JournalEntryId))).ToList(),
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize,
+                TotalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageSize),
+                AccountingBookCode = book.Code,
+                AccountingBookName = book.Name
+            };
+        }
+
         public async Task<IReadOnlyList<AccountDto>> GetAllAsync(
             string? accountType = null,
             string? status = null,
@@ -927,6 +1040,97 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private Guid? TryGetCurrentUserId()
             => Guid.TryParse(_currentUser.UserId, out var userId) ? userId : null;
+
+        private static AccountTransactionInquiryItemDto MapInquiryItem(
+            AccountTransaction transaction,
+            AccountingBook book,
+            FinancePostingEvent? postingEvent)
+        {
+            var snapshot = transaction.FinanceDimensionSnapshot;
+            var dimensions = snapshot is not null
+                ? snapshot.Items
+                    .Where(item => !item.IsDeleted)
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .ThenBy(item => item.Id)
+                    .Select(MapDimensionAssignment)
+                    .ToList()
+                : transaction.FinanceDimensionSet?.Items
+                    .Where(item => !item.IsDeleted)
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .ThenBy(item => item.Id)
+                    .Select(MapDimensionAssignment)
+                    .ToList() ?? [];
+
+            return new AccountTransactionInquiryItemDto
+            {
+                Id = transaction.Id,
+                JournalEntryId = transaction.JournalEntryId,
+                JournalEntryNumber = transaction.JournalEntry.JournalEntryNumber,
+                TransactionDate = transaction.TransactionDate,
+                PostingDate = transaction.PostedDate ?? transaction.JournalEntry.PostingDate,
+                Reference = transaction.SourceReferenceNumber
+                    ?? transaction.JournalEntry.ReferenceNumber
+                    ?? postingEvent?.SourceDocumentReference,
+                JournalDescription = transaction.JournalEntry.Description,
+                LineDescription = transaction.Description,
+                DebitAmount = transaction.DebitAmount,
+                CreditAmount = transaction.CreditAmount,
+                FunctionalCurrencyCode = transaction.FunctionalCurrencyCode,
+                TransactionCurrencyCode = transaction.TransactionCurrency,
+                TransactionDebitAmount = transaction.TransactionDebitAmount,
+                TransactionCreditAmount = transaction.TransactionCreditAmount,
+                ForeignAmount = transaction.ForeignCurrencyAmount,
+                ExchangeRateId = transaction.ExchangeRateId,
+                ExchangeRate = transaction.ExchangeRate,
+                ExchangeRateSource = transaction.ExchangeRateSource,
+                ExchangeRateDate = transaction.ExchangeRateDate,
+                AccountingBookCode = book.Code,
+                AccountingBookName = book.Name,
+                PostingEventId = postingEvent?.Id,
+                SourceModule = transaction.SourceModule
+                    ?? postingEvent?.SourceModule
+                    ?? transaction.JournalEntry.SourceModule,
+                OriginModuleCode = postingEvent?.OriginModuleCode
+                    ?? transaction.JournalEntry.OriginModuleCode,
+                SourceDocumentId = transaction.SourceDocumentId
+                    ?? postingEvent?.SourceDocumentId
+                    ?? transaction.JournalEntry.SourceDocumentId,
+                SourceDocumentType = transaction.SourceDocumentType
+                    ?? postingEvent?.SourceDocumentType
+                    ?? transaction.JournalEntry.SourceDocumentType,
+                SourceReference = transaction.SourceReferenceNumber
+                    ?? postingEvent?.SourceDocumentReference
+                    ?? transaction.JournalEntry.ReferenceNumber,
+                LineNumber = transaction.LineNumber,
+                FinanceDimensionSetId = transaction.FinanceDimensionSetId,
+                FinanceDimensionSnapshotId = transaction.FinanceDimensionSnapshotId,
+                DimensionDisplayValue = snapshot?.DisplayValueSnapshot
+                    ?? transaction.FinanceDimensionSet?.DisplayValue,
+                Dimensions = dimensions
+            };
+        }
+
+        private static FinanceDimensionAssignmentDto MapDimensionAssignment(
+            FinanceDimensionSnapshotItem item) => new()
+        {
+            DefinitionId = item.FinanceDimensionDefinitionId,
+            ValueId = item.FinanceDimensionValueId,
+            DimensionCode = item.DimensionCodeSnapshot,
+            DimensionName = item.DimensionNameSnapshot,
+            ValueCode = item.DimensionValueCodeSnapshot,
+            ValueName = item.DimensionValueNameSnapshot
+        };
+
+        private static FinanceDimensionAssignmentDto MapDimensionAssignment(
+            FinanceDimensionSetItem item) => new()
+        {
+            DefinitionId = item.FinanceDimensionDefinitionId,
+            ValueId = item.FinanceDimensionValueId,
+            DimensionCode = item.DimensionCodeSnapshot,
+            DimensionName = item.DimensionNameSnapshot,
+            ValueCode = item.DimensionValueCodeSnapshot,
+            ValueName = item.DimensionValueNameSnapshot
+        };
 
         #endregion
     }

@@ -16,6 +16,7 @@ import type { Account, AccountType, AccountStatus, AccountCurrencyLink, AccountB
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { AccountTransactionsInquiry } from '@/components/finance/accounts/account-transactions-inquiry';
 
 export default function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = React.use(params);
@@ -875,19 +876,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                         </DialogContent>
                     </Dialog>
 
-                    {/* Transaction History Placeholder */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Recent Transactions</CardTitle>
-                            <CardDescription>Last 10 transactions for this account</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-center py-8 text-muted-foreground">
-                                <p>No transactions to display</p>
-                                <p className="text-sm mt-2">Transaction history will appear here once the backend is connected</p>
-                            </div>
-                        </CardContent>
-                    </Card>
+                    <AccountTransactionsInquiry accountId={id} accountBooks={account.accountingBooks} />
                 </div>
 
                 {/* Sidebar */}

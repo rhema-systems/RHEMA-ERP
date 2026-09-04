@@ -537,6 +537,51 @@ export interface AccountTransaction {
     dimensionSnapshot?: FinanceDimensionSnapshot;
 }
 
+export interface AccountTransactionInquiryItem {
+    id: string;
+    journalEntryId: string;
+    journalEntryNumber: string;
+    transactionDate: string;
+    postingDate?: string | null;
+    reference?: string | null;
+    journalDescription?: string | null;
+    lineDescription?: string | null;
+    debitAmount: number;
+    creditAmount: number;
+    functionalCurrencyCode: string;
+    transactionCurrencyCode?: string | null;
+    transactionDebitAmount?: number | null;
+    transactionCreditAmount?: number | null;
+    foreignAmount?: number | null;
+    exchangeRateId?: string | null;
+    exchangeRate?: number | null;
+    exchangeRateSource?: string | null;
+    exchangeRateDate?: string | null;
+    accountingBookCode: string;
+    accountingBookName: string;
+    postingEventId?: string | null;
+    sourceModule?: string | null;
+    originModuleCode?: string | null;
+    sourceDocumentId?: string | null;
+    sourceDocumentType?: string | null;
+    sourceReference?: string | null;
+    lineNumber: number;
+    financeDimensionSetId?: string | null;
+    financeDimensionSnapshotId?: string | null;
+    dimensionDisplayValue?: string | null;
+    dimensions: FinanceDimensionAssignment[];
+}
+
+export interface AccountTransactionInquiryPage {
+    items: AccountTransactionInquiryItem[];
+    totalCount: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    accountingBookCode: string;
+    accountingBookName: string;
+}
+
 export interface FinanceDimensionAssignment {
     definitionId: string;
     valueId: string;

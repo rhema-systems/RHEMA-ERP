@@ -5,6 +5,7 @@
 
 import type {
     Account,
+    AccountTransactionInquiryPage,
     AccountingBook,
     AccountClassification,
     AccountClassificationWhereUsed,
@@ -191,6 +192,22 @@ class FinanceDataService {
 
     async getAccountById(id: string): Promise<Account> {
         return apiService.get<Account>(`/finance/accounts/${id}`);
+    }
+
+    async getAccountTransactions(
+        accountId: string,
+        accountingBookCode: string,
+        page = 1,
+        pageSize = 10,
+    ): Promise<AccountTransactionInquiryPage> {
+        const queryParams = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize),
+            accountingBookCode,
+        });
+        return apiService.get<AccountTransactionInquiryPage>(
+            `/finance/accounts/${accountId}/transactions?${queryParams}`,
+        );
     }
 
     // ===== CODING DIMENSIONS =====

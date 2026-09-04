@@ -363,6 +363,41 @@ namespace ErpSystem.Api.Controllers.Finance
             return Ok(balance);
         }
 
+        /// <summary>
+        /// Returns a stable, tenant- and accounting-book-scoped page of posted GL lines for an account.
+        /// </summary>
+        [HttpGet("{accountId:guid}/transactions")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<AccountTransactionInquiryPageDto>> GetAccountTransactions(
+            Guid accountId,
+            [FromQuery] string accountingBookCode,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return Ok(await _accountService.GetTransactionsAsync(
+                    accountId,
+                    accountingBookCode,
+                    page,
+                    pageSize,
+                    cancellationToken));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         #region Account Combination Generator
 
         /// <summary>
