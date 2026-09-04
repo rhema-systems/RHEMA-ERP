@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 6 — journal usability and account inquiry |
-| Status | `REVIEWING` |
+| Status | `CORRECTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Branch | `codex/finance-account-inquiry-journal-ux-phase6` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Independent review active at clean implementer HEAD `a9a149c8` |
+| Review status | `CHANGES_REQUIRED`; three findings sent directly to the implementer |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -96,12 +96,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | `a9a149c8c09056e03e3c3eb8ebac824e87b75832` | Independent review active | Clean three-commit implementation (`b54441fc`, `f4a651cb`, `a9a149c8`) delivered from exact base `35df12ea`. The structured handoff was re-requested because its final text was not surfaced; independent review is checking journal state semantics, tenant/book/security boundaries, immutable inquiry evidence, deterministic pagination, UI request/race states, and regression gates. | Pending |
+| 1 | `a9a149c8c09056e03e3c3eb8ebac824e87b75832` | `CHANGES_REQUIRED` | P1: returned dimension snapshot/set/item evidence is not fully tenant-validated; exact-book/Posted authority is checked only on the transaction row rather than consistently against journal and posting-event evidence. P2: a current response carrying the wrong book code leaves the UI blank instead of showing an integrity error with Retry. Description-only line copying passed review. Focused backend 8/8 and frontend 10/10 tests passed; diff and worktree were clean. All three corrections and regression gates were sent directly. | Not integrated |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 6 is committed and clean at implementer HEAD `a9a149c8` on exact base `35df12ea`. Its structured handoff has been re-requested and independent review is active. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Phase 6 review at clean HEAD `a9a149c8` returned `CHANGES_REQUIRED`. Three bounded tenant/book evidence and UI integrity corrections were sent directly to the implementer in the same isolated worktree. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
-Reconcile the Phase 6 handoff with independent Git review, send corrections directly as needed, and integrate only after approval. When the final phase is complete, stop before any database migration/reset, cross-module producer cutover, destructive cleanup, push or PR action and report the remaining authorization gates to the user.
+Review the corrected Phase 6 handoff, repeat independent verification, and integrate only after approval. When the final phase is complete, stop before any database migration/reset, cross-module producer cutover, destructive cleanup, push or PR action and report the remaining authorization gates to the user.
