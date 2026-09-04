@@ -10,8 +10,8 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Integration Stage A — migration/reset rehearsal and V1 producer inventory |
-| Status | `IN_PROGRESS` |
+| Phase | Post-Phase-6 Stage A — migration/reset rehearsal and V1 inventory |
+| Status | `APPROVED_WITH_BLOCKERS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
 | Branch | `codex/finance-gl-cutover-readiness` |
@@ -20,8 +20,8 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Awaiting Stage A handoff and independent review |
-| Connectivity state | Connected; implementing task reactivated |
+| Review status | Stage A independently approved as an accurate readiness/blocker package |
+| Connectivity state | Available; all Stage A work is durably committed before handoff |
 
 ## Authoritative inputs
 
@@ -99,21 +99,34 @@ On 2026-09-04 the user explicitly authorized proceeding with the gated database 
 | 1 | `a9a149c8c09056e03e3c3eb8ebac824e87b75832` | `CHANGES_REQUIRED` | P1: returned dimension snapshot/set/item evidence is not fully tenant-validated; exact-book/Posted authority is checked only on the transaction row rather than consistently against journal and posting-event evidence. P2: a current response carrying the wrong book code leaves the UI blank instead of showing an integrity error with Retry. Description-only line copying passed review. Focused backend 8/8 and frontend 10/10 tests passed; diff and worktree were clean. All three corrections and regression gates were sent directly. | Not integrated |
 | 2 | `0cbd203c7fd9269632fabe6fe90bfa701ed55595` | `APPROVED` | All three findings are closed: dimension evidence is tenant-validated and fails closed; transaction, journal, event and selected-book evidence must agree on tenant/book/Posted state; stale UI responses are suppressed while a current wrong-book response shows an integrity error with Retry. Independent verification passed 20 backend and 11 frontend tests, ESLint and diff checks; the worktree was clean and no schema/cross-module/posting behavior changed. | Four commits cherry-picked without conflict as `de8d026e`, `7875be0b`, `73543118`, and `744b9f48`. Task-owned files match the reviewed tree; only the coordination ledger differs. Primary verification passed: build with 0 errors, 20 focused backend tests, 11 frontend tests, targeted ESLint, and diff check. No migration was introduced. |
 
+## Post-Phase-6 Stage A rehearsal
+
+Stage A repaired focused EF discovery from 444 to the authoritative 448 migrations and added a guarded,
+prefix-locked rehearsal harness plus operator diagnostics. The configured `RhemaERP` database was inspected
+read-only. Its five pending Finance migrations were identified in order, together with one live FX batch,
+nine active currency links, absent classification tables and three historical published/retired layouts.
+
+The empty rehearsal proved the exact-base chain cannot currently migrate from the consolidated baseline:
+`20260317115118_AddCrmEntities` attempts to rename `QuoteLineItem` to the already-existing `QuoteLineItems`.
+A safe `COPY_ONLY` clone proved the configured-database upgrade is independently blocked in Phase 2 because
+SQL Server rejects the singleton-role filtered-index predicate containing `NOT IN`. No historical migration
+was weakened or manually stamped past either failure. Every disposable database was explicitly dropped;
+none remains.
+
+The exact V1 inventory records five active request paths: two Procurement, one Inventory and two Sales
+(including the reversal path). HR/Payroll has no V1 posting constructor, but it and Procurement each retain
+a direct Finance `Account` writer. Owner-scoped Phase B packets are documented in
+`docs/Finance/GL_CUTOVER_STAGE_A_READINESS.md`.
+
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 6 is independently approved and integrated through primary commit `744b9f48d0dad42e2ddcaf15381e1fde45c3b3b0`. Build, 20 backend tests, 11 frontend tests, ESLint and diff gates passed. Phases 1A–6 are now complete. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Stage A is ready for independent review. The configured development database
+was read only; all disposable rehearsal targets were dropped. Migration-chain blockers prevent reset/reseed
+approval and Phase B must not start until the reviewed migration corrections pass both rehearsals.
 
 ## Next action
 
-Complete Stage A in an isolated worktree: reconcile the configured database read-only, prove empty-database migration and deterministic reseed idempotency using disposable databases only, assess a non-destructive forward-migration clone, and publish the exact active V1 producer/direct-account-writer inventory. Independently review the handoff before issuing owner-scoped cross-module conversions.
-
-## Post-Phase-6 integration stages
-
-### Stage A — migration and producer-cutover readiness
-
-- User authorization recorded: 2026-09-04, “proceed,” in direct response to the proposed database rehearsal/reset and separate cross-module V2 producer cutover.
-- Implementing task reactivated on exact primary base `3c5620a3de9c5d3038be4b07b5026149815f4296`.
-- Configured database migration history was queried read-only. The first three previously noted Finance migrations are already applied: `20260902070000_AddFinanceSourceLineReadinessEvidence`, `20260902080000_AddRecurringJournalAutomaticReversalControl`, and `20260902140000_AddFixedAssetDepreciationConventionEvidence`.
-- Five migrations are currently reported pending against configured `RHEMAERP`: `20260903044911_FinanceBookClassificationFoundation`, `20260903120000_EnforceFinanceClassificationSystemRoleCardinality`, `20260903130000_AddFinancialStatementClassificationSnapshots`, `20260903190453_AddBookScopedFxRevaluationPolicy`, and `20260904003118_AddGovernedAccountSegmentIdentity`.
-- Persistent target rule: Stage A may mutate only disposable local databases whose exact names begin `RHEMAERP_GL_REHEARSAL_`; configured `RHEMAERP` is read-only until rehearsal and restore-point gates pass.
-- Cross-module production implementation is inventory-only during Stage A. Owner-scoped changes begin only after the readiness handoff is independently approved.
+Independently review the harness, discovery metadata, diagnostics, inventories and owner packets. Then assign
+the historical baseline collision, `apply-migrations` DI defect and invalid Phase 2 filtered-index predicate
+to their owners. Re-run empty and clone rehearsals through double seeding and invariant checks before
+authorizing the Phase B producer stacks or any developer-database reset.
