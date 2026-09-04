@@ -121,9 +121,13 @@ export function AccountTransactionsInquiry({ accountId, accountBooks }: AccountT
         setResult(null);
         void financeDataService.getAccountTransactions(accountId, selectedBookCode, page, PAGE_SIZE)
             .then(data => {
-                if (requestSequence.current === sequence && data.accountingBookCode === selectedBookCode) {
-                    setResult(data);
+                if (requestSequence.current !== sequence) return;
+                if (data.accountingBookCode !== selectedBookCode) {
+                    setResult(null);
+                    setRequestError(`The server returned ${data.accountingBookCode || 'an unidentified book'} instead of the selected ${selectedBookCode} accounting book. Retry the inquiry; if this continues, contact Finance support.`);
+                    return;
                 }
+                setResult(data);
             })
             .catch(() => {
                 if (requestSequence.current === sequence) {

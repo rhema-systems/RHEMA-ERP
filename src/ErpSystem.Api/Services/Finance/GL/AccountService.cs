@@ -146,15 +146,26 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (!mappings[0].IsEnabled)
                 throw new InvalidOperationException("The account is disabled for the requested accounting book.");
 
-            var transactions = _unitOfWork.Repository<AccountTransaction>()
+            var candidateTransactions = _unitOfWork.Repository<AccountTransaction>()
                 .GetQueryable(item => item.TenantId == tenantId
                     && !item.IsDeleted
                     && item.AccountId == accountId
                     && item.BookClassification == book.Code
-                    && item.PostingStatus == "Posted"
-                    && item.JournalEntry.TenantId == tenantId
-                    && !item.JournalEntry.IsDeleted)
+                    && item.PostingStatus == "Posted")
                 .AsNoTracking();
+            var hasInvalidJournalEvidence = await candidateTransactions.AnyAsync(item =>
+                item.JournalEntry.TenantId != tenantId
+                || item.JournalEntry.IsDeleted
+                || item.JournalEntry.BookClassification != book.Code
+                || item.JournalEntry.PostingStatus != "Posted", cancellationToken);
+            if (hasInvalidJournalEvidence)
+                throw new InvalidOperationException("Posted account transaction journal evidence is inconsistent with the requested tenant and accounting book.");
+
+            var transactions = candidateTransactions
+                .Where(item => item.JournalEntry.TenantId == tenantId
+                    && !item.JournalEntry.IsDeleted
+                    && item.JournalEntry.BookClassification == book.Code
+                    && item.JournalEntry.PostingStatus == "Posted");
 
             var totalCount = await transactions.CountAsync(cancellationToken);
             var rows = await transactions
@@ -172,21 +183,23 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .AsSplitQuery()
                 .ToListAsync(cancellationToken);
 
+            await ValidateInquiryDimensionEvidenceAsync(rows, tenantId, cancellationToken);
+
             var journalEntryIds = rows.Select(item => item.JournalEntryId).Distinct().ToList();
             var postingEvents = journalEntryIds.Count == 0
                 ? new Dictionary<Guid, FinancePostingEvent>()
                 : (await _unitOfWork.Repository<FinancePostingEvent>()
-                    .GetQueryable(item => item.TenantId == tenantId
-                        && !item.IsDeleted
+                    .GetQueryable(item => !item.IsDeleted
                         && item.JournalEntryId.HasValue
-                        && journalEntryIds.Contains(item.JournalEntryId.Value)
-                        && item.PostingStatus == "Posted")
+                        && journalEntryIds.Contains(item.JournalEntryId.Value))
                     .AsNoTracking()
                     .OrderByDescending(item => item.PostedAt ?? item.PostingDate)
                     .ThenByDescending(item => item.Id)
                     .ToListAsync(cancellationToken))
                     .GroupBy(item => item.JournalEntryId!.Value)
-                    .ToDictionary(group => group.Key, group => group.First());
+                    .ToDictionary(
+                        group => group.Key,
+                        group => SelectAndValidatePostingEvent(group, rows, book, tenantId));
 
             return new AccountTransactionInquiryPageDto
             {
@@ -1040,6 +1053,146 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private Guid? TryGetCurrentUserId()
             => Guid.TryParse(_currentUser.UserId, out var userId) ? userId : null;
+
+        private async Task ValidateInquiryDimensionEvidenceAsync(
+            IReadOnlyCollection<AccountTransaction> rows,
+            Guid tenantId,
+            CancellationToken cancellationToken)
+        {
+            var snapshotItems = rows
+                .Where(row => row.FinanceDimensionSnapshot is not null)
+                .SelectMany(row => row.FinanceDimensionSnapshot!.Items)
+                .ToList();
+            var setItems = rows
+                .Where(row => row.FinanceDimensionSet is not null)
+                .SelectMany(row => row.FinanceDimensionSet!.Items)
+                .ToList();
+
+            foreach (var row in rows)
+            {
+                if (row.TenantId != tenantId
+                    || row.JournalEntry.TenantId != tenantId
+                    || row.JournalEntryId != row.JournalEntry.Id)
+                {
+                    throw new InvalidOperationException("Account transaction tenant or journal evidence is inconsistent.");
+                }
+
+                if (row.FinanceDimensionSetId.HasValue
+                    && (row.FinanceDimensionSet is null
+                        || row.FinanceDimensionSet.Id != row.FinanceDimensionSetId.Value
+                        || row.FinanceDimensionSet.TenantId != tenantId
+                        || row.FinanceDimensionSet.IsDeleted))
+                {
+                    throw new InvalidOperationException("Account transaction dimension-set evidence failed tenant integrity validation.");
+                }
+
+                if (row.FinanceDimensionSnapshotId.HasValue
+                    && (row.FinanceDimensionSnapshot is null
+                        || row.FinanceDimensionSnapshot.Id != row.FinanceDimensionSnapshotId.Value
+                        || row.FinanceDimensionSnapshot.TenantId != tenantId
+                        || row.FinanceDimensionSnapshot.IsDeleted
+                        || !row.FinanceDimensionSetId.HasValue
+                        || row.FinanceDimensionSnapshot.FinanceDimensionSetId != row.FinanceDimensionSetId.Value))
+                {
+                    throw new InvalidOperationException("Account transaction dimension-snapshot evidence failed tenant or set integrity validation.");
+                }
+            }
+
+            if (snapshotItems.Any(item => item.TenantId != tenantId
+                    || item.IsDeleted
+                    || rows.All(row => row.FinanceDimensionSnapshotId != item.FinanceDimensionSnapshotId))
+                || setItems.Any(item => item.TenantId != tenantId
+                    || item.IsDeleted
+                    || rows.All(row => row.FinanceDimensionSetId != item.FinanceDimensionSetId)))
+            {
+                throw new InvalidOperationException("Account transaction dimension item evidence failed tenant or parent integrity validation.");
+            }
+
+            var definitionIds = snapshotItems.Select(item => item.FinanceDimensionDefinitionId)
+                .Concat(setItems.Select(item => item.FinanceDimensionDefinitionId)).Distinct().ToList();
+            var valueIds = snapshotItems.Select(item => item.FinanceDimensionValueId)
+                .Concat(setItems.Select(item => item.FinanceDimensionValueId)).Distinct().ToList();
+            if (definitionIds.Count == 0 && valueIds.Count == 0)
+                return;
+
+            var definitions = await _unitOfWork.Repository<FinanceDimensionDefinition>()
+                .GetQueryable(item => definitionIds.Contains(item.Id))
+                .AsNoTracking()
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+            var values = await _unitOfWork.Repository<FinanceDimensionValue>()
+                .GetQueryable(item => valueIds.Contains(item.Id))
+                .AsNoTracking()
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+            foreach (var item in snapshotItems.Select(item => (
+                         item.FinanceDimensionDefinitionId, item.FinanceDimensionValueId))
+                     .Concat(setItems.Select(item => (
+                         item.FinanceDimensionDefinitionId, item.FinanceDimensionValueId))))
+            {
+                if (!definitions.TryGetValue(item.FinanceDimensionDefinitionId, out var definition)
+                    || definition.TenantId != tenantId
+                    || definition.IsDeleted
+                    || !values.TryGetValue(item.FinanceDimensionValueId, out var value)
+                    || value.TenantId != tenantId
+                    || value.IsDeleted
+                    || value.FinanceDimensionDefinitionId != definition.Id)
+                {
+                    throw new InvalidOperationException("Account transaction dimension definition/value lineage failed tenant integrity validation.");
+                }
+            }
+        }
+
+        private static FinancePostingEvent SelectAndValidatePostingEvent(
+            IEnumerable<FinancePostingEvent> events,
+            IReadOnlyCollection<AccountTransaction> rows,
+            AccountingBook book,
+            Guid tenantId)
+        {
+            var group = events.ToList();
+            var journalId = group[0].JournalEntryId!.Value;
+            var journalRows = rows.Where(row => row.JournalEntryId == journalId).ToList();
+            if (group.Any(item => item.TenantId != tenantId
+                    || item.JournalEntryId != journalId
+                    || item.BookClassification != book.Code
+                    || item.PostingStatus != "Posted"
+                    || string.IsNullOrWhiteSpace(item.SourceModule)
+                    || string.IsNullOrWhiteSpace(item.SourceDocumentType)
+                    || item.SourceDocumentId == Guid.Empty)
+                || group.Count != 1)
+            {
+                throw new InvalidOperationException("Posting-event evidence is ambiguous or inconsistent with the requested tenant, journal, book, or posted status.");
+            }
+
+            var postingEvent = group[0];
+            foreach (var row in journalRows)
+            {
+                EnsureMatchingEvidence(row.SourceModule, postingEvent.SourceModule, "source module");
+                EnsureMatchingEvidence(row.SourceDocumentType, postingEvent.SourceDocumentType, "source document type");
+                EnsureMatchingEvidence(row.SourceDocumentId, postingEvent.SourceDocumentId, "source document");
+                EnsureMatchingEvidence(row.JournalEntry.SourceModule, postingEvent.SourceModule, "journal source module");
+                EnsureMatchingEvidence(row.JournalEntry.OriginModuleCode, postingEvent.OriginModuleCode, "origin module");
+                EnsureMatchingEvidence(row.JournalEntry.SourceDocumentType, postingEvent.SourceDocumentType, "journal source document type");
+                EnsureMatchingEvidence(row.JournalEntry.SourceDocumentId, postingEvent.SourceDocumentId, "journal source document");
+            }
+
+            return postingEvent;
+        }
+
+        private static void EnsureMatchingEvidence(string? left, string? right, string evidenceName)
+        {
+            if (!string.IsNullOrWhiteSpace(left)
+                && (string.IsNullOrWhiteSpace(right)
+                    || !string.Equals(left, right, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Posting-event {evidenceName} evidence is inconsistent.");
+            }
+        }
+
+        private static void EnsureMatchingEvidence(Guid? left, Guid right, string evidenceName)
+        {
+            if (left.HasValue && left.Value != right)
+                throw new InvalidOperationException($"Posting-event {evidenceName} evidence is inconsistent.");
+        }
 
         private static AccountTransactionInquiryItemDto MapInquiryItem(
             AccountTransaction transaction,

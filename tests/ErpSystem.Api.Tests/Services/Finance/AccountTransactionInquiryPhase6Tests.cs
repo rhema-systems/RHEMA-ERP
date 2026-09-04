@@ -145,6 +145,141 @@ public sealed class AccountTransactionInquiryPhase6Tests
             && item.Dimensions.Count == 0);
     }
 
+    [Theory]
+    [InlineData("snapshot")]
+    [InlineData("set")]
+    [InlineData("item")]
+    [InlineData("definition")]
+    [InlineData("value")]
+    public async Task Inquiry_FailsClosedWithoutDisclosureForCrossTenantDimensionEvidence(string corruption)
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var foreignTenantId = Guid.NewGuid();
+        var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
+        var transaction = AddLine(db, tenantId, account, book.Code, "JE-DIM", 1, "Posted", DateTime.UtcNow);
+        var definition = new FinanceDimensionDefinition
+        {
+            Id = Guid.NewGuid(), TenantId = corruption == "definition" ? foreignTenantId : tenantId,
+            Code = "DEPT", Name = "Department"
+        };
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = corruption == "value" ? foreignTenantId : tenantId,
+            FinanceDimensionDefinitionId = definition.Id, Code = "OPS", Name = "Operations"
+        };
+        var set = new FinanceDimensionSet
+        {
+            Id = Guid.NewGuid(), TenantId = corruption == "set" ? foreignTenantId : tenantId,
+            CombinationHash = "hash", DisplayValue = "DEPT=OPS"
+        };
+        var snapshot = new FinanceDimensionSnapshot
+        {
+            Id = Guid.NewGuid(), TenantId = corruption == "snapshot" ? foreignTenantId : tenantId,
+            FinanceDimensionSetId = set.Id, CombinationHashSnapshot = "hash", DisplayValueSnapshot = "DEPT=OPS"
+        };
+        set.Items.Add(new FinanceDimensionSetItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FinanceDimensionSetId = set.Id,
+            FinanceDimensionDefinitionId = definition.Id, FinanceDimensionValueId = value.Id,
+            DimensionCodeSnapshot = "DEPT", DimensionNameSnapshot = "Department",
+            DimensionValueCodeSnapshot = "OPS", DimensionValueNameSnapshot = "Operations"
+        });
+        snapshot.Items.Add(new FinanceDimensionSnapshotItem
+        {
+            Id = Guid.NewGuid(), TenantId = corruption == "item" ? foreignTenantId : tenantId,
+            FinanceDimensionSnapshotId = snapshot.Id, FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionValueId = value.Id, DimensionCodeSnapshot = "DEPT",
+            DimensionNameSnapshot = "Department", DimensionValueCodeSnapshot = "OPS",
+            DimensionValueNameSnapshot = "Operations"
+        });
+        transaction.FinanceDimensionSetId = set.Id;
+        transaction.FinanceDimensionSet = set;
+        transaction.FinanceDimensionSnapshotId = snapshot.Id;
+        transaction.FinanceDimensionSnapshot = snapshot;
+        db.AddRange(definition, value, set, snapshot);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var unitOfWork = new UnitOfWork(db);
+
+        await FluentActions.Invoking(() => CreateService(unitOfWork, tenantId)
+                .GetTransactionsAsync(account.Id, book.Code))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*integrity*");
+    }
+
+    [Theory]
+    [InlineData("OTHER", "Posted")]
+    [InlineData("PRIMARY", "Draft")]
+    public async Task Inquiry_FailsClosedForJournalBookOrPostedStatusMismatch(string journalBook, string journalStatus)
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
+        var transaction = AddLine(db, tenantId, account, book.Code, "JE-CORRUPT", 1, "Posted", DateTime.UtcNow);
+        transaction.JournalEntry.BookClassification = journalBook;
+        transaction.JournalEntry.PostingStatus = journalStatus;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var unitOfWork = new UnitOfWork(db);
+
+        await FluentActions.Invoking(() => CreateService(unitOfWork, tenantId)
+                .GetTransactionsAsync(account.Id, book.Code))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*journal evidence*");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Inquiry_FailsClosedForMismatchedOrLaterOtherBookPostingEvent(bool addValidFirst)
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
+        var transaction = AddLine(db, tenantId, account, book.Code, "JE-EVENT", 1, "Posted", DateTime.UtcNow);
+        if (addValidFirst)
+            db.FinancePostingEvents.Add(NewPostingEvent(tenantId, transaction.JournalEntryId, book.Code));
+        db.FinancePostingEvents.Add(NewPostingEvent(tenantId, transaction.JournalEntryId, "OTHER"));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var unitOfWork = new UnitOfWork(db);
+
+        await FluentActions.Invoking(() => CreateService(unitOfWork, tenantId)
+                .GetTransactionsAsync(account.Id, book.Code))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Posting-event evidence*");
+    }
+
+    [Theory]
+    [InlineData("tenant")]
+    [InlineData("status")]
+    [InlineData("source")]
+    public async Task Inquiry_FailsClosedForPostingEventTenantStatusOrSourceMismatch(string corruption)
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
+        var transaction = AddLine(db, tenantId, account, book.Code, "JE-EVENT-INTEGRITY", 1, "Posted", DateTime.UtcNow);
+        var postingEvent = NewPostingEvent(
+            corruption == "tenant" ? Guid.NewGuid() : tenantId,
+            transaction.JournalEntryId,
+            book.Code);
+        if (corruption == "status")
+            postingEvent.PostingStatus = "Failed";
+        if (corruption == "source")
+            transaction.SourceModule = "AR";
+        db.FinancePostingEvents.Add(postingEvent);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var unitOfWork = new UnitOfWork(db);
+
+        await FluentActions.Invoking(() => CreateService(unitOfWork, tenantId)
+                .GetTransactionsAsync(account.Id, book.Code))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Posting-event*");
+    }
+
     private static ApplicationDbContext CreateContext() => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"account-inquiry-phase6-{Guid.NewGuid():N}").Options);
@@ -183,7 +318,7 @@ public sealed class AccountTransactionInquiryPhase6Tests
         Status = AccountStatus.Active
     };
 
-    private static void AddLine(ApplicationDbContext db, Guid tenantId, Account account, string bookCode,
+    private static AccountTransaction AddLine(ApplicationDbContext db, Guid tenantId, Account account, string bookCode,
         string journalNumber, int lineNumber, string status, DateTime date)
     {
         var journal = new JournalEntry
@@ -193,7 +328,7 @@ public sealed class AccountTransactionInquiryPhase6Tests
             BookClassification = bookCode, PostingStatus = status
         };
         db.JournalEntries.Add(journal);
-        db.AccountTransactions.Add(new AccountTransaction
+        var transaction = new AccountTransaction
         {
             Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
             JournalEntryId = journal.Id, Account = account, JournalEntry = journal,
@@ -202,6 +337,16 @@ public sealed class AccountTransactionInquiryPhase6Tests
             TransactionCurrency = "USD", TransactionDebitAmount = 2m,
             ForeignCurrencyAmount = 2m, ExchangeRate = 5m,
             PostingStatus = status, LineNumber = lineNumber
-        });
+        };
+        db.AccountTransactions.Add(transaction);
+        return transaction;
     }
+
+    private static FinancePostingEvent NewPostingEvent(Guid tenantId, Guid journalId, string bookCode) => new()
+    {
+        Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryId = journalId,
+        SourceModule = "AP", SourceDocumentType = "Invoice", SourceDocumentId = Guid.NewGuid(),
+        PostingAction = "Post", PostingStatus = "Posted", PostingDate = DateTime.UtcNow,
+        FunctionalCurrencyCode = "GHS", BookClassification = bookCode
+    };
 }

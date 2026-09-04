@@ -126,6 +126,24 @@ describe('AccountTransactionsInquiry', () => {
         await waitFor(() => expect(screen.queryByText('BOOK-A row')).toBeNull());
     });
 
+    it('reports a current response for the wrong book as an integrity error and allows retry', async () => {
+        vi.mocked(financeDataService.getAccountTransactions)
+            .mockResolvedValueOnce(page('BOOK-B', 'wrong-book row'))
+            .mockResolvedValueOnce(page('BOOK-A', 'correct-book row'));
+
+        render(<AccountTransactionsInquiry accountId="account-1" accountBooks={mappings} />);
+
+        expect(await screen.findByText('Transactions unavailable')).not.toBeNull();
+        expect(screen.getByText(/returned BOOK-B instead of the selected BOOK-A accounting book/)).not.toBeNull();
+        expect(screen.queryByText('wrong-book row')).toBeNull();
+        expect(screen.queryByText('No posted transactions')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(await screen.findByText('correct-book row')).not.toBeNull();
+        expect(screen.queryByText('Transactions unavailable')).toBeNull();
+        expect(financeDataService.getAccountTransactions).toHaveBeenCalledTimes(2);
+    });
+
     it('does not turn request failure into an empty state and supports retry', async () => {
         vi.mocked(financeDataService.getAccountTransactions)
             .mockRejectedValueOnce(new Error('network'))
