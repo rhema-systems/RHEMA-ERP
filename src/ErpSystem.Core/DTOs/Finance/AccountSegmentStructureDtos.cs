@@ -464,6 +464,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Reason { get; set; }
     }
 
+    public sealed class AccountSegmentDeleteDto
+    {
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
+    }
+
     // ========================================================================
     // LOOKUP VALUE SUMMARY DTO
     // ========================================================================

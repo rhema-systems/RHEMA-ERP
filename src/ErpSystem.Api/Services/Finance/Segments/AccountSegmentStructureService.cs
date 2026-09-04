@@ -17,14 +17,17 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IFinanceAuditService _audit;
+    private readonly IAccountSegmentIdentityService _identity;
     private readonly ILogger<AccountSegmentStructureService> _logger;
 
     public AccountSegmentStructureService(ApplicationDbContext db, ICurrentUserService currentUser,
-        IFinanceAuditService audit, ILogger<AccountSegmentStructureService> logger)
+        IFinanceAuditService audit, IAccountSegmentIdentityService identity,
+        ILogger<AccountSegmentStructureService> logger)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
+        _identity = identity;
         _logger = logger;
     }
 
@@ -130,9 +133,10 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
             return (await GetByIdAsync(item.Id, cancellationToken))!;
         }, cancellationToken);
 
-    public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default) => ExecuteAtomicAsync(async () =>
+    public Task DeleteAsync(Guid id, AccountSegmentDeleteDto dto, CancellationToken cancellationToken = default) => ExecuteAtomicAsync(async () =>
     {
         var item = await LoadAsync(id, cancellationToken);
+        ApplyRowVersion(item, dto.RowVersion);
         if (item.LifecycleStatus != AccountSegmentLifecycleStatus.Draft || await UsageCountAsync(id, cancellationToken) > 0)
             throw new InvalidOperationException("Only an unused draft account-number segment can be deleted.");
         var before = Snapshot(item); item.IsDeleted = true; item.IsActive = false; item.DeletedAt = DateTime.UtcNow; item.DeletedBy = UserName;
@@ -151,6 +155,8 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
         if (reorderList.Count != items.Count || reorderList.Select(item => item.SegmentId).Distinct().Count() != items.Count ||
             !reorderList.Select(item => item.NewPosition).OrderBy(value => value).SequenceEqual(Enumerable.Range(1, items.Count)))
             throw new InvalidOperationException("Reorder must contain every segment exactly once with sequential positions.");
+        foreach (var change in reorderList)
+            ApplyRowVersion(items.Single(item => item.Id == change.SegmentId), change.RowVersion);
         var before = items.OrderBy(item => item.SegmentPosition).Select(Snapshot).ToArray();
         foreach (var change in reorderList) items.Single(item => item.Id == change.SegmentId).SegmentPosition = change.NewPosition;
         await _db.SaveChangesAsync(cancellationToken);
@@ -213,12 +219,21 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
 
     private async Task EnsureAllAccountsReadyAsync(CancellationToken ct)
     {
-        var activeIds = await _db.AccountSegmentStructures.AsNoTracking().Where(item => item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
-            .Select(item => item.Id).ToArrayAsync(ct);
-        var accounts = await _db.Accounts.AsNoTracking().Include(item => item.SegmentValues.Where(value => !value.IsDeleted))
-            .Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(ct);
-        if (accounts.Any(account => !account.SegmentValues.Select(value => value.SegmentStructureId).OrderBy(id => id).SequenceEqual(activeIds.OrderBy(id => id))))
-            throw new InvalidOperationException("The structure cannot be frozen while existing accounts have incomplete or extra identity segments.");
+        var accounts = await _db.Accounts.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+            .OrderBy(item => item.AccountNumber)
+            .Select(item => new { item.Id, item.AccountNumber })
+            .ToListAsync(ct);
+        var affected = new List<string>();
+        foreach (var account in accounts)
+        {
+            var readiness = await _identity.GetReadinessAsync(TenantId, account.Id, ct);
+            if (!readiness.IsReady)
+                affected.Add($"{account.AccountNumber} ({account.Id}): {string.Join("; ", readiness.Issues)}");
+        }
+        if (affected.Count > 0)
+            throw new InvalidOperationException(
+                $"The structure cannot be frozen because {affected.Count} account identity record(s) require reconciliation: {string.Join(" | ", affected.Take(20))}");
     }
 
     private async Task EnsureActiveStructureValidAsync(CancellationToken ct)

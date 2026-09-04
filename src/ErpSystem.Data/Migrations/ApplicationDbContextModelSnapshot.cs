@@ -7834,8 +7834,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ParentAccountId");
 
-                    b.HasIndex("TenantId");
-
                     b.ToTable("Accounts");
                 });
 
@@ -8677,11 +8675,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AccountId");
+                    b.HasIndex("TenantId", "SegmentLookupValueId");
 
-                    b.HasIndex("SegmentLookupValueId");
-
-                    b.HasIndex("SegmentStructureId");
+                    b.HasIndex("TenantId", "SegmentStructureId");
 
                     b.HasIndex("TenantId", "AccountId", "SegmentPosition")
                         .IsUnique()
@@ -23834,8 +23830,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ParentValueId");
 
                     b.HasIndex("SegmentStructureId");
-
-                    b.HasIndex("TenantId");
 
                     b.ToTable("SegmentLookupValues");
                 });
@@ -167976,25 +167970,29 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountSegmentValue", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
                         .WithMany("SegmentValues")
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasForeignKey("TenantId", "AccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.SegmentLookupValue", "SegmentLookupValue")
                         .WithMany("AccountSegmentValues")
-                        .HasForeignKey("SegmentLookupValueId");
+                        .HasForeignKey("TenantId", "SegmentLookupValueId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountSegmentStructure", "SegmentStructure")
                         .WithMany()
-                        .HasForeignKey("SegmentStructureId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
+                        .HasForeignKey("TenantId", "SegmentStructureId")
+                        .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 

@@ -2794,6 +2794,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<AccountSegmentValue>(entity =>
         {
+            entity.HasOne(item => item.Account)
+                .WithMany(item => item.SegmentValues)
+                .HasForeignKey(item => new { item.TenantId, item.AccountId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SegmentStructure)
+                .WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SegmentStructureId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SegmentLookupValue)
+                .WithMany(item => item.AccountSegmentValues)
+                .HasForeignKey(item => new { item.TenantId, item.SegmentLookupValueId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(item => new { item.TenantId, item.AccountId, item.SegmentStructureId })
                 .IsUnique().HasFilter("[IsDeleted] = 0");
             entity.HasIndex(item => new { item.TenantId, item.AccountId, item.SegmentPosition })

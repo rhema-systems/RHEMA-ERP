@@ -76,7 +76,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// - Implementation should consider whether any accounts currently depend on this segment.
         /// - May switch IsActive to false instead of deleting when dependencies exist.
         /// </summary>
-        Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+        Task DeleteAsync(Guid id, AccountSegmentDeleteDto dto, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Forces regeneration of all account numbers based on current segment structure and positions.

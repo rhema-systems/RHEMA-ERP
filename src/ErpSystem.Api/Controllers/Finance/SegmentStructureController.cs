@@ -364,12 +364,16 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="500">Internal server error.</response>
         [HttpDelete("{id}")]
         [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
-        public async Task<ActionResult> DeleteSegmentStructure(Guid id)
+        public async Task<ActionResult> DeleteSegmentStructure(Guid id, [FromBody] AccountSegmentDeleteDto dto)
         {
             try
             {
-                await _accountSegmentStructureService.DeleteAsync(id);
+                await _accountSegmentStructureService.DeleteAsync(id, dto);
                 return NoContent();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "The segment changed; refresh and retry." });
             }
             catch (ArgumentException ex)
             {
@@ -389,28 +393,27 @@ namespace ErpSystem.Api.Controllers.Finance
         /// Reorders segments according to the provided list of new positions.
         /// </summary>
         /// <remarks>
-        /// **Warning:** This operation will regenerate account numbers for all accounts.
+        /// **Warning:** Reordering is allowed only while every segment is Draft and no account identity exists.
         ///
         /// **Common Use Cases:**
-        /// - Change the order of segments in the account number (e.g., move Location before Department)
-        /// - Restructure the Chart of Accounts layout after organizational changes
+        /// - Finalize the order of Draft segments during initial setup
+        /// - Correct Draft structure ordering before any GL account is assigned
         ///
         /// **Integration Pattern:**
         /// - Fetch current segments via GET /api/finance/segments
         /// - Build a reorder list mapping each segment ID to its new position
-        /// - POST the list; all existing account numbers will be regenerated automatically
-        /// - Refresh account displays after completion
+        /// - Include the row version returned for every segment
+        /// - POST the list and refresh the structure after completion
         ///
         /// **Business Rules:**
-        /// - The reorder list must include all active segments with unique positions
-        /// - All existing account numbers are regenerated to reflect the new order
-        /// - This is a potentially long-running operation for large account sets
-        /// - Cannot be undone without another reorder operation
+        /// - The reorder list must include every configured Draft segment with unique sequential positions
+        /// - Reordering is rejected after any segment is activated or any account identity exists
+        /// - A stale row version returns 409 and requires the caller to refresh
         ///
         /// **Authorization:** Requires Finance.Write permission
         /// </remarks>
         /// <param name="reorderList">List of segment IDs with their new positions.</param>
-        /// <returns>Success message confirming segments were reordered and accounts updated.</returns>
+        /// <returns>Success message confirming the Draft structure was reordered.</returns>
         /// <response code="200">Segments reordered successfully.</response>
         /// <response code="400">Invalid reorder list.</response>
         /// <response code="500">Internal server error.</response>
@@ -424,7 +427,11 @@ namespace ErpSystem.Api.Controllers.Finance
             try
             {
                 await _accountSegmentStructureService.ReorderSegmentsAsync(reorderList);
-                return Ok(new { message = "Segments reordered and accounts updated successfully." });
+                return Ok(new { message = "Draft account-number segments reordered successfully." });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "The segment structure changed; refresh and retry." });
             }
             catch (ArgumentException ex)
             {

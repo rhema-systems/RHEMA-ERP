@@ -31,6 +31,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
+        private readonly IAccountSegmentIdentityService _segmentIdentity;
         private readonly ILogger<AccountCombinationService> _logger;
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -40,11 +41,13 @@ namespace ErpSystem.Api.Services.Finance.Segments
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
+            IAccountSegmentIdentityService segmentIdentity,
             ILogger<AccountCombinationService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
+            _segmentIdentity = segmentIdentity;
             _logger = logger;
         }
 
@@ -212,7 +215,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         SegmentStructureId = lv.SegmentStructureId,
                         SegmentName = lv.SegmentStructure.SegmentName,
                         SegmentPosition = lv.SegmentStructure.SegmentPosition,
-                        LookupValueId = lv.Id,
+                        LookupValueId = lv.SegmentStructure.LookupTableRequired ? lv.Id : Guid.Empty,
                         Value = lv.SegmentValue,
                         Description = lv.Description
                     }).ToList()
@@ -268,43 +271,23 @@ namespace ErpSystem.Api.Services.Finance.Segments
 
             result.SkipCount = request.Combinations.Count - toCreate.Count;
 
-            // Get required segment structures for building AccountSegmentValue entries
-            var segmentStructures = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted && s.IsActive)
-                .ToDictionaryAsync(s => s.Id, cancellationToken);
-            if (segmentStructures.Values.Count(item => item.IsNaturalAccount) != 1)
-                throw new InvalidOperationException("The active account-number structure must contain exactly one Natural Account segment.");
-
-            // Get finance settings for separator
-            var settings = await _unitOfWork.Repository<FinanceSettings>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId);
-            var separator = settings?.AccountSeparator ?? "-";
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             foreach (var combination in toCreate)
             {
                 try
                 {
-                    if (combination.SegmentValues.Count != segmentStructures.Count
-                        || !combination.SegmentValues.Select(item => item.SegmentStructureId).ToHashSet().SetEquals(segmentStructures.Keys))
-                        throw new InvalidOperationException("The combination does not contain the exact active account-segment set.");
-                    var orderedSegments = segmentStructures.Values.OrderBy(item => item.SegmentPosition).ToList();
-                    var orderedValues = orderedSegments.Select(segment => combination.SegmentValues.Single(value => value.SegmentStructureId == segment.Id)).ToList();
-                    for (var index = 0; index < orderedSegments.Count; index++)
-                    {
-                        var segment = orderedSegments[index]; var value = orderedValues[index];
-                        if (value.SegmentPosition != segment.SegmentPosition || value.Value.Length != segment.SegmentLength)
-                            throw new InvalidOperationException($"Segment {segment.SegmentCode} has an invalid position or length.");
-                        if (segment.DataType.Equals("Numeric", StringComparison.OrdinalIgnoreCase) && !value.Value.All(char.IsDigit))
-                            throw new InvalidOperationException($"Segment {segment.SegmentCode} must be numeric.");
-                        if (segment.LookupTableRequired && !await _unitOfWork.Repository<SegmentLookupValue>().GetQueryable(item =>
-                            item.Id == value.LookupValueId && item.TenantId == TenantId && item.SegmentStructureId == segment.Id
-                            && item.IsActive && !item.IsDeleted && item.SegmentValue == value.Value).AnyAsync(cancellationToken))
-                            throw new InvalidOperationException($"Segment {segment.SegmentCode} requires an active tenant-owned lookup value.");
-                    }
-                    var serverAccountNumber = ComposeAccountNumber(orderedSegments, orderedValues.Select(item => item.Value).ToList(), separator);
-                    if (!string.Equals(combination.AccountNumber, serverAccountNumber, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException($"The supplied account number does not match server-composed identity '{serverAccountNumber}'.");
+                    var identity = await _segmentIdentity.ValidateAndComposeAsync(
+                        TenantId,
+                        combination.SegmentValues.Select(value => new AccountSegmentValueCreateDto
+                        {
+                            SegmentStructureId = value.SegmentStructureId,
+                            SegmentPosition = value.SegmentPosition,
+                            SegmentValue = value.Value,
+                            SegmentLookupValueId = value.LookupValueId == Guid.Empty ? null : value.LookupValueId
+                        }).ToList(),
+                        combination.AccountNumber,
+                        cancellationToken: cancellationToken);
                     // Parse account type
                     if (!Enum.TryParse<AccountType>(combination.AccountType, true, out var accountType))
                     {
@@ -322,8 +305,8 @@ namespace ErpSystem.Api.Services.Finance.Segments
                     {
                         Id = Guid.NewGuid(),
                         TenantId = TenantId,
-                        AccountCode = orderedValues[orderedSegments.FindIndex(item => item.IsNaturalAccount)].Value,
-                        AccountNumber = serverAccountNumber,
+                        AccountCode = identity.NaturalAccountCode,
+                        AccountNumber = identity.AccountNumber,
                         AccountName = combination.GeneratedName,
                         AccountType = accountType,
                         AccountCategory = combination.AccountCategory,
@@ -351,8 +334,17 @@ namespace ErpSystem.Api.Services.Finance.Segments
                     await _unitOfWork.Accounts.AddAsync(account);
 
                     // Create segment value entries
-                    foreach (var segValue in combination.SegmentValues)
+                    foreach (var segValue in identity.Values)
                     {
+                        var lookupDescription = segValue.SegmentLookupValueId.HasValue
+                            ? await _unitOfWork.Repository<SegmentLookupValue>().GetQueryable(item =>
+                                item.Id == segValue.SegmentLookupValueId.Value
+                                && item.TenantId == TenantId
+                                && item.SegmentStructureId == segValue.SegmentStructureId
+                                && !item.IsDeleted)
+                                .Select(item => item.Description)
+                                .SingleAsync(cancellationToken)
+                            : null;
                         var accountSegmentValue = new AccountSegmentValue
                         {
                             Id = Guid.NewGuid(),
@@ -360,9 +352,9 @@ namespace ErpSystem.Api.Services.Finance.Segments
                             AccountId = account.Id,
                             SegmentStructureId = segValue.SegmentStructureId,
                             SegmentPosition = segValue.SegmentPosition,
-                            SegmentValue = segValue.Value,
-                            SegmentValueDescription = segValue.Description,
-                            SegmentLookupValueId = segmentStructures[segValue.SegmentStructureId].LookupTableRequired ? segValue.LookupValueId : null,
+                            SegmentValue = segValue.SegmentValue,
+                            SegmentValueDescription = lookupDescription,
+                            SegmentLookupValueId = segValue.SegmentLookupValueId,
                             IsLocked = false,
                             EffectiveDate = DateTime.UtcNow,
                             CreatedAt = DateTime.UtcNow,

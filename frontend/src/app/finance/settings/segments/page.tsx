@@ -154,7 +154,8 @@ function SegmentConfigurationContent() {
         // Create full payload
         const reorderList = updatedSegments.map(s => ({
             segmentId: s.id,
-            newPosition: s.segmentPosition
+            newPosition: s.segmentPosition,
+            rowVersion: s.rowVersion,
         }));
 
         console.log('Sending Reorder Payload:', JSON.stringify(reorderList, null, 2));
@@ -164,7 +165,7 @@ function SegmentConfigurationContent() {
             setSegments(updatedSegments);
 
             await financeDataService.reorderSegmentStructures(reorderList);
-            toast.success('Segments reordered and account codes updated');
+            toast.success('Draft account-number segments reordered');
 
             // Reload to ensure sync
             await loadData();

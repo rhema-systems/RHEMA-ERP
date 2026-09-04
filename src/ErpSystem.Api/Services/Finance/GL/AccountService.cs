@@ -345,9 +345,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 await _unitOfWork.AccountSegmentValues.DeleteRangeAsync(
                     v => v.TenantId == TenantId && v.AccountId == account.Id);
 
-                account.SegmentValues.Clear();
-
-                foreach (var seg in dto.SegmentValues.OrderBy(v => v.SegmentPosition))
+                foreach (var seg in identity.Values.OrderBy(v => v.SegmentPosition))
                 {
                     var segEntity = new AccountSegmentValue
                     {
@@ -364,13 +362,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                         CreatedBy = UserName
                     };
 
-                    account.SegmentValues.Add(segEntity);
+                    await _unitOfWork.Repository<AccountSegmentValue>().AddAsync(segEntity);
                 }
 
                 account.AccountNumber = identity.AccountNumber;
             }
 
-            await _unitOfWork.Accounts.UpdateAsync(account);
+            // The account and its replacement segment rows are already tracked. Calling Update on the
+            // aggregate here would reclassify newly-added segment rows as Modified after EF generated
+            // their GUIDs, producing updates for rows that do not yet exist.
             await _accountingBookService.SyncAccountMappingsAsync(account, dto.AccountingBooks, cancellationToken);
 
             return MapToDto(account);

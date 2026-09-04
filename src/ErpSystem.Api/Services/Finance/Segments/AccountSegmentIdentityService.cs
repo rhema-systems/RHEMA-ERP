@@ -92,10 +92,7 @@ public sealed class AccountSegmentIdentityService : IAccountSegmentIdentityServi
                 SegmentStructureId = definition.Id,
                 SegmentPosition = definition.SegmentPosition,
                 SegmentValue = value,
-                SegmentLookupValueId = lookup?.Id,
-                IsLocked = input.IsLocked,
-                EffectiveDate = input.EffectiveDate,
-                EndDate = input.EndDate
+                SegmentLookupValueId = lookup?.Id
             });
         }
 
@@ -169,24 +166,50 @@ public sealed class AccountSegmentIdentityService : IAccountSegmentIdentityServi
         CancellationToken cancellationToken = default)
     {
         var account = await _db.Accounts.AsNoTracking()
-            .Include(item => item.SegmentValues.Where(value => !value.IsDeleted))
-                .ThenInclude(value => value.SegmentStructure)
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("GL account was not found.");
+        var assignments = await _db.AccountSegmentValues.AsNoTracking()
+            .Include(value => value.SegmentStructure)
+            .Include(value => value.SegmentLookupValue)
+            .Where(value => value.AccountId == account.Id && !value.IsDeleted)
+            .ToListAsync(cancellationToken);
         var definitions = await ActiveDefinitions(tenantId).AsNoTracking().ToListAsync(cancellationToken);
         var activeIds = definitions.Select(item => item.Id).ToHashSet();
-        var presentIds = account.SegmentValues.Select(item => item.SegmentStructureId).ToHashSet();
+        var presentIds = assignments.Select(item => item.SegmentStructureId).ToHashSet();
         var readiness = new AccountSegmentReadinessDto
         {
             AccountId = account.Id,
             AccountNumber = account.AccountNumber,
             MissingSegmentCodes = definitions.Where(item => !presentIds.Contains(item.Id)).Select(item => item.SegmentCode).OrderBy(item => item).ToList(),
-            ExtraSegmentCodes = account.SegmentValues.Where(item => !activeIds.Contains(item.SegmentStructureId))
+            ExtraSegmentCodes = assignments.Where(item => !activeIds.Contains(item.SegmentStructureId))
                 .Select(item => item.SegmentStructure?.SegmentCode ?? item.SegmentStructureId.ToString()).Distinct().OrderBy(item => item).ToList()
         };
+
+        var lineageIssues = new List<string>();
+        foreach (var value in assignments)
+        {
+            if (value.TenantId != tenantId || value.AccountId != account.Id)
+                lineageIssues.Add($"Segment assignment '{value.Id}' has foreign tenant or account lineage.");
+            if (value.SegmentStructure == null
+                || value.SegmentStructure.TenantId != tenantId
+                || value.SegmentStructure.Id != value.SegmentStructureId)
+                lineageIssues.Add($"Segment assignment '{value.Id}' has foreign or missing segment-definition lineage.");
+            if (value.SegmentLookupValueId.HasValue
+                && (value.SegmentLookupValue == null
+                    || value.SegmentLookupValue.TenantId != tenantId
+                    || value.SegmentLookupValue.SegmentStructureId != value.SegmentStructureId))
+                lineageIssues.Add($"Segment assignment '{value.Id}' has foreign, missing, or mismatched lookup lineage.");
+        }
+
+        if (lineageIssues.Count > 0)
+        {
+            readiness.Issues = lineageIssues.Distinct().ToList();
+            return readiness;
+        }
+
         try
         {
-            await ValidateAndComposeAsync(tenantId, account.SegmentValues.Select(item => new AccountSegmentValueCreateDto
+            await ValidateAndComposeAsync(tenantId, assignments.Select(item => new AccountSegmentValueCreateDto
             {
                 SegmentStructureId = item.SegmentStructureId,
                 SegmentPosition = item.SegmentPosition,

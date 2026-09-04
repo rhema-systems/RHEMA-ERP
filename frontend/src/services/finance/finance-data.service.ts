@@ -975,8 +975,8 @@ class FinanceDataService {
         return apiService.post<SegmentStructure>(`/finance/segments/${id}/freeze`, { rowVersion, reason });
     }
 
-    async deleteSegmentStructure(id: string): Promise<void> {
-        return apiService.delete(`/finance/segments/${id}`);
+    async deleteSegmentStructure(id: string, rowVersion: string): Promise<void> {
+        return apiService.delete(`/finance/segments/${id}`, { rowVersion });
     }
 
     // ===== SEGMENT LOOKUP VALUES =====
@@ -997,7 +997,7 @@ class FinanceDataService {
         return apiService.delete(`/finance/segments/${segmentId}/values/${valueId}`);
     }
 
-    async reorderSegmentStructures(reorderList: { segmentId: string; newPosition: number }[]): Promise<void> {
+    async reorderSegmentStructures(reorderList: { segmentId: string; newPosition: number; rowVersion: string }[]): Promise<void> {
         return apiService.post('/finance/segments/reorder', reorderList);
     }
 

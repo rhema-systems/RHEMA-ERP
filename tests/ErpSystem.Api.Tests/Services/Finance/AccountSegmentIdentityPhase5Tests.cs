@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.Finance.Segments;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -12,6 +13,7 @@ using ErpSystem.Data.Seeders;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -162,7 +164,27 @@ public sealed class AccountSegmentIdentityPhase5Tests
         operations.OfType<AddCheckConstraintOperation>().Should().ContainSingle(item =>
             item.Table == "AccountSegmentStructures" && item.Name == "CK_AccountSegmentStructures_LifecycleActive");
         operations.OfType<SqlOperation>().Should().Contain(item => item.Sql.Contains("Phase 5 preflight failed"));
+        operations.OfType<SqlOperation>().Should().Contain(item => item.Sql.Contains("cross-tenant account/segment lineage"));
+        operations.OfType<SqlOperation>().Should().Contain(item => item.Sql.Contains("wrong-segment lookup lineage"));
+        operations.OfType<AddUniqueConstraintOperation>().Count(item =>
+            item.Name is "AK_Accounts_TenantId_Id" or "AK_AccountSegmentStructures_TenantId_Id" or "AK_SegmentLookupValues_TenantId_Id")
+            .Should().Be(3);
+        operations.OfType<AddForeignKeyOperation>().Count(item =>
+            item.Table == "AccountSegmentValues" && item.Columns.First() == "TenantId")
+            .Should().Be(3);
         operations.OfType<CreateIndexOperation>().Count(item => item.Table == "AccountSegmentValues" && item.IsUnique).Should().Be(2);
+    }
+
+    [Fact]
+    public void Migration_IsDiscoveredByEfCoreWithoutOpeningADatabaseConnection()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=PhaseFiveMigrationDiscovery;Trusted_Connection=True")
+            .Options;
+        using var context = new ApplicationDbContext(options);
+
+        context.GetService<IMigrationsAssembly>().Migrations.Should()
+            .ContainKey("20260904003118_AddGovernedAccountSegmentIdentity");
     }
 
     [Fact]
@@ -317,6 +339,335 @@ public sealed class AccountSegmentIdentityPhase5Tests
         await service.Invoking(item => item.UpdateAsync(update)).Should().ThrowAsync<DbUpdateConcurrencyException>();
     }
 
+    [Fact]
+    public async Task BulkCombinations_PersistOnlyCanonicalIdentityEvidence()
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var service = CombinationService(db, fixture.TenantId);
+        var combination = ValidCombination(fixture);
+        combination.AccountNumber = " tdc-6100 ";
+        combination.SegmentValues[0].Value = " tdc ";
+        combination.SegmentValues[1].Value = " 6100 ";
+
+        var result = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
+        {
+            Combinations = [combination]
+        });
+
+        result.SuccessCount.Should().Be(1);
+        result.ErrorCount.Should().Be(0);
+        var account = await db.Accounts.Include(item => item.SegmentValues).SingleAsync();
+        account.AccountNumber.Should().Be("TDC-6100");
+        account.AccountCode.Should().Be("6100");
+        account.SegmentValues.OrderBy(item => item.SegmentPosition).Select(item => item.SegmentValue)
+            .Should().Equal("TDC", "6100");
+        account.SegmentValues.Should().OnlyContain(item => !item.IsLocked && item.EndDate == null);
+    }
+
+    [Fact]
+    public async Task BulkCombinations_RejectMalformedAlphaAndAlphanumericEvidence()
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var service = CombinationService(db, fixture.TenantId);
+
+        var malformedAlphanumeric = ValidCombination(fixture);
+        malformedAlphanumeric.SegmentValues[0].Value = "T-@";
+        var first = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
+        {
+            Combinations = [malformedAlphanumeric]
+        });
+        first.ErrorCount.Should().Be(1);
+        first.Errors.Single().Error.Should().Contain("Alphanumeric format");
+
+        fixture.Natural.DataType = "Alpha";
+        await db.SaveChangesAsync();
+        var malformedAlpha = ValidCombination(fixture);
+        malformedAlpha.AccountNumber = "TDC-A1CD";
+        malformedAlpha.SegmentValues[1].Value = "A1CD";
+        var second = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
+        {
+            Combinations = [malformedAlpha]
+        });
+        second.ErrorCount.Should().Be(1);
+        second.Errors.Single().Error.Should().Contain("Alpha format");
+        (await db.Accounts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task BulkCombinations_RejectInvalidSetLineagePositionLengthAndClientNumber()
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var other = await SeedStructureAsync(db, "ALT");
+        var service = CombinationService(db, fixture.TenantId);
+        var cases = new List<AccountCombinationPreviewDto>();
+
+        var missing = ValidCombination(fixture); missing.SegmentValues.RemoveAt(1); cases.Add(missing);
+        var duplicate = ValidCombination(fixture); duplicate.SegmentValues.Add(CloneValue(duplicate.SegmentValues[0])); cases.Add(duplicate);
+        var extra = ValidCombination(fixture); extra.SegmentValues.Add(new SegmentValuePreviewDto
+        {
+            SegmentStructureId = other.Natural.Id, SegmentPosition = 3, Value = "6200"
+        }); cases.Add(extra);
+        var crossTenantLookup = ValidCombination(fixture);
+        crossTenantLookup.SegmentValues[0].LookupValueId = other.CompanyValue.Id;
+        crossTenantLookup.SegmentValues[0].Value = other.CompanyValue.SegmentValue;
+        cases.Add(crossTenantLookup);
+        var wrongPosition = ValidCombination(fixture); wrongPosition.SegmentValues[1].SegmentPosition = 1; cases.Add(wrongPosition);
+        var wrongLength = ValidCombination(fixture); wrongLength.SegmentValues[1].Value = "610"; cases.Add(wrongLength);
+        var mismatch = ValidCombination(fixture); mismatch.AccountNumber = "BAD-6100"; cases.Add(mismatch);
+
+        foreach (var invalid in cases)
+        {
+            var result = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
+            {
+                Combinations = [invalid]
+            });
+            result.ErrorCount.Should().Be(1);
+            result.SuccessCount.Should().Be(0);
+        }
+
+        fixture.CompanyValue.IsActive = false;
+        await db.SaveChangesAsync();
+        var inactive = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
+        {
+            Combinations = [ValidCombination(fixture)]
+        });
+        inactive.ErrorCount.Should().Be(1);
+        (await db.Accounts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AccountUpdate_PersistsValidatorNormalizedRowsAndRecomposedNumber()
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var account = AddAccountWithIdentity(db, fixture, "TDC-6100");
+        await db.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(db);
+        var currentUser = CurrentUser(fixture.TenantId);
+        var books = new Mock<IAccountingBookService>();
+        books.Setup(item => item.SyncAccountMappingsAsync(
+                It.IsAny<Account>(), It.IsAny<IReadOnlyCollection<AccountAccountingBookUpdateDto>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new AccountService(unitOfWork, currentUser.Object, books.Object,
+            NullLogger<AccountService>.Instance, new AccountSegmentIdentityService(db));
+        var untrustedDate = DateTime.UnixEpoch;
+
+        await service.UpdateAsync(new AccountUpdateDto
+        {
+            Id = account.Id, AccountCode = "6100", AccountNumber = "tdc-6100", AccountName = account.AccountName,
+            AccountType = account.AccountType.ToString(), AccountCategory = account.AccountCategory,
+            AccountSubCategory = account.AccountSubCategory, CurrencyCode = account.CurrencyCode,
+            SegmentValues =
+            [
+                new() { Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), SegmentStructureId = fixture.Company.Id,
+                    SegmentPosition = 1, SegmentValue = " tdc ", SegmentLookupValueId = fixture.CompanyValue.Id,
+                    IsLocked = true, EffectiveDate = untrustedDate, EndDate = untrustedDate.AddDays(1) },
+                new() { Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), SegmentStructureId = fixture.Natural.Id,
+                    SegmentPosition = 2, SegmentValue = " 6100 ", IsLocked = true,
+                    EffectiveDate = untrustedDate, EndDate = untrustedDate.AddDays(1) }
+            ]
+        });
+        await unitOfWork.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var stored = await db.Accounts.Include(item => item.SegmentValues).SingleAsync(item => item.Id == account.Id);
+        stored.AccountNumber.Should().Be("TDC-6100");
+        stored.AccountCode.Should().Be("6100");
+        var active = stored.SegmentValues.Where(item => !item.IsDeleted).OrderBy(item => item.SegmentPosition).ToList();
+        active.Select(item => item.SegmentValue).Should().Equal("TDC", "6100");
+        active.Should().OnlyContain(item => item.AccountId == account.Id && item.TenantId == fixture.TenantId
+            && !item.IsLocked && item.EndDate == null && item.EffectiveDate > untrustedDate.AddYears(1));
+    }
+
+    [Theory]
+    [InlineData("foreign-row-tenant")]
+    [InlineData("foreign-structure")]
+    [InlineData("foreign-lookup")]
+    [InlineData("inactive-lookup")]
+    [InlineData("duplicate")]
+    [InlineData("missing")]
+    [InlineData("wrong-position")]
+    [InlineData("wrong-length")]
+    [InlineData("wrong-type")]
+    [InlineData("account-number")]
+    public async Task Freeze_RejectsEveryMalformedPersistedIdentity(string corruption)
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var other = await SeedStructureAsync(db, "ALT");
+        var account = AddAccountWithIdentity(db, fixture, "TDC-6100");
+        var rows = account.SegmentValues.OrderBy(item => item.SegmentPosition).ToList();
+        switch (corruption)
+        {
+            case "foreign-row-tenant": rows[0].TenantId = other.TenantId; break;
+            case "foreign-structure": rows[0].SegmentStructureId = other.Company.Id; break;
+            case "foreign-lookup": rows[0].SegmentLookupValueId = other.CompanyValue.Id; break;
+            case "inactive-lookup": fixture.CompanyValue.IsActive = false; break;
+            case "duplicate": account.SegmentValues.Add(new AccountSegmentValue
+            {
+                Id = Guid.NewGuid(), TenantId = fixture.TenantId, AccountId = account.Id,
+                SegmentStructureId = fixture.Company.Id, SegmentPosition = 3, SegmentValue = "TDC",
+                SegmentLookupValueId = fixture.CompanyValue.Id
+            }); break;
+            case "missing": rows[1].IsDeleted = true; break;
+            case "wrong-position": rows[1].SegmentPosition = 1; break;
+            case "wrong-length": rows[1].SegmentValue = "610"; break;
+            case "wrong-type": rows[1].SegmentValue = "ABCD"; break;
+            case "account-number": account.AccountNumber = "TDC-9999"; break;
+        }
+        await db.SaveChangesAsync();
+        var service = StructureService(db, fixture.TenantId, Audit());
+
+        await service.Invoking(item => item.FreezeAsync(fixture.Company.Id, new AccountSegmentLifecycleTransitionDto
+        {
+            RowVersion = Convert.ToBase64String(fixture.Company.RowVersion)
+        })).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*require reconciliation*")
+            .WithMessage($"*{account.Id}*");
+    }
+
+    [Fact]
+    public async Task RelationalDelete_RejectsStaleRowVersion()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await CreateRelationalSegmentTablesAsync(db);
+        var tenant = NewTenant("TDC"); var segmentId = Guid.NewGuid();
+        await InsertDraftSegmentAsync(db, tenant.Id, segmentId, "COMPANY", 1, [1]);
+        var firstClientRowVersion = Convert.ToBase64String(new byte[] { 1 });
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE AccountSegmentStructures SET RowVersion = {new byte[] { 2 }} WHERE Id = {segmentId}");
+        var service = StructureService(db, tenant.Id, Audit());
+
+        await service.Invoking(item => item.DeleteAsync(segmentId, new AccountSegmentDeleteDto
+        {
+            RowVersion = firstClientRowVersion
+        })).Should().ThrowAsync<DbUpdateConcurrencyException>();
+    }
+
+    [Fact]
+    public async Task RelationalReorder_RejectsAnyStaleSegmentRowVersion()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await CreateRelationalSegmentTablesAsync(db);
+        var tenant = NewTenant("TDC"); var first = Guid.NewGuid(); var second = Guid.NewGuid();
+        await InsertDraftSegmentAsync(db, tenant.Id, first, "COMPANY", 1, [1]);
+        await InsertDraftSegmentAsync(db, tenant.Id, second, "NATURAL_ACCOUNT", 2, [1]);
+        var firstClientVersions = new Dictionary<Guid, string>
+        {
+            [first] = Convert.ToBase64String(new byte[] { 1 }),
+            [second] = Convert.ToBase64String(new byte[] { 1 })
+        };
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE AccountSegmentStructures SET RowVersion = {new byte[] { 2 }} WHERE Id = {first}");
+        var service = StructureService(db, tenant.Id, Audit());
+
+        await service.Invoking(item => item.ReorderSegmentsAsync(
+        [
+            new ReorderSegmentDto { SegmentId = first, NewPosition = 2, RowVersion = firstClientVersions[first] },
+            new ReorderSegmentDto { SegmentId = second, NewPosition = 1, RowVersion = firstClientVersions[second] }
+        ])).Should().ThrowAsync<DbUpdateConcurrencyException>();
+    }
+
+    private static AccountCombinationService CombinationService(ApplicationDbContext db, Guid tenantId)
+    {
+        var tenantSettings = new Mock<ITenantSettingsService>();
+        tenantSettings.Setup(item => item.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        return new AccountCombinationService(new UnitOfWork(db), CurrentUser(tenantId).Object,
+            tenantSettings.Object, new AccountSegmentIdentityService(db),
+            NullLogger<AccountCombinationService>.Instance);
+    }
+
+    private static Mock<ICurrentUserService> CurrentUser(Guid tenantId)
+    {
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+        currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(item => item.UserName).Returns("phase5.tests");
+        return currentUser;
+    }
+
+    private static AccountCombinationPreviewDto ValidCombination(
+        (Guid TenantId, AccountSegmentStructure Company, AccountSegmentStructure Natural, SegmentLookupValue CompanyValue) fixture) => new()
+    {
+        AccountNumber = $"{fixture.CompanyValue.SegmentValue}-6100",
+        GeneratedName = "Operating expense",
+        AccountType = AccountType.Expense.ToString(),
+        CurrencyCode = "GHS",
+        Status = CombinationStatus.Valid,
+        SegmentValues =
+        [
+            new SegmentValuePreviewDto
+            {
+                SegmentStructureId = fixture.Company.Id, SegmentPosition = fixture.Company.SegmentPosition,
+                LookupValueId = fixture.CompanyValue.Id, Value = fixture.CompanyValue.SegmentValue,
+                Description = fixture.CompanyValue.Description
+            },
+            new SegmentValuePreviewDto
+            {
+                SegmentStructureId = fixture.Natural.Id, SegmentPosition = fixture.Natural.SegmentPosition,
+                LookupValueId = Guid.Empty, Value = "6100", Description = "Operating expense"
+            }
+        ]
+    };
+
+    private static SegmentValuePreviewDto CloneValue(SegmentValuePreviewDto source) => new()
+    {
+        SegmentStructureId = source.SegmentStructureId,
+        SegmentPosition = source.SegmentPosition,
+        LookupValueId = source.LookupValueId,
+        Value = source.Value,
+        Description = source.Description
+    };
+
+    private static Account AddAccountWithIdentity(
+        ApplicationDbContext db,
+        (Guid TenantId, AccountSegmentStructure Company, AccountSegmentStructure Natural, SegmentLookupValue CompanyValue) fixture,
+        string accountNumber)
+    {
+        var account = new Account
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, AccountCode = "6100", AccountNumber = accountNumber,
+            AccountName = "Operating expense", AccountType = AccountType.Expense, CurrencyCode = "GHS",
+            AccountCategory = "Operating"
+        };
+        account.SegmentValues.Add(new AccountSegmentValue
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, AccountId = account.Id,
+            SegmentStructureId = fixture.Company.Id, SegmentPosition = fixture.Company.SegmentPosition,
+            SegmentValue = fixture.CompanyValue.SegmentValue, SegmentLookupValueId = fixture.CompanyValue.Id
+        });
+        account.SegmentValues.Add(new AccountSegmentValue
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, AccountId = account.Id,
+            SegmentStructureId = fixture.Natural.Id, SegmentPosition = fixture.Natural.SegmentPosition,
+            SegmentValue = "6100"
+        });
+        db.Accounts.Add(account);
+        return account;
+    }
+
+    private static async Task InsertDraftSegmentAsync(ApplicationDbContext db, Guid tenantId, Guid segmentId,
+        string code, int position, byte[] rowVersion)
+    {
+        var segmentName = code; var dataType = code == "NATURAL_ACCOUNT" ? "Numeric" : "Alphanumeric"; var createdBy = "seed";
+        await db.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO AccountSegmentStructures
+            (Id, TenantId, SegmentName, SegmentCode, SegmentPosition, SegmentLength, DataType,
+             LookupTableRequired, IsReportingDimension, IsNaturalAccount, IsActive, LifecycleStatus,
+             IsSystemDefined, RowVersion, CreatedAt, CreatedBy, IsDeleted)
+            VALUES ({segmentId}, {tenantId}, {segmentName}, {code}, {position}, {4}, {dataType},
+             {false}, {false}, {code == "NATURAL_ACCOUNT"}, {false}, {(int)AccountSegmentLifecycleStatus.Draft},
+             {false}, {rowVersion}, {DateTime.UtcNow}, {createdBy}, {false})");
+    }
+
     private static ApplicationDbContext CreateContext() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
         .UseInMemoryDatabase($"phase5-segments-{Guid.NewGuid():N}").Options);
 
@@ -352,6 +703,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid().ToString());
         currentUser.SetupGet(item => item.UserName).Returns("phase5.tests");
         return new AccountSegmentStructureService(db, currentUser.Object, audit,
+            new AccountSegmentIdentityService(db),
             NullLogger<AccountSegmentStructureService>.Instance);
     }
 
@@ -385,7 +737,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         Id = Guid.NewGuid(), TenantId = tenantId, SegmentCode = code, SegmentName = code,
         SegmentPosition = position, SegmentLength = length, DataType = natural ? "Numeric" : "Alphanumeric",
         SeparatorCharacter = position == 1 ? "-" : null, LookupTableRequired = lookup, IsNaturalAccount = natural,
-        IsActive = true, LifecycleStatus = AccountSegmentLifecycleStatus.Active
+        IsActive = true, LifecycleStatus = AccountSegmentLifecycleStatus.Active, RowVersion = [1]
     };
 
     private static List<AccountSegmentValueCreateDto> ValidValues(AccountSegmentStructure company,
