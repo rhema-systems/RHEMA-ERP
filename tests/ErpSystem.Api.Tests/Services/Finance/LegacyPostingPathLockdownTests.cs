@@ -37,6 +37,11 @@ public sealed class LegacyPostingPathLockdownTests
 
         var migrationCommand = program[migrationStart..seedStart];
         migrationCommand.Should().Contain("WebApplication.CreateBuilder(args)");
+        migrationCommand.Should().Contain("tempBuilder.Services.AddHttpContextAccessor()")
+            .And.Contain("tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration)");
+        migrationCommand.IndexOf("AddHttpContextAccessor", StringComparison.Ordinal).Should().BeLessThan(
+            migrationCommand.IndexOf("AddErpSystemDatabase", StringComparison.Ordinal),
+            "the audited DbContext dependency must be registered before host validation");
         migrationCommand.Should().NotContain("CreateSeedBuilder(args)");
         migrationCommand.Should().NotContain("Environment.SetEnvironmentVariable");
     }

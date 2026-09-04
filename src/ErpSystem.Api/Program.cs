@@ -28,6 +28,7 @@ if (args.Length > 0 && args[0] == "apply-migrations")
     // explicit seed commands only and could select the wrong database here.
     var tempBuilder = WebApplication.CreateBuilder(args);
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor(); // Required by AuditInterceptor on the audited DbContext.
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     var tempApp = tempBuilder.Build();
 

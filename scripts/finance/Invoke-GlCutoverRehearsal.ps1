@@ -195,12 +195,10 @@ END;
         Invoke-Sql $target.Builder $target.Database $stampValues
 
         Set-ApplicationConnection $targetConnection {
-            # Use EF tooling for the forward chain. The application's apply-migrations
-            # command currently has a pre-existing DI defect (missing IHttpContextAccessor),
-            # which Stage A records as an operator-path blocker rather than hiding it.
-            Invoke-Native 'dotnet' @('ef', 'database', 'update', '--project', $dataProject,
-                '--startup-project', $apiProject, '--configuration', 'Debug',
-                '--context', 'ApplicationDbContext', '--no-build')
+            # Exercise the same controlled deployment entry point operators use. It runs
+            # Database.MigrateAsync without starting the HTTP host or invoking seeders.
+            Invoke-Native 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                '--project', $apiProject, '--', 'apply-migrations')
             Invoke-Native 'dotnet' @('run', '--no-build', '--configuration', 'Debug', '--project', $apiProject, '--', 'seed-db')
         }
 
