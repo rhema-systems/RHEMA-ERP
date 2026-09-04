@@ -248,6 +248,80 @@ public sealed record DepartmentRef(Guid Id, string Code, string Name);
 public sealed record SectionRef(Guid Id, string Code, string Name, Guid DepartmentId);
 public sealed record PositionRef(Guid Id, string Code, string Title, Guid OrganizationUnitId, Guid? StaffLevelId);
 public sealed record LocationRef(Guid Id, string Code, string Name);
+
+/// <summary>
+/// An administrative area the sheet's Region / City columns can resolve to.
+/// </summary>
+/// <param name="RegionId">
+/// The tier-1 ancestor, carried so a City can be checked against its Region without walking the
+/// tree per row. Equals <paramref name="Id"/> for a region itself.
+/// </param>
+/// <param name="RegionName">
+/// Its region's name, carried so the template's reference sheet can print "which region is this
+/// Tema?" without a second lookup — the disambiguation an importer actually needs.
+/// </param>
+/// <param name="TierName">The tier's own name — "District", "Town" — used in messages.</param>
+/// <param name="RetiredInFavourOf">
+/// Set only on areas that have ceased to exist: the name of the successor recorded against them.
+/// Lets an import say "Brong Ahafo was replaced by Bono" instead of "never heard of it".
+/// </param>
+public sealed record GeoAreaRef(
+    Guid Id, string Code, string Name, Guid RegionId, string RegionName, string TierName,
+    string? RetiredInFavourOf = null);
+
+/// <summary>
+/// Name → area, scoped by region, with ambiguity reported rather than guessed.
+/// </summary>
+/// <remarks>
+/// <para>⚠ Not a <see cref="LookupTable{T}"/>. That keeps the FIRST item registered under a key and
+/// silently ignores later ones, which is fine for a flat list of departments and wrong here: place
+/// names repeat across regions, and picking whichever one loaded first would file an employee in
+/// the wrong half of the country without saying so. This reports the collision instead.</para>
+/// </remarks>
+public sealed class GeoAreaLookup
+{
+    private readonly Dictionary<string, List<GeoAreaRef>> _byName = new();
+    private readonly LookupTable<GeoAreaRef> _suggestions = new();
+    private readonly List<GeoAreaRef> _all = new();
+
+    public int Count => _all.Count;
+
+    /// <summary>Every area, once each — what the template's reference sheet is written from.</summary>
+    public IEnumerable<(GeoAreaRef Area, string RegionName)> Items =>
+        _all.Select(a => (a, a.RegionName));
+
+    public void Add(GeoAreaRef area, params string?[] names)
+    {
+        _all.Add(area);
+        _suggestions.Add(area, area.Name, area.Name, area.Code);
+
+        foreach (var name in names)
+        {
+            var key = EmployeeImportColumns.NormalizeKey(name);
+            if (key.Length == 0) continue;
+            if (!_byName.TryGetValue(key, out var list)) _byName[key] = list = new List<GeoAreaRef>();
+            // The same area registered twice under equivalent spellings must not look ambiguous.
+            if (!list.Any(a => a.Id == area.Id)) list.Add(area);
+        }
+    }
+
+    /// <summary>
+    /// Areas answering to <paramref name="text"/>, narrowed to <paramref name="withinRegionId"/>
+    /// when the sheet also named a region. More than one match means the caller must ask.
+    /// </summary>
+    public IReadOnlyList<GeoAreaRef> Find(string? text, Guid? withinRegionId)
+    {
+        var key = EmployeeImportColumns.NormalizeKey(text);
+        if (key.Length == 0 || !_byName.TryGetValue(key, out var matches))
+            return Array.Empty<GeoAreaRef>();
+
+        return withinRegionId is { } regionId
+            ? matches.Where(a => a.RegionId == regionId).ToList()
+            : matches;
+    }
+
+    public List<string> Suggest(string? text, int max = 3) => _suggestions.Suggest(text, max);
+}
 public sealed record SalaryLevelRef(Guid Id, string Code, string Name, Guid GradeId, string GradeCode);
 public sealed record SalaryNotchRef(Guid Id, int Number, decimal Amount);
 public sealed record QualificationRef(Guid Id, string Name, string? ShortCode);
@@ -294,6 +368,13 @@ public sealed class EmployeeSnapshot
     public string? Address { get; init; }
     public string? City { get; init; }
     public string? State { get; init; }
+
+    /// <summary>The area the record is already placed at, so an update can tell a change from a no-op.</summary>
+    public Guid? GeoAreaId { get; init; }
+
+    /// <summary>Its name, for the "from" side of the per-row diff. Null when unplaced.</summary>
+    public string? GeoAreaName { get; init; }
+
     public string? Notes { get; init; }
     public Guid? CurrentLevelId { get; init; }
     public Guid? CurrentNotchId { get; init; }
@@ -315,6 +396,31 @@ public sealed class EmployeeImportReferenceData
     public required LookupTable<SectionRef> Sections { get; init; }
     public required LookupTable<PositionRef> Positions { get; init; }
     public required LookupTable<LocationRef> Locations { get; init; }
+
+    /// <summary>
+    /// The tier-1 areas of the tenant's default division schemes, keyed by name, code and alias.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Empty means the geography tree is not loaded, and the Region/City columns then behave
+    /// exactly as they did before it existed</b> — plain text, no resolution, no findings. Every
+    /// tenant that has not seeded a scheme depends on that, and an import that started failing
+    /// because a reference table is empty would be a regression, not a validation.
+    /// </remarks>
+    public required LookupTable<GeoAreaRef> GeoRegions { get; init; }
+
+    /// <summary>Everything below tier 1 — districts, towns, communities — for the City column.</summary>
+    public required GeoAreaLookup GeoSubAreas { get; init; }
+
+    /// <summary>
+    /// Areas that have ceased to exist, at any tier, so a sheet naming one gets told what replaced
+    /// it rather than that the name is unknown.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NOT merged into the live lookups. A dissolved region must never be silently
+    /// placed on a new record — Brong Ahafo became three regions and only a person knows which one
+    /// a given employee belongs to. This exists to explain, not to resolve.
+    /// </remarks>
+    public required LookupTable<GeoAreaRef> GeoRetiredAreas { get; init; }
 
     /// <summary>By <see cref="EmployeeImportColumns.NormalizeCode"/> of the level code.</summary>
     public required Dictionary<string, SalaryLevelRef> SalaryLevels { get; init; }

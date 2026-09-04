@@ -350,6 +350,29 @@ public static class EmployeeImportWorkbooks
         AddReference(wb, "Locations", banner, ["Code", "Name"],
             refs.Locations.Items.OrderBy(i => i.Display).Select(i => new object[] { i.Item.Code, i.Item.Name }));
 
+        // ⚠ Only when the geography tree is loaded. On a tenant with no scheme the Region and City
+        // columns are plain text and a sheet of valid values would be an empty promise.
+        if (refs.GeoRegions.Count > 0)
+        {
+            AddReference(wb, "Regions",
+                "Regions the system holds. Filling this in lets the City/Town below be placed exactly — "
+                + "but neither column is required, and an address it cannot place is still imported as text.",
+                ["Region"],
+                refs.GeoRegions.Items.OrderBy(i => i.Display).Select(i => new object[] { i.Item.Name }));
+
+            if (refs.GeoSubAreas.Count > 0)
+            {
+                AddReference(wb, "Cities and Towns",
+                    "Districts, towns and communities the system holds, with the region each sits in. "
+                    + "A name that appears in more than one region needs the Region column filled in too.",
+                    ["City/Town", "Tier", "Region"],
+                    refs.GeoSubAreas.Items
+                        .OrderBy(i => i.RegionName, StringComparer.OrdinalIgnoreCase)
+                        .ThenBy(i => i.Area.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(i => new object[] { i.Area.Name, i.Area.TierName, i.RegionName }));
+            }
+        }
+
         AddReference(wb, "Salary Structure",
             "Salary Level and Notch, as the system holds them. Amounts are the notch amounts on record.",
             ["Grade", "Salary Level", "Notch", "Amount"],

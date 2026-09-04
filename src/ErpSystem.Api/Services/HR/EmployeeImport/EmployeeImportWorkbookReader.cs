@@ -481,6 +481,10 @@ public static class EmployeeImportWorkbookReader
         dto.Address = Text(Get(EmployeeImportColumns.ResidentialAddress), 500, EmployeeImportColumns.ResidentialAddress, Err);
         dto.City = Text(Get(EmployeeImportColumns.City), 100, EmployeeImportColumns.City, Err);
         dto.State = Text(Get(EmployeeImportColumns.Region), 50, EmployeeImportColumns.Region, Err);
+        // Place the address on the geography tree where it can be placed. The text above is kept
+        // regardless — and where this resolves, EmployeeService rewrites it from the tree so the
+        // two cannot disagree.
+        dto.GeoAreaId = ResolveGeoArea(refs, dto.State, dto.City, Warn)?.Id;
         dto.Hometown = Text(Get(EmployeeImportColumns.Hometown), 150, EmployeeImportColumns.Hometown, Err);
         dto.Religion = Text(Get(EmployeeImportColumns.Religion), 50, EmployeeImportColumns.Religion, Err);
         dto.Notes = Get(EmployeeImportColumns.Notes)?.Trim();
@@ -550,8 +554,26 @@ public static class EmployeeImportWorkbookReader
         TextChange(EmployeeImportColumns.Hometown, "Hometown", 150, snap.Hometown, v => dto.Hometown = v);
         TextChange(EmployeeImportColumns.DigitalAddress, "Digital Address", 50, snap.DigitalAddress, v => dto.DigitalAddress = v);
         TextChange(EmployeeImportColumns.ResidentialAddress, "Residential Address", 500, snap.Address, v => dto.Address = v);
-        TextChange(EmployeeImportColumns.City, "City/Town", 100, snap.City, v => dto.City = v);
-        TextChange(EmployeeImportColumns.Region, "Region", 50, snap.State, v => dto.State = v);
+        var cityText = TextChange(EmployeeImportColumns.City, "City/Town", 100, snap.City, v => dto.City = v);
+        var regionText = TextChange(EmployeeImportColumns.Region, "Region", 50, snap.State, v => dto.State = v);
+
+        // ⚠ Resolved from what the SHEET supplied, falling back to what the record already holds:
+        // a file that names only the City must still be placed within the employee's existing
+        // region, or the same row would resolve on create and fail to on update.
+        // ⚠ Only when the sheet actually said something about the address. Resolving from the
+        // record's own existing text on every row would show a diff for each employee the seed
+        // happens to be able to place, on a file that never mentioned an address.
+        if (cityText != null || regionText != null)
+        {
+            var area = ResolveGeoArea(refs, regionText ?? snap.State, cityText ?? snap.City, Warn);
+            if (area?.Id != snap.GeoAreaId)
+            {
+                Change("Administrative area", snap.GeoAreaName, area?.Name);
+                dto.GeoAreaId = area?.Id;
+                // A null id reads as "not supplied", so removing a placement has to say so.
+                dto.ClearGeoArea = area is null;
+            }
+        }
         var notes = Get(EmployeeImportColumns.Notes)?.Trim();
         if (!string.IsNullOrEmpty(notes) && Differs(notes, snap.Notes)) { Change("Notes", snap.Notes, notes); dto.Notes = notes; }
         row.DisplayName = string.Join(" ", new[] { firstName ?? snap.FirstName, lastName ?? snap.LastName }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -763,6 +785,92 @@ public static class EmployeeImportWorkbookReader
     }
 
     // ── Shared pieces ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves the sheet's Region and City text to one <c>GeoAreaId</c> — the deepest of the two
+    /// that can be placed. Returns null when nothing can be, which is not a failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Everything here WARNS; nothing errors.</b> A row must never be blocked because an
+    /// address cannot be placed on the tree. Only Greater Accra and Ho are seeded — roughly 232 of
+    /// Ghana's MMDAs are deliberately absent — so treating an unknown district as an error would
+    /// reject most of the country's real addresses. The text is kept either way and the row
+    /// imports; the link is a bonus, not a gate.</para>
+    ///
+    /// <para>⚠ <b>An empty tree means silence.</b> With no scheme seeded the columns behave exactly
+    /// as they did before geography existed: plain text, no findings. Anything else would turn a
+    /// missing reference table into a wall of warnings on every existing import.</para>
+    ///
+    /// <para>⚠ <b>An ambiguous city is reported, never guessed.</b> Place names repeat across
+    /// regions; picking the first would file someone in the wrong half of the country silently.</para>
+    /// </remarks>
+    private static GeoAreaRef? ResolveGeoArea(
+        EmployeeImportReferenceData refs,
+        string? regionText,
+        string? cityText,
+        Action<string, string, List<string>?> warn)
+    {
+        if (refs.GeoRegions.Count == 0) return null;
+        if (string.IsNullOrWhiteSpace(regionText) && string.IsNullOrWhiteSpace(cityText)) return null;
+
+        // A name that used to exist gets told what replaced it — the single most useful thing to
+        // say to someone importing a file of old records. Never resolved to, only explained: a
+        // dissolved region became several, and only a person knows which one a row belongs to.
+        string? RetirementNote(string? text)
+        {
+            if (!refs.GeoRetiredAreas.TryResolve(text, out var retired)) return null;
+            return retired.RetiredInFavourOf is { } successor
+                ? $"'{text!.Trim()}' no longer exists — it was replaced by {successor}. "
+                  + "The address is kept as text only; set the current area on the record."
+                : $"'{text!.Trim()}' no longer exists, so the address is kept as text only.";
+        }
+
+        GeoAreaRef? region = null;
+        if (!string.IsNullOrWhiteSpace(regionText))
+        {
+            if (refs.GeoRegions.TryResolve(regionText, out var found)) region = found;
+            else if (RetirementNote(regionText) is { } note)
+                warn(EmployeeImportColumns.Region, note, null);
+            else
+                warn(EmployeeImportColumns.Region,
+                    $"'{regionText.Trim()}' is not a region we hold, so the address is kept as text only.",
+                    refs.GeoRegions.Suggest(regionText));
+        }
+
+        if (string.IsNullOrWhiteSpace(cityText)) return region;
+
+        var matches = refs.GeoSubAreas.Find(cityText, region?.Id);
+
+        if (matches.Count == 1) return matches[0];
+
+        if (matches.Count > 1)
+        {
+            // Narrowing by region is the fix, so say so rather than listing near-misses.
+            warn(EmployeeImportColumns.City,
+                $"'{cityText.Trim()}' matches {matches.Count} places"
+                + (region is null ? " — fill in the Region column to say which." : " within that region."),
+                matches.Select(m => $"{m.Name} ({m.TierName})").Take(3).ToList());
+            return region;
+        }
+
+        // Nothing under the named region — but it may exist elsewhere, which is a more useful thing
+        // to say than "unknown".
+        if (region is not null && refs.GeoSubAreas.Find(cityText, null).Count > 0)
+        {
+            warn(EmployeeImportColumns.City,
+                $"'{cityText.Trim()}' is not in {region.Name}, so the address is kept as text only.",
+                refs.GeoSubAreas.Suggest(cityText));
+            return region;
+        }
+
+        if (RetirementNote(cityText) is { } cityNote)
+            warn(EmployeeImportColumns.City, cityNote, null);
+        else
+            warn(EmployeeImportColumns.City,
+                $"'{cityText.Trim()}' is not a place we hold, so the address is kept as text only.",
+                refs.GeoSubAreas.Suggest(cityText));
+        return region;
+    }
 
     private static void CheckAges(DateOnly? dob, DateOnly? dateEmployed, Action<string, string, List<string>?> err, Action<string, string, List<string>?> warn)
     {

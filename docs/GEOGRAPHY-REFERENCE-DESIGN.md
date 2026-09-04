@@ -152,7 +152,7 @@ back into them (`Employee.State` ← region name, `Employee.City` ← town name)
 | --- | --- | --- |
 | **1** | ✅ **complete 2026-09-03** — entities, DbContext config, DTOs, service, 24 endpoints, admin screens, migration, Ghana seed pack | see §6.1 and §6.2 |
 | **2** | ✅ **complete 2026-09-03** — `Employee.GeoAreaId`, snapshot write-back, shared `<AddressFields>`, Employee form wired, migration applied, 25 assertions green | see §6.4 |
-| **3** | Backfill pass + employee import catalogue gains Region / District / Town columns resolving by name-within-parent | unresolved values surface in the existing per-row diff rather than failing the import |
+| **3** | ✅ **complete 2026-09-04** — employee import resolves Region / City to a `GeoAreaId`. **Backfill dropped: it had no input** | see §6.5 |
 | **4** | `Location.GeoAreaId`, `CompanyProfile`, medical facilities, travel destinations | |
 | **5** | Offer to other modules | Estate's `Region`/`District`/`Town` triple is the obvious first external taker |
 
@@ -288,6 +288,47 @@ one skipping every service rule — is pre-existing and out of this slice's scop
 
 **Verified 2026-09-03:** migration applied; `run-phase2.mjs` in the geography harness —
 **25 assertions, 0 failures**, on top of phase 1's 42. The screens have not been browser-walked.
+
+### 6.5 Phase 3 — the import places addresses (2026-09-04)
+
+**⚠ The backfill was dropped, not deferred.** Measured before building it: **0 of 1605 employees**
+have any `State` or `City` text, and the single CompanyProfile has none either. A backfill pass
+would have processed zero rows. Only 5 Locations carry city text, and those belong to phase 4. The
+import is therefore the *only* route by which geography enters the register, so that is where the
+work went. Should real address text ever arrive in bulk, `GeographyService.ResolveAsync` is the
+resolver a backfill would loop over.
+
+The template's `Region` and `City/Town` columns already existed and were copied as inert text. They
+now resolve to a `GeoAreaId`, and `EmployeeService` rewrites the text from the tree. Two reference
+sheets ship in the template: **Regions**, and **Cities and Towns** with the region each sits in.
+
+**⚠ Everything about geography WARNS; nothing errors.** Only Greater Accra and Ho are seeded — some
+232 MMDAs are deliberately absent (§6.2) — so an unplaceable address must never block a row, or the
+import would reject most real Ghanaian addresses. The text is kept, the row imports, the link is a
+bonus.
+
+**⚠ An unseeded tree means total silence.** With no scheme, the columns behave exactly as they did
+before geography existed. Otherwise a missing reference table would produce a wall of warnings on
+every existing import — a regression dressed as validation.
+
+**⚠ Ambiguity is reported, never guessed.** `GeoAreaLookup` exists instead of reusing `LookupTable`
+precisely because the latter keeps the first item registered under a key and drops the rest. Place
+names repeat across regions; picking whichever loaded first would file someone in the wrong half of
+the country silently.
+
+**Retired areas explain themselves but are never resolved to.** A sheet saying "Brong-Ahafo" is told
+it was replaced by Bono, and the row imports unplaced. Brong Ahafo became three regions and only a
+person knows which — placing them all in Bono would be a wrong answer that looks right.
+
+**Verified 2026-09-04** — `run-phase3.mjs`, **31 assertions**. Full suite green:
+74 + 52 (import) + 42 + 25 + 31 (geography) = **224, 0 failures**. The committed register showed the
+design in five rows: resolved-and-rewritten; retired kept as text; ambiguous kept as text;
+unknown city kept as text but still placed at its region; region-only placement.
+
+**⚠ A defect this found in phase-3's own code:** the loader filtered areas on `IsActive`, and a
+dissolved area is inactive *by definition* — so no retired area ever loaded and the successor
+message could not fire. The query now decides what is *known*; the live/retired split decides what
+can be *resolved to*.
 
 ## 7. Conventions this build must honour
 

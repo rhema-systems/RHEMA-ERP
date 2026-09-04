@@ -796,6 +796,96 @@ public sealed class EmployeeImportService : IEmployeeImportService
                      .Select(l => new LocationRef(l.Id, l.Code, l.Name)).ToListAsync(ct))
             locations.Add(l, l.Name, l.Code, l.Name);
 
+        // ── Administrative geography ────────────────────────────────────────────────────────────
+        // The Region and City columns resolve to a GeoAreaId where the tree can place them. Both
+        // lookups stay EMPTY when no scheme is seeded, and the reader then leaves the columns as
+        // the free text they have always been.
+        var geoRegions = new LookupTable<GeoAreaRef>();
+        var geoSubAreas = new GeoAreaLookup();
+        var geoRetired = new LookupTable<GeoAreaRef>();
+
+        var defaultSchemeIds = await _db.GeoSchemes.AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted && s.IsActive && s.IsDefault)
+            .Select(s => s.Id).ToListAsync(ct);
+
+        if (defaultSchemeIds.Count > 0)
+        {
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+            // ⚠ NOT filtered on IsActive. A dissolved area is inactive BY DEFINITION — the seeder
+            // sets IsActive from whether it has an end date — so filtering here loaded none of
+            // them and "Brong Ahafo" came back as a name nobody had heard of, which is the exact
+            // failure the retired lookup exists to prevent. The live/retired split below is what
+            // decides whether an area can be resolved TO; this query only decides what is known.
+            var areas = await _db.GeoAreas.AsNoTracking()
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted
+                         && defaultSchemeIds.Contains(a.SchemeId))
+                .Select(a => new
+                {
+                    a.Id, a.Code, a.Name, a.ParentAreaId, a.EffectiveTo, a.SupersededByGeoAreaId, a.IsActive,
+                    TierName = a.GeoLevel.Name, a.GeoLevel.LevelNumber,
+                })
+                .ToListAsync(ct);
+
+            // ⚠ Areas that have ceased to exist are kept OUT of the live lookups but loaded into a
+            // separate one. A spreadsheet of old data saying "Brong Ahafo" must be told what
+            // replaced it rather than that the name is unknown — but it must never be silently
+            // placed, because that region became three and only a person knows which.
+            // Resolvable: still exists AND still offered. Retired: has an end date in the past,
+            // whatever its IsActive flag says — an area someone deliberately deactivated without
+            // end-dating it is simply unknown, which is the honest answer.
+            var live = areas.Where(a => a.IsActive && (a.EffectiveTo == null || a.EffectiveTo >= today)).ToList();
+            var retired = areas.Where(a => a.EffectiveTo != null && a.EffectiveTo < today).ToList();
+
+            var parentOf = areas.ToDictionary(a => a.Id, a => a.ParentAreaId);
+            Guid RegionOf(Guid id)
+            {
+                var cursor = id;
+                var seen = new HashSet<Guid>();
+                while (seen.Add(cursor) && parentOf.TryGetValue(cursor, out var parent) && parent.HasValue)
+                    cursor = parent.Value;
+                return cursor;
+            }
+
+            var aliasesByArea = await _db.GeoAreaAliases.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && !x.IsDeleted)
+                .Select(x => new { x.GeoAreaId, x.Alias })
+                .ToListAsync(ct);
+            var aliasLookup = aliasesByArea
+                .GroupBy(x => x.GeoAreaId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Alias).ToArray());
+
+            var nameOf = areas.ToDictionary(a => a.Id, a => a.Name);
+
+            foreach (var a in live)
+            {
+                var aliases = aliasLookup.GetValueOrDefault(a.Id) ?? Array.Empty<string>();
+                var regionId = RegionOf(a.Id);
+                var reference = new GeoAreaRef(
+                    a.Id, a.Code, a.Name, regionId, nameOf.GetValueOrDefault(regionId, ""), a.TierName);
+
+                if (a.LevelNumber == 1)
+                    geoRegions.Add(reference, a.Name, new[] { a.Name, a.Code }.Concat(aliases).ToArray());
+                else
+                    geoSubAreas.Add(reference, new[] { a.Name, a.Code }.Concat(aliases).ToArray());
+            }
+
+            foreach (var a in retired)
+            {
+                var aliases = aliasLookup.GetValueOrDefault(a.Id) ?? Array.Empty<string>();
+                var successor = a.SupersededByGeoAreaId.HasValue
+                    ? nameOf.GetValueOrDefault(a.SupersededByGeoAreaId.Value)
+                    : null;
+                var regionId = RegionOf(a.Id);
+
+                geoRetired.Add(
+                    new GeoAreaRef(a.Id, a.Code, a.Name, regionId,
+                        nameOf.GetValueOrDefault(regionId, ""), a.TierName, successor),
+                    a.Name,
+                    new[] { a.Name, a.Code }.Concat(aliases).ToArray());
+            }
+        }
+
         var grades = await _db.SalaryGrades.AsNoTracking()
             .Where(g => g.TenantId == tenantId && !g.IsDeleted)
             .Select(g => new { g.Id, g.Code }).ToDictionaryAsync(g => g.Id, g => g.Code, ct);
@@ -872,6 +962,9 @@ public sealed class EmployeeImportService : IEmployeeImportService
             Sections = sections,
             Positions = positions,
             Locations = locations,
+            GeoRegions = geoRegions,
+            GeoSubAreas = geoSubAreas,
+            GeoRetiredAreas = geoRetired,
             SalaryLevels = levels,
             NotchesByLevel = notchesByLevel,
             Qualifications = qualifications,
@@ -909,6 +1002,20 @@ public sealed class EmployeeImportService : IEmployeeImportService
         if (employees.Count == 0) return;
 
         var ids = employees.Select(e => e.Id).ToList();
+
+        // Names for the areas these employees already sit in, so an update's diff can say what the
+        // address is changing FROM. One query rather than an Include, because the snapshot query
+        // above is deliberately a bare entity load.
+        var geoAreaIds = employees.Where(e => e.GeoAreaId.HasValue).Select(e => e.GeoAreaId!.Value).Distinct().ToList();
+        var geoAreaNames = new Dictionary<Guid, string>();
+        foreach (var chunk in geoAreaIds.Chunk(500))
+        {
+            var set = chunk.ToList();
+            foreach (var a in await _db.GeoAreas.AsNoTracking()
+                         .Where(a => set.Contains(a.Id)).Select(a => new { a.Id, a.Name }).ToListAsync(ct))
+                geoAreaNames[a.Id] = a.Name;
+        }
+
         var managerIds = employees.Where(e => e.ManagerId.HasValue).Select(e => e.ManagerId!.Value).Distinct().ToList();
         var managerNumbers = new Dictionary<Guid, string>();
         foreach (var chunk in managerIds.Chunk(500))
@@ -1004,6 +1111,8 @@ public sealed class EmployeeImportService : IEmployeeImportService
                 Address = e.Address,
                 City = e.City,
                 State = e.State,
+                GeoAreaId = e.GeoAreaId,
+                GeoAreaName = e.GeoAreaId.HasValue ? geoAreaNames.GetValueOrDefault(e.GeoAreaId.Value) : null,
                 Notes = e.Notes,
                 CurrentLevelId = assignment.LevelId,
                 CurrentNotchId = assignment.NotchId,
