@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 5 — account segments versus transaction dimensions |
-| Status | `REVIEWING` |
+| Status | `COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
 | Branch | `codex/finance-segments-dimensions-seed-phase5` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Final clean correction at `4d2891e6`; independent re-review active |
+| Review status | `APPROVED`; all Phase 5 findings closed and integrated |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -90,12 +90,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 |---|---|---|---|---|
 | 1 | `8b45c555dcd88cb47cb4c4b3c9d26c4c421b7f9e` | `CHANGES_REQUIRED` | P1: bulk combinations bypass full Alpha/Alphanumeric and normalization validation; Freeze checks only segment IDs rather than complete persisted identity readiness; cross-tenant persisted assignments lack sufficient migration/schema/runtime protection. P2: account update validates canonical identity but persists raw client rows; delete/reorder lack stale-write tokens and the reorder API text contradicts the actual lifecycle. Independent checks passed 12 backend and 8 frontend tests, ESLint, EF no-pending-model and diff checks. All five corrections and regression gates were sent directly. | Not integrated |
 | 2 | `45fa499901f35821c655b82966dc86a6d2bf260b` | `CHANGES_REQUIRED` | The original five findings are closed, but one P2 regression remains: account update persists normalized rows, then maps the stale tracked navigation and can return soft-deleted raw rows instead of the new canonical identity. Independent gates passed 29 backend and 8 frontend tests, ESLint, EF no-pending-model and diff checks. A narrow response-reload/synchronization fix and direct returned-DTO assertion were sent to the implementer. | Not integrated |
-| 3 | `4d2891e676a82c912c54c61abcf488379c70f244` | Independent re-review active | Narrow correction `4d2891e6` returns only the canonical active account identity after update and adds direct returned-DTO regression coverage. | Pending |
+| 3 | `4d2891e676a82c912c54c61abcf488379c70f244` | `APPROVED` | Narrow correction `4d2891e6` returns only the canonical active account identity after update and adds direct returned-DTO regression coverage. Independent review reconfirmed all earlier closures and passed 29 backend tests, build, EF no-pending-model and diff checks; prior 8 frontend tests and ESLint remained valid. | Five commits cherry-picked without conflict as `58b43652`, `fcb84743`, `28763284`, `f2c06f4e`, and `1f273978`. Task-owned files match the reviewed tree; only the coordination ledger differs. Primary verification passed: build with 0 errors, 29 focused backend tests, 8 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Migration remains unapplied. |
 
 ## Connectivity checkpoint
 
-Last verified durable point: the final narrow Phase 5 correction is committed and clean at `4d2891e6`; independent re-review is active. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Phase 5 is independently approved and integrated through primary commit `1f273978a4a5445b3530b2ce48daaa2e1bcd2e8f`. Build, 29 backend tests, 8 frontend tests, ESLint, EF model-drift and diff gates passed. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
-Review the final narrow Phase 5 correction, integrate the complete stack only after approval, run primary gates, and then immediately activate Phase 6 from the new exact checkpoint. Do not apply migrations or cross any other escalation gate without user authorization.
+Commit the Phase 5 completion checkpoint and immediately activate Phase 6 from that exact primary commit. Do not apply migrations or cross any other escalation gate without user authorization.
