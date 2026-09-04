@@ -110,6 +110,53 @@ public sealed class ProcurementTenderControlServiceTests
     }
 
     [Fact]
+    public async Task FormalOpeningRejectsQuorumConfirmedBeforeBiddingClosed()
+    {
+        await using var fixture = new Fixture();
+        await fixture.PublishAsync();
+        await fixture.IssueDocumentsAsync();
+        await fixture.Service.RecordSubmissionAsync(
+            fixture.Bids[0], fixture.Tender.SubmissionDeadline!.Value.AddMinutes(-3),
+            "receipt-first");
+        await fixture.AddSecondOnTimeReceiptAsync();
+        await fixture.MoveDeadlineToPastAsync();
+        var control = await fixture.Context.ProcurementTenderControls.SingleAsync();
+        fixture.CommitteeMeetingStartedAtUtc =
+            control.SubmissionDeadlineUtc.AddMinutes(-1);
+
+        var action = () => fixture.Service.CompleteOpeningAsync(
+            fixture.Tender.Id, fixture.OpeningRequest(), "opening-premature-quorum");
+
+        await action.Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(exception =>
+                exception.Code == "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED");
+        control.Status.Should().Be(ProcurementTenderControlStatus.Advertised);
+    }
+
+    [Fact]
+    public async Task FormalOpeningRejectsAnOlderQuorumWhenTheLatestMeetingIsNotQuorate()
+    {
+        await using var fixture = new Fixture();
+        await fixture.PublishAsync();
+        await fixture.IssueDocumentsAsync();
+        await fixture.Service.RecordSubmissionAsync(
+            fixture.Bids[0], fixture.Tender.SubmissionDeadline!.Value.AddMinutes(-3),
+            "receipt-first");
+        await fixture.AddSecondOnTimeReceiptAsync();
+        await fixture.MoveDeadlineToPastAsync();
+        fixture.IncludeStaleLatestMeeting = true;
+
+        var action = () => fixture.Service.CompleteOpeningAsync(
+            fixture.Tender.Id, fixture.OpeningRequest(), "opening-stale-quorum");
+
+        await action.Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(exception =>
+                exception.Code == "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED");
+        (await fixture.Context.ProcurementTenderControls.SingleAsync()).Status
+            .Should().Be(ProcurementTenderControlStatus.Advertised);
+    }
+
+    [Fact]
     public async Task ManualPaymentPendingVerificationBlocksFormalOpeningAndIsAudited()
     {
         await using var fixture = new Fixture();
@@ -855,6 +902,8 @@ public sealed class ProcurementTenderControlServiceTests
         public Mock<IProcurementAwardReadinessService> AwardReadiness { get; } = new();
         public bool IncludeApprovedFinancialRecall { get; set; }
         public bool TamperFinancialCommitteeSnapshot { get; set; }
+        public DateTime? CommitteeMeetingStartedAtUtc { get; set; }
+        public bool IncludeStaleLatestMeeting { get; set; }
         private Guid CommitteeId { get; } = Guid.NewGuid();
         private Guid AppointmentId { get; } = Guid.NewGuid();
         private Guid TechnicalMeetingId { get; } = Guid.NewGuid();
@@ -882,6 +931,42 @@ public sealed class ProcurementTenderControlServiceTests
         {
             var control = Context.ProcurementTenderControls.Local
                 .FirstOrDefault(item => !item.IsDeleted);
+            var meetings = new List<ProcurementEvaluationMeetingDto>
+            {
+                new()
+                {
+                    Id = TechnicalMeetingId,
+                    Sequence = 2,
+                    Phase = ProcurementEvaluationPhase.Technical,
+                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
+                    QuorumMet = true,
+                    StartedAtUtc = CommitteeMeetingStartedAtUtc ?? DateTime.UtcNow,
+                    RowVersion = "AQ=="
+                },
+                new()
+                {
+                    Id = FinancialMeetingId,
+                    Sequence = 1,
+                    Phase = ProcurementEvaluationPhase.Financial,
+                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
+                    QuorumMet = true,
+                    StartedAtUtc = CommitteeMeetingStartedAtUtc ?? DateTime.UtcNow,
+                    RowVersion = "AQ=="
+                }
+            };
+            if (IncludeStaleLatestMeeting)
+            {
+                meetings.Add(new ProcurementEvaluationMeetingDto
+                {
+                    Id = Guid.NewGuid(),
+                    Sequence = 3,
+                    Phase = ProcurementEvaluationPhase.Technical,
+                    Status = ProcurementEvaluationMeetingStatus.Draft,
+                    QuorumMet = false,
+                    StartedAtUtc = DateTime.UtcNow,
+                    RowVersion = "AQ=="
+                });
+            }
             return new ProcurementEvaluationCommitteeDto
             {
             Id = CommitteeId,
@@ -889,31 +974,18 @@ public sealed class ProcurementTenderControlServiceTests
             SourceId = Tender.Id,
             Status = ProcurementEvaluationCommitteeControlStatus.Active,
             CompositionReady = true,
-            QuorumMet = true,
+            QuorumMet = !IncludeStaleLatestMeeting,
             RowVersion = "AQ==",
             Members =
             [
                 new ProcurementEvaluationAppointmentDto
                 {
                     Id = AppointmentId, UserId = CurrentUserId, EligibleToScore = true,
+                    Status = ProcurementEvaluationAppointmentStatus.Accepted,
                     RowVersion = "AQ=="
                 }
             ],
-            Meetings =
-            [
-                new ProcurementEvaluationMeetingDto
-                {
-                    Id = TechnicalMeetingId, Phase = ProcurementEvaluationPhase.Technical,
-                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
-                    QuorumMet = true, RowVersion = "AQ=="
-                },
-                new ProcurementEvaluationMeetingDto
-                {
-                    Id = FinancialMeetingId, Phase = ProcurementEvaluationPhase.Financial,
-                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
-                    QuorumMet = true, RowVersion = "AQ=="
-                }
-            ],
+            Meetings = meetings,
             ScoreSheets =
             [
                 ScoreSheet(

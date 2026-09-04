@@ -128,7 +128,7 @@ Expected:
 4. If the method is automatic, verify the system-generated rationale. Do not enter a manual justification unless the lot structure is unusual or the method rule requires it.
 5. Attempt a method override. Expected: manual reason, approved exception, evidence and workflow approval are required.
 6. For RFQ, invite eligible suppliers, publish/send the request, accept sealed quotations, close/open quotations, evaluate and recommend an award.
-7. For tender, publish controlled tender documents, register bids, complete conflict-of-interest/quorum checks, open technical proposals, evaluate, open financial proposals at the permitted stage, recommend and approve the award.
+7. For tender, publish controlled tender documents, register bids, constitute and activate the evaluation committee, complete member appointment acceptance/conflict declarations, close the bidding window, complete meeting attendance and quorum, open technical proposals, evaluate, open financial proposals at the permitted stage, recommend and approve the award. Committee constitution or activation is not permitted before publication and an on-time sealed bid; meeting, attendance and quorum are not permitted before the submission deadline closes; formal opening requires current server-confirmed quorum recorded after that deadline.
 8. Exercise the configured QBS/QCBS route where applicable and verify server-calculated ranking/combined scores.
 
 Expected:
