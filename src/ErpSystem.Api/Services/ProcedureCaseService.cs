@@ -5,6 +5,7 @@ using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.DTOs.Workflow;
@@ -16,6 +17,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Legal;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Planning;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Workflow;
@@ -49,6 +51,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private readonly IFileStorageService _fileStorageService;
     private readonly IInvoiceService _invoiceService;
     private readonly ICentralDocumentPdfSigningService _pdfSigningService;
+    private readonly IJobCardService _jobCardService;
+    private IReadOnlyCollection<string>? _currentUserRoleNames;
 
     public ProcedureCaseService(
         ApplicationDbContext db,
@@ -62,7 +66,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         INotificationService notificationService,
         IFileStorageService fileStorageService,
         IInvoiceService invoiceService,
-        ICentralDocumentPdfSigningService pdfSigningService)
+        ICentralDocumentPdfSigningService pdfSigningService,
+        IJobCardService jobCardService)
     {
         _db = db;
         _currentUser = currentUser;
@@ -76,6 +81,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _fileStorageService = fileStorageService;
         _invoiceService = invoiceService;
         _pdfSigningService = pdfSigningService;
+        _jobCardService = jobCardService;
     }
 
     public async Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly)
@@ -494,6 +500,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .SetProperty(item => item.LastActionById, userId)
                 .SetProperty(item => item.UpdatedAt, now));
 
+        var fieldsByKey = procedureCase.Fields
+            .Where(field => !string.IsNullOrWhiteSpace(field.Key))
+            .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var field in procedureCase.Fields)
         {
             if (request.FieldValues.TryGetValue(field.Key, out var value))
@@ -506,6 +517,32 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                         .SetProperty(item => item.UpdatedAt, now)
                         .SetProperty(item => item.LastModifiedById, userId));
             }
+        }
+
+        foreach (var (key, value) in request.FieldValues)
+        {
+            if (string.IsNullOrWhiteSpace(key) || fieldsByKey.ContainsKey(key))
+            {
+                continue;
+            }
+
+            var seed = ResolveProcedureFieldSeed(procedureCase, key);
+            _db.ProcedureCaseFields.Add(new ProcedureCaseField
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = id,
+                Key = key.Trim(),
+                Label = seed?.Label ?? ToProcedureFieldLabel(key),
+                FieldType = seed?.FieldType ?? "text",
+                OptionsJson = seed?.Options is { Count: > 0 }
+                    ? JsonSerializer.Serialize(seed.Options)
+                    : null,
+                Value = value,
+                CreatedById = userId,
+                CreatedAt = now,
+                UpdatedAt = now,
+                LastModifiedById = userId
+            });
         }
 
         var groundRentAssetCode = await SyncEstateGroundRentAssessmentAsync(
@@ -715,6 +752,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var userId = RequireUserId();
         var now = DateTime.UtcNow;
 
+        await EnsureFacilitiesMaintenanceCloseoutReadyAsync(procedureCase, tenantId);
+
         var completedStageName = procedureCase.CurrentStageName;
 
         if (procedureCase.WorkflowInstanceId.HasValue)
@@ -741,9 +780,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             var syncedCase = (await LoadCaseAsync(id, asTracking: false))!;
             await SynchronizeLinkedLegalMatterAsync(syncedCase, tenantId, userId, now);
             await ArchiveCompetingExternalListingRequestsAsync(syncedCase, tenantId, userId, now);
+            await CreateMaintenanceJobCardForFacilitiesHandoffAsync(syncedCase, completedStageName, tenantId, userId, now);
             await NotifyLegalTransferPaymentRequestedAsync(syncedCase, completedStageName, tenantId, userId, now);
             await NotifyLegalTransferDraftReadyForClientAsync(syncedCase, completedStageName, tenantId, userId, now);
-            await NotifyLegalProcedureStageAssignedAsync(syncedCase, completedStageName, userId, tenantId);
+            await NotifyProcedureStageAssignedAsync(syncedCase, completedStageName, userId, tenantId);
             await NotifyEstateProcedureHandoffsAsync(syncedCase, completedStageName, syncedCase.CurrentStageName, userId, tenantId);
             return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
         }
@@ -789,9 +829,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var updatedCase = (await LoadCaseAsync(id, asTracking: false))!;
         await SynchronizeLinkedLegalMatterAsync(updatedCase, tenantId, userId, now);
         await ArchiveCompetingExternalListingRequestsAsync(updatedCase, tenantId, userId, now);
+        await CreateMaintenanceJobCardForFacilitiesHandoffAsync(updatedCase, completedStageName, tenantId, userId, now);
         await NotifyLegalTransferPaymentRequestedAsync(updatedCase, completedStageName, tenantId, userId, now);
         await NotifyLegalTransferDraftReadyForClientAsync(updatedCase, completedStageName, tenantId, userId, now);
-        await NotifyLegalProcedureStageAssignedAsync(updatedCase, completedStageName, userId, tenantId);
+        await NotifyProcedureStageAssignedAsync(updatedCase, completedStageName, userId, tenantId);
         await NotifyEstateProcedureHandoffsAsync(updatedCase, completedStageName, nextStage?.Name, userId, tenantId);
 
         return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
@@ -1635,44 +1676,376 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         await _db.SaveChangesAsync();
     }
 
-    private async Task NotifyLegalProcedureStageAssignedAsync(
+    private async Task CreateMaintenanceJobCardForFacilitiesHandoffAsync(
+        ProcedureCase procedureCase,
+        string completedStageName,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(completedStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var existingJobCardId = FieldValue(procedureCase, "maintenanceJobCardId");
+        var existingJobCardReference = FieldValue(procedureCase, "maintenanceJobCardReference");
+        if (Guid.TryParse(existingJobCardId, out var linkedJobCardId))
+        {
+            var linkedJobCard = await _jobCardService.GetJobCardByIdAsync(linkedJobCardId);
+            if (linkedJobCard is not null)
+            {
+                await SyncFacilitiesMaintenanceJobCardFieldsAsync(procedureCase.Id, linkedJobCard, tenantId, userId, now);
+                return;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingJobCardReference))
+        {
+            var linkedJobCard = await _jobCardService.GetJobCardByNumberAsync(existingJobCardReference);
+            if (linkedJobCard is not null)
+            {
+                await SyncFacilitiesMaintenanceJobCardFieldsAsync(procedureCase.Id, linkedJobCard, tenantId, userId, now);
+                return;
+            }
+        }
+
+        var sourceCaseMarker = procedureCase.Id.ToString();
+        var existingFromMarker = await _db.JobCards
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.CustomFieldValues != null
+                && item.CustomFieldValues.Contains(sourceCaseMarker))
+            .OrderByDescending(item => item.CreatedAt)
+            .FirstOrDefaultAsync();
+        if (existingFromMarker is not null)
+        {
+            var linkedJobCard = await _jobCardService.GetJobCardByIdAsync(existingFromMarker.Id);
+            if (linkedJobCard is not null)
+            {
+                await SyncFacilitiesMaintenanceJobCardFieldsAsync(procedureCase.Id, linkedJobCard, tenantId, userId, now);
+                return;
+            }
+        }
+
+        var maintenanceAsset = await ResolveFacilitiesMaintenanceAssetAsync(procedureCase, tenantId);
+        var maintenanceType = await ResolveFacilitiesMaintenanceTypeAsync(procedureCase, tenantId);
+        var priorityLevel = await ResolveFacilitiesPriorityLevelAsync(procedureCase, tenantId);
+        if (maintenanceAsset is null || maintenanceType is null || priorityLevel is null)
+        {
+            throw new InvalidOperationException("Maintenance setup is incomplete. Configure an active maintenance asset, maintenance type, and priority level before routing this Facilities request.");
+        }
+
+        var sourceReference = FirstNonBlank(procedureCase.ReferenceNumber, procedureCase.Title, procedureCase.Id.ToString()) ?? procedureCase.Id.ToString();
+        var propertyUnit = FirstNonBlank(FieldValue(procedureCase, "propertyUnit"), FieldValue(procedureCase, "propertyNumber"), FieldValue(procedureCase, "housePlotShopNumber"));
+        var issueType = FirstNonBlank(FieldValue(procedureCase, "issueType"), "Maintenance request")!;
+        var issueDescription = FirstNonBlank(FieldValue(procedureCase, "issueDescription"), procedureCase.Description, FieldValue(procedureCase, "notes"));
+        var serviceImpact = FirstNonBlank(FieldValue(procedureCase, "serviceImpact"), "Not recorded")!;
+        var accessInstructions = FirstNonBlank(FieldValue(procedureCase, "accessInstructions"), "Not recorded")!;
+        var targetDate = ParseProcedureDate(FieldValue(procedureCase, "targetDate"));
+        var customerBusinessPartnerId = Guid.TryParse(FieldValue(procedureCase, "sourceReference"), out var parsedCustomerId)
+            ? parsedCustomerId
+            : (Guid?)null;
+
+        var createdJobCard = await _jobCardService.CreateJobCardAsync(new CreateJobCardDto
+        {
+            Title = $"Facilities maintenance - {FirstNonBlank(propertyUnit, issueType, sourceReference)}",
+            Description = $"Source: Estate / Facilities. Facilities case {sourceReference}. Property/unit: {propertyUnit ?? "Not recorded"}. Service impact: {serviceImpact}. Access: {accessInstructions}.",
+            ProblemDescription = issueDescription ?? issueType,
+            AssetId = maintenanceAsset.Id,
+            MaintenanceTypeId = maintenanceType.Id,
+            PriorityLevelId = priorityLevel.Id,
+            CustomerBusinessPartnerId = customerBusinessPartnerId,
+            MaintenanceLocation = "External",
+            RequiredCompletionDate = targetDate,
+            EstimatedHours = maintenanceType.EstimatedHours > 0 ? maintenanceType.EstimatedHours : 2,
+            EstimatedCost = maintenanceType.EstimatedCost,
+            RequiresShutdown = maintenanceType.RequiresShutdown,
+            RequiresSafetyPermit = maintenanceType.RequiresSafetyPermit,
+            SafetyRequirements = FirstNonBlank(maintenanceType.SafetyRequirements, FieldValue(procedureCase, "safetyNotes")),
+            SpecialInstructions = $"Facilities routing approved from {completedStageName}. Continue execution in Maintenance Management and return job card/work order status to Facilities closeout.",
+            CustomFieldValues = new Dictionary<string, object>
+            {
+                ["sourceModule"] = "Estate / Facilities",
+                ["sourceProcedureCaseId"] = procedureCase.Id.ToString(),
+                ["sourceReference"] = sourceReference,
+                ["sourceEntityType"] = procedureCase.EntityType,
+                ["propertyUnit"] = propertyUnit ?? string.Empty,
+                ["issueType"] = issueType,
+                ["serviceImpact"] = serviceImpact
+            }
+        });
+
+        await SyncFacilitiesMaintenanceJobCardFieldsAsync(procedureCase.Id, createdJobCard, tenantId, userId, now);
+        await RoleNotificationDispatcher.NotifyRolesAsync(
+            _db,
+            _notificationService,
+            tenantId,
+            userId,
+            ["Maintenance Manager", "Maintenance Officer", "Facilities Manager"],
+            $"Maintenance job card created: {createdJobCard.JobCardNumber}",
+            $"{createdJobCard.JobCardNumber} was created from Facilities case {sourceReference} for {propertyUnit ?? "the reported property/unit"}.",
+            "facilities.maintenance-job-card.created",
+            "JobCard",
+            createdJobCard.Id,
+            "/maintenance/job-cards",
+            new Dictionary<string, object>
+            {
+                ["sourceModule"] = "Estate / Facilities",
+                ["sourceProcedureCaseId"] = procedureCase.Id,
+                ["sourceRecordReference"] = sourceReference,
+                ["jobCardId"] = createdJobCard.Id,
+                ["jobCardNumber"] = createdJobCard.JobCardNumber,
+                ["propertyUnit"] = propertyUnit ?? string.Empty,
+                ["issueType"] = issueType
+            },
+            CancellationToken.None);
+
+        _db.ProcedureCaseActivities.Add(Activity(
+            tenantId,
+            userId,
+            procedureCase.Id,
+            "Maintenance job card created",
+            procedureCase.CurrentStageName,
+            $"{createdJobCard.JobCardNumber} opened in Maintenance Management."));
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task SyncFacilitiesMaintenanceJobCardFieldsAsync(
+        Guid procedureCaseId,
+        JobCardDto jobCard,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        await UpsertLinkedSourceFieldAsync(tenantId, procedureCaseId, "maintenanceJobCardId", "Maintenance job card ID", jobCard.Id.ToString(), userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, procedureCaseId, "maintenanceJobCardReference", "Maintenance job card reference", jobCard.JobCardNumber, userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, procedureCaseId, "maintenanceHandoffStatus", "Maintenance handoff status", $"Job card created - {jobCard.JobCardStatus}", userId, now);
+        await UpsertLinkedSourceFieldAsync(tenantId, procedureCaseId, "maintenanceHandoffAt", "Maintenance handoff at", now.ToString("O", CultureInfo.InvariantCulture), userId, now);
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task EnsureFacilitiesMaintenanceCloseoutReadyAsync(
+        ProcedureCase procedureCase,
+        Guid tenantId)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.CurrentStageName, "Maintenance Closeout", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var jobCard = await ResolveFacilitiesMaintenanceJobCardAsync(procedureCase);
+        if (jobCard is null)
+        {
+            throw new InvalidOperationException("Maintenance closeout cannot be submitted until the linked Maintenance job card is available.");
+        }
+
+        if (jobCard.GeneratedWorkOrderId.HasValue)
+        {
+            var workOrder = await _db.WorkOrders
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.Id == jobCard.GeneratedWorkOrderId.Value)
+                .Select(item => new { item.WorkOrderNumber, item.Status })
+                .FirstOrDefaultAsync();
+
+            if (workOrder is not null && !IsMaintenanceExecutionComplete(workOrder.Status))
+            {
+                throw new InvalidOperationException($"Maintenance closeout cannot be submitted because work order {workOrder.WorkOrderNumber} is still {workOrder.Status}.");
+            }
+        }
+
+        if (!IsMaintenanceExecutionComplete(jobCard.JobCardStatus))
+        {
+            throw new InvalidOperationException($"Maintenance closeout cannot be submitted because job card {jobCard.JobCardNumber} is still {jobCard.JobCardStatus}.");
+        }
+    }
+
+    private async Task<JobCardDto?> ResolveFacilitiesMaintenanceJobCardAsync(ProcedureCase procedureCase)
+    {
+        var jobCardId = FieldValue(procedureCase, "maintenanceJobCardId");
+        if (Guid.TryParse(jobCardId, out var linkedJobCardId))
+        {
+            var byId = await _jobCardService.GetJobCardByIdAsync(linkedJobCardId);
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        var jobCardReference = FieldValue(procedureCase, "maintenanceJobCardReference");
+        return string.IsNullOrWhiteSpace(jobCardReference)
+            ? null
+            : await _jobCardService.GetJobCardByNumberAsync(jobCardReference);
+    }
+
+    private static bool IsMaintenanceExecutionComplete(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return false;
+        }
+
+        return status.Trim().Equals("Completed", StringComparison.OrdinalIgnoreCase)
+            || status.Trim().Equals("Quality Checked", StringComparison.OrdinalIgnoreCase)
+            || status.Trim().Equals("Accepted", StringComparison.OrdinalIgnoreCase)
+            || status.Trim().Equals("Closed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<ErpSystem.Core.Entities.Maintenance.MaintenanceAsset?> ResolveFacilitiesMaintenanceAssetAsync(
+        ProcedureCase procedureCase,
+        Guid tenantId)
+    {
+        var propertyUnit = FirstNonBlank(FieldValue(procedureCase, "propertyUnit"), FieldValue(procedureCase, "propertyNumber"), FieldValue(procedureCase, "housePlotShopNumber"));
+        var normalizedPropertyUnit = propertyUnit?.ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(normalizedPropertyUnit))
+        {
+            var matchingAsset = await _db.MaintenanceAssets
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                .Where(item =>
+                    item.AssetNumber.ToLower() == normalizedPropertyUnit
+                    || item.Name.ToLower() == normalizedPropertyUnit
+                    || item.AssetNumber.ToLower().Contains(normalizedPropertyUnit)
+                    || item.Name.ToLower().Contains(normalizedPropertyUnit))
+                .OrderBy(item => item.AssetNumber)
+                .FirstOrDefaultAsync();
+            if (matchingAsset is not null)
+            {
+                return matchingAsset;
+            }
+        }
+
+        return await _db.MaintenanceAssets
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status == AssetStatus.Active)
+            .OrderBy(item => item.AssetNumber)
+            .FirstOrDefaultAsync()
+            ?? await _db.MaintenanceAssets
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                .OrderBy(item => item.AssetNumber)
+                .FirstOrDefaultAsync();
+    }
+
+    private async Task<ErpSystem.Core.Entities.Maintenance.MaintenanceType?> ResolveFacilitiesMaintenanceTypeAsync(
+        ProcedureCase procedureCase,
+        Guid tenantId)
+    {
+        var issueType = FirstNonBlank(FieldValue(procedureCase, "issueType"), FieldValue(procedureCase, "complaintCategory"));
+        if (!string.IsNullOrWhiteSpace(issueType))
+        {
+            var normalizedIssueType = issueType.ToLowerInvariant();
+            var matchingType = await _db.MaintenanceTypes
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .Where(item =>
+                    item.Name.ToLower().Contains(normalizedIssueType)
+                    || item.Code.ToLower().Contains(normalizedIssueType)
+                    || item.Category.ToLower().Contains(normalizedIssueType))
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Name)
+                .FirstOrDefaultAsync();
+            if (matchingType is not null)
+            {
+                return matchingType;
+            }
+        }
+
+        return await _db.MaintenanceTypes
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+            .OrderByDescending(item => item.MaintenanceClass == "Corrective")
+            .ThenBy(item => item.SortOrder)
+            .ThenBy(item => item.Name)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task<ErpSystem.Core.Entities.Maintenance.PriorityLevel?> ResolveFacilitiesPriorityLevelAsync(
+        ProcedureCase procedureCase,
+        Guid tenantId)
+    {
+        var priority = FieldValue(procedureCase, "priority")?.Trim();
+        var desiredLevel = priority?.ToLowerInvariant() switch
+        {
+            "urgent" or "critical" or "emergency" => 1,
+            "high" => 2,
+            "normal" or "medium" => 3,
+            "low" => 4,
+            _ => 3
+        };
+
+        return await _db.PriorityLevels
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+            .OrderBy(item => item.Level == desiredLevel ? 0 : 1)
+            .ThenBy(item => item.Level)
+            .FirstOrDefaultAsync();
+    }
+
+    private static DateTime? ParseProcedureDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private async Task NotifyProcedureStageAssignedAsync(
         ProcedureCase procedureCase,
         string completedStageName,
         Guid userId,
         Guid tenantId)
     {
-        if (!string.Equals(procedureCase.Module, "Legal", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(procedureCase.CurrentStageName)
+        if (string.IsNullOrWhiteSpace(procedureCase.CurrentStageName)
             || string.IsNullOrWhiteSpace(procedureCase.CurrentAssignedRole)
             || string.Equals(procedureCase.CurrentStageName, completedStageName, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
+        var assignedRoles = ResolveProcedureNotificationRoles(procedureCase);
+        if (assignedRoles.Count == 0)
+        {
+            return;
+        }
+
         var sourceReference = FirstNonBlank(procedureCase.ReferenceNumber, procedureCase.Title, procedureCase.Id.ToString()) ?? procedureCase.Id.ToString();
-        var actionUrl = $"/legal/{Uri.EscapeDataString(procedureCase.EntityType)}?caseId={procedureCase.Id}";
+        var actionUrl = BuildProcedureCaseActionUrl(procedureCase);
+        var moduleLabel = ProcedureModuleLabel(procedureCase.Module);
+        var assignedLabel = string.Join(" / ", assignedRoles);
 
         await RoleNotificationDispatcher.NotifyRolesAsync(
             _db,
             _notificationService,
             tenantId,
             userId,
-            [procedureCase.CurrentAssignedRole],
-            $"Legal matter assigned: {sourceReference}",
-            $"{sourceReference} moved from '{completedStageName}' to '{procedureCase.CurrentStageName}' and is assigned to {procedureCase.CurrentAssignedRole}.",
-            "legal.procedure.stage-assigned",
+            assignedRoles,
+            $"{moduleLabel} case assigned: {sourceReference}",
+            $"{sourceReference} moved from '{completedStageName}' to '{procedureCase.CurrentStageName}' and is assigned to {assignedLabel}.",
+            $"{NotificationTopicSegment(procedureCase.Module)}.procedure.stage-assigned",
             "ProcedureCase",
             procedureCase.Id,
             actionUrl,
             new Dictionary<string, object>
             {
-                ["sourceLabel"] = "Source: Legal workflow",
-                ["sourceModule"] = "Legal",
+                ["sourceLabel"] = $"Source: {moduleLabel} workflow",
+                ["sourceModule"] = procedureCase.Module,
                 ["sourceEntityType"] = procedureCase.EntityType,
                 ["sourceRecordReference"] = sourceReference,
                 ["completedStage"] = completedStageName,
                 ["nextStage"] = procedureCase.CurrentStageName,
-                ["assignedRole"] = procedureCase.CurrentAssignedRole,
+                ["assignedRole"] = assignedLabel,
                 ["applicantName"] = procedureCase.ApplicantName ?? string.Empty
             },
             CancellationToken.None);
@@ -1683,7 +2056,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             procedureCase.Id,
             "Role notified",
             procedureCase.CurrentStageName,
-            $"Notified {procedureCase.CurrentAssignedRole} for Legal stage assignment."));
+            $"Notified {assignedLabel} for {moduleLabel} stage assignment."));
 
         await _db.SaveChangesAsync();
     }
@@ -2785,7 +3158,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private bool CanInitiatePropertyLegalHandoff(ProcedureCase procedureCase)
         => IsWorkflowAdmin()
             || UserOwnsCase(procedureCase)
-            || _currentUser.Roles.Any(role =>
+            || CurrentUserRoleNames().Any(role =>
                 string.Equals(role, "Property Manager", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "Property Officer", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "Estate Manager", StringComparison.OrdinalIgnoreCase)
@@ -3166,6 +3539,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList();
         }
 
+        if (string.Equals(module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Facilities Maintenance requires an active published workflow in Administration > Workflow Setup.");
+        }
+
         if (string.Equals(
                 entityType,
                 "EstatePropertyManagementListingApplication",
@@ -3244,6 +3624,63 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             workspace.Procedure.Title,
             workspace.IntakeFields.Select(item => new FieldSeed(item.Key, item.Label, item.Type, item.Options)).ToList(),
             workspace.RequiredDocuments.Select(item => new DocumentSeed(item.Name, item.RequiredFrom, item.IsMandatory)).ToList());
+    }
+
+    private FieldSeed? ResolveProcedureFieldSeed(ProcedureCase procedureCase, string key)
+    {
+        try
+        {
+            var seed = procedureCase.Module switch
+            {
+                "Legal" => BuildLegalSeed(procedureCase.EntityType).Fields,
+                "Facilities" => BuildFacilitiesSeed(procedureCase.EntityType).Fields,
+                "PropertyManagement" => BuildPropertyManagementSeed(procedureCase.EntityType).Fields,
+                "Planning" => BuildPlanningSeed(procedureCase.EntityType).Fields,
+                "Estate" => BuildEstateFieldSeeds(GetEstateProcedure(procedureCase.EntityType)),
+                _ => []
+            };
+
+            return seed.FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string ToProcedureFieldLabel(string key)
+    {
+        var cleaned = key.Trim();
+        if (string.IsNullOrWhiteSpace(cleaned))
+        {
+            return "Field";
+        }
+
+        var label = new List<char>(cleaned.Length + 4);
+        for (var index = 0; index < cleaned.Length; index++)
+        {
+            var current = cleaned[index];
+            if (current is '_' or '-')
+            {
+                label.Add(' ');
+                continue;
+            }
+
+            if (index > 0
+                && char.IsUpper(current)
+                && cleaned[index - 1] != ' '
+                && !char.IsUpper(cleaned[index - 1]))
+            {
+                label.Add(' ');
+            }
+
+            label.Add(current);
+        }
+
+        var result = new string(label.ToArray()).Trim();
+        return result.Length == 0
+            ? "Field"
+            : char.ToUpperInvariant(result[0]) + result[1..];
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildEstateSeed(string entityType)
@@ -4136,7 +4573,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     }
 
     private bool CanCreateLegalProcedureCase()
-        => IsWorkflowAdmin() || _currentUser.Roles.Any(role =>
+        => IsWorkflowAdmin() || CurrentUserRoleNames().Any(role =>
             string.Equals(role, "Legal", StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, "Legal Officer", StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, "Legal Manager", StringComparison.OrdinalIgnoreCase)
@@ -4157,7 +4594,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 procedureCase.EntityType,
                 "EstatePropertyManagementListingApplication",
                 StringComparison.OrdinalIgnoreCase)
-            && _currentUser.Roles.Any(role =>
+            && CurrentUserRoleNames().Any(role =>
                 string.Equals(role, "Property Manager", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "Estate Manager", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "Head of Estate", StringComparison.OrdinalIgnoreCase)
@@ -4182,13 +4619,86 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return true;
         }
 
-        return _currentUser.Roles.Any(role =>
+        return CurrentUserRoleNames().Any(role =>
             assignedTokens.Any(token => string.Equals(token, role, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static string[] SplitAssignedRoles(string assignedRole)
         => assignedRole
             .Split(['/', ',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static IReadOnlyList<string> ResolveProcedureNotificationRoles(ProcedureCase procedureCase)
+    {
+        var currentStageName = procedureCase.CurrentStageName?.Trim();
+        var roles = SplitAssignedRoles(procedureCase.CurrentAssignedRole ?? string.Empty)
+            .Where(role => !role.StartsWith("User:", StringComparison.OrdinalIgnoreCase))
+            .Where(role => !string.Equals(role, currentStageName, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (roles.Count == 0
+            && !string.IsNullOrWhiteSpace(procedureCase.CurrentStageOwner)
+            && !string.Equals(procedureCase.CurrentStageOwner, currentStageName, StringComparison.OrdinalIgnoreCase))
+        {
+            roles.Add(procedureCase.CurrentStageOwner.Trim());
+        }
+
+        return roles;
+    }
+
+    private static string BuildProcedureCaseActionUrl(ProcedureCase procedureCase)
+    {
+        var entityType = Uri.EscapeDataString(procedureCase.EntityType);
+        var query = $"caseId={procedureCase.Id}";
+
+        if (string.Equals(procedureCase.Module, "Legal", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"/legal/{entityType}?{query}";
+        }
+
+        if (string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"/estate/facilities/{entityType}?{query}";
+        }
+
+        if (string.Equals(procedureCase.Module, "PropertyManagement", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"/estate/property-management/{entityType}?{query}";
+        }
+
+        if (string.Equals(procedureCase.Module, "Estate", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"/estate/{entityType}?{query}";
+        }
+
+        return $"/dashboard?{query}";
+    }
+
+    private static string ProcedureModuleLabel(string? module)
+        => module switch
+        {
+            not null when module.Equals("PropertyManagement", StringComparison.OrdinalIgnoreCase) => "Property Management",
+            not null when module.Equals("Facilities", StringComparison.OrdinalIgnoreCase) => "Facilities",
+            not null when module.Equals("Legal", StringComparison.OrdinalIgnoreCase) => "Legal",
+            not null when module.Equals("Estate", StringComparison.OrdinalIgnoreCase) => "Estate",
+            not null when !string.IsNullOrWhiteSpace(module) => module.Trim(),
+            _ => "Workflow"
+        };
+
+    private static string NotificationTopicSegment(string? module)
+    {
+        var source = string.IsNullOrWhiteSpace(module) ? "workflow" : module.Trim();
+        var normalized = new string(source
+            .Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '.')
+            .ToArray());
+
+        while (normalized.Contains("..", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("..", ".", StringComparison.Ordinal);
+        }
+
+        return normalized.Trim('.');
+    }
 
     private static bool IsAssignedUserToken(string token, Guid userId)
     {
@@ -4204,12 +4714,47 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .StartsWith("api/procedure-cases/", StringComparison.OrdinalIgnoreCase);
 
     private bool IsWorkflowAdmin() =>
-        _currentUser.Roles.Any(role =>
+        CurrentUserRoleNames().Any(role =>
             string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, "SystemAdmin", StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, "SuperAdmin", StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, "TenantAdmin", StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, "WorkflowAdmin", StringComparison.OrdinalIgnoreCase));
+
+    private IReadOnlyCollection<string> CurrentUserRoleNames()
+    {
+        if (_currentUserRoleNames is not null)
+        {
+            return _currentUserRoleNames;
+        }
+
+        var roles = _currentUser.Roles
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Select(role => role.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (Guid.TryParse(_currentUser.UserId, out var userId) && userId != Guid.Empty)
+        {
+            var databaseRoles = _db.UserRoles
+                .AsNoTracking()
+                .Where(userRole => userRole.UserId == userId)
+                .Join(
+                    _db.Roles.AsNoTracking(),
+                    userRole => userRole.RoleId,
+                    role => role.Id,
+                    (_, role) => role.Name)
+                .Where(role => !string.IsNullOrWhiteSpace(role))
+                .ToList();
+
+            foreach (var role in databaseRoles)
+            {
+                roles.Add(role!.Trim());
+            }
+        }
+
+        _currentUserRoleNames = roles;
+        return _currentUserRoleNames;
+    }
 
     private Guid RequireTenantId() =>
         _currentUser.TenantId is { } tenantId && tenantId != Guid.Empty
@@ -4316,6 +4861,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private async Task<ProcedureCaseDetailDto> ToDetailDtoAsync(ProcedureCase procedureCase)
     {
         var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase);
+        var fields = procedureCase.Fields.OrderBy(item => item.CreatedAt).Select(ToFieldDto).ToList();
+        await AddFacilitiesMaintenanceExecutionStatusFieldsAsync(procedureCase, fields);
         return new(
             procedureCase.Id,
             procedureCase.Module,
@@ -4335,10 +4882,75 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             procedureCase.WorkflowInstanceId,
             CanEdit(procedureCase),
             currentStageFieldKeys,
-            procedureCase.Fields.OrderBy(item => item.CreatedAt).Select(ToFieldDto).ToList(),
+            fields,
             procedureCase.ChecklistItems.OrderBy(item => item.StageIndex).ThenBy(item => item.CreatedAt).Select(ToChecklistDto).ToList(),
             procedureCase.Documents.OrderBy(item => item.CreatedAt).Select(ToDocumentDto).ToList(),
             procedureCase.Activities.OrderByDescending(item => item.PerformedAt).Take(20).Select(ToActivityDto).ToList());
+    }
+
+    private async Task AddFacilitiesMaintenanceExecutionStatusFieldsAsync(
+        ProcedureCase procedureCase,
+        List<ProcedureCaseFieldDto> fields)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var jobCard = await ResolveFacilitiesMaintenanceJobCardAsync(procedureCase);
+        if (jobCard is null)
+        {
+            return;
+        }
+
+        string? workOrderNumber = jobCard.GeneratedWorkOrderNumber;
+        string? workOrderStatus = null;
+        if (jobCard.GeneratedWorkOrderId.HasValue)
+        {
+            var workOrder = await _db.WorkOrders
+                .AsNoTracking()
+                .Where(item => item.TenantId == procedureCase.TenantId
+                    && !item.IsDeleted
+                    && item.Id == jobCard.GeneratedWorkOrderId.Value)
+                .Select(item => new { item.WorkOrderNumber, item.Status })
+                .FirstOrDefaultAsync();
+
+            workOrderNumber = workOrder?.WorkOrderNumber ?? workOrderNumber;
+            workOrderStatus = workOrder?.Status;
+        }
+
+        var jobCardComplete = IsMaintenanceExecutionComplete(jobCard.JobCardStatus);
+        var workOrderComplete = !jobCard.GeneratedWorkOrderId.HasValue
+            ? true
+            : IsMaintenanceExecutionComplete(workOrderStatus);
+        var executionComplete = jobCardComplete && workOrderComplete;
+        var executionStatus = workOrderStatus is null
+            ? $"Job card {jobCard.JobCardNumber} - {jobCard.JobCardStatus}"
+            : $"Job card {jobCard.JobCardNumber} - {jobCard.JobCardStatus}; work order {workOrderNumber ?? jobCard.GeneratedWorkOrderNumber ?? "not recorded"} - {workOrderStatus}";
+
+        AddOrReplaceSyntheticField(fields, "maintenanceJobCardStatus", "Maintenance job card status", jobCard.JobCardStatus);
+        AddOrReplaceSyntheticField(fields, "maintenanceWorkOrderReference", "Maintenance work order reference", workOrderNumber);
+        AddOrReplaceSyntheticField(fields, "maintenanceWorkOrderStatus", "Maintenance work order status", workOrderStatus);
+        AddOrReplaceSyntheticField(fields, "maintenanceExecutionStatus", "Maintenance execution status", executionStatus);
+        AddOrReplaceSyntheticField(fields, "maintenanceExecutionComplete", "Maintenance execution complete", executionComplete ? "true" : "false");
+    }
+
+    private static void AddOrReplaceSyntheticField(
+        List<ProcedureCaseFieldDto> fields,
+        string key,
+        string label,
+        string? value)
+    {
+        var existingIndex = fields.FindIndex(field => string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase));
+        var field = new ProcedureCaseFieldDto(Guid.Empty, key, label, "text", value, null);
+        if (existingIndex >= 0)
+        {
+            fields[existingIndex] = field;
+            return;
+        }
+
+        fields.Add(field);
     }
 
     private async Task<IReadOnlyList<string>> GetCurrentStageFieldKeysAsync(ProcedureCase procedureCase)
@@ -4535,8 +5147,117 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .SetProperty(item => item.LastActionById, userId)
                 .SetProperty(item => item.UpdatedAt, DateTime.UtcNow));
 
+        await SyncWorkflowCaseChecklistAndDocumentsAsync(
+            tenantId,
+            procedureCaseId,
+            userId,
+            instance.WorkflowDefinitionId,
+            orderedSteps);
+
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCaseId, "Workflow synced", currentStep?.Name ?? "Completed", notes));
         await _db.SaveChangesAsync();
+    }
+
+    private async Task SyncWorkflowCaseChecklistAndDocumentsAsync(
+        Guid tenantId,
+        Guid procedureCaseId,
+        Guid userId,
+        Guid workflowDefinitionId,
+        IReadOnlyList<WorkflowStep> orderedSteps)
+    {
+        var now = DateTime.UtcNow;
+        var workflowChecklist = orderedSteps
+            .SelectMany((step, index) => BuildConfiguredWorkflowChecklist(step)
+                .Select(text => new
+                {
+                    StageIndex = index,
+                    StageName = step.Name,
+                    Text = text
+                }))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Text))
+            .GroupBy(item => $"{item.StageIndex}|{item.StageName}|{item.Text}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+        var checklistKeys = workflowChecklist
+            .Select(item => $"{item.StageIndex}|{item.StageName}|{item.Text}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var existingChecklistItems = await _db.ProcedureCaseChecklistItems
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId && item.ProcedureCaseId == procedureCaseId && !item.IsDeleted)
+            .ToListAsync();
+
+        foreach (var staleItem in existingChecklistItems.Where(item =>
+                     !checklistKeys.Contains($"{item.StageIndex}|{item.StageName}|{item.Text}")))
+        {
+            staleItem.IsDeleted = true;
+            staleItem.UpdatedAt = now;
+            staleItem.LastModifiedById = userId;
+        }
+
+        foreach (var checklistItem in workflowChecklist)
+        {
+            if (existingChecklistItems.Any(item =>
+                    item.StageIndex == checklistItem.StageIndex
+                    && string.Equals(item.StageName, checklistItem.StageName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.Text, checklistItem.Text, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            _db.ProcedureCaseChecklistItems.Add(new ProcedureCaseChecklistItem
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = procedureCaseId,
+                StageIndex = checklistItem.StageIndex,
+                StageName = checklistItem.StageName,
+                Text = checklistItem.Text,
+                CreatedById = userId,
+                CreatedAt = now
+            });
+        }
+
+        var workflowDocuments = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);
+        var documentKeys = workflowDocuments
+            .Select(item => $"{item.RequiredFrom}|{item.Name}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingDocuments = await _db.ProcedureCaseDocuments
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId && item.ProcedureCaseId == procedureCaseId && !item.IsDeleted)
+            .ToListAsync();
+
+        foreach (var staleDocument in existingDocuments.Where(item =>
+                     !documentKeys.Contains($"{item.RequiredFrom}|{item.Name}")
+                     && string.IsNullOrWhiteSpace(item.FileName)
+                     && string.IsNullOrWhiteSpace(item.FileUrl)))
+        {
+            staleDocument.IsDeleted = true;
+            staleDocument.UpdatedAt = now;
+            staleDocument.LastModifiedById = userId;
+        }
+
+        foreach (var document in workflowDocuments)
+        {
+            if (existingDocuments.Any(item =>
+                    string.Equals(item.RequiredFrom, document.RequiredFrom, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.Name, document.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            _db.ProcedureCaseDocuments.Add(new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                ProcedureCaseId = procedureCaseId,
+                Name = document.Name,
+                RequiredFrom = document.RequiredFrom,
+                ProvidedBy = ResolveDocumentProvider(document.Name, document.ProvidedBy),
+                IsMandatory = document.IsMandatory,
+                CreatedById = userId,
+                CreatedAt = now
+            });
+        }
     }
 
     private async Task<string?> ResolveCurrentWorkflowAssignmentLabelAsync(

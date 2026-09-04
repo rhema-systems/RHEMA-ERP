@@ -196,6 +196,13 @@ class ExternalEstateServicesService {
     };
   }
 
+  async getRequest(requestId: string): Promise<ExternalEstateServiceRequest> {
+    const response = await apiService.get<
+      ApiResponse<ExternalEstateServiceRequest>
+    >(`/estate/external/requests/${encodeURIComponent(requestId)}`);
+    return response.data;
+  }
+
   async getMyProperties(): Promise<ExternalPropertyPortfolio> {
     const response = await apiService.get<ApiResponse<ExternalPropertyPortfolio>>(
       '/estate/external/my-properties'

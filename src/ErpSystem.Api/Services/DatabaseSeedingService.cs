@@ -116,7 +116,8 @@ namespace ErpSystem.Web.Services
             IReadOnlyList<string> Documents,
             string TaskActionType = "estate-sop-example",
             string DocumentType = "EstateSopEvidence",
-            string? Instructions = null);
+            string? Instructions = null,
+            IReadOnlyList<string>? FieldKeys = null);
 
         public DatabaseSeedingService(
             ApplicationDbContext context,
@@ -823,6 +824,17 @@ namespace ErpSystem.Web.Services
                         })
                         .ToList()
                 },
+                FormFields = step.FieldKeys?
+                    .Where(field => !string.IsNullOrWhiteSpace(field))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(field => new WorkflowFormFieldDto
+                    {
+                        Name = field.Trim(),
+                        Label = field.Trim(),
+                        FieldType = WorkflowFieldType.Text,
+                        IsRequired = false
+                    })
+                    .ToList(),
                 TaskConfig = new WorkflowTaskConfigDto
                 {
                     TaskActionType = step.TaskActionType,
@@ -938,13 +950,38 @@ namespace ErpSystem.Web.Services
             {
                 Step("Facilities Intake", WorkflowStepType.Manual, "Facilities Officer",
                     ["Requester, contact, property/unit, issue type, and priority are confirmed", "Service impact, target date, and access notes are recorded", "Maintenance job card need is assessed"],
-                    []),
+                    [],
+                    fieldKeys:
+                    [
+                        "issueType",
+                        "priority",
+                        "serviceImpact",
+                        "targetDate",
+                        "preferredVisitDate",
+                        "accessInstructions",
+                        "issueDescription"
+                    ]),
                 Step("Maintenance Handoff Review", WorkflowStepType.Manual, "Facilities Supervisor",
                     ["Maintenance routing decision is recorded", "Safety, access, and SLA context are confirmed", "Requester update has been issued"],
-                    []),
+                    [],
+                    fieldKeys:
+                    [
+                        "priority",
+                        "serviceImpact",
+                        "targetDate",
+                        "accessInstructions",
+                        "closureNotes"
+                    ]),
                 Step("Maintenance Closeout", WorkflowStepType.Approval, "Facilities Manager",
                     ["Job card or work order reference is recorded where required", "Inspection, requester feedback, and completion outcome are reviewed", "Facilities case is ready for closeout"],
-                    [])
+                    [],
+                    fieldKeys:
+                    [
+                        "maintenanceJobCardReference",
+                        "maintenanceWorkOrderReference",
+                        "requesterFeedbackStatus",
+                        "closureNotes"
+                    ])
             };
 
             var facilitiesComplaintSteps = new[]
@@ -993,8 +1030,9 @@ namespace ErpSystem.Web.Services
                 WorkflowStepType type,
                 string role,
                 IReadOnlyList<string> checks,
-                IReadOnlyList<string> documents)
-                => new(name, type, role, string.Join(" ", checks), checks, documents);
+                IReadOnlyList<string> documents,
+                IReadOnlyList<string>? fieldKeys = null)
+                => new(name, type, role, string.Join(" ", checks), checks, documents, FieldKeys: fieldKeys);
 
             static EstateSopWorkflowSeedSpec Spec(
                 string entityCode,
@@ -8346,6 +8384,13 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Manage Facilities Billing",
                     Description = "Prepare Facilities billing instruction packages and follow-up records",
                     Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "maintenance.access",
+                    DisplayName = "Access Maintenance",
+                    Description = "Access Maintenance Management job cards, work orders, and dashboard handoffs",
+                    Category = "Maintenance"
                 },
                 new
                 {

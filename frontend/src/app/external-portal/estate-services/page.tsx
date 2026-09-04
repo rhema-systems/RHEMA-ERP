@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import React from 'react';
-import { ClipboardList, Loader2, Send, Wrench } from 'lucide-react';
+import { ClipboardList, Eye, Loader2, Send, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -45,7 +46,6 @@ type EstateServiceFormState = {
   category: string;
   priority: string;
   serviceImpact: string;
-  targetDate: string;
   description: string;
   additionalValues: Record<string, string>;
 };
@@ -219,7 +219,6 @@ const initialForm = {
   category: '',
   priority: 'Normal',
   serviceImpact: 'Tenant affected',
-  targetDate: '',
   description: '',
   additionalValues: {},
 } satisfies EstateServiceFormState;
@@ -517,7 +516,6 @@ export default function ExternalEstateServicesPage() {
         category: form.category.trim() || selectedType?.category || '',
         priority: form.priority,
         serviceImpact: form.serviceImpact,
-        targetDate: form.targetDate || undefined,
         description: form.description.trim(),
         additionalValues,
       });
@@ -676,7 +674,7 @@ export default function ExternalEstateServicesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Priority</Label>
+                  <Label>Urgency</Label>
                   <Select
                     value={form.priority}
                     onValueChange={(value) => updateForm('priority', value)}
@@ -685,23 +683,13 @@ export default function ExternalEstateServicesPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {['Low', 'Normal', 'High', 'Emergency'].map((priority) => (
+                      {['Low', 'Normal', 'High', 'Urgent'].map((priority) => (
                         <SelectItem key={priority} value={priority}>
                           {priority}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Target date</Label>
-                  <Input
-                    type="date"
-                    value={form.targetDate}
-                    onChange={(event) =>
-                      updateForm('targetDate', event.target.value)
-                    }
-                  />
                 </div>
               </div>
               {extraFields.length > 0 ? (
@@ -777,22 +765,39 @@ export default function ExternalEstateServicesPage() {
               </div>
             ) : null}
             {requests.map((request) => (
-              <div key={request.id} className="rounded-md border p-3 text-sm">
+              <div
+                key={request.id}
+                className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm text-slate-100 shadow-sm"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="font-medium text-slate-900">
+                    <div className="font-medium text-white">
                       {request.referenceNumber || request.title}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
+                    <div className="mt-1 text-xs text-slate-300">
                       {request.title}
                     </div>
                   </div>
                   <Badge variant="secondary">{request.status}</Badge>
                 </div>
-                <div className="mt-3 grid gap-2 text-xs text-slate-600">
+                <div className="mt-3 grid gap-2 text-xs text-slate-300">
                   <div>{request.currentStageName}</div>
                   <div>{request.currentAssignedRole || 'Awaiting assignment'}</div>
                   <div>{formatDate(request.createdAt)}</div>
+                </div>
+                <div className="mt-4 flex justify-end border-t border-slate-800 pt-3">
+                  <Button
+                    asChild
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="border-slate-500 bg-slate-900 text-white hover:bg-slate-800 hover:text-white"
+                  >
+                    <Link href={`/external-portal/estate-services/${request.id}`}>
+                      <Eye className="mr-2 h-4 w-4" />
+                      Open
+                    </Link>
+                  </Button>
                 </div>
               </div>
             ))}

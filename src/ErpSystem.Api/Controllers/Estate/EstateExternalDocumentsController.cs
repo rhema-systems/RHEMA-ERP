@@ -350,6 +350,27 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         });
     }
 
+    [HttpGet("/api/estate/external/requests/{requestId:guid}")]
+    public async Task<IActionResult> GetMyRequest(Guid requestId, CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var procedureCase = await LoadOwnedExternalEstateRequestAsync(
+            tenantId,
+            userId.Value,
+            requestId,
+            cancellationToken);
+
+        return procedureCase is null
+            ? NotFound(new { success = false, message = "Estate service request was not found." })
+            : Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
+    }
+
     [HttpPost("/api/estate/external/requests/{requestId:guid}/customer-intake-documents/{documentId:guid}/upload")]
     [RequestSizeLimit(52_428_800)]
     public async Task<IActionResult> UploadCustomerIntakeDocument(
@@ -2046,7 +2067,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? "Source: External Portal -> Estate / Facilities"
             : "Source: External Portal -> Estate";
         var roles = definition.Module == "Facilities"
-            ? new[] { "Facilities Manager", "Estate Manager", "Estate Officer" }
+            ? new[] { "Facilities Officer", "Facilities Supervisor", "Facilities Manager", "Estate Manager", "Estate Officer" }
             : new[] { "Estate Manager", "Estate Officer", "Land Registry Officer", "Records Officer" };
 
         try
@@ -2181,6 +2202,25 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.OpenedById == userId
                 && item.SourceDepartment == "External Portal - Estate Listings"
                 && item.EntityType == "EstatePropertyManagementListingApplication",
+                cancellationToken);
+
+    private async Task<ProcedureCase?> LoadOwnedExternalEstateRequestAsync(
+        Guid tenantId,
+        Guid userId,
+        Guid requestId,
+        CancellationToken cancellationToken)
+        => await _db.ProcedureCases
+            .AsNoTracking()
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item =>
+                item.Id == requestId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.OpenedById == userId
+                && (item.SourceDepartment == "External Portal"
+                    || item.SourceDepartment == "External Portal - Estate Services"
+                    || item.SourceDepartment == "External Portal - Estate Listings"),
                 cancellationToken);
 
     private static object ToExternalRequestDto(ProcedureCase procedureCase)
@@ -2802,14 +2842,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["issueDescription"] = request.Description,
             ["complaintDescription"] = request.Description,
             ["serviceImpact"] = request.ServiceImpact,
-            ["priority"] = request.Priority,
+            ["reportedPriority"] = request.Priority,
+            ["customerReportedUrgency"] = request.Priority,
             ["requester"] = request.ApplicantName,
             ["requesterType"] = "Tenant / occupant",
             ["complainantName"] = request.ApplicantName,
             ["complainantType"] = "Client",
             ["issueType"] = request.Category,
             ["complaintCategory"] = request.Category,
-            ["targetDate"] = request.TargetDate?.ToString("yyyy-MM-dd"),
             ["schedule"] = ResolveEstateSchedule(definition),
             ["procedureType"] = definition.Title
         };
