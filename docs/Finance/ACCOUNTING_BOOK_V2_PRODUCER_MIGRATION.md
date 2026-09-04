@@ -32,6 +32,10 @@ the central engine intentionally fails closed instead of creating a mapping.
 
 ## Contract replacement
 
+### Phase 5 account-identity boundary
+
+Producer owners must treat `IFinanceAccountProvisioningService` as authoritative for the physical GL account number. Supply the reviewed natural account code and account intent; Finance resolves the tenant COMPANY value, validates the exact active COMPANY/NATURAL_ACCOUNT structure, and composes the identifier. Do not copy tenant-specific segment GUIDs, create `AccountSegmentValue` rows, or place department/project/estate/contract/funding/activity values inside a GL number. Those values use the existing Finance transaction-dimension contract and routes. Existing V1 posting compatibility is unaffected.
+
 | V1 | V2 |
 | --- | --- |
 | `FinancePostingRequestDto` | `FinancePostingRequestV2Dto` |
