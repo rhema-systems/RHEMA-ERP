@@ -10,17 +10,17 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Phase 5 — account segments versus transaction dimensions |
-| Status | `COMPLETE` |
+| Phase | Phase 6 — journal usability and account inquiry |
+| Status | `IMPLEMENTING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
-| Branch | `codex/finance-segments-dimensions-seed-phase5` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-segments-dimensions-seed-phase5` |
+| Exact base | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
+| Branch | `codex/finance-account-inquiry-journal-ux-phase6` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-account-inquiry-journal-ux-phase6` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `290377a213dc47866bbb5a594d5281c23a3b5b3c` |
+| Primary HEAD at activation | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | `APPROVED`; all Phase 5 findings closed and integrated |
+| Review status | Not started; implementation active |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -92,10 +92,16 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | 2 | `45fa499901f35821c655b82966dc86a6d2bf260b` | `CHANGES_REQUIRED` | The original five findings are closed, but one P2 regression remains: account update persists normalized rows, then maps the stale tracked navigation and can return soft-deleted raw rows instead of the new canonical identity. Independent gates passed 29 backend and 8 frontend tests, ESLint, EF no-pending-model and diff checks. A narrow response-reload/synchronization fix and direct returned-DTO assertion were sent to the implementer. | Not integrated |
 | 3 | `4d2891e676a82c912c54c61abcf488379c70f244` | `APPROVED` | Narrow correction `4d2891e6` returns only the canonical active account identity after update and adds direct returned-DTO regression coverage. Independent review reconfirmed all earlier closures and passed 29 backend tests, build, EF no-pending-model and diff checks; prior 8 frontend tests and ESLint remained valid. | Five commits cherry-picked without conflict as `58b43652`, `fcb84743`, `28763284`, `f2c06f4e`, and `1f273978`. Task-owned files match the reviewed tree; only the coordination ledger differs. Primary verification passed: build with 0 errors, 29 focused backend tests, 8 frontend tests, targeted ESLint, EF no-pending-model, and diff check. Migration remains unapplied. |
 
+## Phase 6 review cycles
+
+| Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
+|---|---|---|---|---|
+| 1 | Pending | Implementation active | Phase 6 issued from exact primary base `35df12ea`, covering description-only line copying in standard and Unit journals plus secure exact-book paginated recent-account-transaction inquiry and complete UI request states. | Pending |
+
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 5 is independently approved and integrated through primary commit `1f273978a4a5445b3530b2ce48daaa2e1bcd2e8f`. Build, 29 backend tests, 8 frontend tests, ESLint, EF model-drift and diff gates passed. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Phase 5 is independently approved and integrated, with its completion checkpoint committed as `35df12ea`. Phase 6 instructions were delivered to the existing implementer from that exact base. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
-Commit the Phase 5 completion checkpoint and immediately activate Phase 6 from that exact primary commit. Do not apply migrations or cross any other escalation gate without user authorization.
+Monitor and independently review Phase 6, send corrections directly as needed, and integrate only after approval. When the final phase is complete, stop before any database migration/reset, cross-module producer cutover, destructive cleanup, push or PR action and report the remaining authorization gates to the user.
