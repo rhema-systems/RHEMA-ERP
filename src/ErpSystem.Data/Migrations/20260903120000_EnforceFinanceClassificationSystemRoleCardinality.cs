@@ -31,7 +31,9 @@ public partial class EnforceFinanceClassificationSystemRoleCardinality : Migrati
             table: "AccountClassifications",
             columns: new[] { "TenantId", "AccountingBookId", "SystemRole" },
             unique: true,
-            filter: "[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] NOT IN (1, 2)");
+            // SQL Server filtered indexes accept conjunctions of simple comparisons, but
+            // reject NOT IN in the filter grammar even though it is valid query syntax.
+            filter: "[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder) =>

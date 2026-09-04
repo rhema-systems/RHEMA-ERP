@@ -906,6 +906,8 @@ public sealed class AccountingBookClassificationAuthorityTests
     {
         var index = new CardinalityMigration().BuildUpOperations().OfType<CreateIndexOperation>().Single();
         index.IsUnique.Should().BeTrue();
-        index.Filter.Should().Contain("[SystemRole] NOT IN (1, 2)");
+        index.Filter.Should().Be(
+            "[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
+        index.Filter.Should().NotContain("NOT IN");
     }
 }

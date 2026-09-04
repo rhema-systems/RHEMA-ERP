@@ -8319,7 +8319,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "AccountingBookId", "SystemRole")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] NOT IN (1, 2)");
+                        .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
 
                     b.HasIndex("TenantId", "AccountingBookId", "ParentClassificationId", "DisplayOrder");
 

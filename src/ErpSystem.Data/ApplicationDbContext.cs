@@ -2896,7 +2896,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.ParentClassificationId, item.DisplayOrder });
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.SystemRole })
                 .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] NOT IN (1, 2)");
+                .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
             entity.Property(item => item.Code).HasMaxLength(50).IsRequired();
             entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
             entity.Property(item => item.Description).HasMaxLength(1000);
