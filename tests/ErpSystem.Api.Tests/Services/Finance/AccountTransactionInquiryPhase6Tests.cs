@@ -63,6 +63,42 @@ public sealed class AccountTransactionInquiryPhase6Tests
     }
 
     [Fact]
+    public async Task Inquiry_FailsClosedForUnknownOrInactiveBook()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
+        book.IsActive = false;
+        await db.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(db);
+        var service = CreateService(unitOfWork, tenantId);
+
+        await FluentActions.Invoking(() => service.GetTransactionsAsync(account.Id, "UNKNOWN"))
+            .Should().ThrowAsync<KeyNotFoundException>();
+        await FluentActions.Invoking(() => service.GetTransactionsAsync(account.Id, book.Code))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*inactive*");
+    }
+
+    [Fact]
+    public async Task Inquiry_ReturnsARealEmptyPageForAnEnabledExactBook()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
+        await db.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(db);
+        var service = CreateService(unitOfWork, tenantId);
+
+        var result = await service.GetTransactionsAsync(account.Id, book.Code);
+
+        result.Items.Should().BeEmpty();
+        result.TotalCount.Should().Be(0);
+        result.TotalPages.Should().Be(0);
+        result.AccountingBookCode.Should().Be(book.Code);
+    }
+
+    [Fact]
     public async Task Inquiry_ReturnsOnlyPostedExactBookLinesInStablePages()
     {
         await using var db = CreateContext();
@@ -102,6 +138,11 @@ public sealed class AccountTransactionInquiryPhase6Tests
         first.Items.Concat(second.Items).Select(item => item.Id).Should().OnlyHaveUniqueItems();
         first.Items.Should().OnlyContain(item => item.AccountingBookCode == book.Code
             && item.FunctionalCurrencyCode == "GHS");
+        first.Items.Should().OnlyContain(item => item.TransactionCurrencyCode == "USD"
+            && item.TransactionDebitAmount == 2m
+            && item.ForeignAmount == 2m
+            && item.ExchangeRate == 5m
+            && item.Dimensions.Count == 0);
     }
 
     private static ApplicationDbContext CreateContext() => new(
@@ -158,6 +199,8 @@ public sealed class AccountTransactionInquiryPhase6Tests
             JournalEntryId = journal.Id, Account = account, JournalEntry = journal,
             FiscalPeriodId = journal.FiscalPeriodId, TransactionDate = date, PostedDate = date,
             DebitAmount = 10m, FunctionalCurrencyCode = "GHS", BookClassification = bookCode,
+            TransactionCurrency = "USD", TransactionDebitAmount = 2m,
+            ForeignCurrencyAmount = 2m, ExchangeRate = 5m,
             PostingStatus = status, LineNumber = lineNumber
         });
     }
