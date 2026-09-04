@@ -69,9 +69,7 @@ public class FinanceDataSeeder
             await SeedAccountsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
-            // 6.1 Seed a deliberately small set of realistic DEPT-ACCT-PROJ combinations.
-            // The full Cartesian product would make account selectors unusable and would imply
-            // that every department/project/account combination had been approved by TDC.
+            // 6.1 Deliberately no-op: analytical dimensions must not be expanded into GL identities.
             await SeedFinanceDemoAccountCombinationsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
@@ -633,495 +631,92 @@ public class FinanceDataSeeder
 
     private async Task SeedAccountSegmentsAsync(Guid tenantId, DateTime baseDate)
     {
-        // Target client COA shape restored from historical seed: DEPT-ACCT-PROJ.
-        var deptSegment = await EnsureSegmentStructureAsync(
-            tenantId,
-            preferredId: Guid.Parse("00000004-0001-0001-0001-000000000002"),
-            segmentName: "Department",
-            segmentCode: "DEPT",
-            segmentPosition: 1,
-            segmentLength: 3,
-            dataType: "Alphanumeric",
-            separatorCharacter: "-",
-            lookupTableRequired: true,
-            isMandatory: true,
-            isReportingDimension: true,
-            isNaturalAccount: false,
-            description: "Functional Department",
-            baseDate: baseDate);
-
-        var depts = new[]
-        {
-            new { Val = "000", Desc = "General / No Department" },
-            new { Val = "100", Desc = "Finance & Administration" },
-            new { Val = "200", Desc = "Estates Management" },
-            new { Val = "300", Desc = "Development & Engineering" },
-            new { Val = "400", Desc = "Legal" },
-            new { Val = "500", Desc = "Corporate Planning & Communication" },
-            new { Val = "600", Desc = "Internal Audit" }
-        };
-
-        var order = 1;
-        foreach (var dept in depts)
-        {
-            await EnsureSegmentLookupValueAsync(tenantId, deptSegment.Id, dept.Val, dept.Desc, order++, baseDate);
-        }
-
-        var accountSegment = await EnsureSegmentStructureAsync(
-            tenantId,
-            preferredId: Guid.Parse("00000004-0001-0001-0001-000000000003"),
-            segmentName: "Natural Account",
-            segmentCode: "ACCT",
-            segmentPosition: 2,
-            segmentLength: 4,
-            dataType: "Numeric",
-            separatorCharacter: "-",
-            lookupTableRequired: false,
-            isMandatory: true,
-            isReportingDimension: true,
-            isNaturalAccount: true,
-            description: "Natural GL Account",
-            baseDate: baseDate);
-
-        var projectSegment = await EnsureSegmentStructureAsync(
-            tenantId,
-            preferredId: Guid.Parse("00000004-0001-0001-0001-000000000004"),
-            segmentName: "Project",
-            segmentCode: "PROJ",
-            segmentPosition: 3,
-            segmentLength: 4,
-            dataType: "Alphanumeric",
-            separatorCharacter: null,
-            lookupTableRequired: true,
-            isMandatory: true,
-            isReportingDimension: true,
-            isNaturalAccount: false,
-            description: "Capital/Construction Project",
-            baseDate: baseDate);
-
-        var projects = new[]
-        {
-            new { Val = "0000", Desc = "No Project" },
-            new { Val = "P101", Desc = "Community 26 Kpone Affordable Housing" },
-            new { Val = "P102", Desc = "Oxygen City Housing Project (Ho)" },
-            new { Val = "P103", Desc = "Kaiser Flats Redevelopment" },
-            new { Val = "P104", Desc = "Tema 5,000-Capacity Event Center" }
-        };
-
-        order = 1;
-        foreach (var project in projects)
-        {
-            await EnsureSegmentLookupValueAsync(tenantId, projectSegment.Id, project.Val, project.Desc, order++, baseDate);
-        }
-
-        await DeactivateLegacySegmentAsync(tenantId, "FUND", "FUND");
-        await DeactivateLegacySegmentAsync(tenantId, "TEST", "TEST SEGMENT");
-
-        await _context.SaveChangesAsync();
-        _logger.LogInformation("Account segments seeded");
-
-        async Task EnsureSegmentLookupValueAsync(
-            Guid lookupTenantId,
-            Guid segmentStructureId,
-            string segmentValue,
-            string description,
-            int displayOrder,
-            DateTime effectiveDate)
-        {
-            var existing = await _context.SegmentLookupValues
-                .FirstOrDefaultAsync(v =>
-                    v.TenantId == lookupTenantId &&
-                    v.SegmentStructureId == segmentStructureId &&
-                    v.SegmentValue == segmentValue);
-
-            if (existing == null)
-            {
-                await _context.SegmentLookupValues.AddAsync(new SegmentLookupValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = lookupTenantId,
-                    SegmentStructureId = segmentStructureId,
-                    SegmentValue = segmentValue,
-                    Description = description,
-                    DisplayOrder = displayOrder,
-                    EffectiveDate = effectiveDate,
-                    IsActive = true,
-                    CreatedAt = effectiveDate,
-                    CreatedBy = "System"
-                });
-                return;
-            }
-
-            existing.Description = description;
-            existing.DisplayOrder = displayOrder;
-            existing.EffectiveDate = existing.EffectiveDate == default ? effectiveDate : existing.EffectiveDate;
-            existing.IsActive = true;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedBy = "System";
-        }
-
-        async Task DeactivateLegacySegmentAsync(Guid legacyTenantId, string segmentCode, string segmentName)
-        {
-            var code = segmentCode.ToUpper();
-            var name = segmentName.ToUpper();
-            var legacySegment = await _context.AccountSegmentStructures
-                .FirstOrDefaultAsync(s =>
-                    s.TenantId == legacyTenantId &&
-                    s.IsActive &&
-                    ((s.SegmentCode != null && s.SegmentCode.ToUpper() == code)
-                     || (s.SegmentName != null && s.SegmentName.ToUpper() == name)));
-
-            if (legacySegment == null)
-            {
-                return;
-            }
-
-            legacySegment.IsActive = false;
-            legacySegment.UpdatedAt = DateTime.UtcNow;
-            legacySegment.UpdatedBy = "System";
-            _logger.LogInformation("Deactivated legacy segment structure {SegmentCode} for tenant {TenantId}", legacySegment.SegmentCode, legacyTenantId);
-        }
+        await new FinanceSegmentDimensionManifestSeeder(_context, _logger).SeedAsync(tenantId, baseDate);
     }
-
-    private async Task<AccountSegmentStructure> EnsureSegmentStructureAsync(
-        Guid tenantId,
-        Guid preferredId,
-        string segmentName,
-        string segmentCode,
-        int segmentPosition,
-        int segmentLength,
-        string dataType,
-        string? separatorCharacter,
-        bool lookupTableRequired,
-        bool isMandatory,
-        bool isReportingDimension,
-        bool isNaturalAccount,
-        string description,
-        DateTime baseDate)
-    {
-        var normalizedSegmentCode = segmentCode.ToUpperInvariant();
-        var normalizedSegmentName = segmentName.ToUpperInvariant();
-
-        var existing = await _context.AccountSegmentStructures
-            .FirstOrDefaultAsync(s =>
-                s.TenantId == tenantId &&
-                (
-                    (isNaturalAccount && s.IsNaturalAccount)
-                    || (s.SegmentCode != null && s.SegmentCode.ToUpper() == normalizedSegmentCode)
-                    || (s.SegmentName != null && s.SegmentName.ToUpper() == normalizedSegmentName)
-                ));
-
-        if (existing != null)
-        {
-            existing.SegmentName = segmentName;
-            existing.SegmentCode = segmentCode;
-            existing.SegmentPosition = segmentPosition;
-            existing.SegmentLength = segmentLength;
-            existing.DataType = dataType;
-            existing.SeparatorCharacter = separatorCharacter;
-            existing.LookupTableRequired = lookupTableRequired;
-            existing.IsMandatory = isMandatory;
-            existing.IsReportingDimension = isReportingDimension;
-            existing.IsNaturalAccount = isNaturalAccount;
-            existing.IsActive = true;
-            existing.Description = description;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedBy = "System";
-            return existing;
-        }
-
-        var idInUse = await _context.AccountSegmentStructures.AnyAsync(s => s.Id == preferredId);
-        var newId = idInUse ? Guid.NewGuid() : preferredId;
-        var created = new AccountSegmentStructure
-        {
-            Id = newId,
-            TenantId = tenantId,
-            SegmentName = segmentName,
-            SegmentCode = segmentCode,
-            SegmentPosition = segmentPosition,
-            SegmentLength = segmentLength,
-            DataType = dataType,
-            SeparatorCharacter = separatorCharacter,
-            LookupTableRequired = lookupTableRequired,
-            IsMandatory = isMandatory,
-            IsReportingDimension = isReportingDimension,
-            IsNaturalAccount = isNaturalAccount,
-            IsActive = true,
-            Description = description,
-            CreatedAt = baseDate,
-            CreatedBy = "System"
-        };
-
-        await _context.AccountSegmentStructures.AddAsync(created);
-        return created;
-    }
-
     #endregion
 
     #region Account Seeding
 
-    private async Task SeedAccountsAsync(Guid tenantId, DateTime baseDate)
+    private Task SeedAccountsAsync(Guid tenantId, DateTime baseDate) =>
+        SeedPhase5AccountsAsync(tenantId, baseDate);
+    private async Task SeedPhase5AccountsAsync(Guid tenantId, DateTime baseDate)
     {
-        // Get Segments
-        var deptSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.SegmentCode == "DEPT" && s.TenantId == tenantId && s.IsActive);
-        var acctSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.IsNaturalAccount && s.TenantId == tenantId);
-        var projectSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.SegmentCode == "PROJ" && s.TenantId == tenantId && s.IsActive);
-
-        if (deptSegment == null || acctSegment == null || projectSegment == null)
+        var company = await _context.AccountSegmentStructures.SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.SegmentCode == FinanceSegmentDimensionManifestSeeder.CompanyCode && item.IsActive && !item.IsDeleted);
+        var natural = await _context.AccountSegmentStructures.SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.SegmentCode == FinanceSegmentDimensionManifestSeeder.NaturalAccountCode && item.IsActive && !item.IsDeleted);
+        if (company == null || natural == null)
         {
-            _logger.LogError("Segments not found during account seeding. Ensure SeedAccountSegmentsAsync runs first.");
+            _logger.LogError("Phase 5 COMPANY/NATURAL_ACCOUNT structure is unavailable for tenant {TenantId}.", tenantId);
             return;
         }
 
-        // Get Default Values
-        var deptValue = await _context.SegmentLookupValues.FirstOrDefaultAsync(v => v.SegmentStructureId == deptSegment.Id && v.SegmentValue == "000");
-        var projectValue = await _context.SegmentLookupValues.FirstOrDefaultAsync(v => v.SegmentStructureId == projectSegment.Id && v.SegmentValue == "0000");
-
-        var standardAccounts = GetStandardChartOfAccounts(tenantId, baseDate);
-        
-        // Filter out accounts that already exist
-        var existingAccountIds = await _context.Accounts
-            .Where(a => a.TenantId == tenantId)
-            .Select(a => a.Id)
-            .ToListAsync();
-            
-        var newAccounts = standardAccounts.Where(a => !existingAccountIds.Contains(a.Id)).ToList();
-
-        if (!newAccounts.Any())
+        var companyValue = await _context.SegmentLookupValues.SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.SegmentStructureId == company.Id && item.IsActive && !item.IsDeleted);
+        if (companyValue == null)
         {
-            _logger.LogInformation("All standard accounts already exist. Skipping.");
+            _logger.LogError("Phase 5 COMPANY lookup value is unavailable for tenant {TenantId}.", tenantId);
             return;
         }
 
-        foreach (var account in newAccounts)
-        {
-            // Apply Segmentation
-            account.IsSegmented = true;
-            account.AccountNumber = $"000-{account.AccountCode}-0000"; // Dept-Account-Project
-            
-            // Create Segment Values
-            account.SegmentValues = new List<AccountSegmentValue>
-            {
-                // Segment 1: Department (000)
-                new AccountSegmentValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    SegmentStructureId = deptSegment.Id,
-                    SegmentPosition = 1,
-                    SegmentValue = "000",
-                    SegmentLookupValueId = deptValue?.Id,
-                    SegmentValueDescription = deptValue?.Description ?? "General / No Department",
-                    EffectiveDate = baseDate,
-                    IsLocked = false,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                },
-
-                // Segment 2: Natural Account (Code)
-                new AccountSegmentValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    SegmentStructureId = acctSegment.Id,
-                    SegmentPosition = 2,
-                    SegmentValue = account.AccountCode,
-                    SegmentLookupValueId = null, // Natural account usually doesn't have lookup, or lookup IS the account list
-                    SegmentValueDescription = account.AccountName,
-                    EffectiveDate = baseDate,
-                    IsLocked = false,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                },
-
-                // Segment 3: Project (0000)
-                new AccountSegmentValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    SegmentStructureId = projectSegment.Id,
-                    SegmentPosition = 3,
-                    SegmentValue = "0000",
-                    SegmentLookupValueId = projectValue?.Id,
-                    SegmentValueDescription = projectValue?.Description ?? "No Project",
-                    EffectiveDate = baseDate,
-                    IsLocked = false,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                }
-            };
-        }
-
-        await _context.Accounts.AddRangeAsync(newAccounts);
-        await _context.SaveChangesAsync(); // Explicitly save changes here
-        
-        _logger.LogInformation($"Seeded {newAccounts.Count} new accounts with segmentation");
-    }
-
-    /// <summary>
-    /// Installs a reviewable subset of the TDC segmented chart for demonstrations and UAT.
-    /// </summary>
-    /// <remarks>
-    /// These are additional posting accounts, not aliases for the natural-account rows. Each
-    /// account carries its own DEPT-ACCT-PROJ evidence, so journal and report filters can prove
-    /// that departmental and project analysis works end to end. The seed is missing-only by
-    /// account number; a developer's or accountant's later edits are never overwritten.
-    /// </remarks>
-    private async Task SeedFinanceDemoAccountCombinationsAsync(Guid tenantId, DateTime baseDate)
-    {
-        var structures = await _context.AccountSegmentStructures
-            .Where(segment => segment.TenantId == tenantId && segment.IsActive && !segment.IsDeleted)
-            .ToListAsync();
-        var departmentSegment = structures.SingleOrDefault(segment => segment.SegmentCode == "DEPT");
-        var naturalAccountSegment = structures.SingleOrDefault(segment => segment.IsNaturalAccount);
-        var projectSegment = structures.SingleOrDefault(segment => segment.SegmentCode == "PROJ");
-        if (departmentSegment == null || naturalAccountSegment == null || projectSegment == null)
-        {
-            _logger.LogWarning(
-                "Skipping Finance demo account combinations because the DEPT-ACCT-PROJ structure is incomplete for tenant {TenantId}.",
-                tenantId);
-            return;
-        }
-
-        var lookupValues = await _context.SegmentLookupValues
-            .Where(value =>
-                value.TenantId == tenantId &&
-                !value.IsDeleted &&
-                value.IsActive &&
-                (value.SegmentStructureId == departmentSegment.Id ||
-                 value.SegmentStructureId == projectSegment.Id))
-            .ToListAsync();
-        var departments = lookupValues
-            .Where(value => value.SegmentStructureId == departmentSegment.Id)
-            .ToDictionary(value => value.SegmentValue, StringComparer.OrdinalIgnoreCase);
-        var projects = lookupValues
-            .Where(value => value.SegmentStructureId == projectSegment.Id)
-            .ToDictionary(value => value.SegmentValue, StringComparer.OrdinalIgnoreCase);
-
-        // SourceCode supplies the accounting classification. NaturalCode is the visible natural
-        // segment and differs only for the three dedicated cash/bank accounts introduced here.
-        var definitions = new[]
-        {
-            new { Department = "100", SourceCode = "1000", NaturalCode = "1001", Project = "0000", Name = "Main Operating Bank - GHS", Currency = "GHS", MultiCurrency = false, Budget = false },
-            new { Department = "100", SourceCode = "1000", NaturalCode = "1002", Project = "0000", Name = "Foreign Currency Bank - USD", Currency = "USD", MultiCurrency = true, Budget = false },
-            new { Department = "100", SourceCode = "1000", NaturalCode = "1003", Project = "0000", Name = "Finance Petty Cash - GHS", Currency = "GHS", MultiCurrency = false, Budget = false },
-            new { Department = "100", SourceCode = "6000", NaturalCode = "6000", Project = "0000", Name = "Salaries - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "100", SourceCode = "6100", NaturalCode = "6100", Project = "0000", Name = "Office Rent - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "100", SourceCode = "6200", NaturalCode = "6200", Project = "0000", Name = "Utilities - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "100", SourceCode = "6500", NaturalCode = "6500", Project = "0000", Name = "Professional Fees - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "100", SourceCode = "6600", NaturalCode = "6600", Project = "0000", Name = "Bank Charges - Finance & Administration", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "200", SourceCode = "4100", NaturalCode = "4100", Project = "0000", Name = "Estate Service Revenue", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "200", SourceCode = "6200", NaturalCode = "6200", Project = "P103", Name = "Utilities - Kaiser Flats Redevelopment", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "300", SourceCode = "1500", NaturalCode = "1500", Project = "P101", Name = "Capital Work in Progress - Community 26", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "300", SourceCode = "6200", NaturalCode = "6200", Project = "P101", Name = "Utilities - Community 26 Project", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "300", SourceCode = "6500", NaturalCode = "6500", Project = "P101", Name = "Professional Fees - Community 26 Project", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "500", SourceCode = "6400", NaturalCode = "6400", Project = "0000", Name = "Publicity - Corporate Planning & Communication", Currency = "GHS", MultiCurrency = false, Budget = true },
-            new { Department = "600", SourceCode = "6500", NaturalCode = "6500", Project = "0000", Name = "External Audit & Assurance Fees", Currency = "GHS", MultiCurrency = false, Budget = true }
-        };
-
-        var sourceCodes = definitions.Select(definition => definition.SourceCode).Distinct().ToList();
-        var sourceAccounts = await _context.Accounts
-            .Where(account =>
-                account.TenantId == tenantId &&
-                !account.IsDeleted &&
-                sourceCodes.Contains(account.AccountCode))
-            .ToDictionaryAsync(account => account.AccountCode);
-        var existingNumberList = await _context.Accounts
-            .Where(account => account.TenantId == tenantId && !account.IsDeleted)
-            .Select(account => account.AccountNumber)
-            .ToListAsync();
-        var existingNumbers = existingNumberList.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var created = 0;
+        var definitions = GetStandardChartOfAccounts(tenantId, baseDate);
+        var definitionIds = definitions.Select(item => item.Id).ToArray();
+        var existingAccounts = await _context.Accounts.Include(item => item.SegmentValues.Where(value => !value.IsDeleted))
+            .Where(item => item.TenantId == tenantId && definitionIds.Contains(item.Id) && !item.IsDeleted)
+            .ToDictionaryAsync(item => item.Id);
+        var newAccounts = new List<Account>();
+        var upgradedAccounts = 0;
         foreach (var definition in definitions)
         {
-            var accountNumber = $"{definition.Department}-{definition.NaturalCode}-{definition.Project}";
-            if (existingNumbers.Contains(accountNumber))
-            {
-                continue;
-            }
+            var isNew = !existingAccounts.TryGetValue(definition.Id, out var account);
+            account ??= definition;
+            if (isNew) newAccounts.Add(account);
 
-            if (!sourceAccounts.TryGetValue(definition.SourceCode, out var source) ||
-                !departments.TryGetValue(definition.Department, out var department) ||
-                !projects.TryGetValue(definition.Project, out var project))
+            var systemManaged = isNew || (!string.IsNullOrWhiteSpace(account.CreatedBy)
+                && account.CreatedBy.StartsWith("System", StringComparison.OrdinalIgnoreCase));
+            if (!systemManaged || account.SegmentValues.Any())
+                continue;
+
+            var naturalValue = account.AccountCode.Trim().ToUpperInvariant();
+            if (naturalValue.Length != natural.SegmentLength || !naturalValue.All(char.IsDigit))
             {
                 _logger.LogWarning(
-                    "Skipping demo account {AccountNumber}; its natural account, department or project master is missing.",
-                    accountNumber);
+                    "System GL account {AccountId} was not upgraded because natural code {AccountCode} does not match the governed segment definition.",
+                    account.Id, account.AccountCode);
                 continue;
             }
-
-            var account = new Account
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                AccountCode = accountNumber,
-                AccountNumber = accountNumber,
-                AccountName = definition.Name,
-                AccountType = source.AccountType,
-                AccountCategory = source.AccountCategory,
-                AccountSubCategory = source.AccountSubCategory,
-                Description = $"TDC Finance demonstration posting account derived from natural account {definition.SourceCode}.",
-                ParentAccountId = source.Id,
-                IsSegmented = true,
-                CurrencyCode = definition.Currency,
-                IsMultiCurrency = definition.MultiCurrency,
-                IsIFRSClassified = source.IsIFRSClassified,
-                IsBaseClassified = source.IsBaseClassified,
-                IsLocalClassified = source.IsLocalClassified,
-                IFRSLineItem = source.IFRSLineItem,
-                BaseLineItem = source.BaseLineItem,
-                LocalLineItem = source.LocalLineItem,
-                AllowDirectPosting = true,
-                IsControlAccount = false,
-                RequireDepartmentCode = true,
-                RequireProjectCode = definition.Project != "0000",
-                BudgetTrackingEnabled = definition.Budget,
-                Status = AccountStatus.Active,
-                TaxReportingCategory = source.TaxReportingCategory,
-                CashFlowClassification = source.CashFlowClassification,
-                IsSystemAccount = false,
-                CreatedAt = baseDate,
-                CreatedBy = "System (Finance Demo)",
-                SegmentValues =
-                [
-                    CreateSegmentValue(departmentSegment, department.SegmentValue, department.Description, department.Id),
-                    CreateSegmentValue(naturalAccountSegment, definition.NaturalCode, definition.Name, null),
-                    CreateSegmentValue(projectSegment, project.SegmentValue, project.Description, project.Id)
-                ]
-            };
-
-            _context.Accounts.Add(account);
-            existingNumbers.Add(accountNumber);
-            created++;
+            account.IsSegmented = true;
+            account.AccountNumber = $"{companyValue.SegmentValue}-{naturalValue}";
+            account.SegmentValues =
+            [
+                NewValue(company, companyValue.SegmentValue, companyValue.Description, companyValue.Id),
+                NewValue(natural, naturalValue, account.AccountName, null)
+            ];
+            if (!isNew) upgradedAccounts++;
         }
 
+        if (newAccounts.Count > 0) await _context.Accounts.AddRangeAsync(newAccounts);
+        await _context.SaveChangesAsync();
         _logger.LogInformation(
-            "Ensured TDC Finance demo account combinations for tenant {TenantId}; created {CreatedCount} account(s).",
-            tenantId,
-            created);
+            "Seeded {CreatedCount} and upgraded {UpgradedCount} system-managed Phase 5 COMPANY/NATURAL_ACCOUNT GL identities.",
+            newAccounts.Count, upgradedAccounts);
 
-        AccountSegmentValue CreateSegmentValue(
-            AccountSegmentStructure structure,
-            string value,
-            string? description,
-            Guid? lookupId)
-            => new()
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                SegmentStructureId = structure.Id,
-                SegmentPosition = structure.SegmentPosition,
-                SegmentValue = value,
-                SegmentLookupValueId = lookupId,
-                SegmentValueDescription = description,
-                EffectiveDate = baseDate,
-                IsLocked = false,
-                CreatedAt = baseDate,
-                CreatedBy = "System (Finance Demo)"
-            };
+        AccountSegmentValue NewValue(AccountSegmentStructure structure, string value, string? description, Guid? lookupId) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, SegmentStructureId = structure.Id,
+            SegmentPosition = structure.SegmentPosition, SegmentValue = value, SegmentLookupValueId = lookupId,
+            SegmentValueDescription = description, EffectiveDate = baseDate, IsLocked = false,
+            CreatedAt = baseDate, CreatedBy = "System (Finance Segment Manifest 1.0)"
+        };
     }
 
+    /// <summary>Preserves the old call boundary while deliberately creating no dimension-expanded accounts.</summary>
+    private Task SeedFinanceDemoAccountCombinationsAsync(Guid tenantId, DateTime baseDate)
+    {
+        // Department and project now belong to transaction coding. Creating GL identities for
+        // their Cartesian combinations would duplicate the dimension architecture.
+        return Task.CompletedTask;
+    }
     private async Task SeedUnitAccountingDemoDataAsync(Guid tenantId, DateTime baseDate)
     {
         var unitTypeDefinitions = new (Guid Id, string Code, string Name, string Description, int DecimalPlaces)[]

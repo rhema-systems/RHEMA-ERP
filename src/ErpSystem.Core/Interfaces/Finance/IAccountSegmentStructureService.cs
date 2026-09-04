@@ -54,6 +54,10 @@ namespace ErpSystem.Core.Interfaces.Finance
             AccountSegmentStructureUpdateDto dto,
             CancellationToken cancellationToken = default);
 
+        Task<AccountSegmentStructureDto> ActivateAsync(Guid id, AccountSegmentLifecycleTransitionDto dto, CancellationToken cancellationToken = default);
+
+        Task<AccountSegmentStructureDto> FreezeAsync(Guid id, AccountSegmentLifecycleTransitionDto dto, CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Reorders segments according to the provided list of new positions.
         /// 

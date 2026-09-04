@@ -2780,6 +2780,26 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // â”€â”€â”€ General Ledger FK Configurations â”€â”€â”€
 
+        builder.Entity<AccountSegmentStructure>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_AccountSegmentStructures_LifecycleActive",
+                "([LifecycleStatus] IN (2, 3) AND [IsActive] = 1) OR ([LifecycleStatus] IN (1, 4) AND [IsActive] = 0)"));
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.Property(item => item.LifecycleStatus).HasConversion<int>();
+            entity.HasIndex(item => new { item.TenantId, item.SegmentCode }).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.SegmentPosition }).IsUnique().HasFilter("[IsDeleted] = 0 AND [IsActive] = 1");
+            entity.HasIndex(item => item.TenantId).IsUnique().HasFilter("[IsDeleted] = 0 AND [IsNaturalAccount] = 1 AND [IsActive] = 1");
+        });
+
+        builder.Entity<AccountSegmentValue>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.AccountId, item.SegmentStructureId })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.AccountId, item.SegmentPosition })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+        });
+
         builder.Entity<FiscalYear>(entity =>
         {
             entity.ToTable("FiscalYears");

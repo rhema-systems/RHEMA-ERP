@@ -2,6 +2,12 @@ namespace ErpSystem.Shared;
 
 public static class FinanceAuditEvents
 {
+    public const string AccountSegmentStructureCreated = "Finance.GL.AccountSegmentStructure.Created";
+    public const string AccountSegmentStructureUpdated = "Finance.GL.AccountSegmentStructure.Updated";
+    public const string AccountSegmentStructureActivated = "Finance.GL.AccountSegmentStructure.Activated";
+    public const string AccountSegmentStructureFrozen = "Finance.GL.AccountSegmentStructure.Frozen";
+    public const string AccountSegmentStructureDeleted = "Finance.GL.AccountSegmentStructure.Deleted";
+    public const string AccountSegmentStructureReordered = "Finance.GL.AccountSegmentStructure.Reordered";
     public const string AccountClassificationCreated = "Finance.GL.AccountClassification.Created";
     public const string AccountClassificationUpdated = "Finance.GL.AccountClassification.Updated";
     public const string AccountClassificationRetired = "Finance.GL.AccountClassification.Retired";

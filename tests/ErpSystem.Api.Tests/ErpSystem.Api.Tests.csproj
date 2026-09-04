@@ -214,6 +214,7 @@
     <Compile Include="Services\Finance\FxRealizedUnrealizedRevaluationTests.cs" />
     <Compile Include="Services\Finance\FxRevaluationMathTests.cs" />
     <Compile Include="Services\Finance\AccountBookCurrencyPolicyServiceTests.cs" />
+    <Compile Include="Services\Finance\AccountSegmentIdentityPhase5Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationConventionCalculatorTests.cs" />

@@ -1,470 +1,320 @@
-using System;
-using System.Text;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
+using System.Data;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
-using ErpSystem.Api.Services.Finance;
+using ErpSystem.Data;
+using ErpSystem.Shared;
+using Microsoft.EntityFrameworkCore;
 
-namespace ErpSystem.Api.Services.Finance.Segments
+namespace ErpSystem.Api.Services.Finance.Segments;
+
+/// <summary>Governed definition service for GL account-number identity segments.</summary>
+public sealed class AccountSegmentStructureService : IAccountSegmentStructureService
 {
-    /// <summary>
-    /// Service implementation for managing Account Segment Structures.
-    /// Handles the definition and maintenance of segmented Chart of Accounts structure.
-    /// </summary>
-    public class AccountSegmentStructureService : IAccountSegmentStructureService
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IFinanceAuditService _audit;
+    private readonly ILogger<AccountSegmentStructureService> _logger;
+
+    public AccountSegmentStructureService(ApplicationDbContext db, ICurrentUserService currentUser,
+        IFinanceAuditService audit, ILogger<AccountSegmentStructureService> logger)
     {
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly ICurrentUserService _currentUserService;
-        private readonly ILogger<AccountSegmentStructureService> _logger;
-
-        public AccountSegmentStructureService(
-            IUnitOfWork unitOfWork,
-            ICurrentUserService currentUserService,
-            ILogger<AccountSegmentStructureService> logger)
-        {
-            _unitOfWork = unitOfWork;
-            _currentUserService = currentUserService;
-            _logger = logger;
-        }
-
-        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
-        private string UserName => _currentUserService.UserName ?? "system";
-
-        public async Task<IReadOnlyList<AccountSegmentStructureDto>> GetAllAsync(CancellationToken cancellationToken = default)
-        {
-            var segments = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
-                .Include(s => s.LookupValues.Where(v => !v.IsDeleted))
-                .OrderBy(s => s.SegmentPosition)
-                .ToListAsync(cancellationToken);
-
-            return segments.Select(MapToDto).ToList();
-        }
-
-        public async Task<AccountSegmentStructureDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            var segment = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .GetQueryable(s => s.Id == id && s.TenantId == TenantId && !s.IsDeleted)
-                .Include(s => s.LookupValues.Where(v => !v.IsDeleted))
-                .FirstOrDefaultAsync(cancellationToken);
-
-            return segment == null ? null : MapToDto(segment);
-        }
-
-        public async Task<AccountSegmentStructureDto> CreateAsync(
-            AccountSegmentStructureCreateDto dto,
-            CancellationToken cancellationToken = default)
-        {
-            // Validate unique segment code
-            var existingCode = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.SegmentCode == dto.SegmentCode && !s.IsDeleted);
-            if (existingCode != null)
-                throw new InvalidOperationException($"A segment with code '{dto.SegmentCode}' already exists.");
-
-            // Validate unique segment position
-            var existingPosition = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.SegmentPosition == dto.SegmentPosition && !s.IsDeleted);
-            if (existingPosition != null)
-                throw new InvalidOperationException($"A segment at position {dto.SegmentPosition} already exists.");
-
-            // Validate only one natural account segment
-            if (dto.IsNaturalAccount)
-            {
-                var existingNatural = await _unitOfWork.Repository<AccountSegmentStructure>()
-                    .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.IsNaturalAccount && !s.IsDeleted);
-                if (existingNatural != null)
-                    throw new InvalidOperationException("Only one segment can be marked as the Natural Account segment.");
-            }
-
-            var segment = new AccountSegmentStructure
-            {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                SegmentName = dto.SegmentName,
-                SegmentCode = dto.SegmentCode,
-                SegmentPosition = dto.SegmentPosition,
-                SegmentLength = dto.SegmentLength,
-                DataType = dto.DataType,
-                SeparatorCharacter = dto.SeparatorCharacter,
-                LookupTableRequired = dto.LookupTableRequired,
-                IsMandatory = dto.IsMandatory,
-                IsReportingDimension = dto.IsReportingDimension,
-                IsNaturalAccount = dto.IsNaturalAccount,
-                IsActive = dto.IsActive,
-                Description = dto.Description,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = UserName
-            };
-
-            await _unitOfWork.Repository<AccountSegmentStructure>().AddAsync(segment);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Account segment structure '{Code}' created at position {Position}", 
-                dto.SegmentCode, dto.SegmentPosition);
-
-            return (await GetByIdAsync(segment.Id, cancellationToken))!;
-        }
-
-        public async Task<AccountSegmentStructureDto> UpdateAsync(
-            AccountSegmentStructureUpdateDto dto,
-            CancellationToken cancellationToken = default)
-        {
-            var segment = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .FirstOrDefaultAsync(s => s.Id == dto.Id && s.TenantId == TenantId && !s.IsDeleted);
-
-            if (segment == null)
-                throw new ArgumentException($"Segment with ID '{dto.Id}' not found.");
-
-            // Check if segment code changed and is unique
-            if (segment.SegmentCode != dto.SegmentCode)
-            {
-                var existingCode = await _unitOfWork.Repository<AccountSegmentStructure>()
-                    .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.SegmentCode == dto.SegmentCode && s.Id != dto.Id && !s.IsDeleted);
-                if (existingCode != null)
-                    throw new InvalidOperationException($"A segment with code '{dto.SegmentCode}' already exists.");
-            }
-
-            // Check if position changed and is unique
-            if (segment.SegmentPosition != dto.SegmentPosition)
-            {
-                var existingPosition = await _unitOfWork.Repository<AccountSegmentStructure>()
-                    .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.SegmentPosition == dto.SegmentPosition && s.Id != dto.Id && !s.IsDeleted);
-                if (existingPosition != null)
-                    throw new InvalidOperationException($"A segment at position {dto.SegmentPosition} already exists.");
-            }
-
-            // Validate natural account uniqueness
-            if (dto.IsNaturalAccount && !segment.IsNaturalAccount)
-            {
-                var existingNatural = await _unitOfWork.Repository<AccountSegmentStructure>()
-                    .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.IsNaturalAccount && s.Id != dto.Id && !s.IsDeleted);
-                if (existingNatural != null)
-                    throw new InvalidOperationException("Only one segment can be marked as the Natural Account segment.");
-            }
-
-            // Update properties
-            segment.SegmentName = dto.SegmentName;
-            segment.SegmentCode = dto.SegmentCode;
-            segment.SegmentPosition = dto.SegmentPosition;
-            segment.SegmentLength = dto.SegmentLength;
-            segment.DataType = dto.DataType;
-            segment.SeparatorCharacter = dto.SeparatorCharacter;
-            segment.LookupTableRequired = dto.LookupTableRequired;
-            segment.IsMandatory = dto.IsMandatory;
-            segment.IsReportingDimension = dto.IsReportingDimension;
-            segment.IsNaturalAccount = dto.IsNaturalAccount;
-            segment.IsActive = dto.IsActive;
-            segment.Description = dto.Description;
-            segment.UpdatedAt = DateTime.UtcNow;
-            segment.UpdatedBy = UserName;
-
-            await _unitOfWork.Repository<AccountSegmentStructure>().UpdateAsync(segment);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Account segment structure '{Code}' updated", dto.SegmentCode);
-
-            return (await GetByIdAsync(segment.Id, cancellationToken))!;
-        }
-
-        public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            var segment = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == TenantId && !s.IsDeleted);
-
-            if (segment == null)
-                return;
-
-            // Check if any accounts use this segment
-            var accountsUsingSegment = await _unitOfWork.Repository<AccountSegmentValue>()
-                .CountAsync(asv => asv.SegmentStructureId == id && !asv.IsDeleted);
-
-            if (accountsUsingSegment > 0)
-            {
-                // Deactivate instead of delete
-                segment.IsActive = false;
-                segment.UpdatedAt = DateTime.UtcNow;
-                segment.UpdatedBy = UserName;
-                await _unitOfWork.Repository<AccountSegmentStructure>().UpdateAsync(segment);
-                _logger.LogWarning("Segment '{Code}' deactivated instead of deleted due to {Count} accounts using it", 
-                    segment.SegmentCode, accountsUsingSegment);
-            }
-            else
-            {
-                // Safe to soft delete
-                segment.IsDeleted = true;
-                segment.DeletedAt = DateTime.UtcNow;
-                segment.DeletedBy = UserName;
-                await _unitOfWork.Repository<AccountSegmentStructure>().UpdateAsync(segment);
-                _logger.LogInformation("Segment '{Code}' deleted", segment.SegmentCode);
-            }
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-
-        public async Task ReorderSegmentsAsync(List<ReorderSegmentDto> reorderList, CancellationToken cancellationToken = default)
-        {
-            if (reorderList == null || !reorderList.Any())
-                throw new ArgumentException("Reorder list cannot be empty.");
-
-            // 1. Fetch all active segments
-            var segments = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            // 2. Validation
-            var distinctPositions = reorderList.Select(x => x.NewPosition).Distinct().ToList();
-            if (distinctPositions.Count != reorderList.Count)
-                throw new InvalidOperationException("Duplicate positions found in reorder list.");
-
-            if (distinctPositions.Min() != 1 || distinctPositions.Max() != segments.Count)
-                throw new InvalidOperationException($"Positions must be sequential from 1 to {segments.Count}.");
-
-            if (reorderList.Count != segments.Count)
-                 throw new InvalidOperationException("Reorder list must contain all active segments.");
-
-            // 3. Update Structure Positions
-            foreach (var item in reorderList)
-            {
-                var segment = segments.FirstOrDefault(s => s.Id == item.SegmentId);
-                if (segment == null)
-                    throw new KeyNotFoundException($"Segment with ID {item.SegmentId} not found.");
-
-                segment.SegmentPosition = item.NewPosition;
-                segment.UpdatedAt = DateTime.UtcNow;
-                segment.UpdatedBy = UserName;
-                await _unitOfWork.Repository<AccountSegmentStructure>().UpdateAsync(segment);
-            }
-            
-            // Save structure changes first
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            // 4. Update AccountSegmentValue positions
-            // Efficient bulk update using raw SQL desirable, but falling back to EF core loading for safety/portability
-            // given we also need to regenerate AccountNumber strings.
-            
-            // Getting separator for Account Number generation
-            var financeSettings = await _unitOfWork.Repository<FinanceSettings>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId);
-            var separator = financeSettings?.AccountSeparator ?? "-";
-
-            // Fetch ALL accounts with their segment values
-            // PERFORMANCE WARNING: fine for < 10k accounts. For larger datasets, move to Stored Procedure/SQL.
-            var accounts = await _unitOfWork.Repository<Account>()
-                .GetQueryable(a => a.TenantId == TenantId && !a.IsDeleted)
-                .Include(a => a.SegmentValues.Where(sv => !sv.IsDeleted))
-                .ToListAsync(cancellationToken);
-
-            var accountsUpdated = 0;
-            var accountsSkipped = 0;
-
-            foreach (var account in accounts)
-            {
-                // Skip accounts with no segment values - preserve their existing code
-                if (account.SegmentValues == null || !account.SegmentValues.Any())
-                {
-                    _logger.LogWarning("Account {AccountId} ({AccountCode}) has no segment values - skipping reorder",
-                        account.Id, account.AccountCode);
-                    accountsSkipped++;
-                    continue;
-                }
-
-                foreach (var segValue in account.SegmentValues)
-                {
-                    // Update the cached position from the structure
-                    var structure = segments.FirstOrDefault(s => s.Id == segValue.SegmentStructureId);
-                    if (structure != null)
-                    {
-                        segValue.SegmentPosition = structure.SegmentPosition;
-                    }
-                }
-
-                // Regenerate AccountNumber from segment values
-                var orderedSegmentValues = account.SegmentValues
-                    .OrderBy(v => v.SegmentPosition)
-                    .ToList();
-
-                var sb = new StringBuilder();
-                for (int i = 0; i < orderedSegmentValues.Count; i++)
-                {
-                    var val = orderedSegmentValues[i];
-                    sb.Append(val.SegmentValue);
-
-                    // Add separator if not the last segment
-                    if (i < orderedSegmentValues.Count - 1)
-                    {
-                        var structure = segments.FirstOrDefault(s => s.Id == val.SegmentStructureId);
-                        // Use segment-specific separator if defined, otherwise fallback to global setting
-                        var sep = !string.IsNullOrEmpty(structure?.SeparatorCharacter)
-                            ? structure.SeparatorCharacter
-                            : separator;
-                        sb.Append(sep);
-                    }
-                }
-
-                var newAccountCode = sb.ToString();
-
-                // Only update if we have a valid new code
-                if (string.IsNullOrWhiteSpace(newAccountCode))
-                {
-                    _logger.LogWarning("Account {AccountId} ({AccountCode}) generated empty code from segments - skipping",
-                        account.Id, account.AccountCode);
-                    accountsSkipped++;
-                    continue;
-                }
-
-                // Debug logging for the first account to verify logic
-                if (accountsUpdated == 0)
-                {
-                    _logger.LogInformation("Reordering validation - First Account: OldCode={OldCode}, OldNumber={OldNumber}, NewCode={NewCode}",
-                        account.AccountCode, account.AccountNumber, newAccountCode);
-                    _logger.LogInformation("Segments order: {Order}", string.Join(", ", orderedSegmentValues.Select(v => $"{v.SegmentValue} (Pos: {v.SegmentPosition})")));
-                }
-
-                // Update both AccountCode and AccountNumber to reflect new segment order
-                account.AccountCode = newAccountCode;
-                account.AccountNumber = newAccountCode;
-                account.UpdatedAt = DateTime.UtcNow;
-                accountsUpdated++;
-
-                // No need to call UpdateAsync explicitly for tracked entities, but doing it for safety if repository requires
-                await _unitOfWork.Accounts.UpdateAsync(account);
-            }
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Segments reordered: {Updated} accounts updated, {Skipped} accounts skipped (no segment values)",
-                accountsUpdated, accountsSkipped);
-        }
-
-        public async Task RegenerateAccountNumbersAsync(CancellationToken cancellationToken = default)
-        {
-            var segments = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
-                .ToListAsync(cancellationToken);
-
-            var financeSettings = await _unitOfWork.Repository<FinanceSettings>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId);
-            var separator = financeSettings?.AccountSeparator ?? "-";
-
-            var accounts = await _unitOfWork.Repository<Account>()
-                .GetQueryable(a => a.TenantId == TenantId && !a.IsDeleted)
-                .Include(a => a.SegmentValues.Where(sv => !sv.IsDeleted))
-                .ToListAsync(cancellationToken);
-
-            var accountsUpdated = 0;
-            var accountsSkipped = 0;
-
-            foreach (var account in accounts)
-            {
-                // Skip accounts with no segment values - preserve their existing code
-                if (account.SegmentValues == null || !account.SegmentValues.Any())
-                {
-                    _logger.LogWarning("Account {AccountId} ({AccountCode}) has no segment values - skipping regeneration",
-                        account.Id, account.AccountCode);
-                    accountsSkipped++;
-                    continue;
-                }
-
-                // Ensure positions are consistent with structure
-                foreach (var segValue in account.SegmentValues)
-                {
-                    var structure = segments.FirstOrDefault(s => s.Id == segValue.SegmentStructureId);
-                    if (structure != null)
-                    {
-                        segValue.SegmentPosition = structure.SegmentPosition;
-                    }
-                }
-
-                var orderedSegmentValues = account.SegmentValues
-                    .OrderBy(v => v.SegmentPosition)
-                    .ToList();
-
-                var sb = new StringBuilder();
-                for (int i = 0; i < orderedSegmentValues.Count; i++)
-                {
-                    var val = orderedSegmentValues[i];
-                    sb.Append(val.SegmentValue);
-
-                    if (i < orderedSegmentValues.Count - 1)
-                    {
-                        var structure = segments.FirstOrDefault(s => s.Id == val.SegmentStructureId);
-                        var sep = !string.IsNullOrEmpty(structure?.SeparatorCharacter)
-                            ? structure.SeparatorCharacter
-                            : separator;
-                        sb.Append(sep);
-                    }
-                }
-
-                var newAccountCode = sb.ToString();
-
-                // Only update if we have a valid new code
-                if (string.IsNullOrWhiteSpace(newAccountCode))
-                {
-                    _logger.LogWarning("Account {AccountId} ({AccountCode}) generated empty code from segments - skipping",
-                        account.Id, account.AccountCode);
-                    accountsSkipped++;
-                    continue;
-                }
-
-                // Update both AccountCode and AccountNumber to reflect current segment structure
-                account.AccountCode = newAccountCode;
-                account.AccountNumber = newAccountCode;
-                account.UpdatedAt = DateTime.UtcNow;
-                accountsUpdated++;
-                _logger.LogDebug("Regenerated Account: {Id} -> Code={Code}", account.Id, account.AccountCode);
-            }
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Regenerated account codes: {Updated} updated, {Skipped} skipped (no segment values)",
-                accountsUpdated, accountsSkipped);
-        }
-
-        private static AccountSegmentStructureDto MapToDto(AccountSegmentStructure segment)
-        {
-            return new AccountSegmentStructureDto
-            {
-                Id = segment.Id,
-                TenantId = segment.TenantId,
-                SegmentName = segment.SegmentName,
-                SegmentCode = segment.SegmentCode,
-                SegmentPosition = segment.SegmentPosition,
-                SegmentLength = segment.SegmentLength,
-                DataType = segment.DataType,
-                SeparatorCharacter = segment.SeparatorCharacter,
-                LookupTableRequired = segment.LookupTableRequired,
-                IsMandatory = segment.IsMandatory,
-                IsReportingDimension = segment.IsReportingDimension,
-                IsNaturalAccount = segment.IsNaturalAccount,
-                IsActive = segment.IsActive,
-                Description = segment.Description,
-                LookupValuesCount = segment.LookupValues?.Count(v => !v.IsDeleted) ?? 0,
-                CanBeModified = true, // TODO: Check if accounts exist using this segment
-                RestrictionWarning = null,
-                LookupValues = segment.LookupValues?
-                    .Where(v => !v.IsDeleted)
-                    .OrderBy(v => v.DisplayOrder)
-                    .ThenBy(v => v.SegmentValue)
-                    .Select(v => new SegmentLookupValueSummaryDto
-                    {
-                        Id = v.Id,
-                        SegmentValue = v.SegmentValue,
-                        Description = v.Description,
-                        IsActive = v.IsActive,
-                        DisplayOrder = v.DisplayOrder
-                    })
-                    .ToList() ?? new List<SegmentLookupValueSummaryDto>(),
-                CreatedBy = segment.CreatedBy ?? "system",
-                CreatedAt = segment.CreatedAt,
-                UpdatedBy = segment.UpdatedBy,
-                UpdatedAt = segment.UpdatedAt
-            };
-        }
+        _db = db;
+        _currentUser = currentUser;
+        _audit = audit;
+        _logger = logger;
     }
+
+    private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
+    private string UserName => _currentUser.UserName ?? "system";
+
+    public async Task<IReadOnlyList<AccountSegmentStructureDto>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        var items = await Query().OrderBy(item => item.SegmentPosition).ToListAsync(cancellationToken);
+        return await MapAsync(items, cancellationToken);
+    }
+
+    public async Task<AccountSegmentStructureDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var item = await Query().SingleOrDefaultAsync(value => value.Id == id, cancellationToken);
+        return item == null ? null : (await MapAsync(new[] { item }, cancellationToken)).Single();
+    }
+
+    public Task<AccountSegmentStructureDto> CreateAsync(AccountSegmentStructureCreateDto dto, CancellationToken cancellationToken = default) =>
+        ExecuteAtomicAsync(async () =>
+        {
+            ValidateDefinition(dto.SegmentName, dto.SegmentCode, dto.SegmentPosition, dto.SegmentLength, dto.DataType);
+            var code = NormalizeCode(dto.SegmentCode);
+            await EnsureUniqueAsync(null, code, dto.SegmentPosition, dto.IsNaturalAccount, cancellationToken);
+            var now = DateTime.UtcNow;
+            var item = new AccountSegmentStructure
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, SegmentName = dto.SegmentName.Trim(), SegmentCode = code,
+                SegmentPosition = dto.SegmentPosition, SegmentLength = dto.SegmentLength, DataType = dto.DataType,
+                SeparatorCharacter = NormalizeOptional(dto.SeparatorCharacter), LookupTableRequired = dto.LookupTableRequired,
+                IsReportingDimension = false, IsNaturalAccount = dto.IsNaturalAccount,
+                LifecycleStatus = AccountSegmentLifecycleStatus.Draft, IsActive = false,
+                Description = NormalizeOptional(dto.Description), CreatedAt = now, CreatedBy = UserName
+            };
+            _db.AccountSegmentStructures.Add(item);
+            await _db.SaveChangesAsync(cancellationToken);
+            await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureCreated, item, null, Snapshot(item), null, cancellationToken);
+            _logger.LogInformation("Created draft GL identity segment {SegmentCode}", code);
+            return (await GetByIdAsync(item.Id, cancellationToken))!;
+        }, cancellationToken);
+
+    public Task<AccountSegmentStructureDto> UpdateAsync(AccountSegmentStructureUpdateDto dto, CancellationToken cancellationToken = default) =>
+        ExecuteAtomicAsync(async () =>
+        {
+            var item = await LoadAsync(dto.Id, cancellationToken);
+            ApplyRowVersion(item, dto.RowVersion);
+            if (item.LifecycleStatus is AccountSegmentLifecycleStatus.Frozen or AccountSegmentLifecycleStatus.Retired)
+                throw new InvalidOperationException("Frozen or retired account-number segments cannot be changed.");
+            var usage = await UsageCountAsync(item.Id, cancellationToken);
+            var structuralChange = item.SegmentCode != NormalizeCode(dto.SegmentCode)
+                || item.SegmentPosition != dto.SegmentPosition || item.SegmentLength != dto.SegmentLength
+                || !string.Equals(item.DataType, dto.DataType, StringComparison.OrdinalIgnoreCase)
+                || item.IsNaturalAccount != dto.IsNaturalAccount || item.LookupTableRequired != dto.LookupTableRequired
+                || !string.Equals(item.SeparatorCharacter, NormalizeOptional(dto.SeparatorCharacter), StringComparison.Ordinal);
+            if (structuralChange && (item.LifecycleStatus != AccountSegmentLifecycleStatus.Draft || usage > 0))
+                throw new InvalidOperationException("A used or active account-number segment cannot be structurally changed.");
+            ValidateDefinition(dto.SegmentName, dto.SegmentCode, dto.SegmentPosition, dto.SegmentLength, dto.DataType);
+            var before = Snapshot(item);
+            var code = NormalizeCode(dto.SegmentCode);
+            await EnsureUniqueAsync(item.Id, code, dto.SegmentPosition, dto.IsNaturalAccount, cancellationToken);
+            item.SegmentName = dto.SegmentName.Trim(); item.SegmentCode = code; item.SegmentPosition = dto.SegmentPosition;
+            item.SegmentLength = dto.SegmentLength; item.DataType = dto.DataType.Trim();
+            item.SeparatorCharacter = NormalizeOptional(dto.SeparatorCharacter); item.LookupTableRequired = dto.LookupTableRequired;
+            item.IsNaturalAccount = dto.IsNaturalAccount; item.IsReportingDimension = false;
+            item.Description = NormalizeOptional(dto.Description); item.UpdatedAt = DateTime.UtcNow; item.UpdatedBy = UserName;
+            await _db.SaveChangesAsync(cancellationToken);
+            await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureUpdated, item, before, Snapshot(item), null, cancellationToken);
+            return (await GetByIdAsync(item.Id, cancellationToken))!;
+        }, cancellationToken);
+
+    public Task<AccountSegmentStructureDto> ActivateAsync(Guid id, AccountSegmentLifecycleTransitionDto dto, CancellationToken cancellationToken = default) =>
+        ExecuteAtomicAsync(async () =>
+        {
+            var item = await LoadAsync(id, cancellationToken);
+            ApplyRowVersion(item, dto.RowVersion);
+            if (item.LifecycleStatus != AccountSegmentLifecycleStatus.Draft)
+                throw new InvalidOperationException("Only a draft account-number segment can be activated.");
+            ValidateDefinition(item.SegmentName, item.SegmentCode, item.SegmentPosition, item.SegmentLength, item.DataType);
+            await EnsureUniqueAsync(item.Id, item.SegmentCode, item.SegmentPosition, item.IsNaturalAccount, cancellationToken);
+            await EnsureActivationReadyAsync(item, cancellationToken);
+            var before = Snapshot(item);
+            item.LifecycleStatus = AccountSegmentLifecycleStatus.Active; item.IsActive = true;
+            item.UpdatedAt = DateTime.UtcNow; item.UpdatedBy = UserName;
+            await _db.SaveChangesAsync(cancellationToken);
+            await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureActivated, item, before, Snapshot(item), dto.Reason, cancellationToken);
+            return (await GetByIdAsync(item.Id, cancellationToken))!;
+        }, cancellationToken);
+
+    public Task<AccountSegmentStructureDto> FreezeAsync(Guid id, AccountSegmentLifecycleTransitionDto dto, CancellationToken cancellationToken = default) =>
+        ExecuteAtomicAsync(async () =>
+        {
+            var item = await LoadAsync(id, cancellationToken);
+            ApplyRowVersion(item, dto.RowVersion);
+            if (item.LifecycleStatus != AccountSegmentLifecycleStatus.Active)
+                throw new InvalidOperationException("Only an active account-number segment can be frozen.");
+            await EnsureActiveStructureValidAsync(cancellationToken);
+            await EnsureAllAccountsReadyAsync(cancellationToken);
+            var before = Snapshot(item); var now = DateTime.UtcNow;
+            item.LifecycleStatus = AccountSegmentLifecycleStatus.Frozen; item.IsActive = true;
+            item.FrozenAtUtc = now; item.FrozenByUserId = CurrentUserId(); item.UpdatedAt = now; item.UpdatedBy = UserName;
+            await _db.SaveChangesAsync(cancellationToken);
+            await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureFrozen, item, before, Snapshot(item), dto.Reason, cancellationToken);
+            return (await GetByIdAsync(item.Id, cancellationToken))!;
+        }, cancellationToken);
+
+    public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default) => ExecuteAtomicAsync(async () =>
+    {
+        var item = await LoadAsync(id, cancellationToken);
+        if (item.LifecycleStatus != AccountSegmentLifecycleStatus.Draft || await UsageCountAsync(id, cancellationToken) > 0)
+            throw new InvalidOperationException("Only an unused draft account-number segment can be deleted.");
+        var before = Snapshot(item); item.IsDeleted = true; item.IsActive = false; item.DeletedAt = DateTime.UtcNow; item.DeletedBy = UserName;
+        await _db.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureDeleted, item, before, Snapshot(item), null, cancellationToken);
+        return true;
+    }, cancellationToken);
+
+    public Task ReorderSegmentsAsync(List<ReorderSegmentDto> reorderList, CancellationToken cancellationToken = default) => ExecuteAtomicAsync(async () =>
+    {
+        var items = await _db.AccountSegmentStructures.Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(cancellationToken);
+        if (items.Count == 0) throw new InvalidOperationException("No account-number segments are configured.");
+        if (items.Any(item => item.LifecycleStatus != AccountSegmentLifecycleStatus.Draft) ||
+            await _db.AccountSegmentValues.AnyAsync(value => value.TenantId == TenantId && !value.IsDeleted, cancellationToken))
+            throw new InvalidOperationException("Account-number segments may only be reordered while every segment is draft and no account identity exists.");
+        if (reorderList.Count != items.Count || reorderList.Select(item => item.SegmentId).Distinct().Count() != items.Count ||
+            !reorderList.Select(item => item.NewPosition).OrderBy(value => value).SequenceEqual(Enumerable.Range(1, items.Count)))
+            throw new InvalidOperationException("Reorder must contain every segment exactly once with sequential positions.");
+        var before = items.OrderBy(item => item.SegmentPosition).Select(Snapshot).ToArray();
+        foreach (var change in reorderList) items.Single(item => item.Id == change.SegmentId).SegmentPosition = change.NewPosition;
+        await _db.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureReordered, items[0], before,
+            items.OrderBy(item => item.SegmentPosition).Select(Snapshot).ToArray(), null, cancellationToken);
+        return true;
+    }, cancellationToken);
+
+    public async Task RegenerateAccountNumbersAsync(CancellationToken cancellationToken = default)
+    {
+        if (await _db.AccountSegmentValues.AnyAsync(value => value.TenantId == TenantId && !value.IsDeleted, cancellationToken))
+            throw new InvalidOperationException("Bulk identity regeneration is prohibited after account identities exist; use a governed remediation workflow.");
+    }
+
+    private IQueryable<AccountSegmentStructure> Query() => _db.AccountSegmentStructures.AsNoTracking()
+        .AsSplitQuery().Include(item => item.LookupValues.Where(value => !value.IsDeleted))
+        .Where(item => item.TenantId == TenantId && !item.IsDeleted);
+
+    private async Task<IReadOnlyList<AccountSegmentStructureDto>> MapAsync(IEnumerable<AccountSegmentStructure> items, CancellationToken ct)
+    {
+        var materialized = items.ToList(); var ids = materialized.Select(item => item.Id).ToArray();
+        var counts = await _db.AccountSegmentValues.AsNoTracking().Where(value => ids.Contains(value.SegmentStructureId) && !value.IsDeleted)
+            .GroupBy(value => value.SegmentStructureId).Select(group => new { Id = group.Key, Count = group.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+        return materialized.Select(item => Map(item, counts.GetValueOrDefault(item.Id))).ToList();
+    }
+
+    private static AccountSegmentStructureDto Map(AccountSegmentStructure item, int usage) => new()
+    {
+        Id = item.Id, TenantId = item.TenantId, SegmentName = item.SegmentName, SegmentCode = item.SegmentCode,
+        SegmentPosition = item.SegmentPosition, SegmentLength = item.SegmentLength, DataType = item.DataType,
+        SeparatorCharacter = item.SeparatorCharacter, LookupTableRequired = item.LookupTableRequired,
+        IsReportingDimension = false, IsNaturalAccount = item.IsNaturalAccount, IsActive = item.IsActive,
+        LifecycleStatus = item.LifecycleStatus.ToString(), IsSystemDefined = item.IsSystemDefined,
+        RowVersion = Convert.ToBase64String(item.RowVersion ?? Array.Empty<byte>()), Description = item.Description,
+        LookupValuesCount = item.LookupValues.Count(value => !value.IsDeleted), AccountUsageCount = usage,
+        CanBeModified = item.LifecycleStatus == AccountSegmentLifecycleStatus.Draft && usage == 0,
+        CanActivate = item.LifecycleStatus == AccountSegmentLifecycleStatus.Draft,
+        CanFreeze = item.LifecycleStatus == AccountSegmentLifecycleStatus.Active,
+        RestrictionWarning = usage > 0 ? "This segment forms part of an existing account identity." : null,
+        LookupValues = item.LookupValues.Where(value => !value.IsDeleted).OrderBy(value => value.DisplayOrder).Select(value => new SegmentLookupValueSummaryDto
+        { Id = value.Id, SegmentValue = value.SegmentValue, Description = value.Description, IsActive = value.IsActive, DisplayOrder = value.DisplayOrder }).ToList(),
+        CreatedBy = item.CreatedBy ?? "system", CreatedAt = item.CreatedAt, UpdatedBy = item.UpdatedBy, UpdatedAt = item.UpdatedAt
+    };
+
+    private async Task<AccountSegmentStructure> LoadAsync(Guid id, CancellationToken ct) =>
+        await _db.AccountSegmentStructures.SingleOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, ct)
+        ?? throw new KeyNotFoundException("Account-number segment was not found.");
+
+    private async Task EnsureUniqueAsync(Guid? id, string code, int position, bool natural, CancellationToken ct)
+    {
+        if (await _db.AccountSegmentStructures.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted && item.Id != id && item.SegmentCode == code, ct))
+            throw new InvalidOperationException($"Account-number segment code '{code}' already exists.");
+        if (await _db.AccountSegmentStructures.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted && item.Id != id
+            && item.LifecycleStatus != AccountSegmentLifecycleStatus.Retired && item.SegmentPosition == position, ct))
+            throw new InvalidOperationException($"Account-number segment position {position} already exists.");
+        if (natural && await _db.AccountSegmentStructures.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted && item.Id != id
+            && item.LifecycleStatus != AccountSegmentLifecycleStatus.Retired && item.IsNaturalAccount, ct))
+            throw new InvalidOperationException("Only one Natural Account segment is allowed.");
+    }
+
+    private async Task EnsureAllAccountsReadyAsync(CancellationToken ct)
+    {
+        var activeIds = await _db.AccountSegmentStructures.AsNoTracking().Where(item => item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
+            .Select(item => item.Id).ToArrayAsync(ct);
+        var accounts = await _db.Accounts.AsNoTracking().Include(item => item.SegmentValues.Where(value => !value.IsDeleted))
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(ct);
+        if (accounts.Any(account => !account.SegmentValues.Select(value => value.SegmentStructureId).OrderBy(id => id).SequenceEqual(activeIds.OrderBy(id => id))))
+            throw new InvalidOperationException("The structure cannot be frozen while existing accounts have incomplete or extra identity segments.");
+    }
+
+    private async Task EnsureActiveStructureValidAsync(CancellationToken ct)
+    {
+        var definitions = await _db.AccountSegmentStructures.AsNoTracking().Where(item =>
+                item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
+            .OrderBy(item => item.SegmentPosition).ToListAsync(ct);
+        if (definitions.Count == 0 || definitions.Count(item => item.IsNaturalAccount) != 1)
+            throw new InvalidOperationException("The active account-number structure must contain exactly one Natural Account segment before freezing.");
+        if (!definitions.Select(item => item.SegmentPosition).SequenceEqual(Enumerable.Range(1, definitions.Count)))
+            throw new InvalidOperationException("Active account-number segment positions must be contiguous from 1 before freezing.");
+        foreach (var definition in definitions)
+            ValidateDefinition(definition.SegmentName, definition.SegmentCode, definition.SegmentPosition,
+                definition.SegmentLength, definition.DataType);
+    }
+
+    private async Task EnsureActivationReadyAsync(AccountSegmentStructure candidate, CancellationToken ct)
+    {
+        if (candidate.LookupTableRequired)
+        {
+            var values = await _db.SegmentLookupValues.AsNoTracking().Where(value =>
+                value.TenantId == TenantId && value.SegmentStructureId == candidate.Id
+                && value.IsActive && !value.IsDeleted).Select(value => value.SegmentValue).ToListAsync(ct);
+            if (values.Count == 0)
+                throw new InvalidOperationException("A lookup-backed account-number segment requires at least one active value before activation.");
+            foreach (var value in values)
+            {
+                if (value.Length != candidate.SegmentLength || !MatchesDataType(candidate.DataType, value))
+                    throw new InvalidOperationException($"Lookup value '{value}' does not satisfy the segment length or data type.");
+            }
+        }
+
+        var futureIds = await _db.AccountSegmentStructures.AsNoTracking().Where(item =>
+                item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
+            .Select(item => item.Id).ToListAsync(ct);
+        futureIds.Add(candidate.Id);
+        var futureSet = futureIds.ToHashSet();
+        var accountSets = await _db.Accounts.AsNoTracking().Where(account => account.TenantId == TenantId && !account.IsDeleted)
+            .Select(account => account.SegmentValues.Where(value => !value.IsDeleted).Select(value => value.SegmentStructureId).ToList())
+            .ToListAsync(ct);
+        if (accountSets.Any(values => values.Count != futureSet.Count || !values.All(futureSet.Contains)))
+            throw new InvalidOperationException(
+                "The segment cannot be activated until every existing GL account has exactly the resulting active identity set.");
+    }
+
+    private async Task<int> UsageCountAsync(Guid id, CancellationToken ct) =>
+        await _db.AccountSegmentValues.CountAsync(item => item.TenantId == TenantId && item.SegmentStructureId == id && !item.IsDeleted, ct);
+
+    private async Task<T> ExecuteAtomicAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    {
+        if (!_db.Database.IsRelational()) return await action();
+        return await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            _db.ChangeTracker.Clear();
+            await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            try { var result = await action(); await transaction.CommitAsync(ct); return result; }
+            catch { await transaction.RollbackAsync(ct); _db.ChangeTracker.Clear(); throw; }
+        });
+    }
+
+    private void ApplyRowVersion(AccountSegmentStructure item, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) throw new InvalidOperationException("Row version is required.");
+        try { _db.Entry(item).Property(value => value.RowVersion).OriginalValue = Convert.FromBase64String(value); }
+        catch (FormatException) { throw new InvalidOperationException("Row version is invalid."); }
+    }
+
+    private async Task RecordAuditAsync(string eventType, AccountSegmentStructure item, object? before, object after, string? reason, CancellationToken ct) =>
+        await _audit.RecordAsync(new FinanceAuditEventDto
+        {
+            TenantId = TenantId, EventType = eventType, SourceModule = "GL", SourceDocumentType = "AccountSegmentStructure",
+            SourceDocumentId = item.Id, Resource = "Finance.AccountSegmentStructure", ResourceId = item.Id.ToString(),
+            BeforeValues = before, AfterValues = after, Reason = reason
+        }, ct);
+
+    private static object Snapshot(AccountSegmentStructure item) => new
+    {
+        item.SegmentCode, item.SegmentName, item.SegmentPosition, item.SegmentLength, item.DataType,
+        item.SeparatorCharacter, item.LookupTableRequired, item.IsNaturalAccount, LifecycleStatus = item.LifecycleStatus.ToString()
+    };
+
+    private Guid? CurrentUserId() => Guid.TryParse(_currentUser.UserId, out var id) ? id : null;
+    private static string NormalizeCode(string value) => value.Trim().ToUpperInvariant();
+    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static void ValidateDefinition(string name, string code, int position, int length, string dataType)
+    {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(code)) throw new InvalidOperationException("Segment name and stable code are required.");
+        if (position < 1 || length < 1 || length > 50) throw new InvalidOperationException("Segment position and length are invalid.");
+        if (dataType is not ("Numeric" or "Alphanumeric" or "Alpha")) throw new InvalidOperationException("Segment data type must be Numeric, Alpha, or Alphanumeric.");
+    }
+
+    private static bool MatchesDataType(string dataType, string value) => dataType switch
+    {
+        "Numeric" => value.All(char.IsDigit),
+        "Alpha" => value.All(char.IsLetter),
+        "Alphanumeric" => value.All(char.IsLetterOrDigit),
+        _ => false
+    };
 }

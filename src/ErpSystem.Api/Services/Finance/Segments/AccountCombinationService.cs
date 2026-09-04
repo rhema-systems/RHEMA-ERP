@@ -69,6 +69,11 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 throw new InvalidOperationException("No segment structures configured. Please set up segments first.");
             }
 
+            if (request.SegmentSelections.Count != request.SegmentSelections.Select(item => item.SegmentStructureId).Distinct().Count()
+                || !request.SegmentSelections.Select(item => item.SegmentStructureId).ToHashSet()
+                    .SetEquals(segments.Select(item => item.Id)))
+                throw new InvalidOperationException("Selections must contain every active account-number segment exactly once and no extras.");
+
             // 2. Get account separator from finance settings
             var settings = await _unitOfWork.Repository<FinanceSettings>()
                 .FirstOrDefaultAsync(s => s.TenantId == TenantId);
@@ -81,7 +86,8 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 .ToList();
 
             var lookupValues = await _unitOfWork.Repository<SegmentLookupValue>()
-                .GetQueryable(lv => allSelectedLookupIds.Contains(lv.Id) && !lv.IsDeleted)
+                .GetQueryable(lv => lv.TenantId == TenantId && allSelectedLookupIds.Contains(lv.Id) && !lv.IsDeleted && lv.IsActive
+                    && lv.SegmentStructure.TenantId == TenantId && lv.SegmentStructure.IsActive && !lv.SegmentStructure.IsDeleted)
                 .Include(lv => lv.SegmentStructure)
                 .ToListAsync(cancellationToken);
 
@@ -148,13 +154,8 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 
                 if (selection == null || !selection.SelectedLookupValueIds.Any())
                 {
-                    if (segment.IsMandatory)
-                    {
-                        throw new InvalidOperationException(
-                            $"Segment '{segment.SegmentName}' is mandatory but no values were selected.");
-                    }
-                    // Skip optional segments with no selection
-                    continue;
+                    throw new InvalidOperationException(
+                        $"Segment '{segment.SegmentName}' is required but no values were selected.");
                 }
 
                 var valuesForSegment = lookupValues
@@ -196,7 +197,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
             foreach (var combination in combinations)
             {
                 var orderedValues = combination.OrderBy(lv => lv.SegmentStructure.SegmentPosition).ToList();
-                var accountNumber = string.Join(separator, orderedValues.Select(lv => lv.SegmentValue));
+                var accountNumber = ComposeAccountNumber(segments, orderedValues.Select(value => value.SegmentValue).ToList(), separator);
                 var generatedName = GenerateAccountName(orderedValues, naturalAccountSegment);
 
                 var preview = new AccountCombinationPreviewDto
@@ -269,8 +270,10 @@ namespace ErpSystem.Api.Services.Finance.Segments
 
             // Get required segment structures for building AccountSegmentValue entries
             var segmentStructures = await _unitOfWork.Repository<AccountSegmentStructure>()
-                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
+                .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted && s.IsActive)
                 .ToDictionaryAsync(s => s.Id, cancellationToken);
+            if (segmentStructures.Values.Count(item => item.IsNaturalAccount) != 1)
+                throw new InvalidOperationException("The active account-number structure must contain exactly one Natural Account segment.");
 
             // Get finance settings for separator
             var settings = await _unitOfWork.Repository<FinanceSettings>()
@@ -282,6 +285,26 @@ namespace ErpSystem.Api.Services.Finance.Segments
             {
                 try
                 {
+                    if (combination.SegmentValues.Count != segmentStructures.Count
+                        || !combination.SegmentValues.Select(item => item.SegmentStructureId).ToHashSet().SetEquals(segmentStructures.Keys))
+                        throw new InvalidOperationException("The combination does not contain the exact active account-segment set.");
+                    var orderedSegments = segmentStructures.Values.OrderBy(item => item.SegmentPosition).ToList();
+                    var orderedValues = orderedSegments.Select(segment => combination.SegmentValues.Single(value => value.SegmentStructureId == segment.Id)).ToList();
+                    for (var index = 0; index < orderedSegments.Count; index++)
+                    {
+                        var segment = orderedSegments[index]; var value = orderedValues[index];
+                        if (value.SegmentPosition != segment.SegmentPosition || value.Value.Length != segment.SegmentLength)
+                            throw new InvalidOperationException($"Segment {segment.SegmentCode} has an invalid position or length.");
+                        if (segment.DataType.Equals("Numeric", StringComparison.OrdinalIgnoreCase) && !value.Value.All(char.IsDigit))
+                            throw new InvalidOperationException($"Segment {segment.SegmentCode} must be numeric.");
+                        if (segment.LookupTableRequired && !await _unitOfWork.Repository<SegmentLookupValue>().GetQueryable(item =>
+                            item.Id == value.LookupValueId && item.TenantId == TenantId && item.SegmentStructureId == segment.Id
+                            && item.IsActive && !item.IsDeleted && item.SegmentValue == value.Value).AnyAsync(cancellationToken))
+                            throw new InvalidOperationException($"Segment {segment.SegmentCode} requires an active tenant-owned lookup value.");
+                    }
+                    var serverAccountNumber = ComposeAccountNumber(orderedSegments, orderedValues.Select(item => item.Value).ToList(), separator);
+                    if (!string.Equals(combination.AccountNumber, serverAccountNumber, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"The supplied account number does not match server-composed identity '{serverAccountNumber}'.");
                     // Parse account type
                     if (!Enum.TryParse<AccountType>(combination.AccountType, true, out var accountType))
                     {
@@ -299,8 +322,8 @@ namespace ErpSystem.Api.Services.Finance.Segments
                     {
                         Id = Guid.NewGuid(),
                         TenantId = TenantId,
-                        AccountCode = combination.AccountNumber, // Use account number as code
-                        AccountNumber = combination.AccountNumber,
+                        AccountCode = orderedValues[orderedSegments.FindIndex(item => item.IsNaturalAccount)].Value,
+                        AccountNumber = serverAccountNumber,
                         AccountName = combination.GeneratedName,
                         AccountType = accountType,
                         AccountCategory = combination.AccountCategory,
@@ -339,7 +362,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                             SegmentPosition = segValue.SegmentPosition,
                             SegmentValue = segValue.Value,
                             SegmentValueDescription = segValue.Description,
-                            SegmentLookupValueId = segValue.LookupValueId,
+                            SegmentLookupValueId = segmentStructures[segValue.SegmentStructureId].LookupTableRequired ? segValue.LookupValueId : null,
                             IsLocked = false,
                             EffectiveDate = DateTime.UtcNow,
                             CreatedAt = DateTime.UtcNow,
@@ -396,6 +419,20 @@ namespace ErpSystem.Api.Services.Finance.Segments
                             var result = new List<SegmentLookupValue>(accseq) { item };
                             return result;
                         }));
+        }
+
+        private static string ComposeAccountNumber(
+            IReadOnlyList<AccountSegmentStructure> segments,
+            IReadOnlyList<string> values,
+            string fallbackSeparator)
+        {
+            var parts = new List<string>();
+            for (var index = 0; index < segments.Count; index++)
+            {
+                parts.Add(values[index].Trim().ToUpperInvariant());
+                if (index < segments.Count - 1) parts.Add(segments[index].SeparatorCharacter ?? fallbackSeparator);
+            }
+            return string.Concat(parts);
         }
 
         /// <summary>

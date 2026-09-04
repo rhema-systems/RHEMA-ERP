@@ -849,7 +849,6 @@ public sealed class FixedAssetTransferFoundationTests
             SegmentPosition = 1,
             SegmentLength = Math.Min(10, value.Length),
             LookupTableRequired = true,
-            IsMandatory = true,
             IsReportingDimension = true,
             IsActive = true,
             CreatedAt = DateTime.UtcNow,

@@ -15,15 +15,18 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<FinanceAccountProvisioningService> _logger;
+    private readonly IAccountSegmentIdentityService _segmentIdentity;
 
     public FinanceAccountProvisioningService(
         ApplicationDbContext db,
         ICurrentUserService currentUser,
-        ILogger<FinanceAccountProvisioningService> logger)
+        ILogger<FinanceAccountProvisioningService> logger,
+        IAccountSegmentIdentityService? segmentIdentity = null)
     {
         _db = db;
         _currentUser = currentUser;
         _logger = logger;
+        _segmentIdentity = segmentIdentity ?? new ErpSystem.Api.Services.Finance.Segments.AccountSegmentIdentityService(db);
     }
 
     public async Task<ProvisionedFinanceAccountDto> ProvisionAsync(
@@ -35,7 +38,6 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         if (request.TenantId == Guid.Empty || request.TenantId != tenantId)
             throw new InvalidOperationException("Finance account provisioning tenant context is invalid.");
         var accountCode = NormalizeRequired(request.AccountCode, "Account code", 50).ToUpperInvariant();
-        var accountNumber = NormalizeRequired(request.AccountNumber, "Account number", 50).ToUpperInvariant();
         var accountName = NormalizeRequired(request.AccountName, "Account name", 200);
         var currencyCode = NormalizeRequired(request.CurrencyCode, "Currency code", 3).ToUpperInvariant();
         var classificationCode = FinanceClassificationManifestSeeder.ResolveReviewedClassificationCode(
@@ -47,6 +49,10 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         await using var transaction = ownsTransaction
             ? await _db.Database.BeginTransactionAsync(cancellationToken)
             : null;
+
+        await new FinanceSegmentDimensionManifestSeeder(_db, _logger).SeedAsync(tenantId, DateTime.UtcNow, cancellationToken);
+        var identity = await _segmentIdentity.ResolveProvisioningIdentityAsync(tenantId, accountCode, cancellationToken);
+        var accountNumber = identity.AccountNumber;
 
         var matches = await _db.Accounts.Where(item => item.TenantId == tenantId && !item.IsDeleted
                 && (item.AccountCode == accountCode || item.AccountNumber == accountNumber))
@@ -67,7 +73,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                 AccountType = request.CoreAccountType,
                 CurrencyCode = currencyCode,
                 Description = string.IsNullOrWhiteSpace(request.Description) ? string.Empty : request.Description.Trim(),
-                IsSegmented = request.IsSegmented,
+                IsSegmented = true,
                 AllowDirectPosting = true,
                 IsSystemAccount = true,
                 Status = AccountStatus.Active,
@@ -76,12 +82,28 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.UserName ?? "system"
             };
+            foreach (var value in identity.Values)
+            {
+                account.SegmentValues.Add(new AccountSegmentValue
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
+                    SegmentStructureId = value.SegmentStructureId, SegmentPosition = value.SegmentPosition,
+                    SegmentValue = value.SegmentValue, SegmentLookupValueId = value.SegmentLookupValueId,
+                    EffectiveDate = DateTime.UtcNow, CreatedAt = DateTime.UtcNow,
+                    CreatedBy = _currentUser.UserName ?? "system"
+                });
+            }
             _db.Accounts.Add(account);
             await _db.SaveChangesAsync(cancellationToken);
         }
-        else if (account.AccountType != request.CoreAccountType)
+        else
         {
-            throw new InvalidOperationException("The existing Finance account has a different core account type.");
+            if (account.AccountType != request.CoreAccountType)
+                throw new InvalidOperationException("The existing Finance account has a different core account type.");
+            var readiness = await _segmentIdentity.GetReadinessAsync(tenantId, account.Id, cancellationToken);
+            if (!readiness.IsReady)
+                throw new InvalidOperationException(
+                    $"Existing Finance account '{account.AccountCode}' is not ready for the active account-number structure: {string.Join("; ", readiness.Issues)}");
         }
 
         await new FinanceClassificationManifestSeeder(_db, _logger)

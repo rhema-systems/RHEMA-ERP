@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -33,7 +34,7 @@ namespace ErpSystem.Api.Controllers.Finance
     ///
     /// **Authorization:** Requires authenticated user with Finance module access
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     [ApiController]
     [Route("api/finance/accounts")]
     public class AccountController : ControllerBase
@@ -41,15 +42,32 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IAccountService _accountService;
         private readonly IGeneralLedgerService _glService;
         private readonly IAccountCombinationService _combinationService;
+        private readonly IAccountSegmentIdentityService _segmentIdentityService;
+        private readonly ICurrentUserService _currentUserService;
 
         public AccountController(
             IAccountService accountService,
             IGeneralLedgerService glService,
-            IAccountCombinationService combinationService)
+            IAccountCombinationService combinationService,
+            IAccountSegmentIdentityService segmentIdentityService,
+            ICurrentUserService currentUserService)
         {
             _accountService = accountService;
             _glService = glService;
             _combinationService = combinationService;
+            _segmentIdentityService = segmentIdentityService;
+            _currentUserService = currentUserService;
+        }
+
+        [HttpGet("{id:guid}/segment-readiness")]
+        public async Task<ActionResult<AccountSegmentReadinessDto>> GetSegmentReadiness(Guid id, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _segmentIdentityService.GetReadinessAsync(
+                    _currentUserService.GetRequiredFinanceTenantId(), id, cancellationToken));
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
 
         /// <summary>

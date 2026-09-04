@@ -21,17 +21,20 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly ICurrentUserService _currentUser;
         private readonly IAccountingBookService _accountingBookService;
         private readonly ILogger<AccountService> _logger;
+        private readonly IAccountSegmentIdentityService? _segmentIdentityService;
 
         public AccountService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             IAccountingBookService accountingBookService,
-            ILogger<AccountService> logger)
+            ILogger<AccountService> logger,
+            IAccountSegmentIdentityService? segmentIdentityService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _accountingBookService = accountingBookService;
             _logger = logger;
+            _segmentIdentityService = segmentIdentityService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -190,12 +193,15 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var now = DateTime.UtcNow;
             await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
+            var identityService = _segmentIdentityService ?? throw new InvalidOperationException("The Finance account identity validator is unavailable.");
+            var identity = await identityService.ValidateAndComposeAsync(TenantId, dto.SegmentValues, dto.AccountNumber, cancellationToken: cancellationToken);
+            EnsureNaturalAccountCode(dto.AccountCode, identity.NaturalAccountCode);
 
             var account = new Account
             {
                 TenantId = TenantId,
-                AccountCode = dto.AccountCode ?? string.Empty,
-                AccountNumber = string.Empty, // Will be generated from segments
+                AccountCode = identity.NaturalAccountCode,
+                AccountNumber = identity.AccountNumber,
                 AccountName = dto.AccountName,
                 AccountType = Enum.Parse<AccountType>(dto.AccountType),
                 AccountCategory = dto.AccountCategory,
@@ -218,13 +224,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             };
 
             // Handle segments
-            if (dto.SegmentValues is { Count: > 0 })
+            if (identity.Values.Count > 0)
             {
-                var positions = dto.SegmentValues.Select(v => v.SegmentPosition).ToList();
-                if (positions.Count != positions.Distinct().Count())
-                    throw new InvalidOperationException("Segment positions must be unique per account.");
-
-                foreach (var seg in dto.SegmentValues.OrderBy(v => v.SegmentPosition))
+                foreach (var seg in identity.Values.OrderBy(v => v.SegmentPosition))
                 {
                     var segEntity = new AccountSegmentValue
                     {
@@ -244,18 +246,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                     account.SegmentValues.Add(segEntity);
                 }
 
-                // Auto-generate AccountNumber from segments
-                var orderedSegmentValues = account.SegmentValues
-                    .OrderBy(v => v.SegmentPosition)
-                    .Select(v => v.SegmentValue);
-
-                // Get separator from settings
-                var settings = await _unitOfWork.Repository<FinanceSettings>()
-                    .GetQueryable(s => s.TenantId == TenantId)
-                    .FirstOrDefaultAsync(cancellationToken);
-                var separator = settings?.AccountSeparator ?? "-";
-
-                account.AccountNumber = string.Join(separator, orderedSegmentValues);
             }
 
             // Persist via repository/UnitOfWork
@@ -281,6 +271,23 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             if (account == null)
                 throw new KeyNotFoundException($"Account with Id '{dto.Id}' not found.");
+
+            var submittedSegments = dto.SegmentValues.Count > 0
+                ? dto.SegmentValues.Select(seg => new AccountSegmentValueCreateDto
+                {
+                    SegmentStructureId = seg.SegmentStructureId, SegmentPosition = seg.SegmentPosition,
+                    SegmentValue = seg.SegmentValue, SegmentLookupValueId = seg.SegmentLookupValueId,
+                    IsLocked = seg.IsLocked, EffectiveDate = seg.EffectiveDate, EndDate = seg.EndDate
+                }).ToList()
+                : account.SegmentValues.Select(seg => new AccountSegmentValueCreateDto
+                {
+                    SegmentStructureId = seg.SegmentStructureId, SegmentPosition = seg.SegmentPosition,
+                    SegmentValue = seg.SegmentValue, SegmentLookupValueId = seg.SegmentLookupValueId,
+                    IsLocked = seg.IsLocked, EffectiveDate = seg.EffectiveDate, EndDate = seg.EndDate
+                }).ToList();
+            var identityService = _segmentIdentityService ?? throw new InvalidOperationException("The Finance account identity validator is unavailable.");
+            var identity = await identityService.ValidateAndComposeAsync(TenantId, submittedSegments, dto.AccountNumber, account.Id, cancellationToken);
+            EnsureNaturalAccountCode(dto.AccountCode, identity.NaturalAccountCode);
 
             account.UpdatedAt = now;
             account.UpdatedBy = UserName;
@@ -308,8 +315,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 account.AccountSubCategory = dto.AccountSubCategory;
             }
 
-            account.AccountCode = dto.AccountCode ?? account.AccountCode;
-            account.AccountNumber = dto.AccountNumber;
+            account.AccountCode = identity.NaturalAccountCode;
+            account.AccountNumber = identity.AccountNumber;
             account.AccountName = dto.AccountName;
             account.CashFlowClassification = NormalizeCashFlowClassification(dto.CashFlowClassification);
             // account.AccountType = Enum.Parse<AccountType>(dto.AccountType); // Handled above
@@ -360,23 +367,21 @@ namespace ErpSystem.Api.Services.Finance.GL
                     account.SegmentValues.Add(segEntity);
                 }
 
-                var orderedSegmentValues = account.SegmentValues
-                    .OrderBy(v => v.SegmentPosition)
-                    .Select(v => v.SegmentValue);
-
-                // Get separator from settings
-                var settings = await _unitOfWork.Repository<FinanceSettings>()
-                    .GetQueryable(s => s.TenantId == TenantId)
-                    .FirstOrDefaultAsync(cancellationToken);
-                var separator = settings?.AccountSeparator ?? "-";
-
-                account.AccountNumber = string.Join(separator, orderedSegmentValues);
+                account.AccountNumber = identity.AccountNumber;
             }
 
             await _unitOfWork.Accounts.UpdateAsync(account);
             await _accountingBookService.SyncAccountMappingsAsync(account, dto.AccountingBooks, cancellationToken);
 
             return MapToDto(account);
+        }
+
+        private static void EnsureNaturalAccountCode(string? submittedCode, string naturalAccountCode)
+        {
+            if (!string.IsNullOrWhiteSpace(submittedCode)
+                && !string.Equals(submittedCode.Trim(), naturalAccountCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Account code must match the Natural Account segment value '{naturalAccountCode}'.");
         }
 
         public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)

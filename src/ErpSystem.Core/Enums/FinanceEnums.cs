@@ -77,6 +77,19 @@ public enum AccountClassificationStatus
     Retired = 3
 }
 
+/// <summary>
+/// Governance state for the tenant's GL account-number identity structure.
+/// Active and Frozen definitions participate in every new account identity;
+/// Frozen definitions cannot be structurally reinterpreted.
+/// </summary>
+public enum AccountSegmentLifecycleStatus
+{
+    Draft = 1,
+    Active = 2,
+    Frozen = 3,
+    Retired = 4
+}
+
 public enum RevaluationTreatment
 {
     Exclude = 1,

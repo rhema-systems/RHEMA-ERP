@@ -1260,84 +1260,8 @@ BEGIN
                       AND ISNULL(existing.[IsDeleted], 0) = 0
                 );
 
-            IF OBJECT_ID(N'[dbo].[AccountSegmentValues]', N'U') IS NOT NULL
-               AND OBJECT_ID(N'[dbo].[AccountSegmentStructures]', N'U') IS NOT NULL
-            BEGIN
-                ;WITH SeededAccounts AS
-                (
-                    SELECT a.[Id], a.[TenantId], a.[AccountCode], a.[AccountName]
-                    FROM [dbo].[Accounts] a
-                    INNER JOIN @FinanceDefaultAccounts seed ON seed.[AccountCode] = a.[AccountCode]
-                    WHERE a.[TenantId] = @DefaultFinanceTenantId
-                      AND ISNULL(a.[IsDeleted], 0) = 0
-                ),
-                TargetSegments AS
-                (
-                    SELECT s.[Id], s.[TenantId], s.[SegmentCode], s.[SegmentPosition], s.[IsNaturalAccount]
-                    FROM [dbo].[AccountSegmentStructures] s
-                    WHERE s.[TenantId] = @DefaultFinanceTenantId
-                      AND ISNULL(s.[IsDeleted], 0) = 0
-                      AND (
-                            (s.[SegmentCode] = N'DEPT' AND s.[SegmentPosition] = 1)
-                         OR (s.[IsNaturalAccount] = 1)
-                         OR (s.[SegmentCode] = N'PROJ' AND s.[SegmentPosition] = 3)
-                      )
-                )
-                INSERT INTO [dbo].[AccountSegmentValues]
-                    ([Id], [AccountId], [SegmentStructureId], [SegmentValue], [SegmentLookupValueId], [SegmentValueDescription],
-                     [SegmentPosition], [IsLocked], [EffectiveDate], [EndDate], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy],
-                     [CreatedById], [LastModifiedById], [IsDeleted], [DeletedAt], [DeletedBy], [TenantId])
-                SELECT
-                    NEWID(),
-                    account.[Id],
-                    segment.[Id],
-                    CASE
-                        WHEN segment.[SegmentCode] = N'DEPT' THEN N'000'
-                        WHEN segment.[IsNaturalAccount] = 1 THEN account.[AccountCode]
-                        WHEN segment.[SegmentCode] = N'PROJ' THEN N'0000'
-                    END,
-                    lookupValue.[Id],
-                    CASE
-                        WHEN segment.[IsNaturalAccount] = 1 THEN account.[AccountName]
-                        ELSE lookupValue.[Description]
-                    END,
-                    segment.[SegmentPosition],
-                    0,
-                    SYSUTCDATETIME(),
-                    NULL,
-                    SYSUTCDATETIME(),
-                    NULL,
-                    N'System',
-                    NULL,
-                    NULL,
-                    NULL,
-                    0,
-                    NULL,
-                    NULL,
-                    account.[TenantId]
-                FROM SeededAccounts account
-                INNER JOIN TargetSegments segment ON segment.[TenantId] = account.[TenantId]
-                OUTER APPLY
-                (
-                    SELECT TOP (1) lookup.[Id], lookup.[Description]
-                    FROM [dbo].[SegmentLookupValues] lookup
-                    WHERE lookup.[TenantId] = account.[TenantId]
-                      AND lookup.[SegmentStructureId] = segment.[Id]
-                      AND lookup.[SegmentValue] = CASE
-                            WHEN segment.[SegmentCode] = N'DEPT' THEN N'000'
-                            WHEN segment.[SegmentCode] = N'PROJ' THEN N'0000'
-                            ELSE account.[AccountCode]
-                          END
-                      AND ISNULL(lookup.[IsDeleted], 0) = 0
-                ) lookupValue
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM [dbo].[AccountSegmentValues] existing
-                    WHERE existing.[AccountId] = account.[Id]
-                      AND existing.[SegmentStructureId] = segment.[Id]
-                      AND ISNULL(existing.[IsDeleted], 0) = 0
-                );
-            END;
+            -- Phase 5: account-number identity is created only by the Finance segment manifest
+            -- and provisioning services. Startup repair must not fabricate DEPT/PROJ placeholders.
         END;
 
         UPDATE fs

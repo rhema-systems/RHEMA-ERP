@@ -28,6 +28,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFinancePostingEngine _financePostingEngine;
         private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
         private readonly FinanceDimensionReportingFilterService? _dimensionReportingFilters;
+        private readonly IAccountSegmentIdentityService _segmentIdentityService;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -39,7 +40,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IAccountingBookService accountingBookService,
             IFinancePostingEngine financePostingEngine,
             IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null,
-            FinanceDimensionReportingFilterService? dimensionReportingFilters = null)
+            FinanceDimensionReportingFilterService? dimensionReportingFilters = null,
+            IAccountSegmentIdentityService? segmentIdentityService = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -51,6 +53,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _financePostingEngine = financePostingEngine;
             _statementLayoutExecutionService = statementLayoutExecutionService;
             _dimensionReportingFilters = dimensionReportingFilters;
+            _segmentIdentityService = segmentIdentityService ?? new ErpSystem.Api.Services.Finance.Segments.AccountSegmentIdentityService(context);
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -82,8 +85,13 @@ namespace ErpSystem.Api.Services.Finance.GL
                 if (tenantId == Guid.Empty)
                     throw new InvalidOperationException("Tenant context is required for account creation. User must be authenticated with a valid tenant.");
 
-                // 1. Validate Account Structure
-                await ValidateAccountStructureAsync(accountDto.AccountNumber);
+                // 1. Validate the exact active identity and compose the account number on the server.
+                var identity = await _segmentIdentityService.ValidateAndComposeAsync(
+                    tenantId, accountDto.SegmentValues, accountDto.AccountNumber);
+                if (!string.IsNullOrWhiteSpace(accountDto.AccountCode)
+                    && !string.Equals(accountDto.AccountCode.Trim(), identity.NaturalAccountCode, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Account code must match the Natural Account segment value '{identity.NaturalAccountCode}'.");
                 await _accountingBookService.EnsureTenantDefaultsAsync();
 
                 // 2. Parse AccountType safely
@@ -98,8 +106,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var account = new Account
                 {
                     Id = Guid.NewGuid(),
-                    AccountCode = accountDto.AccountCode ?? accountDto.AccountNumber,
-                    AccountNumber = accountDto.AccountNumber,
+                    AccountCode = identity.NaturalAccountCode,
+                    AccountNumber = identity.AccountNumber,
                     AccountName = accountDto.AccountName,
                     AccountType = accountType,
                     AccountCategory = accountDto.AccountCategory,
@@ -116,9 +124,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 };
 
                 // 4. Create Segment Values from DTO
-                if (accountDto.SegmentValues != null && accountDto.SegmentValues.Count > 0)
+                if (identity.Values.Count > 0)
                 {
-                    foreach (var segmentValue in accountDto.SegmentValues.OrderBy(s => s.SegmentPosition))
+                    foreach (var segmentValue in identity.Values.OrderBy(s => s.SegmentPosition))
                     {
                         var segmentEntity = new AccountSegmentValue
                         {
@@ -137,7 +145,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         account.SegmentValues.Add(segmentEntity);
                     }
 
-                    Console.WriteLine($"DEBUG: Created {accountDto.SegmentValues.Count} segment values for account {account.AccountNumber}");
+                    Console.WriteLine($"DEBUG: Created {identity.Values.Count} segment values for account {account.AccountNumber}");
                 }
                 else
                 {
@@ -207,13 +215,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 var segmentDef = segments[i];
                 var segmentValue = parts[i];
-
-                // Optional segments can be intentionally left blank in UI; we represent
-                // this as all-zero placeholder (e.g., "000") to preserve segment count.
-                if (!segmentDef.IsMandatory && (string.IsNullOrWhiteSpace(segmentValue) || IsAllZeros(segmentValue)))
-                {
-                    continue;
-                }
 
                 // A. Length Check
                 if (segmentValue.Length != segmentDef.SegmentLength)
