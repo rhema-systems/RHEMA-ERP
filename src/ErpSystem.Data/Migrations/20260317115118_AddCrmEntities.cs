@@ -11,6 +11,50 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // InitialBaseline contains the original singular CRM tables. The two migrations
+            // immediately after it also create an abandoned plural CRM graph, after which this
+            // migration promotes the singular graph to the authoritative names. On a fresh
+            // chain both graphs therefore coexist and the first RenameTable used to fail.
+            //
+            // The redundant graph may be removed only when it is complete and empty. A partially
+            // applied graph or any row is an upgrade-data reconciliation case; fail before making
+            // changes so no historical CRM evidence is silently discarded.
+            migrationBuilder.Sql("""
+                DECLARE @RedundantCrmTableCount int =
+                    (SELECT COUNT(*) FROM (VALUES
+                        (OBJECT_ID(N'[dbo].[Leads]', N'U')),
+                        (OBJECT_ID(N'[dbo].[Opportunities]', N'U')),
+                        (OBJECT_ID(N'[dbo].[Activities]', N'U')),
+                        (OBJECT_ID(N'[dbo].[Quotes]', N'U')),
+                        (OBJECT_ID(N'[dbo].[QuoteLineItems]', N'U')),
+                        (OBJECT_ID(N'[dbo].[Campaigns]', N'U')),
+                        (OBJECT_ID(N'[dbo].[CampaignMembers]', N'U'))
+                    ) AS redundant([ObjectId]) WHERE redundant.[ObjectId] IS NOT NULL);
+
+                IF @RedundantCrmTableCount NOT IN (0, 7)
+                    THROW 51000, 'CRM migration compatibility failed: the redundant plural CRM graph is incomplete. Reconcile it before continuing.', 1;
+
+                IF @RedundantCrmTableCount = 7
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM [dbo].[Leads])
+                       OR EXISTS (SELECT 1 FROM [dbo].[Opportunities])
+                       OR EXISTS (SELECT 1 FROM [dbo].[Activities])
+                       OR EXISTS (SELECT 1 FROM [dbo].[Quotes])
+                       OR EXISTS (SELECT 1 FROM [dbo].[QuoteLineItems])
+                       OR EXISTS (SELECT 1 FROM [dbo].[Campaigns])
+                       OR EXISTS (SELECT 1 FROM [dbo].[CampaignMembers])
+                        THROW 51000, 'CRM migration compatibility failed: the redundant plural CRM graph contains data. No rows were changed; complete a reviewed data reconciliation before continuing.', 1;
+
+                    DROP TABLE [dbo].[CampaignMembers];
+                    DROP TABLE [dbo].[Campaigns];
+                    DROP TABLE [dbo].[QuoteLineItems];
+                    DROP TABLE [dbo].[Quotes];
+                    DROP TABLE [dbo].[Activities];
+                    DROP TABLE [dbo].[Opportunities];
+                    DROP TABLE [dbo].[Leads];
+                END;
+                """);
+
             migrationBuilder.DropForeignKey(
                 name: "FK_Activity_Customers_CustomerId",
                 table: "Activity");

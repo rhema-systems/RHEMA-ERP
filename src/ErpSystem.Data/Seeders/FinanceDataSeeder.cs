@@ -659,7 +659,12 @@ public class FinanceDataSeeder
             return;
         }
 
-        var definitions = GetStandardChartOfAccounts(tenantId, baseDate);
+        // Payroll accounts are part of the same canonical Finance chart. Include them before
+        // the payroll-specific enrichment pass so every system-created GL account receives the
+        // mandatory COMPANY/NATURAL_ACCOUNT identity on its first seed.
+        var definitions = GetStandardChartOfAccounts(tenantId, baseDate)
+            .Concat(GetPayrollChartOfAccounts(tenantId, baseDate))
+            .ToList();
         var definitionIds = definitions.Select(item => item.Id).ToArray();
         var existingAccounts = await _context.Accounts.Include(item => item.SegmentValues.Where(value => !value.IsDeleted))
             .Where(item => item.TenantId == tenantId && definitionIds.Contains(item.Id) && !item.IsDeleted)
@@ -891,7 +896,6 @@ public class FinanceDataSeeder
                 continue;
             }
 
-            existing.AccountNumber = account.AccountNumber;
             existing.AccountName = account.AccountName;
             existing.AccountType = account.AccountType;
             existing.AccountCategory = account.AccountCategory;
@@ -899,7 +903,6 @@ public class FinanceDataSeeder
             existing.Description = account.Description;
             existing.CurrencyCode = account.CurrencyCode;
             existing.IsMultiCurrency = account.IsMultiCurrency;
-            existing.IsSegmented = account.IsSegmented;
             existing.IsIFRSClassified = account.IsIFRSClassified;
             existing.IsBaseClassified = account.IsBaseClassified;
             existing.IsLocalClassified = account.IsLocalClassified;

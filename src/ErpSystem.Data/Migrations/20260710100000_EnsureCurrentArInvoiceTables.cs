@@ -10,6 +10,18 @@ namespace ErpSystem.Data.Migrations
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Keep the compatibility column addition in its own SQL batch. SQL Server compiles
+            // the following repair batch before executing it, so references to BusinessPartnerId
+            // fail on legacy/clean-baseline Invoices tables when ALTER TABLE ADD appears in that
+            // same batch.
+            migrationBuilder.Sql("""
+                IF OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'[dbo].[Invoices]', N'BusinessPartnerId') IS NULL
+                BEGIN
+                    ALTER TABLE [dbo].[Invoices] ADD [BusinessPartnerId] uniqueidentifier NULL;
+                END
+                """);
+
             migrationBuilder.Sql("""
                 IF OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NULL
                 BEGIN
@@ -125,14 +137,7 @@ namespace ErpSystem.Data.Migrations
                             [LastModifiedById],
                             [IsDeleted],
                             [DeletedAt],
-                            [DeletedBy],
-                            [ReferenceNumber],
-                            [Status],
-                            [EffectiveDate],
-                            [ExpirationDate],
-                            [Metadata],
-                            [Tags],
-                            [Priority])
+                            [DeletedBy])
                         SELECT DISTINCT
                             c.[Id],
                             -- PartnerCode is globally unique in the current BusinessPartner model.
@@ -176,14 +181,7 @@ namespace ErpSystem.Data.Migrations
                             c.[LastModifiedById],
                             c.[IsDeleted],
                             c.[DeletedAt],
-                            c.[DeletedBy],
-                            LEFT(COALESCE(NULLIF(c.[ReferenceNumber], N''), CONCAT(N'BP-', CONVERT(nvarchar(36), c.[Id]))), 50),
-                            COALESCE(NULLIF(c.[Status], N''), N'Active'),
-                            c.[EffectiveDate],
-                            c.[ExpirationDate],
-                            c.[Metadata],
-                            c.[Tags],
-                            c.[Priority]
+                            c.[DeletedBy]
                         FROM [dbo].[Invoices] i
                         INNER JOIN [dbo].[Customers] c
                             ON c.[Id] = i.[CustomerId]
@@ -214,6 +212,17 @@ namespace ErpSystem.Data.Migrations
                         THROW 51000, 'Cannot align AR Invoices: existing rows could not be mapped to same-tenant BusinessPartners.', 1;
                     END
 
+                    IF EXISTS (
+                        SELECT 1
+                        FROM sys.columns
+                        WHERE [object_id] = OBJECT_ID(N'[dbo].[Invoices]')
+                          AND [name] = N'BusinessPartnerId'
+                          AND [is_nullable] = 1
+                    )
+                    BEGIN
+                        ALTER TABLE [dbo].[Invoices] ALTER COLUMN [BusinessPartnerId] uniqueidentifier NOT NULL;
+                    END
+
                     IF NOT EXISTS (
                         SELECT 1
                         FROM sys.indexes
@@ -234,17 +243,6 @@ namespace ErpSystem.Data.Migrations
                         ALTER TABLE [dbo].[Invoices] WITH CHECK
                         ADD CONSTRAINT [FK_Invoices_BusinessPartners_BusinessPartnerId]
                         FOREIGN KEY ([BusinessPartnerId]) REFERENCES [dbo].[BusinessPartners] ([Id]) ON DELETE NO ACTION;
-                    END
-
-                    IF EXISTS (
-                        SELECT 1
-                        FROM sys.columns
-                        WHERE [object_id] = OBJECT_ID(N'[dbo].[Invoices]')
-                          AND [name] = N'BusinessPartnerId'
-                          AND [is_nullable] = 1
-                    )
-                    BEGIN
-                        ALTER TABLE [dbo].[Invoices] ALTER COLUMN [BusinessPartnerId] uniqueidentifier NOT NULL;
                     END
                 END
 

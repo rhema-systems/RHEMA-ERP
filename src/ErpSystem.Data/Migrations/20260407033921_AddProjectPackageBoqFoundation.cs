@@ -10,6 +10,19 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // InitialBaseline used VendorInvoices, while this migration's target model and
+            // every subsequent runtime mapping use VendorInvoice. Preserve all rows through
+            // the missing compatibility rename and fail closed if both identities coexist.
+            migrationBuilder.Sql("""
+                IF OBJECT_ID(N'[dbo].[VendorInvoices]', N'U') IS NOT NULL
+                   AND OBJECT_ID(N'[dbo].[VendorInvoice]', N'U') IS NOT NULL
+                    THROW 51000, 'Vendor invoice migration compatibility failed: both VendorInvoices and VendorInvoice exist. Reconcile the duplicate tables before continuing.', 1;
+
+                IF OBJECT_ID(N'[dbo].[VendorInvoices]', N'U') IS NOT NULL
+                   AND OBJECT_ID(N'[dbo].[VendorInvoice]', N'U') IS NULL
+                    EXEC sys.sp_rename N'[dbo].[VendorInvoices]', N'VendorInvoice';
+                """);
+
             migrationBuilder.Sql(@"
 IF OBJECT_ID(N'[dbo].[ProjectDevelopmentProfiles]', N'U') IS NULL
 BEGIN

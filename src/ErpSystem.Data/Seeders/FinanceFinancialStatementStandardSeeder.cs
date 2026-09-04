@@ -29,7 +29,7 @@ public sealed class FinanceFinancialStatementStandardSeeder
                 && item.AccountingBookId == book.Id && !item.IsDeleted && item.Status == AccountClassificationStatus.Active)
                 .ToDictionaryAsync(item => item.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
             await EnsureStandardAsync(tenantId, book, classifications, FinancialStatementType.BalanceSheet,
-                "STANDARD_BALANCE_SHEET", "Standard Balance Sheet", new[] { "ASSET_ROOT", "LIABILITY_ROOT", "EQUITY_ROOT" }, now, cancellationToken);
+                "STANDARD_BALANCE_SHEET", "Standard Balance Sheet", new[] { "ASSETS", "LIABILITIES", "EQUITY_ROOT" }, now, cancellationToken);
             await EnsureStandardAsync(tenantId, book, classifications, FinancialStatementType.IncomeStatement,
                 "STANDARD_INCOME_STATEMENT", "Standard Income Statement", new[] { "REVENUE_ROOT", "EXPENSE_ROOT" }, now, cancellationToken);
         }

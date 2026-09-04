@@ -33,8 +33,7 @@ BEGIN
             [RegistrationStatus], [IsPreferred], [IsActive], [IsBlacklisted],
             [IsVatWithholdingAgent], [TaxTreatment], [IsTaxExempt], [IsOnCreditHold], [Notes],
             [TenantId], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy], [CreatedById],
-            [LastModifiedById], [IsDeleted], [DeletedAt], [DeletedBy], [ReferenceNumber],
-            [Status], [EffectiveDate], [ExpirationDate], [Metadata], [Tags], [Priority])
+            [LastModifiedById], [IsDeleted], [DeletedAt], [DeletedBy])
         SELECT DISTINCT
             c.[Id],
             LEFT(CONCAT(N'AR-CUST-', CONVERT(nvarchar(36), c.[Id])), 50),
@@ -48,10 +47,7 @@ BEGIN
             N'Approved', CAST(0 AS bit), c.[IsActive], CAST(0 AS bit), CAST(0 AS bit),
             1, CAST(0 AS bit), CAST(0 AS bit), c.[Notes], c.[TenantId],
             COALESCE(c.[CreatedAt], SYSUTCDATETIME()), c.[UpdatedAt], c.[CreatedBy], c.[UpdatedBy],
-            c.[CreatedById], c.[LastModifiedById], c.[IsDeleted], c.[DeletedAt], c.[DeletedBy],
-            LEFT(COALESCE(NULLIF(c.[ReferenceNumber], N''), CONCAT(N'BP-', CONVERT(nvarchar(36), c.[Id]))), 50),
-            COALESCE(NULLIF(c.[Status], N''), N'Active'), c.[EffectiveDate], c.[ExpirationDate],
-            c.[Metadata], c.[Tags], c.[Priority]
+            c.[CreatedById], c.[LastModifiedById], c.[IsDeleted], c.[DeletedAt], c.[DeletedBy]
         FROM [dbo].[CustomerPayment] cp
         INNER JOIN [dbo].[Customers] c
             ON c.[Id] = cp.[CustomerId]
