@@ -253,7 +253,7 @@ export function WorkflowEvidenceGovernancePanel() {
         <TableBody>{loadingEvidence ? <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Loading evidence...</TableCell></TableRow> : evidence.length === 0 ? <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No evidence loaded.</TableCell></TableRow> : evidence.map(item => <TableRow key={item.id}>
           <TableCell><div className="font-medium">{item.documentName || item.fileName}</div><div className="text-xs text-muted-foreground">{item.documentType || 'Document'}{item.isExpired ? ' / Expired' : ''}</div></TableCell>
           <TableCell>v{item.version}{item.isCurrent ? <Badge variant="outline" className="ml-2">Current</Badge> : null}</TableCell>
-          <TableCell><div className="max-w-32 truncate font-mono text-xs" title={item.sha256}>{item.sha256}</div><div className="text-xs text-muted-foreground">Scan {item.malwareScanStatus === 1 ? 'clean' : item.malwareScanStatus === 2 ? 'failed' : 'pending'}</div></TableCell>
+          <TableCell><div className="max-w-32 truncate font-mono text-xs" title={item.sha256}>{item.sha256}</div><div className="text-xs text-muted-foreground">Scan {item.malwareScanStatus === 1 ? 'clean' : item.malwareScanStatus === 2 ? 'infected' : item.malwareScanStatus === 3 ? 'failed' : item.malwareScanStatus === 0 ? 'pending' : 'unknown'}</div></TableCell>
           <TableCell><Badge variant={item.verificationStatus === 1 ? 'default' : item.verificationStatus === 2 ? 'destructive' : 'secondary'}>{verificationLabel(item.verificationStatus)}</Badge></TableCell>
           <TableCell>
             <div>{new Date(item.retainUntil).toLocaleDateString()}</div>
@@ -265,7 +265,7 @@ export function WorkflowEvidenceGovernancePanel() {
               </div>
             ) : null}
           </TableCell>
-          <TableCell><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => openEvidenceAction(item, 'verify')}>Verify</Button><Button size="sm" variant="outline" onClick={() => openEvidenceAction(item, 'reject')}>Reject</Button>
+          <TableCell><div className="flex justify-end gap-1"><Button size="sm" variant="outline" disabled={item.canVerify !== true} title={item.verificationBlockedReason} onClick={() => openEvidenceAction(item, 'verify')}>Verify</Button><Button size="sm" variant="outline" disabled={item.canVerify !== true} title={item.verificationBlockedReason} onClick={() => openEvidenceAction(item, 'reject')}>Reject</Button>
             <Button size="icon" variant="ghost" title={item.isLegalHold ? 'Release legal hold' : 'Apply legal hold'} onClick={() => openEvidenceAction(item, item.isLegalHold ? 'releaseHold' : 'applyHold')}>{item.isLegalHold ? <ShieldOff className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}</Button></div></TableCell>
         </TableRow>)}</TableBody></Table></div>
     </section>

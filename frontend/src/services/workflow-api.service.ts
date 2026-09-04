@@ -54,6 +54,22 @@ type ApiPagedResponse<T> = ApiResponse<T> & {
   };
 };
 
+type WorkflowEvidenceResponse = Omit<
+  WorkflowEvidenceDocumentDto,
+  'verificationStatus' | 'malwareScanStatus'
+> & {
+  verificationStatus: number | string;
+  malwareScanStatus: number | string;
+};
+
+// ASP.NET serializes enums by name; consumers use the numeric workflow enums.
+const normalizeEvidenceStatus = (value: number | string, names: string[]): number => {
+  const named = typeof value === 'string' ? names.indexOf(value.trim().toLowerCase()) : -1;
+  if (named >= 0) return named;
+  const numeric = typeof value === 'string' && !value.trim() ? NaN : Number(value);
+  return Number.isInteger(numeric) && numeric >= 0 && numeric < names.length ? numeric : -1;
+};
+
 /**
  * Service for handling workflow-related API operations
  */
@@ -484,22 +500,28 @@ export class WorkflowApiService {
   }
 
   async getWorkflowStepEvidence(stepInstanceId: string): Promise<WorkflowEvidenceDocumentDto[]> {
-    const response = await apiService.get<ApiResponse<WorkflowEvidenceDocumentDto[]>>(
+    const response = await apiService.get<ApiResponse<WorkflowEvidenceResponse[]>>(
       `${this.basePath}/evidence/step/${stepInstanceId}`
     );
-    return response.data || [];
+    return (response.data || []).map(item => ({
+      ...item,
+      verificationStatus: normalizeEvidenceStatus(item.verificationStatus, ['pending', 'verified', 'rejected']),
+      malwareScanStatus: normalizeEvidenceStatus(item.malwareScanStatus, ['pending', 'clean', 'infected', 'failed']),
+    }));
   }
 
   async getWorkflowEvidenceReviewInstances(params: {
     search?: string;
     entityType?: string;
     workflowDefinitionId?: string;
+    workflowInstanceId?: string;
     pageSize?: number;
   } = {}): Promise<WorkflowEvidenceReviewInstanceDto[]> {
     const query = new URLSearchParams();
     if (params.search) query.append('search', params.search);
     if (params.entityType) query.append('entityType', params.entityType);
     if (params.workflowDefinitionId) query.append('workflowDefinitionId', params.workflowDefinitionId);
+    if (params.workflowInstanceId) query.append('workflowInstanceId', params.workflowInstanceId);
     if (params.pageSize) query.append('pageSize', String(params.pageSize));
     const suffix = query.toString() ? `?${query.toString()}` : '';
     const response = await apiService.get<ApiResponse<WorkflowEvidenceReviewInstanceDto[]>>(

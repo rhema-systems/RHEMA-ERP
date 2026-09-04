@@ -66,6 +66,10 @@ export function resolveProcurementUatRoute(
   pathname: string
 ): ProcurementUatRoute | undefined {
   if (!pathname.startsWith('/procurement/')) return undefined;
+  // Reusable template setup has no transaction source or bidding progress. Source-specific
+  // tender/RFQ document-control workspaces still participate in the procurement flow below.
+  if (/^\/procurement\/tender-documents(?:\/[^/]+)?\/?$/.test(pathname))
+    return undefined;
 
   const tenderId = pathname.match(/^\/procurement\/tenders\/([^/]+)/)?.[1];
   if (

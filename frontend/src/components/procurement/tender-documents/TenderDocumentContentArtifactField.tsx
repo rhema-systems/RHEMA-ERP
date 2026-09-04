@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { isTenderDocumentContentArtifactApproved } from '@/lib/procurement-tender-document';
 import { procurementTenderDocumentService } from '@/services/procurement-tender-document.service';
 import type { ProcurementTenderDocumentContentArtifactOption } from '@/types/procurement-tender-document';
 
@@ -24,6 +23,7 @@ interface TenderDocumentContentArtifactFieldProps {
   workflowInstanceId?: string;
   contentReference: string;
   checksumSha256: string;
+  eligibleContentEvidenceDocumentIds?: string[];
   disabled?: boolean;
   onSelect: (artifact: ProcurementTenderDocumentContentArtifactOption) => void;
 }
@@ -44,11 +44,26 @@ const malwareLabel = (status: number) =>
         ? 'Scan failed'
         : 'Scan pending';
 
+export const isTenderDocumentContentArtifactEligible = (
+  artifact: Pick<
+    ProcurementTenderDocumentContentArtifactOption,
+    'id' | 'isCurrent' | 'verificationStatus' | 'malwareScanStatus'
+  >,
+  eligibleContentEvidenceDocumentIds?: string[]
+) =>
+  artifact.isCurrent &&
+  artifact.malwareScanStatus === 1 &&
+  (artifact.verificationStatus === 0 || artifact.verificationStatus === 1) &&
+  (eligibleContentEvidenceDocumentIds === undefined
+    ? artifact.verificationStatus === 1
+    : eligibleContentEvidenceDocumentIds.includes(artifact.id));
+
 export function TenderDocumentContentArtifactField({
   value,
   workflowInstanceId,
   contentReference,
   checksumSha256,
+  eligibleContentEvidenceDocumentIds,
   disabled = false,
   onSelect,
 }: TenderDocumentContentArtifactFieldProps) {
@@ -67,6 +82,16 @@ export function TenderDocumentContentArtifactField({
     () => artifacts.data?.find((artifact) => artifact.id === value),
     [artifacts.data, value]
   );
+  const isEligible = (
+    artifact: ProcurementTenderDocumentContentArtifactOption
+  ) =>
+    artifact.workflowInstanceId === workflowInstanceId &&
+    isTenderDocumentContentArtifactEligible(
+      artifact,
+      eligibleContentEvidenceDocumentIds
+    );
+  const showStoredSelection =
+    disabled && selected?.workflowInstanceId === workflowInstanceId;
 
   return (
     <div
@@ -83,15 +108,16 @@ export function TenderDocumentContentArtifactField({
               artifacts.isLoading ||
               artifacts.isError
             }
-            value={value || undefined}
+            value={
+              selected && (showStoredSelection || isEligible(selected))
+                ? value
+                : ''
+            }
             onValueChange={(artifactId) => {
               const artifact = artifacts.data?.find(
                 (candidate) => candidate.id === artifactId
               );
-              if (
-                artifact &&
-                isTenderDocumentContentArtifactApproved(artifact)
-              ) {
+              if (!disabled && artifact && isEligible(artifact)) {
                 onSelect(artifact);
               }
             }}
@@ -100,15 +126,14 @@ export function TenderDocumentContentArtifactField({
               <SelectValue
                 placeholder={
                   artifacts.isLoading
-                    ? 'Loading verified evidence…'
-                    : 'Select verified, scan-clean evidence'
+                    ? 'Loading eligible documents…'
+                    : 'Select eligible document'
                 }
               />
             </SelectTrigger>
             <SelectContent>
               {(artifacts.data ?? []).map((artifact) => {
-                const approved =
-                  isTenderDocumentContentArtifactApproved(artifact);
+                const approved = isEligible(artifact);
                 return (
                   <SelectItem
                     key={artifact.id}
@@ -154,18 +179,16 @@ export function TenderDocumentContentArtifactField({
         !artifacts.data?.length && (
           <p className="text-sm text-muted-foreground">
             {workflowInstanceId
-              ? 'No verified content is available in this approval workflow yet. Upload the tender document on its workflow task, then have a different authorized reviewer verify it.'
+              ? 'No content is available in this approval workflow yet. Upload below, then use the document review section for independent verification.'
               : 'Content can be attached after this Draft starts its exact approval workflow.'}
           </p>
         )}
       {selected && (
         <div className="flex flex-wrap gap-2">
-          <Badge
-            variant={
-              selected.verificationStatus === 1 ? 'default' : 'secondary'
-            }
-          >
-            {verificationLabel(selected.verificationStatus)}
+          <Badge variant={isEligible(selected) ? 'default' : 'secondary'}>
+            {isEligible(selected) && selected.verificationStatus !== 1
+              ? 'Review requirements satisfied'
+              : verificationLabel(selected.verificationStatus)}
           </Badge>
           <Badge
             variant={
@@ -178,30 +201,41 @@ export function TenderDocumentContentArtifactField({
         </div>
       )}
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Backend-controlled content path</Label>
-          <Input
-            readOnly
-            value={contentReference}
-            placeholder="Derived from the selected evidence document"
-            data-testid="controlled-content-reference"
-          />
+      {selected && !isEligible(selected) && !disabled && (
+        <p className="text-sm text-destructive">
+          The selected file is no longer eligible. Refresh and choose an
+          eligible document before attaching.
+        </p>
+      )}
+      <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-sm text-muted-foreground">
+          Stored file details
+        </summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Backend-controlled content path</Label>
+            <Input
+              readOnly
+              value={contentReference}
+              placeholder="Derived from the selected evidence document"
+              data-testid="controlled-content-reference"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Backend-controlled SHA-256</Label>
+            <Input
+              readOnly
+              value={checksumSha256}
+              placeholder="Derived from the selected evidence document"
+              data-testid="controlled-content-checksum"
+            />
+          </div>
         </div>
-        <div className="space-y-2">
-          <Label>Backend-controlled SHA-256</Label>
-          <Input
-            readOnly
-            value={checksumSha256}
-            placeholder="Derived from the selected evidence document"
-            data-testid="controlled-content-checksum"
-          />
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        The stored path and checksum are copied from the selected current
-        evidence version and cannot be edited independently.
-      </p>
+        <p className="text-xs text-muted-foreground">
+          The stored path and checksum are copied from the selected current
+          evidence version and cannot be edited independently.
+        </p>
+      </details>
     </div>
   );
 }

@@ -82,6 +82,7 @@ describe('procurement tender-document API client', () => {
     ]);
     expect(workflowApi.getWorkflowEvidenceReviewInstances).toHaveBeenCalledWith({
       pageSize: 100,
+      workflowInstanceId: undefined,
     });
     expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledTimes(1);
     expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledWith('step-1');
@@ -154,6 +155,11 @@ describe('procurement tender-document API client', () => {
     );
     await service.uploadTemplateWorkflowContent('step-submitted', file);
     await service.completeTemplateContentStep('step-submitted');
+
+    expect(workflowApi.getWorkflowEvidenceReviewInstances).toHaveBeenCalledWith({
+      pageSize: 100,
+      workflowInstanceId: 'instance-exact',
+    });
 
     expect(workflowApi.uploadStepAttachment).toHaveBeenCalledWith(
       'step-submitted',

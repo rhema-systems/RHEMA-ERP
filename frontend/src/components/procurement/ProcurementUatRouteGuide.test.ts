@@ -13,6 +13,10 @@ describe('resolveProcurementUatRoute', () => {
       'tender-documents-publication',
     ],
     [
+      '/procurement/rfqs/rfq-1/document-controls',
+      'tender-documents-publication',
+    ],
+    [
       '/procurement/tenders/tender-1/committee-controls',
       'evaluation-committee',
     ],
@@ -28,6 +32,15 @@ describe('resolveProcurementUatRoute', () => {
     expect(
       resolveProcurementUatRoute('/procurement/business-partners')
     ).toBeUndefined();
+  });
+
+  it.each([
+    '/procurement/tender-documents',
+    '/procurement/tender-documents/',
+    '/procurement/tender-documents/template-1',
+    '/procurement/tender-documents/template-1/',
+  ])('does not imply transaction progress on reusable template setup %s', (path) => {
+    expect(resolveProcurementUatRoute(path)).toBeUndefined();
   });
 
   it('captures the tender id for tender sub-pages', () => {
