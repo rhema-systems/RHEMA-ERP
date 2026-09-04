@@ -168,4 +168,11 @@ describe('ProcurementPlanItemDialogBody product selector', () => {
     expect(screen.queryByRole('button', { name: /Pat Wages Enterprise/i })).not.toBeInTheDocument();
     expect(screen.getByText('Pat Wages Enterprise')).toBeInTheDocument();
   });
+
+  it('does not ask the planner to choose a sourcing method', () => {
+    render(<ProductSelectorHarness />);
+
+    expect(document.getElementById('procurementMethod')).toBeNull();
+    expect(screen.queryByText('Method')).not.toBeInTheDocument();
+  });
 });

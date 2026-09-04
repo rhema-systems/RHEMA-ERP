@@ -183,20 +183,41 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         if (releaseReadiness.IsCompliant)
             selection = await ResolveMethodSelectionAsync(requisition, method, overrideReason,
                 $"sourcing-case-readiness:{requisitionId:N}", OverrideControlMode.Check, cancellationToken);
-        var existing = releaseReadiness.CurrentRelease is null
-            ? await CaseQuery(false).Where(item => item.PurchaseRequisitionId == requisitionId)
-                .OrderByDescending(item => item.CaseSequence).FirstOrDefaultAsync(cancellationToken)
-            : await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id, cancellationToken);
+        var currentReleaseCase = releaseReadiness.CurrentRelease is null
+            ? null
+            : await CaseQuery(false).SingleOrDefaultAsync(
+                item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id,
+                cancellationToken);
+        var activeCase = await CaseQuery(false)
+            .Where(item => item.PurchaseRequisitionId == requisitionId &&
+                (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                 item.Status == ProcurementSourcingCaseStatus.InProgress))
+            .OrderByDescending(item => item.CaseSequence)
+            .FirstOrDefaultAsync(cancellationToken);
+        var existing = currentReleaseCase ?? activeCase;
+        if (existing is null && releaseReadiness.CurrentRelease is null)
+        {
+            existing = await CaseQuery(false)
+                .Where(item => item.PurchaseRequisitionId == requisitionId)
+                .OrderByDescending(item => item.CaseSequence)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
         var existingDto = existing is null ? null : await MapAsync(existing, cancellationToken);
         var methodCompliant = selection?.IsEligible == true;
+        var activeCaseBlocksRelease = activeCase is not null &&
+            releaseReadiness.CurrentRelease is not null &&
+            activeCase.SourcingReleaseId != releaseReadiness.CurrentRelease.Id;
         var canCreate = releaseReadiness.IsCompliant && existing is null && methodCompliant;
         var code = !releaseReadiness.IsCompliant ? releaseReadiness.DecisionCode
+            : activeCaseBlocksRelease ? "SOURCING_CASE_ACTIVE_RELEASE_CONFLICT"
             : existing is not null ? "SOURCING_CASE_ALREADY_EXISTS"
             : !methodCompliant ? selection?.DecisionCode ?? "SOURCING_CASE_METHOD_BLOCKED"
             : selection?.MethodSelectionBasis == ProcurementSourcingMethodSelectionBasis.ApprovedOverride
                 ? "SOURCING_CASE_OVERRIDE_READY"
                 : "SOURCING_CASE_RECOMMENDATION_READY";
         var message = !releaseReadiness.IsCompliant ? releaseReadiness.Message
+            : activeCaseBlocksRelease
+                ? ActiveCaseConflictMessage(activeCase!)
             : existing is not null ? $"Sourcing case {existing.CaseNumber} already owns this immutable release."
             : !methodCompliant ? selection?.Message ?? "The procurement method could not be resolved from the current effective policy."
             : selection?.Message ?? "The server-derived recommendation can be locked into a sourcing case; its release audit record is created automatically.";
@@ -267,6 +288,12 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         }
         if (!readiness.IsReleaseCurrent || readiness.CurrentRelease is null)
             throw new ProcurementSourcingCaseValidationException(readiness.DecisionCode, readiness.Message);
+        if (readiness.CurrentCase is not null &&
+            readiness.CurrentCase.Status is ProcurementSourcingCaseStatus.Ready or ProcurementSourcingCaseStatus.InProgress &&
+            readiness.CurrentCase.SourcingReleaseId != readiness.CurrentRelease.Id)
+            throw new ProcurementSourcingCaseConflictException(
+                "SOURCING_CASE_ACTIVE_RELEASE_CONFLICT",
+                ActiveCaseConflictMessage(readiness.CurrentCase));
         var selection = await ResolveMethodSelectionAsync(requisition, request.SelectedMethod, request.MethodOverrideReason,
             normalizedCorrelation, OverrideControlMode.Enforce, cancellationToken);
         if (!selection.IsEligible || !selection.SelectedMethod.HasValue)
@@ -491,6 +518,24 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     {
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(ManagePermission, sourceReference, normalizedCorrelation, cancellationToken);
+        var activeCase = await CaseQuery(false)
+            .Where(item => item.PurchaseRequisitionId == requisitionId &&
+                (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                 item.Status == ProcurementSourcingCaseStatus.InProgress))
+            .OrderByDescending(item => item.CaseSequence)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (activeCase is not null)
+        {
+            var state = await EvaluateSourceStateAsync(activeCase, cancellationToken);
+            if (!state.Current)
+                throw new ProcurementSourcingCaseConflictException(
+                    "SOURCING_CASE_ACTIVE_RELEASE_CONFLICT",
+                    ActiveCaseConflictMessage(activeCase));
+
+            return await BuildEntryGateAsync(activeCase, expectedMethod, sourceType, sourceReference,
+                normalizedCorrelation, recordAllowedDecision: true, cancellationToken);
+        }
+
         var release = await _sourcingReleases.EnforceSourcingAsync(requisitionId, sourceType, sourceReference, normalizedCorrelation, cancellationToken);
         var entity = await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id, cancellationToken);
         if (entity is null && string.Equals(sourceType, "Tender", StringComparison.OrdinalIgnoreCase))
@@ -850,7 +895,10 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     {
         EnsureReason(request.Reason);
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
-        await EnsureCapabilityAsync(ClosePermission, id.ToString("N"), normalizedCorrelation, cancellationToken);
+        var requiredPermission = target == ProcurementSourcingCaseStatus.Cancelled
+            ? ManagePermission
+            : ClosePermission;
+        await EnsureCapabilityAsync(requiredPermission, id.ToString("N"), normalizedCorrelation, cancellationToken);
         var entity = await CaseQuery(true).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new ProcurementSourcingCaseNotFoundException("SOURCING_CASE_NOT_FOUND", "The sourcing case was not found in the current tenant.");
         EnsureRowVersion(entity.RowVersion, request.RowVersion);
@@ -1155,6 +1203,35 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             .Include(item => item.Lots).ThenInclude(item => item.Items).ThenInclude(item => item.PurchaseRequisitionItem)
             .Include(item => item.SourceRequests);
         return tracked ? query : query.AsNoTracking();
+    }
+
+    private static string ActiveCaseConflictMessage(ProcurementSourcingCase item)
+    {
+        var sourceReference = item.SourceRequests
+            .Where(request => !request.IsDeleted &&
+                request.Status == ProcurementSourcingCaseSourceRequestStatus.Created &&
+                !string.IsNullOrWhiteSpace(request.SourceEntityReference))
+            .OrderByDescending(request => request.RequestSequence)
+            .Select(request => request.SourceEntityReference)
+            .FirstOrDefault();
+        var source = string.IsNullOrWhiteSpace(sourceReference)
+            ? item.CaseNumber
+            : $"{item.CaseNumber} ({sourceReference})";
+        return $"This requisition is already being sourced through {source}, but that active case no longer matches the current release. Continue the existing sourcing process, or close/cancel its sourcing case before starting a replacement.";
+    }
+
+    private static string ActiveCaseConflictMessage(ProcurementSourcingCaseDto item)
+    {
+        var sourceReference = item.SourceRequests
+            .Where(request => request.Status == ProcurementSourcingCaseSourceRequestStatus.Created &&
+                !string.IsNullOrWhiteSpace(request.SourceEntityReference))
+            .OrderByDescending(request => request.RequestSequence)
+            .Select(request => request.SourceEntityReference)
+            .FirstOrDefault();
+        var source = string.IsNullOrWhiteSpace(sourceReference)
+            ? item.CaseNumber
+            : $"{item.CaseNumber} ({sourceReference})";
+        return $"This requisition is already being sourced through {source}, but that active case no longer matches the current release. Continue the existing sourcing process, or close/cancel its sourcing case before starting a replacement.";
     }
 
     private async Task<ProcurementPolicyMethodRule> LoadOperationalMethodRuleAsync(

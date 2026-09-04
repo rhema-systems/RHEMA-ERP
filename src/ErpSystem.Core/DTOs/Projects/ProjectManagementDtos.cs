@@ -1603,7 +1603,7 @@ public class AddProjectMemberDto
     public Guid UserId { get; set; }
 
     [Required]
-    public string Role { get; set; } = "TeamMember";
+    public string Role { get; set; } = "Team Member";
 }
 
 public class ProjectWorkItemDto

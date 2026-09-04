@@ -60,12 +60,14 @@ export function TenderRevisionsPanel({
   tenderId,
   tenderStatus,
   currentSubmissionDeadline,
+  currentOpeningDate,
   revisions,
   onChanged,
 }: {
   tenderId: string;
   tenderStatus: string;
   currentSubmissionDeadline?: string;
+  currentOpeningDate?: string;
   revisions: TenderRevisionDto[];
   onChanged: () => Promise<void> | void;
 }) {
@@ -76,6 +78,13 @@ export function TenderRevisionsPanel({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState(emptyRevision);
+  const scheduledOpening = currentOpeningDate
+    ? new Date(currentOpeningDate)
+    : null;
+  const openingDateLimit =
+    scheduledOpening && !Number.isNaN(scheduledOpening.getTime())
+      ? scheduledOpening.toISOString().slice(0, 16)
+      : undefined;
 
   const issue = async () => {
     if (draft.description.trim().length < 10) {
@@ -100,6 +109,12 @@ export function TenderRevisionsPanel({
       ) {
         toast.error(
           'The revised deadline must be valid and later than the current deadline'
+        );
+        return false;
+      }
+      if (scheduledOpening && proposed > scheduledOpening) {
+        toast.error(
+          'The revised deadline cannot be later than the scheduled opening. Choose a deadline at or before the opening schedule.'
         );
         return false;
       }
@@ -264,6 +279,7 @@ export function TenderRevisionsPanel({
               <Input
                 type="datetime-local"
                 value={draft.newSubmissionDeadline}
+                max={openingDateLimit}
                 onChange={(event) =>
                   setDraft((current) => ({
                     ...current,

@@ -5,8 +5,15 @@ const api = vi.hoisted(() => ({
   post: vi.fn(),
   put: vi.fn(),
 }));
+const workflowApi = vi.hoisted(() => ({
+  getWorkflowEvidenceReviewInstances: vi.fn(),
+  getWorkflowStepEvidence: vi.fn(),
+}));
 
 vi.mock('@/services/api.service', () => ({ apiService: api }));
+vi.mock('@/services/workflow-api.service', () => ({
+  workflowApiService: workflowApi,
+}));
 
 import { procurementTenderDocumentService as service } from './procurement-tender-document.service';
 import type { ProcurementTenderDocumentLifecycleRequest } from '@/types/procurement-tender-document';
@@ -14,6 +21,68 @@ import type { ProcurementTenderDocumentLifecycleRequest } from '@/types/procurem
 describe('procurement tender-document API client', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('builds current artifact options from the tenant workflow-evidence APIs', async () => {
+    workflowApi.getWorkflowEvidenceReviewInstances.mockResolvedValue([
+      {
+        id: 'instance-1',
+        workflowName: 'Document control',
+        entityType: 'TenderDocument',
+        entityId: 'entity-1',
+        steps: [
+          {
+            stepInstanceId: 'step-1',
+            stepName: 'Verify content',
+            evidence: { total: 2 },
+          },
+          {
+            stepInstanceId: 'step-empty',
+            stepName: 'Empty',
+            evidence: { total: 0 },
+          },
+        ],
+      },
+    ]);
+    workflowApi.getWorkflowStepEvidence.mockResolvedValue([
+      {
+        id: 'evidence-current',
+        documentName: 'Controlled ITB',
+        fileName: 'itb.docx',
+        filePath: 'workflow-evidence/default/itb.docx',
+        sha256: 'a'.repeat(64),
+        version: 2,
+        isCurrent: true,
+        verificationStatus: 1,
+        malwareScanStatus: 1,
+      },
+      {
+        id: 'evidence-old',
+        fileName: 'itb-v1.docx',
+        filePath: 'workflow-evidence/default/itb-v1.docx',
+        sha256: 'b'.repeat(64),
+        version: 1,
+        isCurrent: false,
+        verificationStatus: 1,
+        malwareScanStatus: 1,
+      },
+    ]);
+
+    await expect(service.contentArtifactOptions()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'evidence-current',
+        filePath: 'workflow-evidence/default/itb.docx',
+        sha256: 'a'.repeat(64),
+        workflowInstanceId: 'instance-1',
+        workflowName: 'Document control',
+        stepName: 'Verify content',
+      }),
+    ]);
+    expect(workflowApi.getWorkflowEvidenceReviewInstances).toHaveBeenCalledWith({
+      pageSize: 100,
+    });
+    expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledTimes(1);
+    expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledWith('step-1');
   });
 
   it('uses the dedicated template option and history endpoints', async () => {

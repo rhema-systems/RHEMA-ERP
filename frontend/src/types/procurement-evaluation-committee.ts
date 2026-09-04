@@ -1,13 +1,12 @@
-export type ProcurementEvaluationSourceType =
-  | 'Tender'
-  | 'RequestForQuotation';
+export type ProcurementEvaluationSourceType = 'Tender' | 'RequestForQuotation';
 
 export type ProcurementEvaluationPhase = 'Technical' | 'Financial' | 'Combined';
 
 export type ProcurementEvaluationCommitteeControlStatus =
   | 'Draft'
   | 'Active'
-  | 'Closed';
+  | 'Closed'
+  | 'Retired';
 
 export type ProcurementEvaluationAppointmentStatus =
   | 'Pending'
@@ -251,6 +250,10 @@ export interface ProcurementEvaluationCommitteeControl {
   activatedAtUtc?: string;
   activatedByUserId?: string;
   activationEvidenceReference?: string;
+  retiredAtUtc?: string;
+  retiredByUserId?: string;
+  retirementReason?: string;
+  retirementEvidenceReference?: string;
   compositionIntegrityHash: string;
   requiredRoles: ProcurementEvaluationRoleRequirement[];
   members: ProcurementEvaluationAppointment[];
@@ -284,7 +287,14 @@ export interface BindProcurementEvaluationCommitteeRequest {
 
 export interface ActivateProcurementEvaluationCommitteeRequest {
   rowVersion: string;
-  evidenceReference: string;
+  evidenceReference?: string;
+  idempotencyKey: string;
+}
+
+export interface RetireProcurementEvaluationCommitteeDraftRequest {
+  rowVersion: string;
+  reason: string;
+  evidenceReference?: string;
   idempotencyKey: string;
 }
 
@@ -301,8 +311,8 @@ export interface SubmitProcurementEvaluationConflictDeclarationRequest {
   outcome: ProcurementEvaluationConflictOutcome;
   declaration: string;
   conflictDetails?: string;
-  signatureReference: string;
-  evidenceReference: string;
+  signatureReference?: string;
+  evidenceReference?: string;
   workflowEvidenceDocumentId?: string;
   fileUploadRecordId?: string;
   validFromUtc: string;
@@ -316,7 +326,7 @@ export interface CreateProcurementEvaluationMeetingRequest {
   meetingMode: string;
   meetingChannel: string;
   scheduledAtUtc: string;
-  evidenceReference: string;
+  evidenceReference?: string;
   remoteMeetingEvidenceReference?: string;
   committeeRowVersion: string;
   idempotencyKey: string;
@@ -324,8 +334,8 @@ export interface CreateProcurementEvaluationMeetingRequest {
 
 export interface SignProcurementEvaluationAttendanceRequest {
   isPresent: boolean;
-  signatureReference: string;
-  evidenceReference: string;
+  signatureReference?: string;
+  evidenceReference?: string;
   meetingRowVersion: string;
   appointmentRowVersion: string;
   idempotencyKey: string;
@@ -333,7 +343,7 @@ export interface SignProcurementEvaluationAttendanceRequest {
 
 export interface ConfirmProcurementEvaluationQuorumRequest {
   rowVersion: string;
-  evidenceReference: string;
+  evidenceReference?: string;
   remoteMeetingEvidenceReference?: string;
   idempotencyKey: string;
 }

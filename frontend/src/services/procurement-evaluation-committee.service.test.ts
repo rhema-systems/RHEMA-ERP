@@ -53,6 +53,12 @@ describe('procurement evaluation-committee API client', () => {
       evidenceReference: 'ACTIVATE-1',
       idempotencyKey: 'activate-key',
     });
+    await service.retireDraft('control-2', {
+      rowVersion: 'BAQF',
+      reason: 'The wrong committee snapshot was selected.',
+      evidenceReference: 'RETIRE-1',
+      idempotencyKey: 'retire-key',
+    });
     await service.createMeeting('control-1', {
       phase: 'Technical',
       meetingMode: 'Hybrid',
@@ -79,11 +85,16 @@ describe('procurement evaluation-committee API client', () => {
     );
     expect(api.post).toHaveBeenNthCalledWith(
       2,
+      '/procurement/evaluation-committees/control-2/retire-draft',
+      expect.objectContaining({ idempotencyKey: 'retire-key' })
+    );
+    expect(api.post).toHaveBeenNthCalledWith(
+      3,
       '/procurement/evaluation-committees/control-1/meetings',
       expect.any(Object)
     );
     expect(api.post).toHaveBeenNthCalledWith(
-      3,
+      4,
       '/procurement/evaluation-committees/meetings/meeting-1/attendance',
       expect.any(Object)
     );

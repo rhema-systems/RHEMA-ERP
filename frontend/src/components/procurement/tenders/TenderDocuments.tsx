@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { type TenderFormData, type DocumentRequirement } from '@/app/procurement/tenders/new/page';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -314,8 +314,8 @@ export default function TenderDocuments({ formData, updateFormData, tenderId, is
             Specify which documents bidders must upload when submitting their bids
           </p>
         </div>
-        {/* Hide Load Template button on edit page */}
-        {!isEditMode && (
+        {/* Existing requirements must not be overwritten from edit mode. */}
+        {(!isEditMode || formData.documentRequirements.length === 0) && (
           <Button
             type="button"
             variant="outline"
@@ -556,4 +556,3 @@ export default function TenderDocuments({ formData, updateFormData, tenderId, is
     </div>
   );
 }
-

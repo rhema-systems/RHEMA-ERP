@@ -112,6 +112,16 @@ export interface RegistrationFormData {
   contactPersonTitle?: string;
   contactPersonEmail?: string;
   contactPersonPhone?: string;
+  contacts?: Array<{
+    id?: string;
+    contactName: string;
+    contactTitle?: string;
+    department?: string;
+    email?: string;
+    phone?: string;
+    mobile?: string;
+    isPrimary: boolean;
+  }>;
 
   // Business Details
   industryType?: string;
@@ -123,6 +133,18 @@ export interface RegistrationFormData {
   bankName?: string;
   bankAccountNumber?: string;
   bankBranchCode?: string;
+  bankAccounts?: Array<{
+    id?: string;
+    bankName: string;
+    branchName?: string;
+    bankBranchCode?: string;
+    accountName?: string;
+    accountNumber: string;
+    swiftCode?: string;
+    iban?: string;
+    currency?: string;
+    isPrimary: boolean;
+  }>;
 
   // Categories and Specializations
   categoryIds?: string[];

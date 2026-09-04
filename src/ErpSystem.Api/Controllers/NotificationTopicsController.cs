@@ -23,6 +23,7 @@ public class NotificationTopicsController : ControllerBase
         public string Audience { get; init; } = string.Empty;
         public string Name { get; init; } = string.Empty;
         public string? Description { get; init; }
+        public bool IsRequired { get; init; }
         public bool EnableEmail { get; init; }
         public string? InAppTitleTemplate { get; init; }
         public string? InAppBodyTemplate { get; init; }
@@ -540,6 +541,23 @@ public class NotificationTopicsController : ControllerBase
             {
                 new SystemTopicSeed
                 {
+                    EntityType = "ProcurementEvaluationCommittee",
+                    Activity = "AppointmentCreated",
+                    Audience = "Internal",
+                    Name = "Evaluation Committee Appointment",
+                    Description = "Notifies an appointed committee member when an active appointment is ready for response.",
+                    IsRequired = true,
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Evaluation committee appointment: {{SourceReference}}",
+                    InAppBodyTemplate = "You have been appointed as {{MemberKind}} to {{CommitteeName}}. Review and respond to the appointment.",
+                    ActionUrlTemplate = "{{ActionUrl}}",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("UserFromData", "TargetUserId")
+                    }
+                },
+                new SystemTopicSeed
+                {
                     EntityType = "FleetCompliance",
                     Activity = "ComplianceDueSoon",
                     Audience = "Internal",
@@ -676,7 +694,7 @@ public class NotificationTopicsController : ControllerBase
                         Description = t.Description,
                         EntityType = NormalizeSegment(t.EntityType),
                         IsSystem = true,
-                        IsRequired = false,
+                        IsRequired = t.IsRequired,
                         IsActive = true,
                         EnableInApp = true,
                         EnableEmail = t.EnableEmail,
@@ -695,8 +713,11 @@ public class NotificationTopicsController : ControllerBase
                     var changed = false;
 
                     if (!topic.IsSystem) { topic.IsSystem = true; changed = true; }
+                    if (t.IsRequired && !topic.IsRequired) { topic.IsRequired = true; changed = true; }
                     if (string.IsNullOrWhiteSpace(topic.EntityType)) { topic.EntityType = NormalizeSegment(t.EntityType); changed = true; }
                     if (!topic.IsActive) { topic.IsActive = true; changed = true; }
+                    if (t.IsRequired && !topic.EnableInApp) { topic.EnableInApp = true; changed = true; }
+                    if (t.EnableEmail && !topic.EnableEmail) { topic.EnableEmail = true; changed = true; }
                     if (string.IsNullOrWhiteSpace(topic.Name)) { topic.Name = t.Name; changed = true; }
                     if (string.IsNullOrWhiteSpace(topic.Description)) { topic.Description = t.Description; changed = true; }
 

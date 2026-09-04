@@ -1,19 +1,31 @@
 export enum ProcurementTenderControlStatus {
-  Advertised = 0,
-  Opened = 1,
-  TechnicalEvaluated = 2,
-  FinancialEvaluated = 3,
-  PendingApproval = 4,
-  Approved = 5,
-  Rejected = 6,
-  Awarded = 7,
-  Contracted = 8,
-  Accepted = 9,
+  Advertised = 'Advertised',
+  Opened = 'Opened',
+  TechnicalEvaluated = 'TechnicalEvaluated',
+  FinancialEvaluated = 'FinancialEvaluated',
+  PendingApproval = 'PendingApproval',
+  Approved = 'Approved',
+  Rejected = 'Rejected',
+  Awarded = 'Awarded',
+  Contracted = 'Contracted',
+  Accepted = 'Accepted',
 }
 
 export enum ProcurementTenderSubmissionDisposition {
-  OnTimeAccepted = 0,
-  LateRejected = 1,
+  OnTimeAccepted = 'OnTimeAccepted',
+  LateRejected = 'LateRejected',
+}
+
+export enum ProcurementMethodType {
+  RequestForQuotation = 'RequestForQuotation',
+  NationalCompetitiveTendering = 'NationalCompetitiveTendering',
+  InternationalCompetitiveTendering = 'InternationalCompetitiveTendering',
+  RestrictedTendering = 'RestrictedTendering',
+  SingleSource = 'SingleSource',
+  PettyPurchase = 'PettyPurchase',
+  FrameworkCallOff = 'FrameworkCallOff',
+  QualityBasedSelection = 'QualityBasedSelection',
+  QualityAndCostBasedSelection = 'QualityAndCostBasedSelection',
 }
 
 export interface ProcurementTenderDocumentIssue {
@@ -59,7 +71,7 @@ export interface ProcurementTenderControl {
   tenderId: string;
   tenderNumber: string;
   tenderTitle: string;
-  method: number;
+  method: ProcurementMethodType;
   methodRuleCode: string;
   authorityRouteReference: string;
   ppaApprovalRequired: boolean;

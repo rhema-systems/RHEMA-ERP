@@ -1,4 +1,5 @@
 using ErpSystem.Shared;
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -74,6 +75,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     private IGenericRepository<ProcurementTenderSubmissionReceipt> Receipts => _unitOfWork.Repository<ProcurementTenderSubmissionReceipt>();
     private IGenericRepository<TenderFee> TenderFees => _unitOfWork.Repository<TenderFee>();
     private IGenericRepository<TenderPayment> TenderPayments => _unitOfWork.Repository<TenderPayment>();
+    private IGenericRepository<TenderAward> Awards => _unitOfWork.Repository<TenderAward>();
 
     public async Task<bool> IsNctOrIctAsync(Guid tenderId, CancellationToken cancellationToken = default)
     {
@@ -737,7 +739,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     {
         var correlation = NormalizeCorrelation(correlationId);
         var control = await LoadControlAsync(tenderId, tracked: true, cancellationToken);
-        await EnsureCapabilityAsync(EvaluatePermission, control.Tender.TenderNumber, correlation, cancellationToken);
+        await EnsureCapabilityAsync(ApprovePermission, control.Tender.TenderNumber, correlation, cancellationToken);
         await RevalidateAsync(control.Tender, correlation, cancellationToken);
         EnsureStatus(control, ProcurementTenderControlStatus.FinancialEvaluated, "TENDER_APPROVAL_NOT_READY");
         EnsureRowVersion(control.RowVersion, request.RowVersion);
@@ -891,25 +893,95 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 [bid.BusinessPartnerId]),
             correlation,
             cancellationToken);
+        if (!control.SubmittedForApprovalById.HasValue ||
+            !control.ApprovedById.HasValue)
+            throw Conflict("TENDER_AWARD_ACTOR_LINEAGE_REQUIRED",
+                "The controlled award requires both recommendation-maker and approval-actor lineage.");
+        if (control.SubmittedForApprovalById == control.ApprovedById)
+            throw new ProcurementTenderControlAuthorizationException(
+                "The recommendation maker cannot be the controlled award approver.");
+        if (bid.TotalBidAmount <= 0m)
+            throw Validation("TENDER_AWARD_AMOUNT_INVALID",
+                "The approved recommended bid must retain a positive total amount.");
+        var awardCurrency = (bid.Currency ?? control.Tender.Currency)?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(awardCurrency) || awardCurrency.Length != 3)
+            throw Validation("TENDER_AWARD_CURRENCY_INVALID",
+                "The approved recommended bid must retain a valid three-letter currency code.");
+
         var now = DateTime.UtcNow;
-        control.AwardBidId = bid.Id;
-        control.AwardReference = request.AwardReference.Trim();
-        control.AwardEvidenceReference = request.EvidenceReference.Trim();
-        control.AwardedAtUtc = now;
-        control.Status = ProcurementTenderControlStatus.Awarded;
-        control.Tender.Status = "Awarded";
-        control.Tender.AwardDate = now;
-        control.Tender.AwardedById = _currentUser.UserId;
-        bid.Status = "Accepted";
-        bid.UpdatedAt = now;
-        Touch(control, now);
-        await Controls.UpdateAsync(control);
-        await Tenders.UpdateAsync(control.Tender);
-        await Bids.UpdateAsync(bid);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"procurement:tender-award:{control.TenantId:N}:{control.TenderId:N}",
+                    cancellationToken);
+                var existingAwards = await Awards.GetQueryable(item =>
+                        item.TenantId == control.TenantId &&
+                        item.TenderId == control.TenderId &&
+                        !item.IsDeleted)
+                    .ToListAsync(cancellationToken);
+                if (existingAwards.Count != 0)
+                    throw Conflict("TENDER_AWARD_ALREADY_RECORDED",
+                        "A real tender award already exists for this controlled tender.");
+
+                var realAward = new TenderAward
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = control.TenantId,
+                    TenderId = control.TenderId,
+                    TenderBidId = bid.Id,
+                    BusinessPartnerId = bid.BusinessPartnerId,
+                    AwardDate = now,
+                    OriginalBidAmount = bid.TotalBidAmount,
+                    AwardedAmount = bid.TotalBidAmount,
+                    Currency = awardCurrency,
+                    AwardedById = control.ApprovedById.Value,
+                    AwardJustification = request.AwardReference.Trim(),
+                    Status = "Awarded",
+                    Notes = $"Controlled statutory award evidence: {request.EvidenceReference.Trim()}",
+                    CreatedAt = now,
+                    CreatedById = control.SubmittedForApprovalById.Value
+                };
+                await Awards.AddAsync(realAward);
+
+                control.AwardBidId = bid.Id;
+                control.AwardReference = request.AwardReference.Trim();
+                control.AwardEvidenceReference = request.EvidenceReference.Trim();
+                control.AwardedAtUtc = now;
+                control.Status = ProcurementTenderControlStatus.Awarded;
+                control.Tender.Status = "Awarded";
+                control.Tender.AwardDate = now;
+                control.Tender.AwardedById = control.ApprovedById.Value;
+                bid.Status = "Accepted";
+                bid.UpdatedAt = now;
+                Touch(control, now);
+                await Controls.UpdateAsync(control);
+                await Tenders.UpdateAsync(control.Tender);
+                await Bids.UpdateAsync(bid);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }, cancellationToken);
         await RecordAsync(control, "TenderAwardRecorded", ProcurementControlEventResult.Allowed,
-            new { request.BidId, request.AwardReference }, new { control.Status, control.AwardedAtUtc },
-            correlation, cancellationToken, External(control.AwardEvidenceReference, "Tender award record", "SRC-009"));
+            new { request.BidId, request.AwardReference },
+            new
+            {
+                control.Status,
+                control.AwardedAtUtc,
+                MaterializedAwardAmount = bid.TotalBidAmount,
+                MaterializedAwardCurrency = awardCurrency,
+                RecommendationMakerId = control.SubmittedForApprovalById,
+                AwardApproverId = control.ApprovedById
+            },
+            correlation, cancellationToken, External(request.EvidenceReference.Trim(), "Tender award record", "SRC-009"));
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 

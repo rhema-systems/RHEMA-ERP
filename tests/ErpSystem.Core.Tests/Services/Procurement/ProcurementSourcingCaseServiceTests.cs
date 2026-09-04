@@ -315,6 +315,38 @@ public sealed class ProcurementSourcingCaseServiceTests
     }
 
     [Fact]
+    public async Task SourcingManagerCanCancelButCannotCloseWithoutApprovalCapability()
+    {
+        await using var fixture = new Fixture();
+        var cancellable = await fixture.Service.CreateAsync(fixture.ValidRequest(), "trace-create-cancellable");
+        fixture.DenyOverrideCapability();
+
+        var cancelled = await fixture.Service.CancelAsync(cancellable.Id,
+            new ProcurementSourcingCaseActionRequest
+            {
+                RowVersion = cancellable.RowVersion,
+                Reason = "Replace stale legacy tender sourcing control."
+            }, "trace-cancel-as-manager");
+
+        cancelled.Status.Should().Be(ProcurementSourcingCaseStatus.Cancelled);
+
+        await using var closeFixture = new Fixture();
+        var started = await closeFixture.Service.CreateAsync(closeFixture.ValidRequest(), "trace-create-close");
+        await closeFixture.Service.RegisterSourceRequestAsync(started.Id, "RequestForQuotation",
+            closeFixture.SourceEntityId, "RFQ-CLOSE-001", "trace-register-close");
+        started = await closeFixture.Service.GetAsync(started.Id);
+        closeFixture.DenyOverrideCapability();
+
+        await closeFixture.Service.Invoking(service => service.CloseAsync(started.Id,
+                new ProcurementSourcingCaseActionRequest
+                {
+                    RowVersion = started.RowVersion,
+                    Reason = "Controlled source request completed."
+                }, "trace-close-as-manager"))
+            .Should().ThrowAsync<ProcurementSourcingCaseAuthorizationException>();
+    }
+
+    [Fact]
     public async Task TenderEntryAutomaticallyLocksAndReusesThePolicySelectedSourcingCase()
     {
         await using var fixture = new Fixture
@@ -347,6 +379,49 @@ public sealed class ProcurementSourcingCaseServiceTests
         retained.SourceRequests.Should().ContainSingle(item =>
             item.SourceType == "Tender" &&
             item.Status == ProcurementSourcingCaseSourceRequestStatus.Planned);
+        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task NewerReleaseCannotCreateASecondCaseWhileEarlierCaseIsActive()
+    {
+        await using var fixture = new Fixture();
+        var active = await fixture.Service.CreateAsync(fixture.ValidRequest(), "trace-active-case");
+        fixture.AdvanceToNewRelease();
+
+        var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
+
+        readiness.CanCreate.Should().BeFalse();
+        readiness.DecisionCode.Should().Be("SOURCING_CASE_ACTIVE_RELEASE_CONFLICT");
+        readiness.CurrentCase.Should().NotBeNull();
+        readiness.CurrentCase!.Id.Should().Be(active.Id);
+        readiness.Message.Should().Contain(active.CaseNumber);
+
+        await fixture.Service.Invoking(service => service.CreateAsync(
+                fixture.ValidRequest(), "trace-second-case"))
+            .Should().ThrowAsync<ProcurementSourcingCaseConflictException>()
+            .Where(exception => exception.Code == "SOURCING_CASE_ACTIVE_RELEASE_CONFLICT");
+        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SourceEntryRejectsStaleActiveCaseBeforeIssuingAnotherRelease()
+    {
+        await using var fixture = new Fixture();
+        var active = await fixture.Service.CreateAsync(fixture.ValidRequest(), "trace-active-source");
+        fixture.AdvanceToNewRelease();
+
+        await fixture.Service.Invoking(service => service.EnforceSourceEntryAsync(
+                fixture.Requisition.Id,
+                ProcurementMethodType.RequestForQuotation,
+                "RequestForQuotation",
+                "RFQ-SECOND-001",
+                "trace-stale-active"))
+            .Should().ThrowAsync<ProcurementSourcingCaseConflictException>()
+            .Where(exception => exception.Code == "SOURCING_CASE_ACTIVE_RELEASE_CONFLICT" &&
+                exception.Message.Contains(active.CaseNumber));
+
+        fixture.VerifyNoSourceReleaseWasIssued();
         (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
     }
 
@@ -725,6 +800,35 @@ public sealed class ProcurementSourcingCaseServiceTests
                     It.IsAny<string>(),
                     It.IsAny<CancellationToken>()),
                 Times.Once);
+
+        public void VerifyNoSourceReleaseWasIssued() =>
+            _releases.Verify(item => item.EnforceSourcingAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+
+        public void AdvanceToNewRelease()
+        {
+            var fingerprint = new string('c', 64);
+            Readiness.ControlFingerprint = fingerprint;
+            Readiness.IsReleased = true;
+            Readiness.CanRelease = false;
+            Readiness.CurrentRelease = new PurchaseRequisitionSourcingReleaseDto
+            {
+                Id = Guid.NewGuid(),
+                RequisitionId = Requisition.Id,
+                RequisitionNumber = Requisition.RequisitionNumber,
+                AttemptNumber = ReleaseDto.AttemptNumber + 1,
+                ReleaseReference = $"SRL-{Requisition.RequisitionNumber}-A{ReleaseDto.AttemptNumber + 1}",
+                ReleasedAtUtc = DateTime.UtcNow,
+                ReleasedById = Guid.NewGuid(),
+                ReleasedByName = "Procurement Controller",
+                ReleaseReason = "Updated sourcing controls.",
+                CorrelationId = "trace-new-release",
+                ControlFingerprint = fingerprint,
+                IntegrityHash = new string('d', 64)
+            };
+        }
 
         public void VerifyEvaluatorRecoveryAuthorization() =>
             VerifyRecoveryAuthorization("procurement.tender.evaluate");

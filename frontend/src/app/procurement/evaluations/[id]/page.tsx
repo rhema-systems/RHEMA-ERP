@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,6 +29,8 @@ import { type TenderBidDetailDto } from '@/services/tenderBidService';
 import { createEvaluationIdempotencyKey } from '@/lib/procurement-evaluation-committee';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { useAuth } from '@/hooks/use-auth';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -50,6 +53,8 @@ export default function EvaluationFormPage() {
   const [evaluation, setEvaluation] = useState<TenderEvaluationDto | null>(null);
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [template, setTemplate] = useState<EvaluationTemplate | null>(null);
+  const [sourceTender, setSourceTender] = useState<TenderDetailDto | null>(null);
+  const [evaluationRouteError, setEvaluationRouteError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -80,6 +85,28 @@ export default function EvaluationFormPage() {
       // Load bid details
       const bidData = await tenderBidService.getBidById(evalData.tenderBidId);
       setBid(bidData);
+
+      let tenderData: TenderDetailDto | null = null;
+      try {
+        setEvaluationRouteError(undefined);
+        tenderData = await tenderService.getTenderById(bidData.tenderId);
+        setSourceTender(tenderData);
+      } catch (tenderError) {
+        setSourceTender(null);
+        setEvaluationRouteError(
+          getProcurementProblemMessage(
+            tenderError,
+            'The tender evaluation route could not be determined.'
+          )
+        );
+      }
+
+      if (
+        tenderData &&
+        getTenderEvaluationRoute(tenderData, bidData.id).mode === 'controlled'
+      ) {
+        return;
+      }
 
       // Load evaluation template if assigned
       if (bidData.evaluationTemplateId) {
@@ -286,6 +313,67 @@ export default function EvaluationFormPage() {
             Back to Evaluations
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  const evaluationRoute = sourceTender
+    ? getTenderEvaluationRoute(sourceTender, bid.id)
+    : undefined;
+
+  if (evaluationRoute?.mode === 'controlled') {
+    return (
+      <div className="container mx-auto py-6">
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-blue-700" />
+              Legacy evaluation retained for audit
+            </CardTitle>
+            <CardDescription>
+              This tender now uses the signed controlled evaluation lifecycle.
+              This legacy record cannot be edited or submitted; continue from
+              the tender committee and controlled evaluation workspaces.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => router.push(evaluationRoute.committeeHref)}
+            >
+              Committee controls
+            </Button>
+            <Button
+              onClick={() => router.push(evaluationRoute.evaluationHref)}
+            >
+              {evaluationRoute.evaluationLabel}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!evaluationRoute) {
+    return (
+      <div className="container mx-auto py-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Evaluation route unavailable</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>
+              {evaluationRouteError ??
+                'The tender evaluation route could not be determined.'}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/procurement/tenders/${bid.tenderId}`)}
+            >
+              Return to tender
+            </Button>
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }

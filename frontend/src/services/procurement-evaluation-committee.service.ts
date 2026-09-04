@@ -16,6 +16,7 @@ import type {
   ProcurementEvaluationScoreRecall,
   ProcurementEvaluationSourceType,
   RequestProcurementEvaluationScoreRecallRequest,
+  RetireProcurementEvaluationCommitteeDraftRequest,
   RespondProcurementEvaluationAppointmentRequest,
   SignProcurementEvaluationAttendanceRequest,
   SubmitProcurementEvaluationConflictDeclarationRequest,
@@ -58,6 +59,14 @@ export const procurementEvaluationCommitteeService = {
   ) =>
     apiService.post<ProcurementEvaluationCommitteeControl>(
       `${root}/${committeeControlId}/activate`,
+      request
+    ),
+  retireDraft: (
+    committeeControlId: string,
+    request: RetireProcurementEvaluationCommitteeDraftRequest
+  ) =>
+    apiService.post<ProcurementEvaluationCommitteeControl>(
+      `${root}/${committeeControlId}/retire-draft`,
       request
     ),
   respondToAppointment: (

@@ -64,6 +64,8 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         _unitOfWork.Repository<ProcurementSupplierRegistrationEvidencePackBinding>();
     private IGenericRepository<BusinessPartnerRegistration> Registrations =>
         _unitOfWork.Repository<BusinessPartnerRegistration>();
+    private IGenericRepository<ProcurementSupplierApplicantAccess> ApplicantAccesses =>
+        _unitOfWork.Repository<ProcurementSupplierApplicantAccess>();
     private IGenericRepository<ProcurementConfigurationProfile> ConfigurationProfiles =>
         _unitOfWork.Repository<ProcurementConfigurationProfile>();
     private IGenericRepository<WorkflowDefinition> WorkflowDefinitions =>
@@ -1283,6 +1285,18 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         if (!_currentUser.IsExternalUser) return;
         if (registration.CreatedById == _currentUser.UserId) return;
 
+        // Retained applications preserve their original audit creator. A verified
+        // applicant-token session is instead authorized by its signed registration,
+        // token, and active session binding.
+        if (string.Equals(
+                _currentUser.AuthenticationProvider,
+                "ApplicantToken",
+                StringComparison.OrdinalIgnoreCase) &&
+            await HasRestrictedApplicantAccessAsync(registration, cancellationToken))
+        {
+            return;
+        }
+
         // Approval replaces the temporary applicant identity with the supplier account.
         // The approved supplier owner and its active delegated users must therefore be
         // able to read the evidence lineage that now governs their eligibility.
@@ -1307,6 +1321,47 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
 
         throw new ProcurementSupplierEvidencePackAuthorizationException(
             "Supplier applicants can access only their own or linked approved supplier registration evidence status.");
+    }
+
+    private async Task<bool> HasRestrictedApplicantAccessAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.Claims is null ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_registration",
+                out var registrationClaim) ||
+            !Guid.TryParse(registrationClaim, out var claimedRegistrationId) ||
+            claimedRegistrationId != registration.Id ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_token",
+                out var tokenClaim) ||
+            !Guid.TryParse(tokenClaim, out var claimedTokenId) ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_session",
+                out var sessionClaim) ||
+            !Guid.TryParse(sessionClaim, out var claimedSessionReference))
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        return await ApplicantAccesses.GetQueryable(item =>
+                item.Id == _currentUser.UserId &&
+                item.TenantId == registration.TenantId &&
+                item.RegistrationId == registration.Id &&
+                item.TokenId == claimedTokenId &&
+                item.Status ==
+                    ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
+                !item.TerminalAtUtc.HasValue &&
+                !item.IsDeleted &&
+                item.Sessions.Any(session =>
+                    session.TenantId == registration.TenantId &&
+                    session.SessionReference == claimedSessionReference &&
+                    session.Status == ProcurementSupplierApplicantSessionStatus.Active &&
+                    session.ExpiresAtUtc > now &&
+                    !session.IsDeleted))
+            .AnyAsync(cancellationToken);
     }
 
     private void EnsureAuthenticatedTenant()

@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -6,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,6 +18,55 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class TenderPersistenceRoundTripTests
 {
+    [Fact]
+    public async Task SubmitWithoutActiveWorkflowFailsClosedAndLeavesDraftUnchanged()
+    {
+        var fixture = new Fixture();
+        var tender = fixture.SeedDraftTender();
+        fixture.Workflow.Setup(service => service.SubmitAsync("Tender", tender.Id))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.Completed,
+                    Message = "No active approval workflow is configured; approval is not required."
+                },
+                WorkflowOutcome.Approved,
+                approvalRequired: false));
+
+        var action = () => fixture.Service.SubmitTenderForApprovalAsync(tender.Id, fixture.UserId);
+
+        var exception = await action.Should().ThrowAsync<ProcurementTenderWorkflowValidationException>();
+        exception.Which.Code.Should().Be("TENDER_WORKFLOW_NOT_CONFIGURED");
+        tender.Status.Should().Be("Draft");
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(It.IsAny<Tender>()), Times.Never);
+        fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.StatusAdapters.Verify(registry => registry.GetAdapter(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitWithActiveWorkflowAppliesPendingOutcomeAndPersistsTender()
+    {
+        var fixture = new Fixture();
+        var tender = fixture.SeedDraftTender();
+        fixture.Workflow.Setup(service => service.SubmitAsync("Tender", tender.Id))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.InProgress
+                },
+                WorkflowOutcome.Pending,
+                approvalRequired: true));
+
+        await fixture.Service.SubmitTenderForApprovalAsync(tender.Id, fixture.UserId);
+
+        tender.Status.Should().Be("Submitted");
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(tender), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        fixture.StatusAdapters.Verify(registry => registry.GetAdapter("Tender"), Times.Once);
+    }
+
     [Fact]
     public async Task CreateUpdateAndGetRetainEvaluationTemplateAndEvaluationSettings()
     {
@@ -177,16 +228,36 @@ public sealed class TenderPersistenceRoundTripTests
             bids.Setup(repository => repository.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<TenderBid, bool>>>()))
                 .ReturnsAsync(Array.Empty<TenderBid>());
             var evaluations = new Mock<IGenericRepository<TenderEvaluation>>();
+            var sourcingCases = new Mock<IGenericRepository<ProcurementSourcingCase>>();
+            var sourcingCaseRows = new[]
+            {
+                new ProcurementSourcingCase
+                {
+                    Id = SourcingCaseId,
+                    TenantId = tenantId,
+                    SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+                }
+            };
+            sourcingCases.Setup(repository => repository.GetQueryable(
+                    It.IsAny<System.Linq.Expressions.Expression<Func<ProcurementSourcingCase, bool>>>()))
+                .Returns((System.Linq.Expressions.Expression<Func<ProcurementSourcingCase, bool>> predicate) =>
+                    sourcingCaseRows.Where(predicate.Compile()).AsAsyncQueryable());
 
             var unitOfWork = new Mock<IUnitOfWork>();
-            unitOfWork.Setup(repository => repository.Repository<TenderBid>()).Returns(bids.Object);
-            unitOfWork.Setup(repository => repository.Repository<TenderEvaluation>()).Returns(evaluations.Object);
-            unitOfWork.Setup(repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            UnitOfWork = unitOfWork;
+            UnitOfWork.Setup(repository => repository.Repository<TenderBid>()).Returns(bids.Object);
+            UnitOfWork.Setup(repository => repository.Repository<TenderEvaluation>()).Returns(evaluations.Object);
+            UnitOfWork.Setup(repository => repository.Repository<ProcurementSourcingCase>()).Returns(sourcingCases.Object);
+            UnitOfWork.Setup(repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(1);
 
             var currentUser = new Mock<ICurrentUserProvider>();
             currentUser.SetupGet(provider => provider.TenantId).Returns(tenantId);
             currentUser.SetupGet(provider => provider.UserId).Returns(userId);
+            UserId = userId;
+
+            StatusAdapters.Setup(registry => registry.GetAdapter("Tender"))
+                .Returns(new TenderWorkflowStatusAdapter());
 
             SourcingCases.Setup(service => service.EnforceSourceEntryAsync(
                     RequisitionId,
@@ -248,9 +319,9 @@ public sealed class TenderPersistenceRoundTripTests
                 lots.Object,
                 Mock.Of<IBusinessPartnerRepository>(),
                 Mock.Of<ITenderNotificationService>(),
-                Mock.Of<IWorkflowIntegrationService>(),
-                Mock.Of<IWorkflowStatusAdapterRegistry>(),
-                unitOfWork.Object,
+                Workflow.Object,
+                StatusAdapters.Object,
+                UnitOfWork.Object,
                 userManager.Object,
                 roleManager.Object,
                 currentUser.Object,
@@ -264,12 +335,33 @@ public sealed class TenderPersistenceRoundTripTests
         }
 
         public TenderService Service { get; }
+        public Guid UserId { get; }
         public Guid RequisitionId { get; }
         public Guid ReleaseId { get; }
         public Guid SourcingCaseId { get; }
         public decimal EstimatedValue { get; }
         public string Currency { get; }
         public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
+        public Mock<IWorkflowIntegrationService> Workflow { get; } = new();
+        public Mock<IWorkflowStatusAdapterRegistry> StatusAdapters { get; } = new();
+        public Mock<IUnitOfWork> UnitOfWork { get; }
+        public Mock<ITenderRepository> Tenders => _tenders;
+
+        public Tender SeedDraftTender()
+        {
+            _storedTender = new Tender
+            {
+                Id = Guid.NewGuid(),
+                TenantId = Guid.NewGuid(),
+                TenderNumber = "TND-2026-9002",
+                Title = "Governed tender",
+                TenderType = "ITB",
+                Status = "Draft",
+                CreatedById = UserId,
+                CreatedAt = DateTime.UtcNow
+            };
+            return _storedTender;
+        }
 
         public void RemoveSourcingCaseLink()
         {

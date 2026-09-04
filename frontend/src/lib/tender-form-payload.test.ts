@@ -86,5 +86,9 @@ describe('tender form persistence payloads', () => {
       experienceWeightage: 10,
       minimumPerformanceRating: 4,
     });
+    expect(payload.requiredDocuments).toBeDefined();
+    expect(JSON.parse(payload.requiredDocuments ?? '[]')).toEqual(
+      formData.documentRequirements
+    );
   });
 });

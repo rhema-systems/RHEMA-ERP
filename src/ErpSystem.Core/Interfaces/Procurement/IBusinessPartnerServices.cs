@@ -59,6 +59,9 @@ public interface IBusinessPartnerService
     Task DeleteContactAsync(Guid partnerId, Guid contactId);
     Task SetPrimaryContactAsync(Guid partnerId, Guid contactId);
 
+    // Bank accounts (read-only; changes continue through governed supplier master data)
+    Task<IEnumerable<BusinessPartnerBankAccountDto>> GetBankAccountsAsync(Guid partnerId);
+
     // Licenses
     Task<IEnumerable<BusinessPartnerLicenseDto>> GetLicensesAsync(Guid partnerId);
     Task<BusinessPartnerLicenseDto> AddLicenseAsync(Guid partnerId, CreateBusinessPartnerLicenseDto dto);

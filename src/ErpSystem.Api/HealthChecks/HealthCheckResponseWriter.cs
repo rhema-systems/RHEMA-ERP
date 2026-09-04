@@ -10,6 +10,30 @@ namespace ErpSystem.Api.HealthChecks;
 /// </summary>
 public static class HealthCheckResponseWriter
 {
+    /// <summary>
+    /// Writes a dependency-free process-liveness response. This deliberately does not resolve
+    /// <see cref="HealthCheckService"/>: SQL, Redis, identity and other dependency checks belong
+    /// to readiness and must not make an otherwise running process appear dead.
+    /// </summary>
+    public static Task WriteLivenessAsync(HttpContext context)
+    {
+        var report = new HealthReport(
+            new Dictionary<string, HealthReportEntry>(StringComparer.Ordinal)
+            {
+                ["self"] = new(
+                    HealthStatus.Healthy,
+                    "API is running",
+                    TimeSpan.Zero,
+                    exception: null,
+                    data: null,
+                    tags: ["live"])
+            },
+            TimeSpan.Zero);
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        return WriteAsync(context, report);
+    }
+
     public static Task WriteAsync(HttpContext context, HealthReport report)
     {
         context.Response.ContentType = "application/json; charset=utf-8";

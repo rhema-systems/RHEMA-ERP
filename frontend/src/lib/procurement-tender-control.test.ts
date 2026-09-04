@@ -8,11 +8,12 @@ import {
 import {
   ProcurementTenderControlStatus as Status,
   ProcurementTenderSubmissionDisposition as Disposition,
+  ProcurementMethodType as Method,
   type ProcurementTenderControl,
 } from '@/types/procurement-tender-control';
 
 const control = (status: Status): ProcurementTenderControl => ({
-  tenderId: 't1', tenderNumber: 'NCT-1', tenderTitle: 'Goods', method: 1,
+  tenderId: 't1', tenderNumber: 'NCT-1', tenderTitle: 'Goods', method: Method.NationalCompetitiveTendering,
   methodRuleCode: 'NCT-GOODS', authorityRouteReference: 'ARR-1',
   ppaApprovalRequired: false, status, advertisementReference: 'ADV-1',
   publicationChannel: 'Daily Graphic', tenderDocumentReference: 'STD-1',
@@ -51,7 +52,7 @@ describe('NCT/ICT tender control helpers', () => {
   });
   it('limits QBS financial review to the highest qualified technical bid', () => {
     const qbs = control(Status.TechnicalEvaluated);
-    qbs.method = 7;
+    qbs.method = Method.QualityBasedSelection;
     qbs.submissionReceipts.push({
       id: 'r3', tenderBidId: 'b3', businessPartnerId: 'p3', businessPartnerName: 'Three',
       receiptNumber: 'R3', receivedAtUtc: '2026-07-19T01:00:00Z',

@@ -15,7 +15,7 @@ param(
     [string]$SshUser = 'Administrator',
     [string]$SshKeyPath = (Join-Path $env:USERPROFILE '.ssh\id_rsa'),
     [string]$PublicBaseUrl = 'https://149.102.145.190:8443',
-    [int]$ApiReadyTimeoutSeconds = 420
+    [int]$ApiReadyTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Stop'
@@ -502,6 +502,11 @@ function New-ReleaseArtifacts {
     ) 'Frontend public staging failed'
     Copy-Item (Join-Path $nextOutput 'standalone\server.js') `
         (Join-Path $frontendOutput 'server.js') -Force
+    Invoke-RobocopyChecked @(
+        (Join-Path $nextOutput 'standalone\node_modules'),
+        (Join-Path $frontendOutput 'node_modules'),
+        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+    ) 'Frontend runtime dependencies staging failed'
     Copy-Item (Join-Path $frontendRoot 'package.json') `
         (Join-Path $frontendOutput 'package.json') -Force
 

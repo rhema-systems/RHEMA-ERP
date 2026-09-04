@@ -48,11 +48,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { TenderDocumentContentArtifactField } from '@/components/procurement/tender-documents/TenderDocumentContentArtifactField';
 import { useAuth } from '@/hooks/use-auth';
 import {
   procurementMethodLabel,
   tenderDocumentTemplateStatusLabel,
   validateTenderDocumentTemplate,
+  applyTenderDocumentContentArtifact,
 } from '@/lib/procurement-tender-document';
 import { procurementTenderDocumentService as service } from '@/services/procurement-tender-document.service';
 import type {
@@ -548,29 +550,16 @@ export default function TenderDocumentTemplatesPage() {
               </Field>
             </div>
             <div className="md:col-span-2">
-              <Field label="Shared content reference">
-                <Input
-                  value={form.contentReference}
-                  onChange={(event) =>
-                    setForm({ ...form, contentReference: event.target.value })
-                  }
-                  placeholder="Workflow evidence, file-upload, or governed external reference"
-                />
-              </Field>
-            </div>
-            <div className="md:col-span-2">
-              <Field label="Content SHA-256 checksum">
-                <Input
-                  value={form.contentChecksumSha256}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      contentChecksumSha256: event.target.value,
-                    })
-                  }
-                  maxLength={64}
-                />
-              </Field>
+              <TenderDocumentContentArtifactField
+                value={form.contentWorkflowEvidenceDocumentId}
+                contentReference={form.contentReference}
+                checksumSha256={form.contentChecksumSha256}
+                onSelect={(artifact) =>
+                  setForm((current) =>
+                    applyTenderDocumentContentArtifact(current, artifact)
+                  )
+                }
+              />
             </div>
             <div className="md:col-span-2 space-y-2">
               <Label>Applicable procurement methods</Label>

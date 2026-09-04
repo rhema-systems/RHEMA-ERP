@@ -442,21 +442,54 @@ public class PayrollController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Unauthorized(new { message = ex.Message });
+            return PayrollProblem(
+                StatusCodes.Status401Unauthorized,
+                "PAYROLL_AUTHENTICATION_REQUIRED",
+                "Payroll authentication required",
+                ex.Message);
         }
         catch (KeyNotFoundException ex)
         {
-            return NotFound(new { message = ex.Message });
+            return PayrollProblem(
+                StatusCodes.Status404NotFound,
+                "PAYROLL_NOT_FOUND",
+                "Payroll record not found",
+                ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return PayrollProblem(
+                StatusCodes.Status400BadRequest,
+                "PAYROLL_INVALID_OPERATION",
+                "Payroll request could not be completed",
+                ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Payroll API request failed");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Payroll request failed." });
+            HttpContext.Items[
+                ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter.HandledExceptionItemKey] = ex;
+            return PayrollProblem(
+                StatusCodes.Status500InternalServerError,
+                "PAYROLL_UNEXPECTED",
+                "Payroll request failed",
+                $"Something went wrong while processing your payroll request. Please try again. If the problem continues, contact your administrator. Reference ID: {HttpContext.TraceIdentifier}.");
         }
+    }
+
+    private ObjectResult PayrollProblem(int status, string code, string title, string detail)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = title,
+            Detail = detail,
+            Instance = HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+
+        return new ObjectResult(problem) { StatusCode = status };
     }
 
     private async Task<ActionResult<T>> HandleCreated<T>(Func<Task<T>> action)

@@ -14,7 +14,6 @@ import {
   Search,
   Eye,
   Edit,
-  Plus,
   Download,
   RefreshCw,
   Filter,
@@ -91,10 +90,6 @@ export default function TendersPage() {
 
   const handleEdit = (id: string) => {
     router.push(`/procurement/tenders/${id}/edit`);
-  };
-
-  const handleCreateNew = () => {
-    router.push('/procurement/tenders/new');
   };
 
   const confirmTenderAction = async () => {
@@ -193,10 +188,6 @@ export default function TendersPage() {
             Manage tenders, invitations, bids, and awards
           </p>
         </div>
-        <Button onClick={handleCreateNew} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Create Tender
-        </Button>
       </div>
 
       {/* Filters */}

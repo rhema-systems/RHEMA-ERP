@@ -16,11 +16,17 @@ interface BasicInformationProps {
   formData: TenderFormData;
   updateFormData: (data: Partial<TenderFormData>) => void;
   procurementCategory?: string;
+  sourceCurrency?: string;
 }
 
 const CURRENCIES = ['USD', 'GHS', 'EUR', 'GBP'];
 
-export default function BasicInformation({ formData, updateFormData, procurementCategory }: BasicInformationProps) {
+export default function BasicInformation({
+  formData,
+  updateFormData,
+  procurementCategory,
+  sourceCurrency,
+}: BasicInformationProps) {
   const [evaluationTemplates, setEvaluationTemplates] = useState<EvaluationTemplateListItem[]>([]);
   const [selectedTemplateDetails, setSelectedTemplateDetails] = useState<EvaluationTemplate | null>(null);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
@@ -187,6 +193,7 @@ export default function BasicInformation({ formData, updateFormData, procurement
             <Select
               value={formData.currency}
               onValueChange={(value) => updateFormData({ currency: value })}
+              disabled={Boolean(sourceCurrency)}
             >
               <SelectTrigger id="currency">
                 <SelectValue placeholder="Select currency" />
@@ -259,7 +266,11 @@ export default function BasicInformation({ formData, updateFormData, procurement
               type="datetime-local"
               value={formData.openingDate}
               onChange={(e) => updateFormData({ openingDate: e.target.value })}
+              min={formData.submissionDeadline || undefined}
             />
+            <p className="text-xs text-muted-foreground">
+              Must be at or after the submission deadline.
+            </p>
           </div>
         </div>
       </div>

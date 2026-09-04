@@ -66,6 +66,8 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         var stored = await fixture.Context.ProcurementRequisitionSourcingReleases.SingleAsync();
         stored.SnapshotJson.Should().Contain("tdc.pr-sourcing-release.v2");
         stored.BudgetCommitmentId.Should().Be(fixture.BudgetCommitmentId);
+        stored.AuthorityRouteId.Should().Be(fixture.Route.Id);
+        stored.AuthorityRouteReference.Should().Be(fixture.Route.RouteReference);
         stored.WorkflowInstanceId.Should().Be(fixture.Workflow.Id);
         var actions = await fixture.Context.ProcurementControlEvents
             .Where(item => item.SourceId == fixture.Requisition.Id)
@@ -74,6 +76,22 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
             .ToListAsync();
         actions.Should().ContainInOrder("SourcingReleased", "SourcingReleaseReused");
         (await fixture.Service.GetHistoryAsync(fixture.Requisition.Id)).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CapturedAuthorityRouteWithInvalidIntegrityFailsClosed()
+    {
+        await using var fixture = new Fixture();
+        fixture.Route.IntegrityHash = new string('0', 64);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
+
+        readiness.IsCompliant.Should().BeFalse();
+        readiness.CanRelease.Should().BeFalse();
+        readiness.DecisionCode.Should().Be("PR_SOURCING_AUTHORITY_ROUTE_INVALID");
+        readiness.AuthorityRouteId.Should().BeNull();
+        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -199,7 +217,10 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         private static readonly DateTime Moment = new(2026, 7, 22, 8, 0, 0, DateTimeKind.Utc);
         private readonly UnitOfWork _unitOfWork;
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
-        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TenantAdmin" };
+        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "TDC_PROCUREMENT_OFFICER"
+        };
 
         public Fixture()
         {
@@ -449,6 +470,16 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
             Compliance.Setup(service => service.EvaluateAuthorityRouteAsync(
                     It.IsAny<ProcurementAuthorityRouteDecisionRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(PolicyDecision);
+            Access.Setup(service => service.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ACCESS_ALLOWED",
+                    Message = "Allowed by the focused test fixture."
+                });
 
             _unitOfWork = new UnitOfWork(Context);
             var events = new ProcurementControlEventService(
@@ -457,7 +488,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                 _unitOfWork,
                 _currentUser.Object,
                 Compliance.Object,
-                Mock.Of<IProcurementAccessControlService>(),
+                Access.Object,
                 events,
                 Submission.Object,
                 Budget.Object,
@@ -483,6 +514,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         public Mock<IProcurementRequisitionBudgetControlService> Budget { get; } = new();
         public Mock<IProcurementRequisitionAuthorityRouteService> Authority { get; } = new();
         public Mock<IProcurementComplianceDecisionService> Compliance { get; } = new();
+        public Mock<IProcurementAccessControlService> Access { get; } = new();
         public ProcurementRequisitionSourcingReleaseService Service { get; }
 
         public void SwitchRoles(params string[] roles)

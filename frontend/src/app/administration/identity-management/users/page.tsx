@@ -721,6 +721,17 @@ export default function UsersPage() {
               <UserProfile
                 user={viewingUser}
                 onClose={() => setIsProfileDialogOpen(false)}
+                onResetPassword={async (userId, request) => {
+                  await adminApiService.resetUserPassword(userId, request);
+                  await queryClient.invalidateQueries({
+                    queryKey: ['admin-users'],
+                  });
+                  toast({
+                    title: 'Temporary password set',
+                    description:
+                      'The user must replace it at next sign-in before it expires.',
+                  });
+                }}
                 onEdit={(user) => {
                   setEditingUser(user);
                   setIsDialogOpen(true);

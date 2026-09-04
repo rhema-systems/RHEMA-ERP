@@ -33,7 +33,6 @@ const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
   requiredDate: '',
   plannedQuarter: '',
   justification: '',
-  procurementMethod: 'DirectPurchase',
   notes: '',
   itemSuppliers: [],
 });
@@ -398,7 +397,7 @@ export default function EditProcurementPlanPage() {
       requiredDate: item.requiredDate ? item.requiredDate.split('T')[0] : '',
       plannedQuarter: item.plannedQuarter || '',
       justification: item.justification || '',
-      procurementMethod: item.procurementMethod || 'DirectPurchase',
+      procurementMethod: item.procurementMethod || undefined,
       notes: item.notes || '',
       itemSuppliers: existingSuppliers,
     });
@@ -1301,23 +1300,6 @@ export default function EditProcurementPlanPage() {
                         <SelectItem value="Q2">Q2</SelectItem>
                         <SelectItem value="Q3">Q3</SelectItem>
                         <SelectItem value="Q4">Q4</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="procurementMethod">Method</Label>
-                    <Select
-                      value={newItemForm.procurementMethod || 'DirectPurchase'}
-                      onValueChange={(value) => setNewItemForm({ ...newItemForm, procurementMethod: value })}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
-                        <SelectItem value="RFQ">RFQ</SelectItem>
-                        <SelectItem value="Tender">Tender</SelectItem>
-                        <SelectItem value="Framework">Framework</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

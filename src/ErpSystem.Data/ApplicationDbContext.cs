@@ -718,6 +718,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<LicenseType> LicenseTypes { get; set; }
     public DbSet<BusinessPartnerLicense> BusinessPartnerLicenses { get; set; }
     public DbSet<BusinessPartnerContact> BusinessPartnerContacts { get; set; }
+    public DbSet<BusinessPartnerBankAccount> BusinessPartnerBankAccounts { get; set; }
     public DbSet<BusinessPartnerDocument> BusinessPartnerDocuments { get; set; }
     public DbSet<BusinessPartnerFinancial> BusinessPartnerFinancials { get; set; }
     public DbSet<BusinessPartnerRegistration> BusinessPartnerRegistrations { get; set; }
@@ -1265,6 +1266,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderPaymentConfiguration());
         builder.ApplyConfiguration(new TenderBidLotConfiguration());
         builder.ApplyConfiguration(new TenderBidItemConfiguration());
+        builder.ApplyConfiguration(new TenderEvaluationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationItemConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
@@ -6011,7 +6013,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<PayrollJournalLine>(entity =>
         {
-            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.SequenceNo }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.SequenceNo })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.AccountCode });
         });
 
@@ -7524,6 +7528,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(bpc => bpc.BusinessPartner)
                 .WithMany(bp => bp.Contacts)
                 .HasForeignKey(bpc => bpc.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<BusinessPartnerBankAccount>(entity =>
+        {
+            entity.ToTable("BusinessPartnerBankAccounts");
+            entity.HasIndex(account => new { account.TenantId, account.BusinessPartnerId });
+            entity.HasIndex(account => new { account.TenantId, account.BusinessPartnerId, account.IsPrimary })
+                .IsUnique()
+                .HasFilter("[IsPrimary] = 1 AND [IsDeleted] = 0");
+
+            entity.HasOne(account => account.BusinessPartner)
+                .WithMany(partner => partner.BankAccounts)
+                .HasForeignKey(account => account.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

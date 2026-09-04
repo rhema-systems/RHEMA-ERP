@@ -779,6 +779,7 @@ export interface WorkflowEvidenceDocumentDto {
   documentName?: string;
   documentType?: string;
   fileName: string;
+  filePath: string;
   sha256: string;
   documentOwnerId: string;
   issueDate?: string;

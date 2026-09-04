@@ -10,15 +10,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
-import { ArrowLeft, Save, Send, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ArrowLeft, Save, Send, Clock, XCircle, AlertCircle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderEvaluationService from '@/services/tenderEvaluationService';
 import * as tenderBidService from '@/services/tenderBidService';
 import { evaluationTemplateService, type EvaluationTemplate, type EvaluationTemplateCriterion } from '@/services/evaluationTemplateService';
 import { type CreateEvaluationDto } from '@/services/tenderEvaluationService';
 import { type TenderBidDetailDto } from '@/services/tenderBidService';
-import { createEvaluationIdempotencyKey } from '@/lib/procurement-evaluation-committee';
+import { createEvaluationIdempotencyKey, isEvaluationCommitteeControlError } from '@/lib/procurement-evaluation-committee';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -53,8 +56,11 @@ function CreateEvaluationContent() {
 
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [template, setTemplate] = useState<EvaluationTemplate | null>(null);
+  const [sourceTender, setSourceTender] = useState<TenderDetailDto | null>(null);
+  const [evaluationRouteError, setEvaluationRouteError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [committeeControlError, setCommitteeControlError] = useState<string>();
 
   // Dynamic criteria scores - keyed by criterion ID
   const [criteriaScores, setCriteriaScores] = useState<Record<string, number>>({});
@@ -79,6 +85,28 @@ function CreateEvaluationContent() {
       setLoading(true);
       const bidData = await tenderBidService.getBidById(bidId);
       setBid(bidData);
+
+      let tenderData: TenderDetailDto | null = null;
+      try {
+        setEvaluationRouteError(undefined);
+        tenderData = await tenderService.getTenderById(bidData.tenderId);
+        setSourceTender(tenderData);
+      } catch (tenderError) {
+        setSourceTender(null);
+        setEvaluationRouteError(
+          getProcurementProblemMessage(
+            tenderError,
+            'The tender evaluation route could not be determined.'
+          )
+        );
+      }
+
+      if (
+        tenderData &&
+        getTenderEvaluationRoute(tenderData, bidId).mode === 'controlled'
+      ) {
+        return;
+      }
 
       // Load evaluation template if assigned
       if (bidData.evaluationTemplateId) {
@@ -198,6 +226,9 @@ function CreateEvaluationContent() {
       router.push(`/procurement/evaluations/${evaluation.id}`);
     } catch (error) {
       console.error('Error creating evaluation:', error);
+      if (isEvaluationCommitteeControlError(error)) {
+        setCommitteeControlError(getProcurementProblemMessage(error));
+      }
       toast.error(getProcurementProblemMessage(error, 'Failed to create evaluation'));
     } finally {
       setSaving(false);
@@ -233,8 +264,13 @@ function CreateEvaluationContent() {
         toast.success('Evaluation submitted and locked successfully');
         router.push('/procurement/evaluations');
       } catch (submitError) {
-        toast.error(`Draft saved, but submission was blocked: ${getProcurementProblemMessage(submitError, 'Failed to submit evaluation')}`);
-        router.push(`/procurement/evaluations/${evaluation.id}`);
+        if (isEvaluationCommitteeControlError(submitError)) {
+          toast.warning('Draft saved. Complete the tender committee controls before final submission.');
+          router.push(`/procurement/evaluations/${evaluation.id}`);
+        } else {
+          toast.error(`Draft saved, but submission was blocked: ${getProcurementProblemMessage(submitError, 'Failed to submit evaluation')}`);
+          router.push(`/procurement/evaluations/${evaluation.id}`);
+        }
       }
     } catch (error) {
       console.error('Error submitting evaluation:', error);
@@ -266,6 +302,67 @@ function CreateEvaluationContent() {
             Go Back
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  const evaluationRoute = sourceTender
+    ? getTenderEvaluationRoute(sourceTender, bidId)
+    : undefined;
+
+  if (evaluationRoute?.mode === 'controlled') {
+    return (
+      <div className="container mx-auto py-6">
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-blue-700" />
+              Use the controlled tender evaluation
+            </CardTitle>
+            <CardDescription>
+              This NCT, ICT, QBS, or QCBS tender cannot create a legacy
+              per-bid evaluation. Complete committee readiness, then record the
+              signed technical and financial evaluations for the tender.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => router.push(evaluationRoute.committeeHref)}
+            >
+              Committee controls
+            </Button>
+            <Button
+              onClick={() => router.push(evaluationRoute.evaluationHref)}
+            >
+              {evaluationRoute.evaluationLabel}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!evaluationRoute) {
+    return (
+      <div className="container mx-auto py-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Evaluation route unavailable</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>
+              {evaluationRouteError ??
+                'The tender evaluation route could not be determined.'}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/procurement/tenders/${bid.tenderId}`)}
+            >
+              Return to tender
+            </Button>
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -310,6 +407,20 @@ function CreateEvaluationContent() {
           </div>
         </CardContent>
       </Card>
+
+      {committeeControlError && (
+        <Alert variant="destructive">
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>Committee controls require attention</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{committeeControlError}</p>
+            <p>Scores can be saved as a draft. A procurement administrator must complete the tender committee controls before final submission.</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => router.push(`/procurement/tenders/${bid.tenderId}/committee-controls`)}>
+              Open Committee Controls
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Evaluation Scores */}
       <Card>
@@ -501,7 +612,7 @@ function CreateEvaluationContent() {
         <CardHeader>
           <CardTitle>Signed score-sheet lock</CardTitle>
           <CardDescription>
-            Submission records the evaluator signature and evidence reference, then locks the exact score snapshot.
+            Scoring can be saved as a draft without committee readiness. Final submission checks the active committee requirements and locks the exact score snapshot.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">

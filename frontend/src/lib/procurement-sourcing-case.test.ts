@@ -97,9 +97,17 @@ describe('procurement sourcing-case presentation controls', () => {
     expect(
       procurementSourcingCaseActions(
         { status: 'InProgress', isSourceCurrent: true },
+        true,
+        false
+      )
+    ).toEqual({ canClose: false, canCancel: true });
+    expect(
+      procurementSourcingCaseActions(
+        { status: 'InProgress', isSourceCurrent: true },
+        false,
         true
       )
-    ).toEqual({ canClose: true, canCancel: true });
+    ).toEqual({ canClose: true, canCancel: false });
     expect(
       procurementSourcingCaseActions(
         { status: 'InProgress', isSourceCurrent: false },

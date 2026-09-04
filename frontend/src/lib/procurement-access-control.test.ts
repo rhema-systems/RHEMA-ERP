@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { canActivateCommittee, canCheckAccessCapability, validateResponsibilityAssignment } from './procurement-access-control';
+import {
+  canActivateCommittee, canCheckAccessCapability, committeeAssignmentEligibilityIssue,
+  validateResponsibilityAssignment,
+} from './procurement-access-control';
 
 const assignment = {
   userId: 'user-1', roleName: 'TDC_STORES_OFFICER', warehouseScopeMode: 'Restricted' as const,
@@ -27,5 +30,40 @@ describe('procurement access UI guards', () => {
     const request = { permissionCode: 'procurement.inventory.read', sourceType: 'Warehouse', sourceReference: 'WH-1' };
     expect(canCheckAccessCapability(request, true)).toBe(false);
     expect(canCheckAccessCapability({ ...request, warehouseId: 'warehouse-1' }, true)).toBe(true);
+  });
+
+  it('does not offer inactive or role-incompatible responsibility assignments to a committee', () => {
+    const evaluator = {
+      id: 'assignment-1', userId: 'user-1', username: 'evaluator', userDisplayName: 'Evaluator',
+      roleId: 'role-1', roleName: 'TDC_EVALUATOR', roleDisplayName: 'TDC Tender Evaluator',
+      warehouseScopeMode: 'None' as const, warehouses: [], locationScopeMode: 'None' as const, locations: [],
+      effectiveFrom: '2026-09-01', isActive: true, reason: 'Evaluation duty', rowVersion: 'AQ==',
+    };
+
+    expect(committeeAssignmentEligibilityIssue(
+      evaluator, 'TDC_EVALUATOR', 'Chair', '2026-09-02')).toBeUndefined();
+    expect(committeeAssignmentEligibilityIssue(
+      { ...evaluator, isActive: false }, 'TDC_EVALUATOR', 'Chair', '2026-09-02')).toContain('inactive');
+    expect(committeeAssignmentEligibilityIssue(
+      { ...evaluator, roleName: 'TDC_OBSERVER' }, 'TDC_EVALUATOR', 'Chair', '2026-09-02')).toContain('requires TDC_EVALUATOR');
+    expect(committeeAssignmentEligibilityIssue(
+      { ...evaluator, roleName: 'TDC_OBSERVER' }, 'TDC_EVALUATOR', 'Observer', '2026-09-02')).toBeUndefined();
+  });
+
+  it('requires committee membership dates to stay inside the responsibility period', () => {
+    const evaluator = {
+      id: 'assignment-1', userId: 'user-1', username: 'evaluator', userDisplayName: 'Evaluator',
+      roleId: 'role-1', roleName: 'TDC_EVALUATOR', roleDisplayName: 'TDC Tender Evaluator',
+      warehouseScopeMode: 'None' as const, warehouses: [], locationScopeMode: 'None' as const, locations: [],
+      effectiveFrom: '2026-09-01', effectiveTo: '2026-09-30', isActive: true,
+      reason: 'Evaluation duty', rowVersion: 'AQ==',
+    };
+
+    expect(committeeAssignmentEligibilityIssue(
+      evaluator, 'TDC_EVALUATOR', 'VotingMember', '2026-09-02')).toContain('Set the membership end date');
+    expect(committeeAssignmentEligibilityIssue(
+      evaluator, 'TDC_EVALUATOR', 'VotingMember', '2026-09-02', '2026-09-30')).toBeUndefined();
+    expect(committeeAssignmentEligibilityIssue(
+      evaluator, 'TDC_EVALUATOR', 'VotingMember', '2026-09-02', '2026-10-01')).toContain('cannot continue');
   });
 });

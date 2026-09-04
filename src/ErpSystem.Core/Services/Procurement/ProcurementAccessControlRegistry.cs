@@ -127,6 +127,7 @@ public static class ProcurementAccessControlRegistry
         W("TDC_PROCUREMENT_BUDGET", "TDC Procurement Budget Approval", "PROCUREMENT_BUDGET", "Procurement Budget", "TDC_PROCUREMENT_OFFICER", "TDC_FINANCE_REVIEWER"),
         W("TDC_PURCHASE_REQUISITION", "TDC Purchase Requisition Approval", "PURCHASE_REQUISITION", "Purchase Requisition", "TDC_REQUISITIONER", "TDC_MANAGING_DIRECTOR"),
         W("TDC_SOURCING", "TDC Sourcing Approval", "PROCUREMENT_SOURCING", "Procurement Sourcing", "TDC_PROCUREMENT_OFFICER", "TDC_HEAD_OF_PROCUREMENT"),
+        W("TDC_TENDER_APPROVAL", "TDC Tender Approval", "TENDER", "Tender", "TDC_PROCUREMENT_OFFICER", "TDC_HEAD_OF_PROCUREMENT"),
         W("TDC_TENDER_EVALUATION", "TDC Tender Evaluation", "TENDER_EVALUATION", "Tender Evaluation", "TDC_PROCUREMENT_OFFICER", "TDC_EVALUATOR"),
         W("TDC_TENDER_AWARD", "TDC Tender Award Approval", "TENDER_AWARD", "Tender Award", "TDC_HEAD_OF_PROCUREMENT", "TDC_ETC_MEMBER"),
         W("TDC_PURCHASE_ORDER", "TDC Purchase Order Approval", "PURCHASE_ORDER", "Purchase Order", "TDC_PROCUREMENT_OFFICER", "TDC_HEAD_OF_PROCUREMENT"),
@@ -146,6 +147,11 @@ public static class ProcurementAccessControlRegistry
 
     public static ProcurementPermissionDefinition? FindPermission(string code) =>
         Permissions.FirstOrDefault(item => string.Equals(item.Code, code, StringComparison.OrdinalIgnoreCase));
+
+    public static bool RoleGrantsPermission(string roleCode, string permissionCode) =>
+        FindRole(roleCode)?.PermissionCodes.Contains(
+            permissionCode,
+            StringComparer.OrdinalIgnoreCase) == true;
 
     private static ProcurementPermissionDefinition P(string code, string name, string description, bool mutation, bool warehouse = false) =>
         new(code, name, description, mutation, warehouse);

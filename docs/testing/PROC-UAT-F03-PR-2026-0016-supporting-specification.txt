@@ -1,0 +1,24 @@
+PROC-UAT-F03 PURCHASE REQUISITION SUPPORTING SPECIFICATION
+
+Campaign: PROC-UAT-20260904-01
+Purchase requisition: PR-2026-0016
+Source plan: PP-2026-0011
+Budget: PB-2026-0005
+Category: Goods
+Currency: GHS
+
+Line 1 - Barcode Device Kit
+- Quantity: 20 EA
+- Required by: 2026-10-15
+- Requirement: New enterprise barcode device kits with USB and Bluetooth connectivity, charging cradle, and a minimum 12-month warranty.
+
+Line 2 - PVC Pipe 50mm
+- Quantity: 20 EACH
+- Required by: 2026-11-15
+- Requirement: New 50 mm PVC pipe suitable for the approved operational use, supplied in undamaged condition and compliant with the requisition line specification.
+
+Delivery and acceptance
+- Deliver to the Operations department by the applicable required date.
+- Items must pass quantity, condition, and specification checks before acceptance.
+
+This document is test evidence for the F03 purchase-requisition end-to-end UAT flow.

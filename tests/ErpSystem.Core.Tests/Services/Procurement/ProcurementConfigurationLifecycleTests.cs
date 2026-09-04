@@ -120,7 +120,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task CreateSeedsFourteenDraftDecisionsAndIsTenantScoped()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-1");
         created.Decisions.Should().HaveCount(14);
         created.Decisions.Should().OnlyContain(item => item.Status == ProcurementConfigurationDecisionStatus.Draft);
@@ -148,7 +148,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task IncompleteProfileCannotPublishAndRejectedAttemptIsAudited()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-2");
 
         await fixture.Service.Invoking(service => service.PublishProfileAsync(created.Id,
@@ -179,7 +179,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task StaleProfileRowVersionIsRejectedBeforeMutation()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var created = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-4");
         var tracked = await fixture.Context.ProcurementConfigurationProfiles.SingleAsync(item => item.Id == created.Id);
         tracked.RowVersion = new byte[] { 1, 2, 3 };
@@ -199,7 +199,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task CompleteProfilePublishes_CloneRetiresPriorAtomically_AndHistoryIsAuditable()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var first = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-publish");
         await PrepareForPublicationAsync(fixture.Service, first.Id,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -251,7 +251,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task FutureDatedReplacementKeepsCurrentProfileEffectiveUntilCutover()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var now = DateTime.UtcNow;
         var currentFrom = now.AddDays(-30);
         var replacementFrom = now.AddDays(30);
@@ -304,7 +304,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task CloneDraftAdvancesPastSoftDeletedVersionsWithoutTreatingThemAsActiveDrafts()
     {
-        await using var fixture = new ServiceFixture("SuperAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var first = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-soft-delete-version");
         await PrepareForPublicationAsync(fixture.Service, first.Id,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -333,7 +333,7 @@ public sealed class ProcurementConfigurationServiceTests
     [Fact]
     public async Task DraftDeletionIsBlockedByEvidence_AndEligibleDeletionIsAudited()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var protectedDraft = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-protected");
         var decision = protectedDraft.Decisions.Single(item => item.DecisionKey == "DEC-001");
         await fixture.Service.LinkEvidenceAsync(protectedDraft.Id, decision.DecisionKey,

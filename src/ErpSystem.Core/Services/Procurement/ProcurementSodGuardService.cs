@@ -471,8 +471,12 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        // SOD policy administration is permission-gated by procurement.access.manage
-        // at the API boundary. The SOD domain must not substitute a legacy role list.
+        if (!_currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) &&
+            !_currentUser.Roles.Any(role =>
+                ProcurementAccessControlRegistry.RoleGrantsPermission(
+                    role, "procurement.access.manage")))
+            throw new ProcurementPolicyAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement SOD controls.");
     }
 
     private void EnsureEditor() => EnsureAdministrator();

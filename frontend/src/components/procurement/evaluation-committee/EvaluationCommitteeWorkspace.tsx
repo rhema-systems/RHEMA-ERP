@@ -114,6 +114,11 @@ export function EvaluationCommitteeWorkspace({
     Financial: financialEligibility.data,
     Combined: combinedEligibility.data,
   };
+  const scorerEligibilityErrors = {
+    Technical: technicalEligibility.error ?? undefined,
+    Financial: financialEligibility.error ?? undefined,
+    Combined: combinedEligibility.error ?? undefined,
+  };
 
   const refresh = async () => {
     await Promise.all([
@@ -212,10 +217,7 @@ export function EvaluationCommitteeWorkspace({
             )}
           </div>
           <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-            {readiness.data.sourceReference} · history-first composition,
-            appointment acceptance, COI, signed attendance, server-derived
-            quorum, scorer eligibility, immutable score locks, and independently
-            approved recall.
+            {readiness.data.sourceReference}
           </p>
         </div>
         <Button
@@ -233,17 +235,6 @@ export function EvaluationCommitteeWorkspace({
           Refresh controls
         </Button>
       </div>
-
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Shared-control boundary</AlertTitle>
-        <AlertDescription>
-          Reusable committee membership stays in Access &amp; Committees. Shared
-          workflow, evidence, identity, responsibility, notification, SOD, and
-          audit services remain authoritative. This workspace retains only the
-          exact source-specific execution history.
-        </AlertDescription>
-      </Alert>
 
       {control.isError && readiness.data.hasControl ? (
         <Alert variant="destructive">
@@ -263,12 +254,14 @@ export function EvaluationCommitteeWorkspace({
           readiness={readiness.data}
           control={control.data}
           scorerEligibility={scorerEligibility}
+          scorerEligibilityErrors={scorerEligibilityErrors}
           currentUserId={user?.id}
           canAdminister={canAdminister}
           canEvaluate={canEvaluate}
           canApprove={canApprove}
           onBind={() => setAction({ type: 'bind' })}
           onActivate={() => setAction({ type: 'activate' })}
+          onRetireDraft={() => setAction({ type: 'retireDraft' })}
           onAppointment={(member, accept) =>
             setAction({ type: 'appointment', member, accept })
           }

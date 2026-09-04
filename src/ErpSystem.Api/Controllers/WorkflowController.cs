@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Procurement;
@@ -52,6 +53,7 @@ public class WorkflowController : ControllerBase
     private readonly IFileStorageService _fileStorageService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IProcurementRequisitionBudgetControlService _requisitionBudgetControlService;
+    private readonly IProcurementAccessControlService _procurementAccessControlService;
     private readonly IProcedureCaseService _procedureCaseService;
     private readonly ILogger<WorkflowController> _logger;
 
@@ -76,6 +78,7 @@ public class WorkflowController : ControllerBase
         IFileStorageService fileStorageService,
         ICurrentUserService currentUserService,
         IProcurementRequisitionBudgetControlService requisitionBudgetControlService,
+        IProcurementAccessControlService procurementAccessControlService,
         IProcedureCaseService procedureCaseService,
         ILogger<WorkflowController> logger)
     {
@@ -99,6 +102,7 @@ public class WorkflowController : ControllerBase
         _fileStorageService = fileStorageService;
         _currentUserService = currentUserService;
         _requisitionBudgetControlService = requisitionBudgetControlService;
+        _procurementAccessControlService = procurementAccessControlService;
         _procedureCaseService = procedureCaseService;
         _logger = logger;
     }
@@ -2462,7 +2466,7 @@ public class WorkflowController : ControllerBase
                 return NotFound();
             }
 
-            var supplierDebitNoteWorkflow = await _db.WorkflowStepInstances
+            var workflowMetadata = await _db.WorkflowStepInstances
                 .AsNoTracking()
                 .Where(step => step.Id == approval.StepInstanceId && !step.IsDeleted)
                 .Select(step => new
@@ -2472,9 +2476,9 @@ public class WorkflowController : ControllerBase
                     EntityTypeCode = step.WorkflowInstance.EntityType.Code
                 })
                 .FirstOrDefaultAsync(HttpContext.RequestAborted);
-            if (supplierDebitNoteWorkflow != null &&
-                supplierDebitNoteWorkflow.TenantId == approval.TenantId &&
-                string.Equals(supplierDebitNoteWorkflow.EntityTypeCode, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase))
+            if (workflowMetadata != null &&
+                workflowMetadata.TenantId == approval.TenantId &&
+                string.Equals(workflowMetadata.EntityTypeCode, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase))
             {
                 // The shared workflow endpoint may advance steps but cannot update the AP
                 // document, enforce its purpose-specific permission, or post its audit outcome.
@@ -2482,7 +2486,7 @@ public class WorkflowController : ControllerBase
                 return Conflict(new
                 {
                     code = "FINANCE_DOMAIN_APPROVAL_REQUIRED",
-                    route = $"/api/ap/supplier-debit-notes/{supplierDebitNoteWorkflow.EntityId}/approval"
+                    route = $"/api/ap/supplier-debit-notes/{workflowMetadata.EntityId}/approval"
                 });
             }
 
@@ -2493,6 +2497,50 @@ public class WorkflowController : ControllerBase
             if (!isDirect && !isRole)
             {
                 return Forbid();
+            }
+
+            var isPurchaseRequisitionWorkflow = workflowMetadata != null &&
+                workflowMetadata.TenantId == approval.TenantId &&
+                IsPurchaseRequisitionEntityType(workflowMetadata.EntityTypeCode);
+            if (isPurchaseRequisitionWorkflow)
+            {
+                var requisitionNumber = await _db.PurchaseRequisitions
+                    .AsNoTracking()
+                    .Where(item => item.Id == workflowMetadata!.EntityId &&
+                                   item.TenantId == workflowMetadata.TenantId &&
+                                   !item.IsDeleted)
+                    .Select(item => item.RequisitionNumber)
+                    .SingleOrDefaultAsync(HttpContext.RequestAborted);
+                var sourceReference = string.IsNullOrWhiteSpace(requisitionNumber)
+                    ? workflowMetadata!.EntityId.ToString("D")
+                    : requisitionNumber;
+
+                if (!_currentUserService.IsInRole("SuperAdmin"))
+                {
+                    var capability = await _procurementAccessControlService.EnforceCapabilityAsync(
+                        new ProcurementAccessCapabilityRequest
+                        {
+                            PermissionCode = "procurement.requisition.approve",
+                            SourceType = "PurchaseRequisition",
+                            SourceReference = sourceReference
+                        },
+                        CorrelationId,
+                        HttpContext.RequestAborted);
+                    if (!capability.Allowed)
+                    {
+                        return StatusCode(403, ProcurementApprovalCapabilityProblem(capability.Message));
+                    }
+                }
+
+                if (request.Action is not WorkflowApprovalAction.Delegate and
+                    not WorkflowApprovalAction.RequestMoreInfo)
+                {
+                    return Conflict(new
+                    {
+                        code = "PROCUREMENT_REQUISITION_DOMAIN_APPROVAL_REQUIRED",
+                        route = $"/api/PurchaseRequisitions/{workflowMetadata!.EntityId}/approve"
+                    });
+                }
             }
 
             var stepAction = request.Action switch
@@ -2836,6 +2884,35 @@ public class WorkflowController : ControllerBase
         }
 
         return userId;
+    }
+
+    private string CorrelationId => string.IsNullOrWhiteSpace(HttpContext?.TraceIdentifier)
+        ? Guid.NewGuid().ToString("N")
+        : HttpContext.TraceIdentifier;
+
+    private ProblemDetails ProcurementApprovalCapabilityProblem(string detail)
+    {
+        const string code = "PR_APPROVAL_CAPABILITY_REQUIRED";
+        var problem = new ProblemDetails
+        {
+            Status = 403,
+            Title = code,
+            Detail = $"The effective procurement.requisition.approve capability is required for this purchase requisition workflow action. {detail}",
+            Instance = HttpContext?.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = CorrelationId;
+        return problem;
+    }
+
+    private static bool IsPurchaseRequisitionEntityType(string? value)
+    {
+        var normalized = (value ?? string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace("_", string.Empty)
+            .Replace("-", string.Empty);
+        return normalized.Equals("PurchaseRequisition", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("PR", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

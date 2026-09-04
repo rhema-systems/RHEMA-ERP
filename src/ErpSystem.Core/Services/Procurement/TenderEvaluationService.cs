@@ -131,7 +131,6 @@ public class TenderEvaluationService : ITenderEvaluationService
             await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
             EnsureBidEvaluationState(bid);
             await EnsurePaymentAdmissionForEvaluationAsync(bid);
-            await EnsureCommitteeScorerAsync(bid.TenderId, bid.Id);
 
             // Get evaluator assignment for current user
             var evaluators = await _evaluatorRepository.GetByUserIdAsync(_currentUserProvider.UserId);
@@ -240,9 +239,8 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
-            var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
             await EnsureCurrentEvaluatorOwnsAsync(evaluation);
-            await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
             {
@@ -573,9 +571,8 @@ public class TenderEvaluationService : ITenderEvaluationService
             var evaluation = await _evaluationRepository.GetByIdAsync(id);
             if (evaluation != null)
             {
-                var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+                await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
                 await EnsureCurrentEvaluatorOwnsAsync(evaluation);
-                await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
             }
             if (evaluation?.Status == "Submitted")
             {

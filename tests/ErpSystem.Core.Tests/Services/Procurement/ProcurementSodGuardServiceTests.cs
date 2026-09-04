@@ -198,7 +198,8 @@ public sealed class ProcurementSodGuardServiceTests
         private Guid _activeTenantId;
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
         private readonly UnitOfWork _unitOfWork;
-        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TenantAdmin" };
+        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase)
+            { ProcurementAccessControlRegistry.IctAdministratorRole };
 
         public GuardFixture()
         {

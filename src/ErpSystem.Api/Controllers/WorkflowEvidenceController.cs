@@ -69,7 +69,7 @@ public sealed class WorkflowEvidenceController : ControllerBase
             item.TenantId == TenantId && item.StepInstanceId == stepInstanceId && !item.IsDeleted)
             .OrderBy(item => item.DocumentName).ThenByDescending(item => item.Version)
             .Select(item => new { item.Id, item.AttachmentId, item.DocumentName, item.DocumentType, item.FileName,
-                item.Sha256, item.DocumentOwnerId, item.IssueDate, item.ExpiryDate, IsExpired = item.ExpiryDate < DateTime.UtcNow,
+                item.FilePath, item.Sha256, item.DocumentOwnerId, item.IssueDate, item.ExpiryDate, IsExpired = item.ExpiryDate < DateTime.UtcNow,
                 item.Version, item.ReplacesEvidenceId, item.IsCurrent, item.VerificationStatus, item.VerifiedById,
                 item.VerifiedAt, item.VerificationNotes, item.MalwareScanStatus, item.RetainUntil, item.IsLegalHold,
                 item.LegalHoldReason, item.LegalHoldById, item.LegalHoldAt })

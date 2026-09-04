@@ -10,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +39,7 @@ public class PurchaseRequisitionsController : ControllerBase
     private readonly IProcurementRequisitionBudgetControlService _budgetControlService;
     private readonly IProcurementRequisitionAuthorityRouteService _authorityRouteService;
     private readonly IProcurementRequisitionSourcingReleaseService _sourcingReleaseService;
+    private readonly IProcurementAccessControlService _procurementAccessControlService;
     private readonly IAppEventBus _appEventBus;
     private readonly ILogger<PurchaseRequisitionsController> _logger;
 
@@ -56,6 +58,7 @@ public class PurchaseRequisitionsController : ControllerBase
         IProcurementRequisitionBudgetControlService budgetControlService,
         IProcurementRequisitionAuthorityRouteService authorityRouteService,
         IProcurementRequisitionSourcingReleaseService sourcingReleaseService,
+        IProcurementAccessControlService procurementAccessControlService,
         IAppEventBus appEventBus,
         ILogger<PurchaseRequisitionsController> logger)
     {
@@ -73,6 +76,7 @@ public class PurchaseRequisitionsController : ControllerBase
         _budgetControlService = budgetControlService;
         _authorityRouteService = authorityRouteService;
         _sourcingReleaseService = sourcingReleaseService;
+        _procurementAccessControlService = procurementAccessControlService;
         _appEventBus = appEventBus;
         _logger = logger;
     }
@@ -802,6 +806,26 @@ public class PurchaseRequisitionsController : ControllerBase
                 return StatusCode(403, "You are not assigned as an approver for the current workflow step");
             }
 
+            if (!_currentUserProvider.HasRole(Constants.Roles.SuperAdmin))
+            {
+                var capability = await _procurementAccessControlService.EnforceCapabilityAsync(
+                    new ProcurementAccessCapabilityRequest
+                    {
+                        PermissionCode = "procurement.requisition.approve",
+                        SourceType = "PurchaseRequisition",
+                        SourceReference = requisition.RequisitionNumber
+                    },
+                    CorrelationId,
+                    HttpContext.RequestAborted);
+                if (!capability.Allowed)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, Problem(
+                        "PR_APPROVAL_CAPABILITY_REQUIRED",
+                        $"The effective procurement.requisition.approve capability is required for this purchase requisition approval action. {capability.Message}",
+                        StatusCodes.Status403Forbidden));
+                }
+            }
+
             var action = approvalDto.Approved ? "approve" : "reject";
             var comments = approvalDto.Comments;
             if (!approvalDto.Approved && string.IsNullOrWhiteSpace(comments))
@@ -923,6 +947,11 @@ public class PurchaseRequisitionsController : ControllerBase
         catch (ProcurementRequisitionAuthorityAuthorizationException ex)
         {
             return StatusCode(403, Problem("PR_AUTHORITY_APPROVAL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, Problem(
+                "PR_APPROVAL_CAPABILITY_REQUIRED", ex.Message, StatusCodes.Status403Forbidden));
         }
         catch (ProcurementRequisitionAuthorityNotFoundException ex)
         {

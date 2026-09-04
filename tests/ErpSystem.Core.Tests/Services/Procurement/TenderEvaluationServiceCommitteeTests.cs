@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Linq.Expressions;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -8,6 +10,7 @@ using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -16,6 +19,152 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class TenderEvaluationServiceCommitteeTests
 {
+    [Fact]
+    public async Task AssignedEvaluatorCanCreateDraftBeforeCommitteeIsActive()
+    {
+        var fixture = new Fixture();
+        fixture.Committee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                It.IsAny<ProcurementEvaluationSourceType>(),
+                It.IsAny<Guid>(),
+                It.IsAny<ProcurementEvaluationPhase>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementEvaluationScorerEligibilityDto
+            {
+                Allowed = false,
+                BlockedReasons = ["No active evaluation committee control exists."]
+            });
+
+        var result = await fixture.Service.CreateEvaluationAsync(
+            new CreateEvaluationDto { TenderBidId = fixture.Bids[0].Id });
+
+        result.Status.Should().Be("Draft");
+        fixture.Evaluations.Verify(
+            repository => repository.CreateAsync(It.Is<TenderEvaluation>(item =>
+                item.TenderBidId == fixture.Bids[0].Id &&
+                item.TenderEvaluatorId == fixture.Evaluator.Id &&
+                item.Status == "Draft")),
+            Times.Once);
+        fixture.Committee.Verify(service => service.EnsureScoreSubjectEligibleAsync(
+            It.IsAny<ProcurementEvaluationSourceType>(),
+            It.IsAny<Guid>(),
+            It.IsAny<ProcurementEvaluationPhase>(),
+            It.IsAny<string>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AssignedEvaluatorCanUpdateDraftBeforeCommitteeIsActive()
+    {
+        var fixture = new Fixture();
+        fixture.Bids[0].Status = "UnderEvaluation";
+        var evaluation = fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Draft");
+        fixture.Evaluations.Setup(repository => repository.GetByIdAsync(evaluation.Id))
+            .ReturnsAsync(evaluation);
+        fixture.Committee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                It.IsAny<ProcurementEvaluationSourceType>(),
+                It.IsAny<Guid>(),
+                It.IsAny<ProcurementEvaluationPhase>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementEvaluationScorerEligibilityDto
+            {
+                Allowed = false,
+                BlockedReasons = ["No active evaluation committee control exists."]
+            });
+
+        var result = await fixture.Service.UpdateEvaluationAsync(
+            evaluation.Id,
+            new UpdateEvaluationDto { QualityScore = 82m, OverallComments = "Draft review" });
+
+        result.Status.Should().Be("Draft");
+        result.QualityScore.Should().Be(82m);
+        result.OverallComments.Should().Be("Draft review");
+        fixture.Evaluations.Verify(
+            repository => repository.UpdateAsync(It.Is<TenderEvaluation>(item =>
+                item.Id == evaluation.Id && item.Status == "Draft")),
+            Times.Once);
+        fixture.Committee.Verify(service => service.EnsureScoreSubjectEligibleAsync(
+            It.IsAny<ProcurementEvaluationSourceType>(),
+            It.IsAny<Guid>(),
+            It.IsAny<ProcurementEvaluationPhase>(),
+            It.IsAny<string>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AssignedEvaluatorCanDeleteDraftBeforeCommitteeIsActive()
+    {
+        var fixture = new Fixture();
+        fixture.Bids[0].Status = "UnderEvaluation";
+        var evaluation = fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Draft");
+        fixture.Evaluations.Setup(repository => repository.GetByIdAsync(evaluation.Id))
+            .ReturnsAsync(evaluation);
+
+        await fixture.Service.DeleteEvaluationAsync(evaluation.Id);
+
+        fixture.Evaluations.Verify(
+            repository => repository.DeleteAsync(evaluation.Id), Times.Once);
+        fixture.Committee.Verify(service => service.EnsureScoreSubjectEligibleAsync(
+            It.IsAny<ProcurementEvaluationSourceType>(),
+            It.IsAny<Guid>(),
+            It.IsAny<ProcurementEvaluationPhase>(),
+            It.IsAny<string>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitStillRequiresActiveCommitteeScorerControl()
+    {
+        var fixture = new Fixture();
+        fixture.Bids[0].Status = "UnderEvaluation";
+        var evaluation = fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Draft");
+        fixture.Evaluations.Setup(repository => repository.GetByIdAsync(evaluation.Id))
+            .ReturnsAsync(evaluation);
+        fixture.Committee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.Tender,
+                fixture.TenderId,
+                ProcurementEvaluationPhase.Combined,
+                "TenderEvaluation",
+                fixture.Bids[0].Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementEvaluationScorerEligibilityDto
+            {
+                Allowed = false,
+                BlockedReasons = ["No active evaluation committee control exists."]
+            });
+
+        await fixture.Service.Invoking(service => service.SubmitEvaluationAsync(
+                evaluation.Id,
+                new SubmitEvaluationDto
+                {
+                    ConfirmSubmission = true,
+                    SignatureReference = "SIG-001",
+                    EvidenceReference = "DMS-001",
+                    IdempotencyKey = "submit-001"
+                }))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception => exception.Code == "EVALUATION_SCORER_INELIGIBLE");
+
+        fixture.Evaluations.Verify(
+            repository => repository.UpdateAsync(It.IsAny<TenderEvaluation>()), Times.Never);
+        fixture.UnitOfWork.Verify(
+            unitOfWork => unitOfWork.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task CreateRejectsSecondDraftForSameBidAndEvaluator()
     {
@@ -136,6 +285,12 @@ public sealed class TenderEvaluationServiceCommitteeTests
             ExceptionalControl.Setup(service => service.IsExceptionalAsync(
                     It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
+            TenderFees.Setup(repository => repository.GetQueryable(
+                    It.IsAny<Expression<Func<TenderFee, bool>>>()))
+                .Returns((Expression<Func<TenderFee, bool>> predicate) =>
+                    Array.Empty<TenderFee>().Where(predicate.Compile()).AsAsyncQueryable());
+            UnitOfWork.Setup(unitOfWork => unitOfWork.Repository<TenderFee>())
+                .Returns(TenderFees.Object);
             Committee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
                     ProcurementEvaluationSourceType.Tender,
                     TenderId,
@@ -190,6 +345,7 @@ public sealed class TenderEvaluationServiceCommitteeTests
         public Mock<IProcurementTenderControlService> TenderControl { get; } = new();
         public Mock<IProcurementExceptionalSourcingControlService> ExceptionalControl { get; } = new();
         public Mock<IProcurementEvaluationCommitteeControlService> Committee { get; } = new();
+        public Mock<IGenericRepository<TenderFee>> TenderFees { get; } = new();
 
         public TenderEvaluation Evaluation(
             TenderBid bid,
@@ -271,5 +427,73 @@ public sealed class TenderEvaluationServiceCommitteeTests
                 evaluation.IsRecommended,
                 evaluation.Recommendation
             });
+    }
+}
+
+internal static class TenderEvaluationAsyncQueryableExtensions
+{
+    public static IQueryable<T> AsAsyncQueryable<T>(this IEnumerable<T> source) =>
+        new TestAsyncEnumerable<T>(source);
+
+    private sealed class TestAsyncQueryProvider<TEntity>(IQueryProvider inner) : IAsyncQueryProvider
+    {
+        public IQueryable CreateQuery(Expression expression) =>
+            new TestAsyncEnumerable<TEntity>(expression);
+
+        public IQueryable<TElement> CreateQuery<TElement>(Expression expression) =>
+            new TestAsyncEnumerable<TElement>(expression);
+
+        public object? Execute(Expression expression) => inner.Execute(expression);
+
+        public TResult Execute<TResult>(Expression expression) => inner.Execute<TResult>(expression);
+
+        public TResult ExecuteAsync<TResult>(
+            Expression expression,
+            CancellationToken cancellationToken = default)
+        {
+            var resultType = typeof(TResult).GetGenericArguments().Single();
+            var result = typeof(IQueryProvider)
+                .GetMethods()
+                .Single(method => method.Name == nameof(IQueryProvider.Execute) && method.IsGenericMethod)
+                .MakeGenericMethod(resultType)
+                .Invoke(inner, [expression]);
+
+            return (TResult)typeof(Task)
+                .GetMethod(nameof(Task.FromResult))!
+                .MakeGenericMethod(resultType)
+                .Invoke(null, [result])!;
+        }
+    }
+
+    private sealed class TestAsyncEnumerable<T> :
+        EnumerableQuery<T>,
+        IAsyncEnumerable<T>,
+        IQueryable<T>
+    {
+        public TestAsyncEnumerable(IEnumerable<T> enumerable) : base(enumerable)
+        {
+        }
+
+        public TestAsyncEnumerable(Expression expression) : base(expression)
+        {
+        }
+
+        IQueryProvider IQueryable.Provider => new TestAsyncQueryProvider<T>(this);
+
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new TestAsyncEnumerator<T>(((IEnumerable<T>)this).GetEnumerator());
+    }
+
+    private sealed class TestAsyncEnumerator<T>(IEnumerator<T> inner) : IAsyncEnumerator<T>
+    {
+        public T Current => inner.Current;
+
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromResult(inner.MoveNext());
+
+        public ValueTask DisposeAsync()
+        {
+            inner.Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 }

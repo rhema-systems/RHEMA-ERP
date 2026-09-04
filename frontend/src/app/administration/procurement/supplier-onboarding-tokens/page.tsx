@@ -40,6 +40,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
 import { QUERY_KEYS } from '@/config/api';
 import { resolveSupplierOnboardingAccess } from '@/lib/procurement-supplier-onboarding-access';
+import {
+  getVerifiableSupplierOnboardingPayment,
+  isSupplierOnboardingDeliveryRecovery,
+} from '@/lib/procurement-supplier-onboarding-token-actions';
 import { procurementSupplierOnboardingTokenService as service } from '@/services/procurement-supplier-onboarding-token.service';
 import type {
   SupplierOnboardingExemption,
@@ -193,7 +197,9 @@ export default function SupplierOnboardingTokensPage() {
           notes.trim() || undefined,
           targetPayment.rowVersion
         );
-        message = 'Payment verified, posted, receipted, and reconciled';
+        message = isDeliveryRecovery
+          ? 'Application token rotated and delivered; Finance posting was unchanged'
+          : 'Payment verified, posted, receipted, and reconciled';
       } else if (action === 'exemption' && detail.data) {
         await service.requestExemption(detail.data.id, {
           reason: reason.trim(),
@@ -302,11 +308,19 @@ export default function SupplierOnboardingTokensPage() {
   );
 
   const value = detail.data;
+  const deliveryRecoveryRequired = Boolean(
+    value?.applicationTokenDeliveryRecoveryRequired
+  );
   const pendingExemption = value?.exemptions.find(
     (item) => item.status === 'PendingApproval'
   );
-  const verifiablePayment = value?.payments.find(
-    (item) => item.status === 'Pending' || item.status === 'Posted'
+  const verifiablePayment = getVerifiableSupplierOnboardingPayment(
+    value?.payments ?? [],
+    deliveryRecoveryRequired
+  );
+  const isDeliveryRecovery = isSupplierOnboardingDeliveryRecovery(
+    targetPayment,
+    deliveryRecoveryRequired
   );
 
   return (
@@ -541,11 +555,23 @@ export default function SupplierOnboardingTokensPage() {
                     variant="outline"
                     onClick={() => {
                       setTargetPayment(verifiablePayment);
+                      setReference(
+                        verifiablePayment.status === 'Reconciled'
+                          ? (verifiablePayment.reconciliationReference ?? '')
+                          : ''
+                      );
+                      setNotes(
+                        verifiablePayment.status === 'Reconciled'
+                          ? (verifiablePayment.reconciliationNotes ?? '')
+                          : ''
+                      );
                       setAction('reconcile');
                     }}
                   >
                     <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Verify &amp; post
+                    {deliveryRecoveryRequired
+                      ? 'Retry token delivery'
+                      : 'Verify & post'}
                   </Button>
                 )}
                 {canReview && pendingExemption && (
@@ -642,7 +668,13 @@ export default function SupplierOnboardingTokensPage() {
       >
         <DialogContent className="bg-white dark:bg-slate-950">
           <DialogHeader>
-            <DialogTitle>{action ? actionTitles[action] : ''}</DialogTitle>
+            <DialogTitle>
+              {isDeliveryRecovery
+                ? 'Retry automatic application-token delivery'
+                : action
+                  ? actionTitles[action]
+                  : ''}
+            </DialogTitle>
             <DialogDescription>
               The action is tenant-scoped, correlation-idempotent, audited, and
               protected by the shared procurement controls.
@@ -741,13 +773,14 @@ export default function SupplierOnboardingTokensPage() {
               <Alert className="border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
                 <ShieldCheck className="h-4 w-4" />
                 <AlertTitle>
-                  Independent payment verification required
+                  {isDeliveryRecovery
+                    ? 'Finance posting is already reconciled'
+                    : 'Independent payment verification required'}
                 </AlertTitle>
                 <AlertDescription>
-                  Confirm becomes available after both audit fields below are
-                  completed. Use evidence obtained independently from the
-                  provider, bank, POS or official cashier record—not an
-                  unverified reference supplied only by the applicant.
+                  {isDeliveryRecovery
+                    ? 'This retry securely rotates and automatically delivers a fresh application token. It does not repost the Finance transaction.'
+                    : 'Confirm becomes available after both audit fields below are completed. Use evidence obtained independently from the provider, bank, POS or official cashier record—not an unverified reference supplied only by the applicant.'}
                 </AlertDescription>
               </Alert>
             )}
@@ -761,6 +794,7 @@ export default function SupplierOnboardingTokensPage() {
                   id="payment-verification-reference"
                   value={reference}
                   onChange={(event) => setReference(event.target.value)}
+                  readOnly={isDeliveryRecovery}
                   placeholder="MoMo transaction ID, bank reference, POS or cashier receipt no."
                 />
                 <p className="text-xs text-muted-foreground">
@@ -791,6 +825,7 @@ export default function SupplierOnboardingTokensPage() {
                   id="payment-verification-note"
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
+                  readOnly={isDeliveryRecovery}
                   placeholder="How the amount, payer, date and settlement or receipt were independently confirmed"
                 />
                 <p className="text-xs text-muted-foreground">

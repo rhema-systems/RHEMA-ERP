@@ -51,6 +51,7 @@ export interface RegistrationReviewDto {
 }
 
 export interface RegistrationDetailDto extends RegistrationReviewDto {
+  registrationData?: string;
   registrationNumber?: string;
   taxNumber?: string;
   vatNumber?: string;

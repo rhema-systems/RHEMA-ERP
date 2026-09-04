@@ -60,6 +60,8 @@ import QCBSEvaluationPanel from '@/components/procurement/tenders/QCBSEvaluation
 import { AwardVerificationResults } from '@/components/procurement/tenders/AwardVerificationResults';
 import { Calculator, Shield } from 'lucide-react';
 import { getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
+import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
+import { getTenderScheduleError } from '@/lib/tender-schedule';
 import { TenderHeaderControlActions } from '@/components/procurement/tenders/TenderHeaderControlActions';
 import { TenderRevisionsPanel } from '@/components/procurement/tenders/TenderRevisionsPanel';
 import { useAuth } from '@/hooks/use-auth';
@@ -246,12 +248,13 @@ export default function TenderDetailPage() {
         return;
       }
 
-      if (publishData.openingDate) {
-        const openingDate = new Date(publishData.openingDate);
-        if (openingDate <= submissionDeadline) {
-          toast.error('Opening date must be after submission deadline');
-          return;
-        }
+      const scheduleError = getTenderScheduleError(
+        publishData.submissionDeadline,
+        publishData.openingDate
+      );
+      if (scheduleError) {
+        toast.error(scheduleError);
+        return;
       }
 
       setPublishing(true);
@@ -348,6 +351,7 @@ export default function TenderDetailPage() {
   }
 
   const publicationPresentation = getTenderPublicationPresentation(tender);
+  const evaluationRoute = getTenderEvaluationRoute(tender);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -550,12 +554,16 @@ export default function TenderDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="evaluators">
             <Users className="h-4 w-4 mr-2" />
-            Evaluators ({tender.evaluators?.length || 0})
+            {evaluationRoute.mode === 'controlled'
+              ? 'Evaluation Committee'
+              : `Evaluators (${tender.evaluators?.length || 0})`}
           </TabsTrigger>
-          <TabsTrigger value="qcbs" disabled={!tender.useQCBSEvaluation}>
-            <Calculator className="h-4 w-4 mr-2" />
-            QCBS
-          </TabsTrigger>
+          {evaluationRoute.mode === 'legacy' && (
+            <TabsTrigger value="qcbs" disabled={!tender.useQCBSEvaluation}>
+              <Calculator className="h-4 w-4 mr-2" />
+              QCBS
+            </TabsTrigger>
+          )}
           <TabsTrigger value="bids">
             <Award className="h-4 w-4 mr-2" />
             Bids ({tender.bids?.length || 0})
@@ -1489,6 +1497,7 @@ export default function TenderDetailPage() {
             tenderId={tenderId}
             tenderStatus={tender.status}
             currentSubmissionDeadline={tender.submissionDeadline}
+            currentOpeningDate={tender.openingDate}
             revisions={tender.revisions || []}
             onChanged={loadTenderDetails}
           />
@@ -1500,31 +1509,42 @@ export default function TenderDetailPage() {
             <CardContent className="flex flex-col justify-between gap-3 pt-6 sm:flex-row sm:items-center">
               <div>
                 <p className="font-medium">
-                  Source-specific committee controls
+                  {evaluationRoute.mode === 'controlled'
+                    ? 'Controlled tender evaluation'
+                    : 'Source-specific committee controls'}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Appointment acceptance, COI, signed quorum, scorer
-                  eligibility, immutable score locks, and controlled recall.
+                  {evaluationRoute.mode === 'controlled'
+                    ? 'This tender uses one signed committee lifecycle for appointment acceptance, COI, quorum, technical scoring, and the financial recommendation. Individual legacy evaluator assignments are not used.'
+                    : 'Appointment acceptance, COI, signed quorum, scorer eligibility, immutable score locks, and controlled recall.'}
                 </p>
               </div>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  router.push(
-                    `/procurement/tenders/${tenderId}/committee-controls`
-                  )
-                }
-              >
-                <Users className="mr-2 h-4 w-4" />
-                Open committee controls
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => router.push(evaluationRoute.committeeHref)}
+                >
+                  <Users className="mr-2 h-4 w-4" />
+                  Committee controls
+                </Button>
+                {evaluationRoute.mode === 'controlled' && (
+                  <Button
+                    onClick={() => router.push(evaluationRoute.evaluationHref)}
+                  >
+                    <Shield className="mr-2 h-4 w-4" />
+                    {evaluationRoute.evaluationLabel}
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
-          <TenderEvaluators
-            tenderId={tenderId}
-            tenderStatus={tender.status}
-            onEvaluatorsChanged={loadTenderDetails}
-          />
+          {evaluationRoute.mode === 'legacy' && (
+            <TenderEvaluators
+              tenderId={tenderId}
+              tenderStatus={tender.status}
+              onEvaluatorsChanged={loadTenderDetails}
+            />
+          )}
         </TabsContent>
 
         {/* Bids Tab */}
@@ -1596,16 +1616,18 @@ export default function TenderDetailPage() {
         </TabsContent>
 
         {/* QCBS Evaluation Tab */}
-        <TabsContent value="qcbs" className="space-y-4">
-          <QCBSEvaluationPanel
-            tenderId={tenderId}
-            useQCBSEvaluation={tender.useQCBSEvaluation}
-            technicalWeight={tender.technicalWeight}
-            financialWeight={tender.financialWeight}
-            minimumTechnicalScore={tender.minimumTechnicalScore}
-            tenderStatus={tender.status}
-          />
-        </TabsContent>
+        {evaluationRoute.mode === 'legacy' && (
+          <TabsContent value="qcbs" className="space-y-4">
+            <QCBSEvaluationPanel
+              tenderId={tenderId}
+              useQCBSEvaluation={tender.useQCBSEvaluation}
+              technicalWeight={tender.technicalWeight}
+              financialWeight={tender.financialWeight}
+              minimumTechnicalScore={tender.minimumTechnicalScore}
+              tenderStatus={tender.status}
+            />
+          </TabsContent>
+        )}
 
         {/* Award Tab */}
         <TabsContent value="award" className="space-y-4">
@@ -1732,10 +1754,10 @@ export default function TenderDetailPage() {
                     type="datetime-local"
                     value={publishData.submissionDeadline}
                     onChange={(e) =>
-                      setPublishData({
-                        ...publishData,
+                      setPublishData((prev) => ({
+                        ...prev,
                         submissionDeadline: e.target.value,
-                      })
+                      }))
                     }
                   />
                 </div>
@@ -1748,11 +1770,12 @@ export default function TenderDetailPage() {
                   <Input
                     type="datetime-local"
                     value={publishData.openingDate}
+                    min={publishData.submissionDeadline || undefined}
                     onChange={(e) =>
-                      setPublishData({
-                        ...publishData,
+                      setPublishData((prev) => ({
+                        ...prev,
                         openingDate: e.target.value,
-                      })
+                      }))
                     }
                   />
                 </div>
@@ -1791,10 +1814,10 @@ export default function TenderDetailPage() {
                     <Input
                       value={publishData.advertisementReference}
                       onChange={(e) =>
-                        setPublishData({
-                          ...publishData,
+                        setPublishData((prev) => ({
+                          ...prev,
                           advertisementReference: e.target.value,
-                        })
+                        }))
                       }
                     />
                   </div>
@@ -1803,10 +1826,10 @@ export default function TenderDetailPage() {
                     <Input
                       value={publishData.publicationChannel}
                       onChange={(e) =>
-                        setPublishData({
-                          ...publishData,
+                        setPublishData((prev) => ({
+                          ...prev,
                           publicationChannel: e.target.value,
-                        })
+                        }))
                       }
                     />
                   </div>
@@ -1815,10 +1838,10 @@ export default function TenderDetailPage() {
                     <Input
                       value={publishData.tenderDocumentReference}
                       onChange={(e) =>
-                        setPublishData({
-                          ...publishData,
+                        setPublishData((prev) => ({
+                          ...prev,
                           tenderDocumentReference: e.target.value,
-                        })
+                        }))
                       }
                     />
                   </div>
@@ -1827,10 +1850,10 @@ export default function TenderDetailPage() {
                     <Input
                       value={publishData.tenderDocumentVersion}
                       onChange={(e) =>
-                        setPublishData({
-                          ...publishData,
+                        setPublishData((prev) => ({
+                          ...prev,
                           tenderDocumentVersion: e.target.value,
-                        })
+                        }))
                       }
                     />
                   </div>
@@ -1841,10 +1864,10 @@ export default function TenderDetailPage() {
                       min="0"
                       value={publishData.documentFee}
                       onChange={(e) =>
-                        setPublishData({
-                          ...publishData,
+                        setPublishData((prev) => ({
+                          ...prev,
                           documentFee: Number(e.target.value),
-                        })
+                        }))
                       }
                     />
                   </div>
@@ -1855,10 +1878,10 @@ export default function TenderDetailPage() {
                     <Input
                       value={publishData.advertisementEvidenceReference}
                       onChange={(e) =>
-                        setPublishData({
-                          ...publishData,
+                        setPublishData((prev) => ({
+                          ...prev,
                           advertisementEvidenceReference: e.target.value,
-                        })
+                        }))
                       }
                     />
                   </div>

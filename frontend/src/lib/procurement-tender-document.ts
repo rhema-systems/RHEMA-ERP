@@ -5,6 +5,7 @@ import type {
   ProcurementTenderDocumentChange,
   ProcurementTenderDocumentChangeStatus,
   ProcurementTenderDocumentChangeType,
+  ProcurementTenderDocumentContentArtifactOption,
   ProcurementTenderDocumentFeeMode,
   ProcurementTenderDocumentRegister,
   ProcurementTenderDocumentTemplateStatus,
@@ -80,6 +81,10 @@ export const validateTenderDocumentTemplate = (
   if (value.policySetVersion < 1) return 'Policy version is required.';
   if (!value.sourceConfigurationProfileId)
     return 'Source configuration profile is required.';
+  if (!value.contentWorkflowEvidenceDocumentId)
+    return 'Select a controlled workflow evidence document.';
+  if (value.contentFileUploadRecordId)
+    return 'Controlled content must use one workflow evidence document.';
   if (!value.contentReference.trim())
     return 'Controlled content reference is required.';
   if (!/^[A-Fa-f0-9]{64}$/.test(value.contentChecksumSha256.trim()))
@@ -102,6 +107,24 @@ export const validateTenderDocumentTemplate = (
     return 'Effective-to date must follow effective-from date.';
   return undefined;
 };
+
+export const isTenderDocumentContentArtifactApproved = (
+  artifact: ProcurementTenderDocumentContentArtifactOption
+) =>
+  artifact.isCurrent &&
+  artifact.verificationStatus === 1 &&
+  artifact.malwareScanStatus === 1;
+
+export const applyTenderDocumentContentArtifact = (
+  value: SaveProcurementTenderDocumentTemplate,
+  artifact: ProcurementTenderDocumentContentArtifactOption
+): SaveProcurementTenderDocumentTemplate => ({
+  ...value,
+  contentWorkflowEvidenceDocumentId: artifact.id,
+  contentFileUploadRecordId: undefined,
+  contentReference: artifact.filePath,
+  contentChecksumSha256: artifact.sha256,
+});
 
 export const validateTenderDocumentIssue = (
   request: IssueProcurementTenderDocumentRegisterRequest,

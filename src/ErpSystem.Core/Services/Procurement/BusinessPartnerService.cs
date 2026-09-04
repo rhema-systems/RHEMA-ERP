@@ -407,6 +407,17 @@ public class BusinessPartnerService : IBusinessPartnerService
         return contacts.Select(MapContactDto).ToList();
     }
 
+    public async Task<IEnumerable<BusinessPartnerBankAccountDto>> GetBankAccountsAsync(Guid partnerId)
+    {
+        var partner = await _partnerRepository.GetWithBankAccountsAsync(partnerId);
+        if (partner == null || partner.TenantId != _currentUserProvider.TenantId)
+        {
+            throw new ArgumentException($"Business partner {partnerId} was not found.");
+        }
+
+        return MapBankAccounts(partner);
+    }
+
     public async Task<BusinessPartnerContactDto> AddContactAsync(Guid partnerId, CreateBusinessPartnerContactDto dto)
     {
         var partner = await GetPartnerEntityAsync(partnerId);
@@ -814,6 +825,8 @@ public class BusinessPartnerService : IBusinessPartnerService
             dto.Contacts = partner.Contacts.Select(MapContactDto).ToList();
         }
 
+        dto.BankAccounts = MapBankAccounts(partner);
+
         // Map documents
         if (partner.Documents != null && partner.Documents.Any())
         {
@@ -979,6 +992,58 @@ public class BusinessPartnerService : IBusinessPartnerService
             IsPrimary = contact.IsPrimary,
             IsActive = !contact.IsDeleted
         };
+
+    private static List<BusinessPartnerBankAccountDto> MapBankAccounts(BusinessPartner partner)
+    {
+        var accounts = partner.BankAccounts
+            .Where(account => !account.IsDeleted)
+            .OrderByDescending(account => account.IsPrimary)
+            .ThenBy(account => account.BankName)
+            .ThenBy(account => account.AccountNumber)
+            .Select(account => new BusinessPartnerBankAccountDto
+            {
+                Id = account.Id,
+                BusinessPartnerId = account.BusinessPartnerId,
+                BankName = account.BankName,
+                BranchName = account.BranchName,
+                AccountName = account.AccountName,
+                AccountNumber = account.AccountNumber,
+                SwiftCode = account.SwiftCode,
+                Iban = account.Iban,
+                Currency = account.Currency,
+                IsPrimary = account.IsPrimary,
+                IsActive = account.IsActive
+            })
+            .ToList();
+
+        if (accounts.Count == 0 && HasLegacyBankDetails(partner))
+        {
+            accounts.Add(new BusinessPartnerBankAccountDto
+            {
+                Id = Guid.Empty,
+                BusinessPartnerId = partner.Id,
+                BankName = partner.BankName,
+                BranchName = partner.BankBranch,
+                AccountName = partner.BankAccountName,
+                AccountNumber = partner.BankAccountNumber,
+                SwiftCode = partner.BankSwiftCode,
+                Iban = partner.BankIBAN,
+                Currency = partner.Currency,
+                IsPrimary = true,
+                IsActive = true
+            });
+        }
+
+        return accounts;
+    }
+
+    private static bool HasLegacyBankDetails(BusinessPartner partner)
+        => !string.IsNullOrWhiteSpace(partner.BankName) ||
+           !string.IsNullOrWhiteSpace(partner.BankBranch) ||
+           !string.IsNullOrWhiteSpace(partner.BankAccountName) ||
+           !string.IsNullOrWhiteSpace(partner.BankAccountNumber) ||
+           !string.IsNullOrWhiteSpace(partner.BankSwiftCode) ||
+           !string.IsNullOrWhiteSpace(partner.BankIBAN);
 
     private static string? CleanNullable(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

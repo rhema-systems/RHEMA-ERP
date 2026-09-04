@@ -26,6 +26,11 @@ public interface IProcurementEvaluationCommitteeControlService
         ActivateProcurementEvaluationCommitteeRequest request,
         string correlationId,
         CancellationToken cancellationToken = default);
+    Task<ProcurementEvaluationCommitteeDto> RetireDraftAsync(
+        Guid committeeControlId,
+        RetireProcurementEvaluationCommitteeDraftRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default);
     Task<ProcurementEvaluationAppointmentDto> RespondToAppointmentAsync(
         Guid appointmentId,
         RespondProcurementEvaluationAppointmentRequest request,

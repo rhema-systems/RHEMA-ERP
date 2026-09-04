@@ -48,9 +48,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { TenderDocumentContentArtifactField } from './TenderDocumentContentArtifactField';
 import { useAuth } from '@/hooks/use-auth';
 import {
   hasAnyTenderDocumentAction,
+  applyTenderDocumentContentArtifact,
   procurementMethodLabel,
   tenderDocumentTemplateStatusLabel,
   validateTenderDocumentTemplate,
@@ -452,30 +454,19 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
               </Field>
             </div>
             <div className="md:col-span-2">
-              <Field label="Shared content reference">
-                <Input
-                  disabled={!editable}
-                  value={form.contentReference}
-                  onChange={(event) =>
-                    setForm({ ...form, contentReference: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <div className="md:col-span-2">
-              <Field label="Content SHA-256 checksum">
-                <Input
-                  disabled={!editable}
-                  maxLength={64}
-                  value={form.contentChecksumSha256}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      contentChecksumSha256: event.target.value,
-                    })
-                  }
-                />
-              </Field>
+              <TenderDocumentContentArtifactField
+                value={form.contentWorkflowEvidenceDocumentId}
+                contentReference={form.contentReference}
+                checksumSha256={form.contentChecksumSha256}
+                disabled={!editable}
+                onSelect={(artifact) =>
+                  setForm((current) =>
+                    current
+                      ? applyTenderDocumentContentArtifact(current, artifact)
+                      : current
+                  )
+                }
+              />
             </div>
           </CardContent>
         </Card>

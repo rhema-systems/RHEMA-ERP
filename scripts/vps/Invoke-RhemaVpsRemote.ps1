@@ -12,7 +12,7 @@ param(
     [string]$FrontendPackageName,
     [string]$ApiSha256,
     [string]$FrontendSha256,
-    [int]$ApiReadyTimeoutSeconds = 420
+    [int]$ApiReadyTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Stop'
@@ -527,6 +527,32 @@ BEGIN
             OBJECT_ID(N'dbo.TR_Tenders_SourcingReleaseGuard', N'TR')) IS NULL
         INSERT @R VALUES(N'Governed tender lineage recovery prerequisites', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260902110000_AllowHistoricalEvaluationCommitteeSourceLineage')
+BEGIN
+    IF OBJECT_ID(N'dbo.ProcurementEvaluationCommitteeControls', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementEvaluationCommitteeAppointments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementEvaluationCommitteeRoleRequirements', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.RequestForQuotations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementSourcingCases', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementCommittees', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementPolicySets', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementConfigurationProfiles', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementPolicyMethodRules', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.WorkflowDefinitions', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.WorkflowInstances', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.Tenders', N'SourcingCaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingCaseId') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementSourcingCases', N'PolicySetId') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementSourcingCases', N'MethodRuleId') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementConfigurationProfiles', N'PublishedAt') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementPolicySets', N'PublishedAt') IS NULL
+       OR OBJECT_DEFINITION(
+            OBJECT_ID(N'dbo.TR_ProcurementEvaluationCommitteeControls_Lifecycle', N'TR')) IS NULL
+        INSERT @R VALUES(N'Historical evaluation committee lineage prerequisites', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -728,6 +754,10 @@ function Invoke-Preflight {
     # not update stored tenders; the schema probe above verifies every shared
     # lineage owner and the installed trigger baseline before replacement.
     Write-Output 'GUARD_COVERAGE|20260901033000_AllowGovernedTenderLineageRecovery'
+    # This migration only replaces the committee-control trigger. The exact
+    # source, tenant, policy, method, workflow, and temporal lineage remain
+    # fail-closed; no stored committee or sourcing rows are rewritten.
+    Write-Output 'GUARD_COVERAGE|20260902110000_AllowHistoricalEvaluationCommitteeSourceLineage'
     # Civil Engineering migrations create new governed tables. The document-register migration
     # idempotently inserts only a missing tenant metadata template; existing Project, Workflow
     # and central-DMS records are not rewritten. All THROW statements live in trigger bodies.
@@ -1053,6 +1083,17 @@ function Invoke-Apply {
         'Staged API executable is missing.'
     Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'server.js')) `
         'Staged frontend server.js is missing.'
+    Assert-True (Test-Path -LiteralPath `
+            (Join-Path $stageFrontend 'node_modules\next\package.json')) `
+        'Staged frontend Next.js runtime is missing.'
+    $stagedFrontendPackage = Get-Content `
+        (Join-Path $stageFrontend 'package.json') -Raw | ConvertFrom-Json
+    $stagedNextPackage = Get-Content `
+        (Join-Path $stageFrontend 'node_modules\next\package.json') -Raw |
+        ConvertFrom-Json
+    Assert-True ($stagedNextPackage.version -eq `
+            $stagedFrontendPackage.dependencies.next) `
+        'Staged frontend Next.js runtime differs from package.json.'
     $forbiddenApiConfig = @(Get-ChildItem $stageApi -File -Force | Where-Object {
         $_.Name -like 'appsettings*.json' -or $_.Name -like '.env*'
     })
@@ -1105,12 +1146,18 @@ function Invoke-Apply {
         if (Test-Path (Join-Path $FrontendRoot 'public')) {
             Move-Item (Join-Path $FrontendRoot 'public') (Join-Path $retired 'public')
         }
+        if (Test-Path (Join-Path $FrontendRoot 'node_modules')) {
+            Move-Item (Join-Path $FrontendRoot 'node_modules') `
+                (Join-Path $retired 'node_modules')
+        }
         Copy-Item (Join-Path $FrontendRoot 'server.js') `
             (Join-Path $retired 'server.js') -Force
         Copy-Item (Join-Path $FrontendRoot 'package.json') `
             (Join-Path $retired 'package.json') -Force
         Move-Item (Join-Path $stageFrontend '.next') (Join-Path $FrontendRoot '.next')
         Move-Item (Join-Path $stageFrontend 'public') (Join-Path $FrontendRoot 'public')
+        Move-Item (Join-Path $stageFrontend 'node_modules') `
+            (Join-Path $FrontendRoot 'node_modules')
         Copy-Item (Join-Path $stageFrontend 'server.js') `
             (Join-Path $FrontendRoot 'server.js') -Force
         Copy-Item (Join-Path $stageFrontend 'package.json') `
@@ -1121,7 +1168,7 @@ function Invoke-Apply {
     catch {
         Stop-Service RhemaERPFrontend -Force -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Path $failed -Force | Out-Null
-        foreach ($name in @('.next', 'public')) {
+        foreach ($name in @('.next', 'public', 'node_modules')) {
             $livePath = Join-Path $FrontendRoot $name
             if (Test-Path $livePath) { Move-Item $livePath (Join-Path $failed $name) -Force }
             $oldPath = Join-Path $retired $name
@@ -1167,6 +1214,9 @@ function Invoke-ResumeFrontend {
         'The staged frontend server is missing.'
     Assert-True (Test-Path (Join-Path $failedFrontend '.next\BUILD_ID')) `
         'The failed frontend build is unavailable for retry.'
+    Assert-True (Test-Path `
+            (Join-Path $failedFrontend 'node_modules\next\package.json')) `
+        'The failed frontend runtime dependencies are unavailable for retry.'
     Assert-True (-not (Test-Path $rollbackFrontend)) `
         "Frontend retry rollback path already exists: $rollbackFrontend"
 
@@ -1188,14 +1238,14 @@ function Invoke-ResumeFrontend {
     $swapped = $false
     try {
         Stop-ManagedService RhemaERPFrontend
-        foreach ($name in @('.next', 'public')) {
+        foreach ($name in @('.next', 'public', 'node_modules')) {
             Move-Item (Join-Path $FrontendRoot $name) `
                 (Join-Path $rollbackFrontend $name)
         }
         Copy-Item (Join-Path $FrontendRoot 'server.js'), `
             (Join-Path $FrontendRoot 'package.json') `
             -Destination $rollbackFrontend -Force
-        foreach ($name in @('.next', 'public')) {
+        foreach ($name in @('.next', 'public', 'node_modules')) {
             Move-Item (Join-Path $failedFrontend $name) `
                 (Join-Path $FrontendRoot $name)
         }
@@ -1229,7 +1279,7 @@ function Invoke-ResumeFrontend {
         if ($swapped) {
             Stop-Service RhemaERPFrontend -Force -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Path $retryFailed -Force | Out-Null
-            foreach ($name in @('.next', 'public')) {
+            foreach ($name in @('.next', 'public', 'node_modules')) {
                 $livePath = Join-Path $FrontendRoot $name
                 if (Test-Path $livePath) {
                     Move-Item $livePath (Join-Path $retryFailed $name) -Force

@@ -99,6 +99,39 @@ if (args.Length > 0 && args[0] == "seed-civil-e2e")
     return;
 }
 
+// Create role-separated actors and prerequisite reference/source data used by the
+// disposable tender browser acceptance harness. Governed lifecycle transitions are
+// still performed by the real APIs so each browser transition remains verifiable.
+if (args.Length > 0 && args[0] == "seed-tender-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+    tempBuilder.Services.AddScoped<ErpSystem.Api.Services.TenderLifecycleE2ETestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.EnsureCreatedAsync();
+        await StampCurrentModelMigrationsAsAppliedAsync(
+            db,
+            scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+        await scope.ServiceProvider.GetRequiredService<ProcurementAccessControlSeeder>()
+            .SeedAsync();
+        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.TenderLifecycleE2ETestSeeder>()
+            .SeedAsync();
+    }
+
+    Console.WriteLine("Tender disposable browser prerequisite fixture seeded successfully.");
+    return;
+}
+
 // Check for maintenance workflow seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance")
 {
@@ -327,7 +360,7 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -667,6 +700,9 @@ if (!skipStartupInitialization)
     try
     {
         await InitializeDatabaseAsync(app, databaseConnectionTimeout, migrationTimeout);
+        app.Logger.LogInformation("Starting TDC procurement security-baseline reconciliation...");
+        await ReconcileProcurementSecurityBaselineAsync(app);
+        app.Logger.LogInformation("TDC procurement security-baseline reconciliation completed");
         databaseInitializationSucceeded = true;
         app.Logger.LogInformation("Database initialization completed");
     }
@@ -872,6 +908,13 @@ async Task SeedFinanceCloseTemplateBaselineAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<FinanceCloseTemplateBaselineSeeder>();
     await seeder.SeedAllActiveTenantsAsync();
+}
+
+async Task ReconcileProcurementSecurityBaselineAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<ProcurementAccessControlSeeder>();
+    await seeder.ReconcileIdentityAccessBaselineAsync();
 }
 
 static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(

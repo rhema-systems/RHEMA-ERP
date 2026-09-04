@@ -226,8 +226,23 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         var items = await RequisitionItems.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                 item.RequisitionId == requisition.Id && !item.IsDeleted && item.Status != "Cancelled")
             .AsNoTracking().OrderBy(item => item.CreatedAt).ToListAsync(cancellationToken);
+        var route = await Routes.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id && !item.IsDeleted)
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .OrderByDescending(item => item.AttemptNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+        var routeIntegrityValid = route is null ||
+            (route.Steps.Count > 0 &&
+             ComputeHash(route.SnapshotJson) == route.IntegrityHash &&
+             route.Category == requisition.ProcurementCategory &&
+             route.Amount == requisition.TotalAmount &&
+             string.Equals(route.CurrencyCode, NormalizeCurrency(requisition.Currency), StringComparison.Ordinal));
+        var routeWorkflowDefinitionId = route?.WorkflowDefinitionId;
         var workflow = await WorkflowInstances.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && item.EntityId == requisition.Id &&
+                (!routeWorkflowDefinitionId.HasValue ||
+                 item.WorkflowDefinitionId == routeWorkflowDefinitionId.Value) &&
                 !item.IsDeleted && item.Status == WorkflowInstanceStatus.Completed)
             .AsNoTracking().OrderByDescending(item => item.CompletedDate).ThenByDescending(item => item.CreatedDate)
             .FirstOrDefaultAsync(cancellationToken);
@@ -259,6 +274,13 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             budget.Message,
             budget.BudgetCode);
 
+        if (route is not null)
+            Add(requirements, "AUTHORITY_ROUTE_LINEAGE", "Immutable authority-route lineage",
+                routeIntegrityValid,
+                "PR_SOURCING_AUTHORITY_ROUTE_INVALID",
+                "The latest captured authority route no longer matches the approved requisition or failed integrity verification.",
+                route.RouteReference);
+
         var fingerprintObject = new
         {
             schemaVersion = "tdc.pr-sourcing-release.v2",
@@ -276,6 +298,8 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             requisition.ExceptionApprovedAtUtc,
             requisition.SpecificationTemplateId,
             requisition.BudgetId,
+            AuthorityRouteId = routeIntegrityValid ? route?.Id : null,
+            AuthorityRouteIntegrityHash = routeIntegrityValid ? route?.IntegrityHash : null,
             WorkflowInstanceId = workflow?.Id,
             workflow?.CompletedDate,
             requisition.TotalAmount,
@@ -330,6 +354,8 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             SpecificationTemplateVersion = requisition.SpecificationTemplateVersion,
             BudgetCommitmentId = budget.CommitmentId,
             BudgetCommitmentReference = budget.CommitmentReference,
+            AuthorityRouteId = routeIntegrityValid ? route?.Id : null,
+            AuthorityRouteReference = routeIntegrityValid ? route?.RouteReference : null,
             WorkflowInstanceId = workflow?.Id,
             CurrentRelease = current ? Map(latest!, requisition.RequisitionNumber) : null,
             Requirements = requirements,

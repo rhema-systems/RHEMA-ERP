@@ -51,6 +51,7 @@ export default function InitiateBidPage() {
     : (params?.id ?? '');
 
   const [loading, setLoading] = useState(true);
+  const [loadingInitiationStatus, setLoadingInitiationStatus] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
@@ -172,6 +173,7 @@ export default function InitiateBidPage() {
     if (!tenderId) return;
 
     try {
+      setLoadingInitiationStatus(true);
       const data = await tenderBidService.getInitiationStatus(tenderId);
       setInitiationStatus(data);
       setBusinessPartnerId(data.businessPartnerId);
@@ -190,6 +192,8 @@ export default function InitiateBidPage() {
           ? error.message
           : 'Failed to load bid initiation status'
       );
+    } finally {
+      setLoadingInitiationStatus(false);
     }
   };
 
@@ -1000,7 +1004,10 @@ export default function InitiateBidPage() {
           Previous
         </Button>
 
-        <Button onClick={handleNext} disabled={submitting}>
+        <Button
+          onClick={handleNext}
+          disabled={submitting || loadingInitiationStatus || !businessPartnerId}
+        >
           {currentStep === STEPS.length ? 'Proceed to Bid Submission' : 'Next'}
           <ArrowRight className="h-4 w-4 ml-2" />
         </Button>

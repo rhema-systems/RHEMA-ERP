@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,8 +30,45 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { registrationReviewService, type RegistrationDetailDto } from '@/services/registrationReviewService';
-import { businessPartnerRegistrationService } from '@/services/businessPartnerRegistrationService';
 import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfigService';
+import {
+  SupplierBankAccountsPanel,
+  SupplierContactsPanel,
+} from '@/components/procurement/SupplierContactBankDetails';
+import {
+  bankAccountsFromRegistrationData,
+  contactsFromRegistrationData,
+  parseRegistrationData,
+} from '@/lib/supplier-registration-details';
+
+interface ParsedLicense {
+  licenseTypeId: string;
+  licenseNumber: string;
+  issueDate: string;
+  expiryDate?: string;
+  issuingAuthority: string;
+}
+
+function licensesFromRegistrationData(
+  data: Record<string, unknown>
+): ParsedLicense[] {
+  const key = Object.keys(data).find((name) => name.toLowerCase() === 'licenses');
+  const value = key ? data[key] : undefined;
+  if (!Array.isArray(value)) return [];
+
+  return value.filter((license): license is ParsedLicense => {
+    if (!license || Array.isArray(license) || typeof license !== 'object') {
+      return false;
+    }
+    const candidate = license as Partial<ParsedLicense>;
+    return (
+      typeof candidate.licenseTypeId === 'string' &&
+      typeof candidate.licenseNumber === 'string' &&
+      typeof candidate.issueDate === 'string' &&
+      typeof candidate.issuingAuthority === 'string'
+    );
+  });
+}
 
 export default function RegistrationDetailPage() {
   const router = useRouter();
@@ -43,7 +80,23 @@ export default function RegistrationDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [licenseTypes, setLicenseTypes] = useState<LicenseTypeDto[]>([]);
-  const [parsedLicenses, setParsedLicenses] = useState<any[]>([]);
+
+  const parsedRegistrationData = useMemo(
+    () => parseRegistrationData(registration?.registrationData),
+    [registration?.registrationData]
+  );
+  const parsedContacts = useMemo(
+    () => contactsFromRegistrationData(parsedRegistrationData),
+    [parsedRegistrationData]
+  );
+  const parsedBankAccounts = useMemo(
+    () => bankAccountsFromRegistrationData(parsedRegistrationData),
+    [parsedRegistrationData]
+  );
+  const parsedLicenses = useMemo(
+    () => licensesFromRegistrationData(parsedRegistrationData),
+    [parsedRegistrationData]
+  );
 
   // Document dialog states
   const [verifyDocDialogOpen, setVerifyDocDialogOpen] = useState(false);
@@ -76,28 +129,6 @@ export default function RegistrationDetailPage() {
       setLoading(true);
       const data = await registrationReviewService.getById(id);
       setRegistration(data);
-
-      // Parse licenses from registrationData if available
-      if ((data as any).registrationData) {
-        try {
-          // First parse - gets the outer object
-          const firstParse = JSON.parse((data as any).registrationData);
-
-          // Check if there's a nested RegistrationData property that needs second parse
-          let finalData = firstParse;
-          if (firstParse.RegistrationData && typeof firstParse.RegistrationData === 'string') {
-            // Second parse - gets the actual form data
-            finalData = JSON.parse(firstParse.RegistrationData);
-          }
-
-          // Set parsed licenses
-          if (finalData.licenses && Array.isArray(finalData.licenses)) {
-            setParsedLicenses(finalData.licenses);
-          }
-        } catch (e) {
-          console.error('Failed to parse registration data:', e);
-        }
-      }
     } catch (error) {
       console.error('Error loading registration:', error);
       toast.error('Failed to load registration details');
@@ -416,8 +447,12 @@ export default function RegistrationDetailPage() {
 
       {/* Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="details">Company Details</TabsTrigger>
+          <TabsTrigger value="contacts">Contacts ({parsedContacts.length})</TabsTrigger>
+          <TabsTrigger value="bank-accounts">
+            Bank Accounts ({parsedBankAccounts.length})
+          </TabsTrigger>
           <TabsTrigger value="documents">Documents ({registration.documents?.length || 0})</TabsTrigger>
           <TabsTrigger value="licenses">Licenses ({parsedLicenses.length})</TabsTrigger>
           <TabsTrigger value="history">Status History</TabsTrigger>
@@ -671,6 +706,16 @@ export default function RegistrationDetailPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* Contact Persons Tab */}
+        <TabsContent value="contacts">
+          <SupplierContactsPanel contacts={parsedContacts} />
+        </TabsContent>
+
+        {/* Bank Accounts Tab */}
+        <TabsContent value="bank-accounts">
+          <SupplierBankAccountsPanel accounts={parsedBankAccounts} />
         </TabsContent>
 
         {/* Documents Tab */}

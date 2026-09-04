@@ -159,7 +159,12 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
             new ReconcileProcurementSupplierOnboardingPaymentRequest(),
             CancellationToken.None);
 
-        result.Should().BeOfType<ConflictObjectResult>();
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        var problem = conflict.Value.Should().BeAssignableTo<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should()
+            .Be("SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED");
+        problem.Detail.Should().Contain("Retry payment confirmation")
+            .And.NotContain("Reissue");
     }
 
     [Fact]

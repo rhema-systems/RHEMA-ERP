@@ -268,6 +268,7 @@ public sealed class ProcurementTenderControlServiceTests
     {
         await using var fixture = new Fixture();
         var financial = await fixture.EvaluateAsync();
+        var recommendationMakerId = fixture.CurrentUserId;
 
         var submitted = await fixture.Service.SubmitApprovalAsync(
             fixture.Tender.Id,
@@ -277,6 +278,7 @@ public sealed class ProcurementTenderControlServiceTests
         submitted.WorkflowInstanceId.Should().Be(fixture.WorkflowInstanceId);
 
         fixture.CurrentUserId = Guid.NewGuid();
+        var awardApproverId = fixture.CurrentUserId;
         fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
                 "TenderAward", fixture.Tender.Id, fixture.CurrentUserId, "approve", It.IsAny<string?>()))
             .ReturnsAsync(new WorkflowExecutionResult
@@ -303,6 +305,19 @@ public sealed class ProcurementTenderControlServiceTests
                 EvidenceReference = "evidence://award-001",
                 RowVersion = approved.RowVersion
             }, "record-award");
+        var realAward = await fixture.Context.TenderAwards.SingleAsync(item =>
+            item.TenantId == fixture.CurrentTenantId &&
+            item.TenderId == fixture.Tender.Id &&
+            !item.IsDeleted);
+        realAward.TenderBidId.Should().Be(fixture.Bids[0].Id);
+        realAward.BusinessPartnerId.Should().Be(fixture.Bids[0].BusinessPartnerId);
+        realAward.OriginalBidAmount.Should().Be(fixture.Bids[0].TotalBidAmount);
+        realAward.AwardedAmount.Should().Be(fixture.Bids[0].TotalBidAmount);
+        realAward.Currency.Should().Be(fixture.Bids[0].Currency);
+        realAward.Status.Should().Be("Awarded");
+        realAward.CreatedById.Should().Be(recommendationMakerId);
+        realAward.AwardedById.Should().Be(awardApproverId);
+        realAward.CreatedById.Should().NotBe(awardApproverId);
         var contracted = await fixture.Service.RecordContractAsync(
             fixture.Tender.Id,
             new RecordProcurementTenderContractRequest
@@ -341,6 +356,55 @@ public sealed class ProcurementTenderControlServiceTests
     }
 
     [Fact]
+    public async Task ControlledAwardRetryWithConsumedRowVersionCannotDuplicateRealAward()
+    {
+        await using var fixture = new Fixture();
+        var financial = await fixture.EvaluateAsync();
+        var submitted = await fixture.Service.SubmitApprovalAsync(
+            fixture.Tender.Id,
+            new SubmitProcurementTenderApprovalRequest { RowVersion = financial.RowVersion },
+            "submit-award-retry");
+
+        fixture.CurrentUserId = Guid.NewGuid();
+        fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
+                "TenderAward", fixture.Tender.Id, fixture.CurrentUserId, "approve", It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.Completed,
+                WorkflowInstanceId = fixture.WorkflowInstanceId
+            });
+        var approved = await fixture.Service.DecideApprovalAsync(
+            fixture.Tender.Id,
+            new DecideProcurementTenderApprovalRequest
+            {
+                Action = "Approve",
+                AuthorityApprovalReference = "ENTITY-TENDER-COMMITTEE-RETRY",
+                PpaApprovalReference = "PPA-RETRY",
+                RowVersion = submitted.RowVersion
+            }, "approve-award-retry");
+        var request = new RecordProcurementTenderAwardRequest
+        {
+            BidId = fixture.Bids[0].Id,
+            AwardReference = "AWD-RETRY-001",
+            EvidenceReference = "evidence://award-retry-001",
+            RowVersion = approved.RowVersion
+        };
+
+        await fixture.Service.RecordAwardAsync(
+            fixture.Tender.Id, request, "record-award-first");
+        await fixture.Service.Invoking(service => service.RecordAwardAsync(
+                fixture.Tender.Id, request, "record-award-retry"))
+            .Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_AWARD_NOT_READY");
+
+        (await fixture.Context.TenderAwards.CountAsync(item =>
+            item.TenantId == fixture.CurrentTenantId &&
+            item.TenderId == fixture.Tender.Id &&
+            !item.IsDeleted)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task FailedWorkflowStartDoesNotLeaveRecommendationPending()
     {
         await using var fixture = new Fixture();
@@ -366,6 +430,45 @@ public sealed class ProcurementTenderControlServiceTests
         control.Status.Should().Be(ProcurementTenderControlStatus.FinancialEvaluated);
         control.WorkflowInstanceId.Should().BeNull();
         control.SubmittedForApprovalAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AwardRecommendationSubmissionUsesTenderApprovalCapability()
+    {
+        await using var fixture = new Fixture();
+        var financial = await fixture.EvaluateAsync();
+        fixture.PlatformAdministrator = false;
+        fixture.AccessControl.Setup(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.approve" &&
+                    request.SourceType == "Tender" &&
+                    request.SourceReference == fixture.Tender.TenderNumber),
+                "head-submit-award",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+            {
+                Allowed = true,
+                PermissionCode = "procurement.tender.approve",
+                ActorUserId = fixture.CurrentUserId,
+                TenantId = fixture.CurrentTenantId
+            });
+
+        var submitted = await fixture.Service.SubmitApprovalAsync(
+            fixture.Tender.Id,
+            new SubmitProcurementTenderApprovalRequest { RowVersion = financial.RowVersion },
+            "head-submit-award");
+
+        submitted.Status.Should().Be(ProcurementTenderControlStatus.PendingApproval);
+        fixture.AccessControl.Verify(service => service.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.tender.approve"),
+            "head-submit-award",
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.AccessControl.Verify(service => service.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.tender.evaluate"),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -501,9 +604,10 @@ public sealed class ProcurementTenderControlServiceTests
             _currentUser.SetupGet(item => item.Username).Returns("tender.controller@tdc.test");
             _currentUser.SetupGet(item => item.FullName).Returns("Tender Controller");
             _currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
-            _currentUser.SetupGet(item => item.Roles).Returns(["SuperAdmin"]);
+            _currentUser.SetupGet(item => item.Roles).Returns(() =>
+                PlatformAdministrator ? ["SuperAdmin"] : ["TDC_HEAD_OF_PROCUREMENT"]);
             _currentUser.Setup(item => item.HasRole(It.IsAny<string>()))
-                .Returns((string role) => role == "SuperAdmin");
+                .Returns((string role) => PlatformAdministrator && role == "SuperAdmin");
 
             Requisition = new PurchaseRequisition
             {
@@ -727,6 +831,7 @@ public sealed class ProcurementTenderControlServiceTests
 
         public Guid CurrentTenantId { get; set; }
         public Guid CurrentUserId { get; set; }
+        public bool PlatformAdministrator { get; set; } = true;
         public Guid ReleaseId { get; }
         public Guid WorkflowDefinitionId { get; }
         public Guid WorkflowInstanceId { get; }
