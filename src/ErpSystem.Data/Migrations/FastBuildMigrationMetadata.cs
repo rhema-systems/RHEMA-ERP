@@ -275,3 +275,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903223232_AddAdministrativeGeography")] partial class AddAdministrativeGeography { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903232742_AddEmployeeGeoArea")] partial class AddEmployeeGeoArea { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904005351_AddGeoAreaToLocationCompanyAndFacility")] partial class AddGeoAreaToLocationCompanyAndFacility { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260904032437_AddSheHazardReporter")] partial class AddSheHazardReporter { }

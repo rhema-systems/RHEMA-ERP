@@ -88,11 +88,12 @@ export default function SafetyHomePage() {
         <NavCardGrid
           items={[
             {
-              // Area 25 slice 8: the open reporting screens live in the self-service portal.
-              title: 'Report an Incident',
+              // 2026-09-03: the desk's own doors. Staff still report from My Self-Service → My
+              // Safety; these record on behalf of the reporter who reached the desk.
+              title: 'Record an Incident',
               description:
-                'Open to everyone — accidents, near misses and environmental incidents. No SHE role needed. Opens in your self-service portal.',
-              href: '/me/safety/report/incident',
+                'A report that reached the desk in person, by phone or on paper — recorded in the name of the person who reported it.',
+              href: '/hr/safety/incidents/new',
               icon: Megaphone,
             },
             {
@@ -111,17 +112,17 @@ export default function SafetyHomePage() {
         <NavCardGrid
           items={[
             {
-              title: 'Report a Hazard',
+              title: 'Record a Hazard',
               description:
-                'Open to everyone — flag anything that could hurt someone before it does. No SHE role needed. Opens in your self-service portal.',
-              href: '/me/safety/report/hazard',
+                'Put a hazard on the register from an inspection, a walk-round or a report that reached the desk.',
+              href: '/hr/safety/hazards/new',
               icon: FileWarning,
             },
             {
-              title: 'Raise Stop-Work',
+              title: 'Record Stop-Work',
               description:
-                'Open to everyone — stop work you believe is imminently dangerous and record why. No SHE role needed. Opens in your self-service portal.',
-              href: '/me/safety/report/stop-work',
+                'An order that reached the desk by radio, phone or in person — recorded in the name of whoever stopped the work.',
+              href: '/hr/safety/stop-work/new',
               icon: OctagonX,
             },
             {
@@ -279,10 +280,10 @@ export default function SafetyHomePage() {
               icon: Recycle,
             },
             {
-              title: 'Report Environmental Incident',
+              title: 'Environmental Incidents',
               description:
-                'Open to every employee — report a spill, exceedance or dumping; the SHE team is alerted automatically. Opens in your self-service portal.',
-              href: '/me/safety/report/environmental',
+                'The environmental incident register; the desk records spills, exceedances and dumping here in the name of the reporter. Staff report from My Self-Service.',
+              href: '/hr/safety/environmental',
               icon: Megaphone,
             },
             {

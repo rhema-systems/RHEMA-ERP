@@ -700,6 +700,18 @@ public class SheHazard : TenantEntity
     [ForeignKey(nameof(LastReviewedById))]
     public virtual Employee? LastReviewedBy { get; set; }
 
+    /// <summary>
+    /// Who reported the hazard (2026-09-04). Stamped from the token for a self-service report;
+    /// the SHE desk may name the reporter when recording a hazard that reached it in person.
+    /// Nullable because every hazard created before this column has no reporter on record.
+    /// </summary>
+    public Guid? ReportedById { get; set; }
+
+    [ForeignKey(nameof(ReportedById))]
+    public virtual Employee? ReportedBy { get; set; }
+
+    public DateTime? ReportedDate { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public virtual ICollection<SheHazardControl> Controls { get; set; } = new List<SheHazardControl>();

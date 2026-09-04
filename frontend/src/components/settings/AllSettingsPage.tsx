@@ -51,6 +51,7 @@ const moduleTitleAliases: Record<string, string> = {
 const moduleOrder = [
   'Finance',
   'Human Resources',
+  'Safety (SHE)',
   'Procurement',
   'Inventory',
   'Sales',
@@ -164,6 +165,9 @@ export function buildSettingsSections(items: NavItem[]): SettingsSection[] {
   const administrationModules = new Set([
     'Finance',
     'HR',
+    // DR-10 (2026-09-03): the SHE settings tree is its own module card, beside Human Resources,
+    // not a bucket of "General Administration" links.
+    'Safety (SHE)',
     'Procurement',
     'Inventory',
     'Sales',

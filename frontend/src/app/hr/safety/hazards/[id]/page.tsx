@@ -288,6 +288,7 @@ export default function HazardDetailPage() {
             <InfoRow label="Location" value={hazard.locationName} />
             <InfoRow label="Specific area" value={hazard.specificArea} />
             <InfoRow label="Owner" value={hazard.ownerName} />
+            <InfoRow label="Reported by" value={hazard.reportedByName} />
             <div className="flex items-baseline justify-between gap-4 py-1.5 text-sm">
               <span className="text-muted-foreground">Status</span>
               <span className="flex items-center gap-2">

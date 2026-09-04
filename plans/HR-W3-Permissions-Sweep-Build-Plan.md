@@ -549,4 +549,31 @@ catalogue but does not edit it. Waste types stay at Write (managed from the desk
 settings tree). Harness: `CONFIG_WRITES` list + `w3.shemanager`/W3SHM fixture — officer and HR
 refused, manager reaches; admin.she grant assertions.
 **Verified 2026-09-03:** full ladder **964/964** on the rebuilt API (slice 12 = 178; the other ten unchanged); `admin.she` rows checked in the database — granted to SHE Manager, SuperAdmin, TenantAdmin only.
+**All Settings page + personas (same day):** the SHE settings landed in "General Administration" on
+the All Settings page because `AllSettingsPage.buildSettingsSections` only treats a fixed list of
+Administration children as module cards — added `Safety (SHE)` (ordered after Human Resources;
+test pins it and asserts no SHE link falls into General Administration). Demo cast re-cut for
+the role pair: `she.officer` = Safety Officer on the Environmental Officer post (fallback HSE
+Assistant — `Persona` now takes preferred titles, the workforce leaves every 6th post vacant);
+new `she.manager` = SHE Manager on the HSE Supervisor post (Josephine Appiah, TDC/00071). The
+persona seeder re-binds an existing user whose post changed. Runbooks 0/4 + cheat sheet + UAT doc
+updated; she.officer's name/number is read off the seed log after the rebuild.
+**Desk doors for reports (same day):** the desk register buttons for incidents, hazards and
+stop-work pointed at the self-service forms, which file as the logged-in user, so a walk-in or
+phoned-in report could only be recorded AS the officer — although the API had honoured
+`reportedById`/`raisedById` for SHE Write holders since W3 slice 12. Extracted the three forms
+into `components/hr/safety/report/{Incident,Hazard,StopWork}*Form.tsx` with `mode: self | desk`;
+the /me pages are wrappers; new desk doors `/hr/safety/{incidents,hazards,stop-work}/new` name
+the reporter (incident: EmployeePickerField; stop-work: EmployeePicker) and land on the new
+record. Hazards carry NO reporter column (recorded residual) — the desk door says so. The
+environmental desk register already had its own form with a reporter picker. Slice 12 proves:
+officer names a colleague → record shows the colleague; employee naming a colleague → forced
+back onto themselves (incident + stop-work).
+**Hazard reporter (2026-09-04, user asked for the column):** `SheHazard.ReportedById` (+ `ReportedBy`
+nav, `ReportedDate`), nullable — every earlier hazard has no reporter. DTOs/mapping/includes
+carry it; `SheHazardController.Create` now stamps the token's employee and honours a named
+reporter only for SHE Write (same arm as incidents/stop-work); the desk door gets a required
+"Reported by" picker; the detail page shows it. Migration: user scaffolds
+`AddSheHazardReporter`, I guard it and list it in FastBuildMigrationMetadata. Slice 12 gains the
+hazard on-behalf + forced-self lines.
 

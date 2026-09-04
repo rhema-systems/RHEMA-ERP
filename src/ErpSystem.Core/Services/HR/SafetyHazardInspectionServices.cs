@@ -95,6 +95,7 @@ public class SheHazardService : ISheHazardService
         var entity = await _hazardRepository.GetQueryable()
             .Include(h => h.Location)
             .Include(h => h.Owner)
+            .Include(h => h.ReportedBy)
             .FirstOrDefaultAsync(h => h.TenantId == tenantId && h.Code == code && !h.IsDeleted, cancellationToken);
         return entity?.ToDto();
     }

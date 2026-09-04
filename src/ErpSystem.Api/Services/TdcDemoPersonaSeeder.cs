@@ -61,7 +61,16 @@ public class TdcDemoPersonaSeeder
     }
 
     /// <summary>A demo login: who they are in the organogram, and what the system lets them do.</summary>
-    private sealed record Persona(string Username, string PositionTitle, string Purpose, params string[] Roles);
+    /// <param name="PositionTitles">
+    /// The post(s) the persona is bound to, in order of preference. The demo workforce leaves every
+    /// sixth post vacant, so a persona on a junior post names a fallback rather than vanishing.
+    /// </param>
+    private sealed record Persona(string Username, string[] PositionTitles, string Purpose, params string[] Roles)
+    {
+        public string PositionTitle => string.Join(" / ", PositionTitles);
+    }
+
+    private static string[] Post(params string[] titles) => titles;
 
     // The cast. Every role name here is a Constants.Roles member so a rename cannot strand a persona
     // with a role that no longer exists. Employee is on all of them: the self-service portal is
@@ -79,40 +88,47 @@ public class TdcDemoPersonaSeeder
 
     private static readonly Persona[] Cast =
     {
-        new("hr.head", "Head of HR & Administration",
+        new("hr.head", Post("Head of HR & Administration"),
             "Drives every HR register and admin screen; also a line manager and an employee",
             Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.Employee),
 
-        // DR-10 (2026-09-03): the safety desk is its own role. No HR role here — the point of the
-        // persona is that SHE runs without one, and that hr.head can read SHE but not edit it.
-        new("she.officer", "HSE Supervisor",
-            "Drives the whole SHE module — incidents, permits, PPE, audits, environmental",
+        // DR-10 (2026-09-03): the safety function has its own two roles and no HR role. The desk
+        // officer sits on a junior SHE post and WORKS every register; the HSE Supervisor — the
+        // head of the SHE Section — holds SHE Manager and is the one who CONFIGURES it (catalogues,
+        // checklists, PPE requirements, the reminder engine) and may delete. hr.head can read all
+        // of SHE and edit none of it. she.officer is listed before she.manager so that a database
+        // seeded before this date re-links she.officer off the HSE Supervisor first.
+        new("she.officer", Post("Environmental Officer", "HSE Assistant"),
+            "Works the whole SHE desk — incidents, permits, PPE issue, inspections, environmental — but cannot configure it",
             Constants.Roles.SafetyOfficer, Constants.Roles.Employee),
+        new("she.manager", Post("HSE Supervisor"),
+            "Head of the SHE Section: everything the officer does, plus the Safety (SHE) settings tree and deletion",
+            Constants.Roles.SheManager, Constants.Roles.Employee),
 
         // Not "md": the login request validates usernames at 3-100 characters, and a two-letter
         // persona fails before it reaches the password check. Not "managing.director" either: the
         // base seeders already create that account, unlinked and with their own password.
-        new("md.tdc", "Managing Director",
+        new("md.tdc", Post("Managing Director"),
             "Signs separations (FR-HR-092), top of every approval chain, sees the executive view",
             Constants.Roles.ManagingDirector, Constants.Roles.Manager, Constants.Roles.Employee),
 
-        new("gm.ops", "General Manager - Operations",
+        new("gm.ops", Post("General Manager - Operations"),
             "Directorate-level approver above Development, Estates and Development Control",
             Constants.Roles.Manager, Constants.Roles.Employee),
 
-        new("head.dev", "Head of Development",
+        new("head.dev", Post("Head of Development"),
             "A working line manager: approvals, team appraisals, direct reports, nominations",
             Constants.Roles.Manager, Constants.Roles.Employee),
 
-        new("staff", "Project Coordinator",
+        new("staff", Post("Project Coordinator"),
             "An ordinary employee under head.dev — raises leave, claims, requests; the self-service view",
             Constants.Roles.Employee),
 
-        new("new.hire", "Supervising Architect",
+        new("new.hire", Post("Supervising Architect"),
             "Hired within the last few months — probation, onboarding and orientation from their side",
             Constants.Roles.Employee),
 
-        new("auditor", "Chief Internal Auditor",
+        new("auditor", Post("Chief Internal Auditor"),
             "Reviews separation settlements (FR-HR-185); reports to the Board, not to management",
             Constants.Roles.InternalAudit, Constants.Roles.Employee),
     };
@@ -139,13 +155,19 @@ public class TdcDemoPersonaSeeder
         var created = 0;
         foreach (var persona in Cast)
         {
-            var employee = await _context.Employees
-                .IgnoreQueryFilters()
-                .Where(e => e.TenantId == tenantId && !e.IsDeleted
-                         && e.EmployeeNumber.StartsWith("TDC/")
-                         && _context.Set<EmployeePosition>().Any(p => p.Id == e.PositionId && p.Title == persona.PositionTitle))
-                .OrderBy(e => e.EmployeeNumber)
-                .FirstOrDefaultAsync(ct);
+            // First staffed post in the persona's order of preference.
+            Employee? employee = null;
+            foreach (var title in persona.PositionTitles)
+            {
+                employee = await _context.Employees
+                    .IgnoreQueryFilters()
+                    .Where(e => e.TenantId == tenantId && !e.IsDeleted
+                             && e.EmployeeNumber.StartsWith("TDC/")
+                             && _context.Set<EmployeePosition>().Any(p => p.Id == e.PositionId && p.Title == title))
+                    .OrderBy(e => e.EmployeeNumber)
+                    .FirstOrDefaultAsync(ct);
+                if (employee is not null) break;
+            }
 
             if (employee is null)
             {

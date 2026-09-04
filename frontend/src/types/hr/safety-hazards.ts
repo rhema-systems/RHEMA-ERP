@@ -208,6 +208,11 @@ export interface SheHazard extends AuditFields {
   lastReviewedDate?: string | null;
   lastReviewedById?: string | null;
   lastReviewedByName?: string | null;
+  /** Who reported it (2026-09-04): the token's employee for a self-service report, or the
+   * person the SHE desk named. Null on hazards recorded before the column existed. */
+  reportedById?: string | null;
+  reportedByName?: string | null;
+  reportedDate?: string | null;
   isActive: boolean;
   controls: SheHazardControl[];
   correctiveActions: SheHazardCorrectiveAction[];
@@ -227,12 +232,15 @@ export interface SheHazardSummary {
   status: SheHazardStatus;
   statusName: string;
   ownerName?: string | null;
+  reportedByName?: string | null;
   reviewDueDate?: string | null;
   isActive: boolean;
 }
 
 /** Open to every authenticated employee (the reporting surface). Status is forced to
- * Identified server-side; scores/levels are computed from the four factors. */
+ * Identified server-side; scores/levels are computed from the four factors.
+ * `reportedById` is honoured only for a SHE Write holder (the desk recording on behalf);
+ * everyone else is stamped with the token's employee. */
 export interface SheHazardCreateRequest {
   code?: string | null;
   name: string;
@@ -247,6 +255,7 @@ export interface SheHazardCreateRequest {
   ownerId?: string | null;
   reviewDueDate?: string | null;
   isActive?: boolean;
+  reportedById?: string | null;
 }
 
 export interface SheHazardUpdateRequest {

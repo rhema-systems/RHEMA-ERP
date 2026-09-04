@@ -78,10 +78,14 @@ public class SheHazardController : SheApiControllerBase
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetDueForReview([FromQuery] int daysAhead = 30)
         => Ok(await _service.GetDueForReviewAsync(daysAhead));
 
-    /// <summary>Open to any authenticated employee — hazard reporting must not be gatekept. The reporter is stamped from the token.</summary>
+    /// <summary>Open to any authenticated employee — hazard reporting must not be gatekept. The
+    /// reporter is stamped from the token; only the SHE desk (HR.She.Write) may name another
+    /// employee as the reporter, for a hazard that reached it in person (2026-09-04).</summary>
     [HttpPost]
     public async Task<ActionResult<SheHazardDto>> Create([FromBody] CreateSheHazardDto dto)
     {
+        var isDesk = await HoldsPolicyAsync(HrPermissions.SheWritePolicy);
+        dto.ReportedById = isDesk && dto.ReportedById is { } reporter && reporter != Guid.Empty ? reporter : UserId;
         var created = await _service.CreateAsync(dto, TenantId, UserId);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }

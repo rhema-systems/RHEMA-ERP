@@ -51,7 +51,7 @@
   <div class="sub">From a near-miss reported on a phone to a closed corrective action, a signed permit to work, a PPE issue, a contractor induction, an environmental permit and the monthly report. Roughly 50 minutes performed in full.</div>
   <table>
     <tr><th style="width:32%">Sections</th><td>1 Dashboard · 2 Incidents · 3 Hazards &amp; risk assessments · 4 Inspections · 5 Permits to work · 6 PPE · 7 Safety equipment &amp; emergency · 8 Safety training · 9 Contractors · 10 Occupational health &amp; return to work · 11 Environmental · 12 Committees, regulatory, audits, stop-work, documents, performance · 13 The employee's side · 14 Configuration</td></tr>
-    <tr><th>Logins used</th><td><b>she.officer</b> throughout (the <b>Safety Officer</b> role since 2026-09-03 — no HR role; <b>hr.head</b> can open every SHE register read-only but every edit, close or approve button refuses) · <b>staff</b> (reports a hazard and a stop-work) · <b>head.dev</b> (closes a corrective action) · <b>admin</b> (configuration)</td></tr>
+    <tr><th>Logins used</th><td><b>she.officer</b> for every desk step (the <b>Safety Officer</b> role since 2026-09-03 — no HR role) · <b>she.manager</b> for every configuration step (the <b>SHE Manager</b> role: the Safety (SHE) settings tree and deletion) · <b>staff</b> (reports a hazard and a stop-work) · <b>head.dev</b> (closes a corrective action). <b>hr.head</b> can open every SHE register read-only; every edit, close or approve button refuses. There is no <b>admin</b> step left in this book.</td></tr>
     <tr><th>A note on the sample data</th><td>The seeded incidents and hazards use <b>generic industrial narratives</b> (a conveyor pinch point, a forklift, welding fumes). Present them as illustrative: "these are sample records; TDC's own will read like a building site and an estate." Everything you create live will be TDC's.</td></tr>
   </table>
 </div>
@@ -68,7 +68,7 @@
 <table class="steps">
   <tr><td>1</td><td>Open INC-2026-001</td><td>Walk the tabs: the report (what, where, when, who, witnesses, injured body parts, injury type); investigation team and root cause; corrective actions with owners and due dates; documents and photographs; follow-ups; the statutory submission to the regulator with its reference; the link to an insurance claim.</td></tr>
   <tr><td>2</td><td>Report one live</td><td>Switch to <span class="who">staff</span>: <b>Health &amp; Safety → My Safety → Report</b> · <code>/me/safety/report/incident</code>. "Loose paving slab at the Community 25 site office entrance; a visitor stumbled, no injury." Location, date, type Near-miss. Submit. Say: "Any employee reports from their phone; nothing needs an officer to be present."</td></tr>
-  <tr><td>3</td><td>Triage it</td><td>Back as <span class="who">she.officer</span>: the new incident is at the top of the register. Classify it, assign an investigator, add a corrective action ("Re-lay the slab; barrier the entrance until done") with an owner — <b>Kwasi Danquah</b> — and a due date next week.</td></tr>
+  <tr><td>3</td><td>Triage it</td><td>Back as <span class="who">she.officer</span>: the new incident is at the top of the register. (Since 2026-09-03 the desk has its own door too — <b>Record incident</b> on the register · <code>/hr/safety/incidents/new</code> — for a report that arrives by phone or in person: the officer names the reporter and the register shows that person, not the officer. Same for hazards and stop-work.) Classify it, assign an investigator, add a corrective action ("Re-lay the slab; barrier the entrance until done") with an owner — <b>Kwasi Danquah</b> — and a due date next week.</td></tr>
   <tr><td>4</td><td>The owner closes it</td><td>Switch to <span class="who">head.dev</span>: <b>Safety (SHE) → Incidents &amp; Hazards → Corrective Actions</b> · <code>/hr/safety/corrective-actions</code>: the action is his. Mark it complete with a note and evidence. Back on the dashboard the open-actions tile drops by one.</td></tr>
 </table>
 <div class="box aside">Reporting is open to every employee (<code>/me/safety</code>), and an anonymous route exists for environmental incidents. Reading, investigating and closing are gated by the SHE permission family. Statutory reporting to the Department of Factories Inspectorate is a record on the incident with the body, the date and the reference — the reminder engine chases the deadline.</div>
@@ -86,7 +86,7 @@
 <p class="path"><b>Safety (SHE) → Inspections &amp; Audits → Inspections</b> · <code>/hr/safety/inspections</code></p>
 <div class="box ok">Two inspections against checklists, with items passed and failed, hazards found and the actions raised from them.</div>
 <table class="steps">
-  <tr><td>1</td><td>Checklists</td><td><code>/administration/safety/checklists</code>: the inspection checklists (site, office, vehicle, fire) and their items.</td></tr>
+  <tr><td>1</td><td>Checklists</td><td><span class="who">she.manager</span>: <code>/administration/safety/checklists</code>: the inspection checklists (site, office, vehicle, fire) and their items.</td></tr>
   <tr><td>2</td><td>Schedule one</td><td><code>/hr/safety/inspections/new</code>: a site inspection at Community 25 next week, the site checklist, the inspector. Say: "The dashboard's inspections-due tile is this list."</td></tr>
 </table>
 
@@ -104,7 +104,7 @@
 <p class="path"><b>Safety (SHE) → PPE &amp; Equipment → PPE Stock</b> · <code>/hr/safety/ppe</code> · <b>PPE Issuance</b> · <code>/hr/safety/ppe/issuances</code></p>
 <div class="box ok">Stock by PPE type (helmets, boots, high-visibility vests, gloves, eye protection, harnesses) with quantities, re-order levels and what is below them; issuances to named employees with sizes, issue dates and replacement due dates.</div>
 <table class="steps">
-  <tr><td>1</td><td>Requirements</td><td><code>/administration/safety/ppe-requirements</code>: which positions require which PPE — a Draughtsman none, a Building Inspector helmet, boots, vest.</td></tr>
+  <tr><td>1</td><td>Requirements</td><td><span class="who">she.manager</span>: <code>/administration/safety/ppe-requirements</code>: which positions require which PPE — a Draughtsman none, a Building Inspector helmet, boots, vest.</td></tr>
   <tr><td>2</td><td>Issue live</td><td>Issue a helmet and boots to <b>Kojo Ansah</b> (Supervising Architect, size 43). Stock drops; the issuance carries his signature line.</td></tr>
   <tr><td>3</td><td>His side</td><td><span class="who">new.hire</span> or <span class="who">staff</span>: <code>/me/safety/ppe</code>: what they hold and when it is due for replacement.</td></tr>
 </table>
@@ -169,7 +169,7 @@
 <p class="path"><b>Administration → Safety (SHE)</b> <span style="color:var(--muted)">(its own settings tree since 2026-09-03 — SHE Manager and administrators; a Safety Officer uses the catalogue but does not edit it)</span> · <code>/administration/safety</code></p>
 <table class="steps">
   <tr><td>1</td><td>Reference data</td><td>Incident types, injury types, body parts, corrective-action templates, regulatory bodies, PPE types, PPE requirements by position, inspection checklists.</td></tr>
-  <tr><td>2</td><td>Reminder engine</td><td><code>/administration/safety/reminders</code>: what is chased (permit expiry, equipment inspection, certificate expiry, statutory returns, action due dates), to whom, how far ahead; the run log. Show the preview; do not run it.</td></tr>
+  <tr><td>2</td><td>Reminder engine</td><td><span class="who">she.manager</span>: <code>/administration/safety/reminders</code>: what is chased (permit expiry, equipment inspection, certificate expiry, statutory returns, action due dates), to whom, how far ahead; the run log. Show the preview; do not run it.</td></tr>
 </table>
 <div class="box aside">Any step here that attaches a file — evidence on a corrective action, a permit document, a controlled document, a contractor's insurance — goes through the same gate as the rest of HR, and a clean malware scan is mandatory. If an attach is refused with <code>FILE_VIRUS_SCAN_INCOMPLETE</code>, the document scanner is not running: Book 0 §3.2.
 <br><br>The SHE reference catalogues and the seeded sample dataset were shaped so that every dashboard tile reports a non-zero count on a fresh database; the tiles are the acceptance test. Occupational-health screens are gated by the medical policies; everything else by the SHE policies; and the two reporting routes an ordinary employee uses are open to the Employee role only.</div>
