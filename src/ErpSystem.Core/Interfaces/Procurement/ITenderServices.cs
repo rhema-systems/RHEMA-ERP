@@ -4,6 +4,12 @@ using System.Threading;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
+public sealed class ProcurementTenderWorkflowValidationException(string code, string message)
+    : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
+
 /// <summary>
 /// Tender service interface
 /// </summary>

@@ -299,6 +299,60 @@ public sealed class SupplierApplicantAccessSecurityTests
         dmsField.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task ExternalSupplierCanReadOnlyAnOwnedRegistrationDetail()
+    {
+        var userId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.GetMyRegistrationsAsync(userId))
+            .ReturnsAsync(new[]
+            {
+                new BusinessPartnerRegistrationDto { Id = registrationId }
+            });
+        registrations.Setup(item => item.GetByIdAsync(registrationId))
+            .ReturnsAsync(new BusinessPartnerRegistrationDetailDto
+            {
+                Id = registrationId
+            });
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.UserId).Returns(userId.ToString());
+        currentUser.Setup(item => item.IsInRole("ExternalUser")).Returns(true);
+        var controller = RegistrationController(
+            registrations.Object,
+            userId,
+            currentUser: currentUser.Object);
+
+        var result = await controller.GetRegistration(registrationId);
+
+        result.Result.Should().BeOfType<OkObjectResult>();
+        registrations.Verify(item => item.GetByIdAsync(registrationId), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExternalSupplierCannotProbeAnotherRegistrationDetail()
+    {
+        var userId = Guid.NewGuid();
+        var requestedRegistrationId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.GetMyRegistrationsAsync(userId))
+            .ReturnsAsync(Array.Empty<BusinessPartnerRegistrationDto>());
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.UserId).Returns(userId.ToString());
+        currentUser.Setup(item => item.IsInRole("ExternalUser")).Returns(true);
+        var controller = RegistrationController(
+            registrations.Object,
+            userId,
+            currentUser: currentUser.Object);
+
+        var result = await controller.GetRegistration(requestedRegistrationId);
+
+        result.Result.Should().BeOfType<NotFoundResult>();
+        registrations.Verify(
+            item => item.GetByIdAsync(It.IsAny<Guid>()),
+            Times.Never);
+    }
+
     private static string? Policy(Type controller, string method) =>
         controller.GetMethod(method)!.GetCustomAttribute<AuthorizeAttribute>()?.Policy;
 
@@ -315,7 +369,8 @@ public sealed class SupplierApplicantAccessSecurityTests
     private static BusinessPartnerRegistrationsController RegistrationController(
         IBusinessPartnerRegistrationService registrations,
         Guid actorId,
-        IProcurementSupplierApplicantAccessService? applicantAccess = null)
+        IProcurementSupplierApplicantAccessService? applicantAccess = null,
+        ICurrentUserService? currentUser = null)
     {
         var controller = new BusinessPartnerRegistrationsController(
             registrations,
@@ -323,7 +378,7 @@ public sealed class SupplierApplicantAccessSecurityTests
             Mock.Of<IControlledFileUploadService>(),
             Mock.Of<ICentralDocumentRepositoryFileService>(),
             Mock.Of<IFileStorageService>(),
-            Mock.Of<ICurrentUserService>(),
+            currentUser ?? Mock.Of<ICurrentUserService>(),
             NullLogger<BusinessPartnerRegistrationsController>.Instance);
         controller.ControllerContext = new ControllerContext
         {

@@ -14,7 +14,9 @@ export const hasEvaluationCommitteeAction = (
   expected: string
 ) =>
   Boolean(
-    actions?.some((action) => normalizeAction(action) === normalizeAction(expected))
+    actions?.some(
+      (action) => normalizeAction(action) === normalizeAction(expected)
+    )
   );
 
 export const hasAnyEvaluationCommitteeAction = (
@@ -26,14 +28,17 @@ export const createEvaluationIdempotencyKey = (action: string) =>
   `tdc0208-${normalizeAction(action)}-${crypto.randomUUID()}`;
 
 export const isEvaluationCommitteeControlError = (error: unknown) => {
-  const message = error instanceof Error
-    ? error.message
-    : typeof error === 'string'
-      ? error
-      : error && typeof error === 'object'
-        ? JSON.stringify(error)
-        : '';
-  return /EVALUATION_SCORER_INELIGIBLE|evaluation committee control|committee (acceptance|appointment|attendance|quorum|conflict)/i.test(message);
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : error && typeof error === 'object'
+          ? JSON.stringify(error)
+          : '';
+  return /EVALUATION_SCORER_INELIGIBLE|evaluation committee control|committee (acceptance|appointment|attendance|quorum|conflict)/i.test(
+    message
+  );
 };
 
 export const validateCommitteeBinding = (
@@ -64,10 +69,10 @@ export const validateCoiDeclaration = (
   )
     return 'Describe the declared conflict.';
   if (
-    !request.signatureReference.trim() ||
-    !request.evidenceReference.trim()
+    request.outcome === 'ConflictDeclared' &&
+    (!request.signatureReference?.trim() || !request.evidenceReference?.trim())
   )
-    return 'Declaration signature and evidence are required.';
+    return 'A declared conflict requires signature and supporting evidence references.';
   if (Number.isNaN(Date.parse(request.validFromUtc)))
     return 'Declaration validity start is invalid.';
   if (
@@ -88,13 +93,15 @@ export const validateMeetingReadiness = (
   const eligibleVoting = control.members.filter(
     (member) => member.eligibleToScore && member.isVoting
   );
-  const hasChair = eligibleVoting.some((member) => member.memberKind === 'Chair');
+  const hasChair = eligibleVoting.some(
+    (member) => member.memberKind === 'Chair'
+  );
   const hasSecretary = control.members.some(
-    (member) =>
-      member.eligibleToScore && member.memberKind === 'Secretary'
+    (member) => member.eligibleToScore && member.memberKind === 'Secretary'
   );
   if (!hasChair) return 'An accepted, non-conflicted Chair is required.';
-  if (!hasSecretary) return 'An accepted, non-conflicted Secretary is required.';
+  if (!hasSecretary)
+    return 'An accepted, non-conflicted Secretary is required.';
   if (eligibleVoting.length < control.requiredQuorum)
     return `At least ${control.requiredQuorum} eligible voting members are required.`;
   return undefined;
@@ -105,8 +112,7 @@ export const validateRecallRequest = (
 ) => {
   if (request.reason.trim().length < 10)
     return 'Provide a complete reason for controlled recall.';
-  if (!request.evidenceReference.trim())
-    return 'Recall evidence is required.';
+  if (!request.evidenceReference.trim()) return 'Recall evidence is required.';
   if (!request.workflowDefinitionId)
     return 'Select the independent recall workflow.';
   return undefined;

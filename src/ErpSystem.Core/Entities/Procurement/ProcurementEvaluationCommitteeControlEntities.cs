@@ -38,6 +38,11 @@ public sealed class ProcurementEvaluationCommitteeControl : TenantEntity
     public Guid? ActivatedByUserId { get; set; }
     [StringLength(500)] public string? ActivationEvidenceReference { get; set; }
     [StringLength(100)] public string? ActivationIdempotencyKey { get; set; }
+    public DateTime? RetiredAtUtc { get; set; }
+    public Guid? RetiredByUserId { get; set; }
+    [StringLength(1000)] public string? RetirementReason { get; set; }
+    [StringLength(500)] public string? RetirementEvidenceReference { get; set; }
+    [StringLength(100)] public string? RetirementIdempotencyKey { get; set; }
     [Column(TypeName = "nvarchar(max)")] public string CompositionSnapshotJson { get; set; } = string.Empty;
     [Required, StringLength(64)] public string CompositionIntegrityHash { get; set; } = string.Empty;
     [Required, StringLength(100)] public string CreationIdempotencyKey { get; set; } = string.Empty;

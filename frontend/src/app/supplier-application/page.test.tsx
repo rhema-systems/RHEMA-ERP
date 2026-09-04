@@ -116,6 +116,20 @@ describe('supplier application CAPTCHA lifecycle', () => {
     });
   });
 
+  it('explains where repeatable supplier contacts and bank accounts are entered', async () => {
+    render(<SupplierApplicationAccessPage />);
+
+    expect(
+      await screen.findByText('Where contacts and bank accounts are captured')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/open the Application tab in the restricted portal/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/add multiple contact persons and bank accounts/i)
+    ).toBeInTheDocument();
+  });
+
   it('opens token login with a clear pending-verification message after payment', async () => {
     window.history.replaceState(
       {},

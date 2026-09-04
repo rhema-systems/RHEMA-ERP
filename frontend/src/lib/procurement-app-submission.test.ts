@@ -5,6 +5,7 @@ import {
   procurementAppSubmissionActions,
   procurementAppSubmissionStatusTone,
   readProcurementAppExportFile,
+  toProcurementAppEventInputValue,
   validateProcurementAppExport,
 } from './procurement-app-submission';
 
@@ -61,5 +62,17 @@ describe('procurement APP submission presentation controls', () => {
     );
     expect(procurementAppSubmissionStatusTone('Rejected')).toContain('red');
     expect(procurementAppSubmissionStatusTone('Submitted')).toContain('blue');
+  });
+
+  it('defaults lifecycle events after the prior event without dropping seconds', () => {
+    const now = new Date('2026-09-04T01:33:42.900Z');
+    const priorEvent = '2026-09-04T01:33:42.950Z';
+
+    const value = toProcurementAppEventInputValue(priorEvent, now);
+
+    expect(value).toHaveLength(19);
+    expect(new Date(value).getTime()).toBeGreaterThan(
+      new Date(priorEvent).getTime()
+    );
   });
 });

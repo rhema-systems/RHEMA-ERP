@@ -430,6 +430,7 @@ export default function ProcurementSourcingCasesPage() {
                 {cases.data?.items.map((item) => {
                   const actions = procurementSourcingCaseActions(
                     item,
+                    canManage,
                     canApprove
                   );
                   return (

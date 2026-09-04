@@ -556,12 +556,15 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
 
     private static bool IsUniqueConstraintViolation(Exception exception)
     {
-        if (exception is DbUpdateException { InnerException: not null } updateException)
-            return IsUniqueConstraintViolation(updateException.InnerException);
+        if (exception is DbUpdateException updateException &&
+            updateException.InnerException is Exception updateInnerException)
+            return IsUniqueConstraintViolation(updateInnerException);
         if (exception is SqlException sqlException)
-            return sqlException.Number is 2601 or 2627;
-        return exception.InnerException is not null &&
-               IsUniqueConstraintViolation(exception.InnerException);
+            return sqlException.Number is 2601 or 2627 &&
+                   sqlException.Message.Contains("ProcurementControlEvents", StringComparison.OrdinalIgnoreCase) &&
+                   sqlException.Message.Contains("EventKey", StringComparison.OrdinalIgnoreCase);
+        return exception.InnerException is Exception innerException &&
+               IsUniqueConstraintViolation(innerException);
     }
 
     private static void ValidateWrite(ProcurementControlEventWriteRequest request)

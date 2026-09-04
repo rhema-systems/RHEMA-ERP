@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyTenderDocumentContentArtifact,
   hasTenderDocumentAction,
+  isTenderDocumentContentArtifactApproved,
   pendingMandatoryAcknowledgements,
   validateTenderDocumentChange,
   validateTenderDocumentIssue,
@@ -24,6 +26,7 @@ const template = (): SaveProcurementTenderDocumentTemplate => ({
   policySetVersion: 3,
   sourceConfigurationProfileId: 'profile-1',
   contentReference: 'workflow-evidence://document/1',
+  contentWorkflowEvidenceDocumentId: 'evidence-1',
   contentChecksumSha256: 'a'.repeat(64),
   workflowDefinitionId: 'workflow-1',
   applicableMethods: ['NationalCompetitiveTendering'],
@@ -66,9 +69,59 @@ describe('controlled tender document presentation', () => {
     expect(
       validateTenderDocumentTemplate({
         ...template(),
+        contentWorkflowEvidenceDocumentId: undefined,
+      })
+    ).toContain('workflow evidence document');
+    expect(
+      validateTenderDocumentTemplate({
+        ...template(),
         effectiveFromUtc: 'not-a-date',
       })
     ).toContain('invalid');
+  });
+
+  it('derives the immutable content ID, path, and checksum from one approved artifact', () => {
+    const artifact = {
+      id: 'evidence-2',
+      documentName: 'NCT source document',
+      fileName: 'nct.docx',
+      filePath: 'workflow-evidence/default/nct.docx',
+      sha256: 'b'.repeat(64),
+      version: 2,
+      isCurrent: true,
+      verificationStatus: 1,
+      malwareScanStatus: 1,
+      workflowInstanceId: 'instance-1',
+      workflowName: 'Document control',
+      entityType: 'TenderDocument',
+      entityId: 'entity-1',
+      stepName: 'Content verification',
+    };
+
+    expect(isTenderDocumentContentArtifactApproved(artifact)).toBe(true);
+    expect(
+      applyTenderDocumentContentArtifact(
+        { ...template(), contentFileUploadRecordId: 'legacy-upload' },
+        artifact
+      )
+    ).toMatchObject({
+      contentWorkflowEvidenceDocumentId: 'evidence-2',
+      contentFileUploadRecordId: undefined,
+      contentReference: 'workflow-evidence/default/nct.docx',
+      contentChecksumSha256: 'b'.repeat(64),
+    });
+    expect(
+      isTenderDocumentContentArtifactApproved({
+        ...artifact,
+        malwareScanStatus: 0,
+      })
+    ).toBe(false);
+    expect(
+      isTenderDocumentContentArtifactApproved({
+        ...artifact,
+        verificationStatus: 0,
+      })
+    ).toBe(false);
   });
 
   it('enforces exact paid issue data and rejects payment on a free issue', () => {

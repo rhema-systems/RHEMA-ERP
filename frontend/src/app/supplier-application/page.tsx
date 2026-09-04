@@ -270,6 +270,19 @@ export default function SupplierApplicationAccessPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-5">
+                <Alert className="border-blue-200 bg-blue-50 text-blue-950">
+                  <AlertDescription>
+                    <strong className="block font-medium">
+                      Where contacts and bank accounts are captured
+                    </strong>
+                    <span className="mt-1 block text-sm">
+                      After verification, open the Application tab in the
+                      restricted portal. There you can add multiple contact
+                      persons and bank accounts, choose one primary entry in
+                      each list, and save them with the supplier application.
+                    </span>
+                  </AlertDescription>
+                </Alert>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="grid gap-2">
                     <Label
@@ -493,6 +506,8 @@ export default function SupplierApplicationAccessPage() {
                 </CardTitle>
                 <CardDescription className="text-slate-600">
                   This does not sign you into the approved supplier portal.
+                  After token login, open the Application tab to add or update
+                  contact persons and bank accounts.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-4">

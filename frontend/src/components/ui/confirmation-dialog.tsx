@@ -44,13 +44,29 @@ export function ConfirmationDialog({
   maxWidth = "425px",
   children
 }: ConfirmationDialogProps) {
-  const handleConfirm = async () => {
-    const result = await onConfirm()
-    if (result === false) {
-      return
+  const confirmInFlight = React.useRef(false)
+  const [isConfirming, setIsConfirming] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!open) {
+      confirmInFlight.current = false
+      setIsConfirming(false)
     }
-    if (!isLoading) {
-      onOpenChange(false)
+  }, [open])
+
+  const handleConfirm = async () => {
+    if (confirmInFlight.current || isLoading) return
+
+    confirmInFlight.current = true
+    setIsConfirming(true)
+    try {
+      const result = await onConfirm()
+      if (result !== false) {
+        onOpenChange(false)
+      }
+    } finally {
+      confirmInFlight.current = false
+      setIsConfirming(false)
     }
   }
 
@@ -90,16 +106,16 @@ export function ConfirmationDialog({
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={isLoading}
+            disabled={isLoading || isConfirming}
           >
             {cancelText}
           </Button>
           <Button
             variant={variant === "destructive" ? "destructive" : "default"}
             onClick={handleConfirm}
-            disabled={isLoading || confirmDisabled}
+            disabled={isLoading || isConfirming || confirmDisabled}
           >
-            {confirmText}
+            {isLoading || isConfirming ? "Please wait..." : confirmText}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -84,6 +84,7 @@ public sealed class ProcurementSupplierOnboardingTokenDto :
     public string? ExpiryReason { get; set; }
     public string? ReissueReason { get; set; }
     public DateTime? ReissuedAtUtc { get; set; }
+    public bool ApplicationTokenDeliveryRecoveryRequired { get; set; }
     public IReadOnlyList<ProcurementSupplierOnboardingPaymentDto> Payments { get; set; } =
         Array.Empty<ProcurementSupplierOnboardingPaymentDto>();
     public IReadOnlyList<ProcurementSupplierOnboardingExemptionDto> Exemptions { get; set; } =

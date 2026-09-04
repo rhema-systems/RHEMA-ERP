@@ -38,6 +38,8 @@
     <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
+    <Compile Include="Controllers\Administration\UserTenantMappingsControllerTests.cs" />
+    <Compile Include="Controllers\Administration\InternalUserCredentialsControllerTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
@@ -73,6 +75,7 @@
     <Compile Include="Controllers\Procurement\ProcurementSourcingCasesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\RfqsControllerStatutoryControlsTests.cs" />
     <Compile Include="Controllers\Procurement\TenderControlsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderWorkflowSubmissionControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ExceptionalSourcingControlsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PrequalificationControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementTenderDocumentRegisterControllerTests.cs" />
@@ -247,12 +250,14 @@
     <Compile Include="Services\Finance\SupplierDebitNoteFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
+    <Compile Include="Services\HR\PayrollJournalPostingTransactionTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
     <Compile Include="Services\Finance\AllocationRunBatchServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
+    <Compile Include="Services\UnifiedNotificationServiceTests.cs" />
     <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />

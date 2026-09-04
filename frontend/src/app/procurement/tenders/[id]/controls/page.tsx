@@ -30,6 +30,7 @@ import {
 import { procurementTenderControlService as service } from '@/services/procurement-tender-control.service';
 import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import {
   ProcurementTenderControlStatus as Status,
   ProcurementTenderSubmissionDisposition as Disposition,
@@ -40,13 +41,14 @@ import type { ProcurementAwardReadinessDecision } from '@/types/procurement-awar
 
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleString() : '—';
+const methodLabels: Partial<Record<Method, string>> = {
+  [Method.NationalCompetitiveTendering]: 'NCT',
+  [Method.InternationalCompetitiveTendering]: 'ICT',
+  [Method.QualityBasedSelection]: 'QBS',
+  [Method.QualityAndCostBasedSelection]: 'QCBS',
+};
 const methodLabel = (method: Method) =>
-  ({
-    [Method.NationalCompetitiveTendering]: 'NCT',
-    [Method.InternationalCompetitiveTendering]: 'ICT',
-    [Method.QualityBasedSelection]: 'QBS',
-    [Method.QualityAndCostBasedSelection]: 'QCBS',
-  })[method] ?? 'Controlled tender';
+  methodLabels[method] ?? 'Controlled tender';
 const isQualitySelection = (method: Method) =>
   method === Method.QualityBasedSelection ||
   method === Method.QualityAndCostBasedSelection;
@@ -55,6 +57,7 @@ export default function ProcurementTenderControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
   const { user, hasPermission } = useAuth();
   const [control, setControl] = useState<ProcurementTenderControl | null>(null);
+  const [loadError, setLoadError] = useState<string>();
   const [awardGate, setAwardGate] =
     useState<ProcurementAwardReadinessDecision | null>(null);
   const [loading, setLoading] = useState(true);
@@ -85,11 +88,19 @@ export default function ProcurementTenderControlsPage() {
   const [contractEvidence, setContractEvidence] = useState('');
   const [acceptanceReference, setAcceptanceReference] = useState('');
   const [acceptanceEvidence, setAcceptanceEvidence] = useState('');
+  const [focusedBidId, setFocusedBidId] = useState<string>();
+
+  useEffect(() => {
+    setFocusedBidId(
+      new URLSearchParams(window.location.search).get('bidId') || undefined
+    );
+  }, []);
 
   const load = useCallback(async () => {
     if (!tenderId) return;
     try {
       setLoading(true);
+      setLoadError(undefined);
       const next = await service.get(tenderId);
       setControl(next);
       setTechnicalScores(buildTechnicalScores(next));
@@ -112,10 +123,12 @@ export default function ProcurementTenderControlsPage() {
         setAwardGate(null);
       }
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Failed to load controlled tender lifecycle'
+      setControl(null);
+      setLoadError(
+        getProcurementProblemMessage(
+          error,
+          'Failed to load controlled tender lifecycle.'
+        )
       );
     } finally {
       setLoading(false);
@@ -135,11 +148,14 @@ export default function ProcurementTenderControlsPage() {
     'Opening officer';
   const awardGateAllows = Boolean(
     awardGate?.isReady &&
-    awardGate.isCurrent &&
-    hasAwardReadinessAction(awardGate.allowedActions, 'RecordAward') &&
-    hasPermission('procurement.tender.approve') &&
-    control?.recommendedBidId &&
-    awardGate.recommendation.subjectIds.includes(control.recommendedBidId)
+      awardGate.isCurrent &&
+      hasAwardReadinessAction(awardGate.allowedActions, 'RecordAward') &&
+      hasPermission('procurement.tender.approve') &&
+      control?.recommendedBidId &&
+      awardGate.recommendation.subjectIds.includes(control.recommendedBidId)
+  );
+  const focusedBid = control?.submissionReceipts.find(
+    (item) => item.tenderBidId === focusedBidId
   );
 
   const run = async (
@@ -168,7 +184,55 @@ export default function ProcurementTenderControlsPage() {
       </div>
     );
   if (!control || !readiness)
-    return <div className="p-6">Controlled tender lifecycle not found.</div>;
+    return (
+      <div className="space-y-4 p-6">
+        <Button variant="ghost" asChild className="px-0">
+          <Link href={`/procurement/bids?tenderId=${encodeURIComponent(tenderId)}`}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Tender bids
+          </Link>
+        </Button>
+        <Card className="border-red-200">
+          <CardHeader>
+            <CardTitle>
+              This historical tender cannot enter controlled evaluation
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-destructive">
+              {loadError ?? 'The controlled tender lifecycle was not found.'}
+            </p>
+            {(loadError?.includes('TENDER_CONTROL_NOT_FOUND') ||
+              loadError?.includes(
+                'Advertise this NCT/ICT tender through the statutory control'
+              )) && (
+              <p className="text-sm text-muted-foreground">
+                This tender was published without its mandatory controlled
+                document register and statutory tender record. Existing bids
+                cannot be scored until an administrator completes a reviewed
+                historical-data migration. For UAT, create a replacement tender
+                through the current controlled publication flow; bypassing this
+                check would create an invalid audit trail.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <Link
+                  href={`/procurement/bids?tenderId=${encodeURIComponent(tenderId)}`}
+                >
+                  Return to tender bids
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href={`/procurement/tenders/${tenderId}`}>
+                  Open tender details
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
 
   return (
     <div className="space-y-6 p-6" data-testid="controlled-tender-page">
@@ -445,180 +509,217 @@ export default function ProcurementTenderControlsPage() {
         </div>
       )}
 
-      {readiness.canTechnical && (
-        <EvaluationCard
-          title="Signed technical evaluation"
-          evidence={technicalEvidence}
-          setEvidence={setTechnicalEvidence}
-        >
-          {isQualitySelection(control.method) && (
-            <p className="text-xs text-muted-foreground">
-              Qualification is calculated from the locked{' '}
-              {control.minimumTechnicalScore} technical threshold.
+      <section id="evaluation-workspace" className="scroll-mt-6 space-y-4">
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-blue-700" />
+              Tender bid evaluation
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {focusedBid
+                ? `${focusedBid.businessPartnerName} is highlighted below. Complete the current phase for every eligible bid, then save the signed committee evaluation.`
+                : 'Score every eligible bid in the current phase, then save the signed committee evaluation.'}
             </p>
-          )}
-          {technicalScores.map((score, index) => (
-            <ScoreRow
-              key={score.bidId}
-              label={
-                control.submissionReceipts.find(
-                  (item) => item.tenderBidId === score.bidId
-                )?.businessPartnerName ?? score.bidId
-              }
-              score={score.score}
-              onScore={(value) =>
-                setTechnicalScores(
-                  technicalScores.map((item, i) =>
-                    i === index
-                      ? {
-                          ...item,
-                          score: value,
-                          qualified: isQualitySelection(control.method)
-                            ? value >= control.minimumTechnicalScore
-                            : item.qualified,
-                        }
-                      : item
-                  )
-                )
-              }
-              qualified={score.qualified}
-              qualifiedLocked={isQualitySelection(control.method)}
-              onQualified={(value) =>
-                setTechnicalScores(
-                  technicalScores.map((item, i) =>
-                    i === index ? { ...item, qualified: value } : item
-                  )
-                )
-              }
-            />
-          ))}
-          <Button
-            disabled={busy === 'technical'}
-            onClick={() =>
-              void run(
-                'technical',
-                () =>
-                  service.technicalEvaluation(tenderId, {
-                    evidenceReference: technicalEvidence,
-                    scores: technicalScores,
-                    rowVersion: control.rowVersion,
-                  }),
-                'Technical evaluation signed'
-              )
-            }
-          >
-            Save technical evaluation
-          </Button>
-        </EvaluationCard>
-      )}
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={`/procurement/bids?tenderId=${encodeURIComponent(tenderId)}`}
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Tender bids
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
 
-      {readiness.canFinancial && (
-        <EvaluationCard
-          title="Signed financial evaluation and recommendation"
-          evidence={financialEvidence}
-          setEvidence={setFinancialEvidence}
-        >
-          {control.method === Method.QualityBasedSelection && (
-            <p className="text-xs text-muted-foreground">
-              QBS opens the financial/negotiation review only for the uniquely
-              highest-ranked qualified technical bid.
-            </p>
-          )}
-          {control.method === Method.QualityAndCostBasedSelection && (
-            <p className="text-xs text-muted-foreground">
-              QCBS financial and combined scores are calculated by the server
-              from evaluated amounts using {control.technicalWeight}/
-              {control.financialWeight} weights.
-            </p>
-          )}
-          {financialScores.map((score, index) => (
-            <ScoreRow
-              key={score.bidId}
-              label={
-                control.submissionReceipts.find(
-                  (item) => item.tenderBidId === score.bidId
-                )?.businessPartnerName ?? score.bidId
-              }
-              score={score.score}
-              scoreLocked={isQualitySelection(control.method)}
-              onScore={(value) =>
-                setFinancialScores(
-                  financialScores.map((item, i) =>
-                    i === index ? { ...item, score: value } : item
-                  )
-                )
-              }
-              evaluatedAmount={score.evaluatedAmount}
-              onEvaluatedAmount={(value) =>
-                setFinancialScores(
-                  financialScores.map((item, i) =>
-                    i === index ? { ...item, evaluatedAmount: value } : item
-                  )
-                )
-              }
-            />
-          ))}
-          <Label>Recommended bid</Label>
-          <select
-            className="h-10 rounded-md border bg-background px-3"
-            value={recommendedBidId}
-            onChange={(event) => setRecommendedBidId(event.target.value)}
+        {readiness.canTechnical && (
+          <EvaluationCard
+            title="Signed technical evaluation"
+            evidence={technicalEvidence}
+            setEvidence={setTechnicalEvidence}
           >
-            {financialScores.map((item) => (
-              <option key={item.bidId} value={item.bidId}>
-                {control.submissionReceipts.find(
-                  (receipt) => receipt.tenderBidId === item.bidId
-                )?.businessPartnerName ?? item.bidId}
-              </option>
+            {isQualitySelection(control.method) && (
+              <p className="text-xs text-muted-foreground">
+                Qualification is calculated from the locked{' '}
+                {control.minimumTechnicalScore} technical threshold.
+              </p>
+            )}
+            {technicalScores.map((score, index) => (
+              <ScoreRow
+                key={score.bidId}
+                label={
+                  control.submissionReceipts.find(
+                    (item) => item.tenderBidId === score.bidId
+                  )?.businessPartnerName ?? score.bidId
+                }
+                score={score.score}
+                onScore={(value) =>
+                  setTechnicalScores(
+                    technicalScores.map((item, i) =>
+                      i === index
+                        ? {
+                            ...item,
+                            score: value,
+                            qualified: isQualitySelection(control.method)
+                              ? value >= control.minimumTechnicalScore
+                              : item.qualified,
+                          }
+                        : item
+                    )
+                  )
+                }
+                qualified={score.qualified}
+                focused={score.bidId === focusedBidId}
+                qualifiedLocked={isQualitySelection(control.method)}
+                onQualified={(value) =>
+                  setTechnicalScores(
+                    technicalScores.map((item, i) =>
+                      i === index ? { ...item, qualified: value } : item
+                    )
+                  )
+                }
+              />
             ))}
-          </select>
-          <Label>Recommendation reason</Label>
-          <Textarea
-            value={financialReason}
-            onChange={(event) => setFinancialReason(event.target.value)}
-          />
-          <Button
-            disabled={busy === 'financial'}
-            onClick={() =>
-              void run(
-                'financial',
-                () =>
-                  service.financialEvaluation(tenderId, {
-                    evidenceReference: financialEvidence,
-                    scores: financialScores,
-                    recommendedBidId,
-                    recommendationReason: financialReason,
-                    rowVersion: control.rowVersion,
-                  }),
-                'Financial evaluation signed'
-              )
-            }
+            <Button
+              disabled={busy === 'technical'}
+              onClick={() =>
+                void run(
+                  'technical',
+                  () =>
+                    service.technicalEvaluation(tenderId, {
+                      evidenceReference: technicalEvidence,
+                      scores: technicalScores,
+                      rowVersion: control.rowVersion,
+                    }),
+                  'Technical evaluation signed'
+                )
+              }
+            >
+              Save technical evaluation
+            </Button>
+          </EvaluationCard>
+        )}
+
+        {readiness.canFinancial && (
+          <EvaluationCard
+            title="Signed financial evaluation and recommendation"
+            evidence={financialEvidence}
+            setEvidence={setFinancialEvidence}
           >
-            Save financial recommendation
-          </Button>
-        </EvaluationCard>
-      )}
+            {control.method === Method.QualityBasedSelection && (
+              <p className="text-xs text-muted-foreground">
+                QBS opens the financial/negotiation review only for the uniquely
+                highest-ranked qualified technical bid.
+              </p>
+            )}
+            {control.method === Method.QualityAndCostBasedSelection && (
+              <p className="text-xs text-muted-foreground">
+                QCBS financial and combined scores are calculated by the server
+                from evaluated amounts using {control.technicalWeight}/
+                {control.financialWeight} weights.
+              </p>
+            )}
+            {financialScores.map((score, index) => (
+              <ScoreRow
+                key={score.bidId}
+                label={
+                  control.submissionReceipts.find(
+                    (item) => item.tenderBidId === score.bidId
+                  )?.businessPartnerName ?? score.bidId
+                }
+                score={score.score}
+                scoreLocked={isQualitySelection(control.method)}
+                onScore={(value) =>
+                  setFinancialScores(
+                    financialScores.map((item, i) =>
+                      i === index ? { ...item, score: value } : item
+                    )
+                  )
+                }
+                evaluatedAmount={score.evaluatedAmount}
+                focused={score.bidId === focusedBidId}
+                onEvaluatedAmount={(value) =>
+                  setFinancialScores(
+                    financialScores.map((item, i) =>
+                      i === index ? { ...item, evaluatedAmount: value } : item
+                    )
+                  )
+                }
+              />
+            ))}
+            <Label>Recommended bid</Label>
+            <select
+              className="h-10 rounded-md border bg-background px-3"
+              value={recommendedBidId}
+              onChange={(event) => setRecommendedBidId(event.target.value)}
+            >
+              {financialScores.map((item) => (
+                <option key={item.bidId} value={item.bidId}>
+                  {control.submissionReceipts.find(
+                    (receipt) => receipt.tenderBidId === item.bidId
+                  )?.businessPartnerName ?? item.bidId}
+                </option>
+              ))}
+            </select>
+            <Label>Recommendation reason</Label>
+            <Textarea
+              value={financialReason}
+              onChange={(event) => setFinancialReason(event.target.value)}
+            />
+            <Button
+              disabled={busy === 'financial'}
+              onClick={() =>
+                void run(
+                  'financial',
+                  () =>
+                    service.financialEvaluation(tenderId, {
+                      evidenceReference: financialEvidence,
+                      scores: financialScores,
+                      recommendedBidId,
+                      recommendationReason: financialReason,
+                      rowVersion: control.rowVersion,
+                    }),
+                  'Financial evaluation signed'
+                )
+              }
+            >
+              Save financial recommendation
+            </Button>
+          </EvaluationCard>
+        )}
+        {!readiness.canTechnical && !readiness.canFinancial && (
+          <Card>
+            <CardContent className="pt-6 text-sm text-muted-foreground">
+              Scoring is not open at the current lifecycle stage (
+              {tenderControlStatusLabel[control.status]}). Complete the pending
+              opening, committee, or prior evaluation phase first.
+            </CardContent>
+          </Card>
+        )}
+      </section>
 
       {readiness.canSubmitApproval &&
         hasPermission('procurement.tender.approve') && (
-        <ActionCard title="Submit exact authority/PPA workflow">
-          <p className="text-sm text-muted-foreground">
-            Route {control.authorityRouteReference}; shared workflow and SOD are
-            server enforced.
-          </p>
-          <Button
-            onClick={() =>
-              void run(
-                'submit',
-                () => service.submitApproval(tenderId, control.rowVersion),
-                'Recommendation submitted'
-              )
-            }
-          >
-            Submit for approval
-          </Button>
-        </ActionCard>
-      )}
+          <ActionCard title="Submit exact authority/PPA workflow">
+            <p className="text-sm text-muted-foreground">
+              Route {control.authorityRouteReference}; shared workflow and SOD
+              are server enforced.
+            </p>
+            <Button
+              onClick={() =>
+                void run(
+                  'submit',
+                  () => service.submitApproval(tenderId, control.rowVersion),
+                  'Recommendation submitted'
+                )
+              }
+            >
+              Submit for approval
+            </Button>
+          </ActionCard>
+        )}
 
       {readiness.canDecide && hasPermission('procurement.tender.approve') && (
         <ActionCard title="Authority and PPA decision">
@@ -908,6 +1009,7 @@ function ScoreRow({
   onQualified,
   evaluatedAmount,
   onEvaluatedAmount,
+  focused,
 }: {
   label: string;
   score: number;
@@ -918,10 +1020,18 @@ function ScoreRow({
   onQualified?: (value: boolean) => void;
   evaluatedAmount?: number;
   onEvaluatedAmount?: (value: number) => void;
+  focused?: boolean;
 }) {
   return (
-    <div className="grid items-end gap-2 rounded border p-3 md:grid-cols-[1fr_140px_160px]">
-      <span className="text-sm font-medium">{label}</span>
+    <div
+      className={`grid items-end gap-2 rounded border p-3 md:grid-cols-[1fr_140px_160px] ${
+        focused ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-300' : ''
+      }`}
+    >
+      <span className="flex items-center gap-2 text-sm font-medium">
+        {label}
+        {focused && <Badge variant="secondary">Selected bid</Badge>}
+      </span>
       {!scoreLocked && (
         <Field
           label="Score / 100"

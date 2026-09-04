@@ -181,6 +181,30 @@ public class TendersController : ControllerBase
         {
             return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("SOURCING_CASE_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementSourcingCaseValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementComplianceRequestValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseConflictException ex)
+        {
+            return Conflict(SourcingProblem(ex.Code, ex.Message, status: 409));
+        }
+        catch (ProcurementCompliancePolicyNotFoundException ex)
+        {
+            return Conflict(SourcingProblem("SOURCING_CASE_POLICY_NOT_FOUND", ex.Message, status: 409));
+        }
+        catch (ProcurementCompliancePolicyConflictException ex)
+        {
+            return Conflict(SourcingProblem("SOURCING_CASE_POLICY_CONFLICT", ex.Message, status: 409));
+        }
         catch (ProcurementExceptionalSourcingConflictException ex)
         {
             return Conflict(new { code = ex.Code, message = ex.Message });
@@ -227,6 +251,10 @@ public class TendersController : ControllerBase
             var userId = _currentUserProvider.UserId;
             await _tenderService.SubmitTenderForApprovalAsync(id, userId);
             return NoContent();
+        }
+        catch (ProcurementTenderWorkflowValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
         }
         catch (InvalidOperationException ex)
         {

@@ -106,6 +106,7 @@ public class PayrollService : IPayrollService
 
     private readonly ApplicationDbContext _context;
     private readonly IJournalEntryService _journalEntryService;
+    private readonly IFinancePostingEngine _financePostingEngine;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly INotificationTopicPublisher _notificationTopicPublisher;
     private readonly ILogger<PayrollService> _logger;
@@ -113,12 +114,14 @@ public class PayrollService : IPayrollService
     public PayrollService(
         ApplicationDbContext context,
         IJournalEntryService journalEntryService,
+        IFinancePostingEngine financePostingEngine,
         IWorkflowIntegrationService workflowIntegrationService,
         INotificationTopicPublisher notificationTopicPublisher,
         ILogger<PayrollService> logger)
     {
         _context = context;
         _journalEntryService = journalEntryService;
+        _financePostingEngine = financePostingEngine;
         _workflowIntegrationService = workflowIntegrationService;
         _notificationTopicPublisher = notificationTopicPublisher;
         _logger = logger;
@@ -5767,10 +5770,16 @@ public class PayrollService : IPayrollService
                 throw new InvalidOperationException($"Finance journal {journalNumber} already exists. Review the existing journal before posting this payroll run again.");
             }
 
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
             var journalLines = run.JournalLines.ToList();
             if (journalLines.Count > 0)
             {
                 _context.PayrollJournalLines.RemoveRange(journalLines);
+                // The Finance posting engine persists through this shared context. Flush the
+                // soft-deleted preview rows first so the filtered unique index releases their
+                // tenant/run/sequence keys before regenerated rows are tracked.
+                await _context.SaveChangesAsync(cancellationToken);
             }
 
             journalLines = (await BuildJournalLinesAsync(tenantId, run, run.Transactions.ToList(), cancellationToken)).ToList();
@@ -5853,33 +5862,41 @@ public class PayrollService : IPayrollService
                 throw new InvalidOperationException($"Payroll journal account code(s) not found in Chart of Accounts: {string.Join(", ", missingAccounts)}.");
             }
 
-            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-
             var postedAt = DateTime.UtcNow;
-            var journalDto = new CreateJournalEntryDto
+            var postingRequest = new FinancePostingRequestDto
             {
-                JournalNumber = journalNumber,
-                TransactionDate = run.ClosedAt ?? postedAt,
-                Description = $"Payroll journal for {run.RunNumber}",
-                Reference = run.RunNumber,
                 SourceModule = PayrollJournalSourceModule,
-                Transactions = journalLines
+                SourceDocumentType = "PayrollRun",
+                SourceDocumentId = run.Id,
+                SourceDocumentTenantId = tenantId,
+                SourceDocumentReference = run.RunNumber,
+                Description = $"Payroll journal for {run.RunNumber}",
+                PostingDate = run.ClosedAt ?? postedAt,
+                JournalType = "Payroll",
+                FunctionalCurrencyCode = run.CurrencyCode,
+                IdempotencyKey = $"{PayrollJournalSourceModule}:PayrollRun:{run.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = journalLines
                     .OrderBy(e => e.SequenceNo)
-                    .Select(e => new CreateAccountTransactionDto
+                    .Select(e => new FinancePostingLineDto
                     {
                         AccountId = accountsByCode[NormalizePayrollJournalAccountCode(e.AccountCode)],
-                        Amount = e.Amount,
-                        TransactionType = e.DebitCredit == "DR" ? "Debit" : "Credit",
+                        DebitAmount = e.DebitCredit == "DR" ? e.Amount : 0m,
+                        CreditAmount = e.DebitCredit == "CR" ? e.Amount : 0m,
                         Description = e.Description,
-                        Reference = run.RunNumber,
-                        CurrencyCode = run.CurrencyCode,
+                        SourceReferenceNumber = run.RunNumber,
+                        TransactionCurrency = run.CurrencyCode,
                         LineNumber = e.SequenceNo
                     })
                     .ToList()
             };
 
-            var created = await _journalEntryService.CreateJournalEntryAsync(journalDto, cancellationToken);
-            var posted = await _journalEntryService.PostJournalEntryAsync(created.Id, cancellationToken);
+            // Payroll is an approved HR source document, not a manually authored GL journal.
+            // Route it through the central posting engine so the Finance journal is created as
+            // system-generated and Posted in the same caller-owned transaction.
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+            var posted = await _journalEntryService.GetJournalEntryByIdAsync(postingResult.JournalEntryId, cancellationToken)
+                ?? throw new InvalidOperationException("Payroll journal was posted but could not be reloaded.");
 
             foreach (var line in journalLines)
             {

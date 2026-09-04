@@ -272,6 +272,12 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
             It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.Budget.Verify(item => item.ReserveAsync(
             It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.requisition.approve" &&
+                request.SourceReference == fixture.Requisition.RequisitionNumber),
+            "trace-pr-budget",
+            It.IsAny<CancellationToken>()), Times.Once);
         fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -315,6 +321,19 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
                 .ReturnsAsync((PurchaseRequisition item) => item);
             CurrentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
             CurrentUser.SetupGet(item => item.UserId).Returns(UserId);
+            Access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ACCESS_ALLOWED",
+                    Message = "The current actor has an effective approval capability.",
+                    PermissionCode = "procurement.requisition.approve",
+                    ActorUserId = UserId,
+                    TenantId = Requisition.TenantId
+                });
             AuthorityRoute = new ProcurementRequisitionAuthorityRoute
             {
                 Id = Guid.NewGuid(), TenantId = Requisition.TenantId, PurchaseRequisitionId = Requisition.Id,
@@ -387,6 +406,7 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
                 Budget.Object,
                 Authority.Object,
                 Mock.Of<IProcurementRequisitionSourcingReleaseService>(),
+                Access.Object,
                 Mock.Of<IAppEventBus>(),
                 NullLogger<PurchaseRequisitionsController>.Instance)
             {
@@ -407,6 +427,7 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
         public Mock<IProcurementRequisitionSubmissionControlService> Submission { get; } = new();
         public Mock<IProcurementRequisitionBudgetControlService> Budget { get; } = new();
         public Mock<IProcurementRequisitionAuthorityRouteService> Authority { get; } = new();
+        public Mock<IProcurementAccessControlService> Access { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
         public PurchaseRequisitionsController Controller { get; }
 

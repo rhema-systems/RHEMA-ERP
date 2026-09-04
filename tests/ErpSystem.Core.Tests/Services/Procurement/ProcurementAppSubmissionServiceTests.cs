@@ -150,6 +150,22 @@ public sealed class ProcurementAppSubmissionServiceTests
         (await fixture.Context.ProcurementAppSubmissions.CountAsync()).Should().Be(0);
     }
 
+    [Fact]
+    public async Task TenantAdministratorCanReadWhileUnregisteredRoleIsDenied()
+    {
+        await using var fixture = new Fixture();
+
+        var summary = await fixture.Service.GetSummaryAsync();
+
+        summary.PublishedPlanCount.Should().Be(1);
+
+        fixture.SwitchRoles("Manager");
+        var denied = () => fixture.Service.SearchAsync(new ProcurementAppSubmissionSearchRequest());
+
+        await denied.Should().ThrowAsync<ProcurementAppSubmissionAuthorizationException>()
+            .WithMessage("*procurement records read permission*");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Guid _tenantId;

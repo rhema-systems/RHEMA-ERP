@@ -105,6 +105,8 @@ describe('AllSettingsPage', () => {
 
     expect(screen.getByRole('link', { name: 'Open Inventory settings' }))
       .toHaveAttribute('href', '/settings/modules/inventory');
+    expect(screen.getByRole('link', { name: 'Open Inventory settings' }))
+      .toHaveClass('min-h-20', 'px-4', 'py-3');
     expect(screen.getByRole('link', { name: 'Open Procurement settings' }))
       .toHaveAttribute('href', '/settings/modules/procurement');
     expect(screen.queryByRole('link', { name: 'Units of Measure' })).not.toBeInTheDocument();

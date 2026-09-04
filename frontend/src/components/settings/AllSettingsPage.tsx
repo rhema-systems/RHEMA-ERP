@@ -302,22 +302,22 @@ export function AllSettingsPage() {
         </div>
       </header>
 
-      <main className="space-y-6 p-5 lg:p-7">
+      <main className="space-y-4 p-4 lg:p-5">
         {visibleSections.map(section => (
           <section
             key={section.key}
             aria-labelledby={`${section.key}-settings-heading`}
-            className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-[#1b1b1b]"
+            className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-[#1b1b1b]"
           >
             <h2
               id={`${section.key}-settings-heading`}
-              className="mb-4 text-lg font-medium text-slate-800 dark:text-slate-100"
+              className="mb-3 text-base font-semibold text-slate-800 dark:text-slate-100"
             >
               {section.title}
             </h2>
             <div
               data-testid={`${section.key}-settings-grid`}
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
             >
               {section.cards.map((card, cardIndex) => {
                 const CardIcon = card.icon;
@@ -330,20 +330,20 @@ export function AllSettingsPage() {
                       href={getSettingsModuleHref(section.key, card.key)}
                       aria-label={`Open ${card.title} settings`}
                       className={cn(
-                        'flex min-h-28 w-full items-center gap-4 bg-gradient-to-br px-5 py-5 text-left transition-colors',
+                        'flex min-h-20 w-full items-center gap-3 bg-gradient-to-br px-4 py-3 text-left transition-colors',
                         cardAccentClasses[cardIndex % cardAccentClasses.length],
                       )}
                     >
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/80 shadow-sm ring-1 ring-black/5 dark:bg-black/20 dark:ring-white/10">
-                        <CardIcon className="h-5 w-5" />
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/80 shadow-sm ring-1 ring-black/5 dark:bg-black/20 dark:ring-white/10">
+                        <CardIcon className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <h3 className="text-base font-semibold">{card.title}</h3>
-                        <span className="mt-1 block text-xs font-medium opacity-75">
+                        <span className="mt-0.5 block text-xs font-medium opacity-75">
                           {card.links.length} {card.links.length === 1 ? 'setting' : 'settings'}
                         </span>
                       </span>
-                      <ChevronRight className="h-5 w-5 shrink-0 opacity-60" />
+                      <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
                     </Link>
                   </article>
                 );

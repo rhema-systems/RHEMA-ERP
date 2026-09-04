@@ -144,15 +144,14 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
             throw new ProcurementSupplierOnboardingTokenConflictException(
                 "SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED",
                 "Application-token delivery could not be completed. " +
-                "Reissue the token to retry delivery.");
+                "Retry payment confirmation to rotate and deliver a fresh token safely.");
         }
         if (!delivery.ApplicantAccessFound)
             return value;
         if (!delivery.Delivered)
             throw new ProcurementSupplierOnboardingTokenConflictException(
                 "SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED",
-                delivery.FailureMessage ??
-                "Application-token delivery failed. Reissue the token to retry delivery.");
+                "Application-token delivery failed. Retry payment confirmation to rotate and deliver a fresh token safely.");
 
         return new ProcurementSupplierOnboardingTokenIssueResultDto
         {

@@ -30,6 +30,7 @@ import {
   TableRow,
 } from '../ui/table';
 import { useToast } from '../ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import {
   RefreshCw,
   Trash2,
@@ -39,6 +40,29 @@ import {
   Eraser,
   Copy,
 } from 'lucide-react';
+
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/$/, '');
+const EXCEPTION_LOGS_URL = `${API_BASE_URL}/admin/system-exception-logs`;
+
+const getAuthHeaders = (includeContentType = false): HeadersInit => {
+  const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(includeContentType ? { 'Content-Type': 'application/json' } : {}),
+  };
+};
+
+const responseErrorMessage = async (response: Response, fallback: string) => {
+  try {
+    const payload = await response.json();
+    return payload?.detail || payload?.title || payload?.message || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const requestErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback;
 
 interface ExceptionLogListItem {
   id: string;
@@ -87,6 +111,8 @@ interface ExceptionLogDetail {
 
 export default function SystemExceptionLogs() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canManageLogs = hasPermission('settings.update');
 
   const [items, setItems] = useState<ExceptionLogListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,14 +151,14 @@ export default function SystemExceptionLogs() {
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/admin/system-exception-logs?${queryString}`,
+        `${EXCEPTION_LOGS_URL}?${queryString}`,
         {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          headers: getAuthHeaders(),
         }
       );
       if (!response.ok) {
         toast({
-          description: 'Failed to load exception logs',
+          description: await responseErrorMessage(response, 'Failed to load exception logs'),
           variant: 'destructive',
         });
         return;
@@ -140,9 +166,9 @@ export default function SystemExceptionLogs() {
       const data = await response.json();
       setItems(data.items || []);
       setTotalCount(Number(data.totalCount) || 0);
-    } catch {
+    } catch (error) {
       toast({
-        description: 'Failed to load exception logs',
+        description: requestErrorMessage(error, 'Failed to load exception logs'),
         variant: 'destructive',
       });
     } finally {
@@ -156,12 +182,12 @@ export default function SystemExceptionLogs() {
 
   const openDetails = async (id: string) => {
     try {
-      const response = await fetch(`/api/admin/system-exception-logs/${id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      const response = await fetch(`${EXCEPTION_LOGS_URL}/${id}`, {
+        headers: getAuthHeaders(),
       });
       if (!response.ok) {
         toast({
-          description: 'Failed to load details',
+          description: await responseErrorMessage(response, 'Failed to load details'),
           variant: 'destructive',
         });
         return;
@@ -169,8 +195,11 @@ export default function SystemExceptionLogs() {
       const data = await response.json();
       setSelected(data);
       setDetailOpen(true);
-    } catch {
-      toast({ description: 'Failed to load details', variant: 'destructive' });
+    } catch (error) {
+      toast({
+        description: requestErrorMessage(error, 'Failed to load details'),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -183,15 +212,15 @@ export default function SystemExceptionLogs() {
     if (!deleteTargetId) return;
     try {
       const response = await fetch(
-        `/api/admin/system-exception-logs/${deleteTargetId}`,
+        `${EXCEPTION_LOGS_URL}/${deleteTargetId}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          headers: getAuthHeaders(),
         }
       );
       if (!response.ok) {
         toast({
-          description: 'Failed to delete log entry',
+          description: await responseErrorMessage(response, 'Failed to delete log entry'),
           variant: 'destructive',
         });
         return;
@@ -199,9 +228,9 @@ export default function SystemExceptionLogs() {
       toast({ description: 'Log entry deleted' });
       setDeleteTargetId(null);
       await load();
-    } catch {
+    } catch (error) {
       toast({
-        description: 'Failed to delete log entry',
+        description: requestErrorMessage(error, 'Failed to delete log entry'),
         variant: 'destructive',
       });
     }
@@ -211,19 +240,16 @@ export default function SystemExceptionLogs() {
     if (!selected) return;
     try {
       const response = await fetch(
-        `/api/admin/system-exception-logs/${selected.id}/resolve`,
+        `${EXCEPTION_LOGS_URL}/${selected.id}/resolve`,
         {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(true),
           body: JSON.stringify({ notes: resolveNotes }),
         }
       );
       if (!response.ok) {
         toast({
-          description: 'Failed to resolve log entry',
+          description: await responseErrorMessage(response, 'Failed to resolve log entry'),
           variant: 'destructive',
         });
         return false;
@@ -233,9 +259,9 @@ export default function SystemExceptionLogs() {
       setResolveOpen(false);
       setDetailOpen(false);
       await load();
-    } catch {
+    } catch (error) {
       toast({
-        description: 'Failed to resolve log entry',
+        description: requestErrorMessage(error, 'Failed to resolve log entry'),
         variant: 'destructive',
       });
       return false;
@@ -244,18 +270,24 @@ export default function SystemExceptionLogs() {
 
   const clearAll = async () => {
     try {
-      const response = await fetch(`/api/admin/system-exception-logs/clear`, {
+      const response = await fetch(`${EXCEPTION_LOGS_URL}/clear`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: getAuthHeaders(),
       });
       if (!response.ok) {
-        toast({ description: 'Failed to clear logs', variant: 'destructive' });
+        toast({
+          description: await responseErrorMessage(response, 'Failed to clear logs'),
+          variant: 'destructive',
+        });
         return false;
       }
       toast({ description: 'Logs cleared' });
       await load();
-    } catch {
-      toast({ description: 'Failed to clear logs', variant: 'destructive' });
+    } catch (error) {
+      toast({
+        description: requestErrorMessage(error, 'Failed to clear logs'),
+        variant: 'destructive',
+      });
       return false;
     }
   };
@@ -315,10 +347,12 @@ export default function SystemExceptionLogs() {
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
-            <Button variant="destructive" onClick={() => setClearOpen(true)}>
-              <Eraser className="h-4 w-4 mr-2" />
-              Clear
-            </Button>
+            {canManageLogs && (
+              <Button variant="destructive" onClick={() => setClearOpen(true)}>
+                <Eraser className="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -452,13 +486,16 @@ export default function SystemExceptionLogs() {
                             <Eye className="h-4 w-4 mr-1" />
                             View
                           </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => requestDelete(x.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {canManageLogs && (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              aria-label="Delete exception log"
+                              onClick={() => requestDelete(x.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -638,7 +675,7 @@ export default function SystemExceptionLogs() {
                     : ''}
                 </div>
                 <div className="flex gap-2">
-                  {!selected.isResolved && (
+                  {!selected.isResolved && canManageLogs && (
                     <Button
                       onClick={() => setResolveOpen(true)}
                       variant="default"

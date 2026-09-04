@@ -97,9 +97,9 @@ export function SettingsModulePage({ sectionKey, moduleKey }: SettingsModulePage
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-5 p-5 lg:p-7">
-        <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-[#1b1b1b]">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <main className="mx-auto max-w-7xl space-y-4 p-4 lg:p-5">
+        <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-[#1b1b1b]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 {moduleCard.title}
@@ -123,7 +123,7 @@ export function SettingsModulePage({ sectionKey, moduleKey }: SettingsModulePage
           {visibleLinks.length > 0 ? (
             <nav
               aria-label={`${moduleCard.title} settings`}
-              className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"
+              className="mt-4 grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3"
             >
               {visibleLinks.map(link => {
                 const LinkIcon = link.icon;
@@ -132,9 +132,9 @@ export function SettingsModulePage({ sectionKey, moduleKey }: SettingsModulePage
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="group flex min-h-20 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 transition hover:border-blue-300 hover:bg-blue-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
+                    className="group flex min-h-16 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 transition hover:border-blue-300 hover:bg-blue-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 group-hover:text-blue-700 dark:bg-neutral-800 dark:text-slate-300 dark:ring-neutral-700 dark:group-hover:text-blue-300">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 group-hover:text-blue-700 dark:bg-neutral-800 dark:text-slate-300 dark:ring-neutral-700 dark:group-hover:text-blue-300">
                       <LinkIcon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">

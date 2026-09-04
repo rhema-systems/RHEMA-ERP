@@ -266,7 +266,11 @@ export default function BasicInformation({
               type="datetime-local"
               value={formData.openingDate}
               onChange={(e) => updateFormData({ openingDate: e.target.value })}
+              min={formData.submissionDeadline || undefined}
             />
+            <p className="text-xs text-muted-foreground">
+              Must be at or after the submission deadline.
+            </p>
           </div>
         </div>
       </div>

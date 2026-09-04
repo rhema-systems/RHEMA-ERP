@@ -206,6 +206,7 @@ public class TenderService : ITenderService
     {
         try
         {
+            ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
             if (dto.SourcePurchaseRequisitionId == Guid.Empty)
                 throw new ProcurementRequisitionSourcingValidationException(
                     "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender must be created from a released purchase requisition.");
@@ -350,6 +351,7 @@ public class TenderService : ITenderService
             {
                 throw new InvalidOperationException("Only draft tenders can be updated");
             }
+            ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
             if (tender.SourcePurchaseRequisitionId.HasValue)
             {
                 var requestForQuotation = IsRequestForQuotation(tender.TenderType);
@@ -437,6 +439,13 @@ public class TenderService : ITenderService
         }
 
         var workflowResult = await _workflowIntegrationService.SubmitAsync("Tender", id);
+        if (!workflowResult.ApprovalRequired)
+        {
+            throw new ProcurementTenderWorkflowValidationException(
+                "TENDER_WORKFLOW_NOT_CONFIGURED",
+                "A published Tender approval workflow with an independent approver must be configured before submission.");
+        }
+
         if (!workflowResult.ExecutionResult.Success)
         {
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
@@ -540,6 +549,7 @@ public class TenderService : ITenderService
             {
                 throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
             }
+            ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
             if (!tender.SourcePurchaseRequisitionId.HasValue)
                 throw new ProcurementRequisitionSourcingValidationException(
                     "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender cannot be published without a source purchase requisition and current sourcing release.");
@@ -1465,6 +1475,11 @@ public class TenderService : ITenderService
                 dto.NewSubmissionDeadline.Value <= tender.SubmissionDeadline.Value)
                 throw new InvalidOperationException(
                     "A revised submission deadline must extend the current deadline.");
+            ValidateTenderSchedule(
+                dto.NewSubmissionDeadline,
+                tender.OpeningDate,
+                "TENDER_REVISION_OPENING_BEFORE_DEADLINE",
+                "The revised submission deadline cannot be later than the scheduled tender opening. Choose a deadline at or before the opening schedule.");
 
             // Get current revision number
             var revisions = await _revisionRepository.GetByTenderIdAsync(tenderId);
@@ -1622,6 +1637,7 @@ public class TenderService : ITenderService
             SourcePurchaseRequisitionId = tender.SourcePurchaseRequisitionId,
             SourcingReleaseId = tender.SourcingReleaseId,
             SourcingCaseId = tender.SourcingCaseId,
+            SourcingMethod = tender.SourcingCase?.SelectedMethod,
             BidCount = tender.Bids?.Count(b => !b.IsDeleted && b.Status != "Draft") ?? 0,
             InvitationCount = tender.Invitations?.Count(i => !i.IsDeleted) ?? 0,
             CreatedAt = tender.CreatedAt,
@@ -1786,10 +1802,17 @@ public class TenderService : ITenderService
             throw new ProcurementRequisitionSourcingValidationException(
                 "TENDER_DEADLINE_PASSED",
                 "The tender submission deadline must be in the future when it is published.");
-        if (request.OpeningDate.HasValue && request.OpeningDate.Value < request.SubmissionDeadline)
-            throw new ProcurementRequisitionSourcingValidationException(
-                "TENDER_OPENING_BEFORE_DEADLINE",
-                "The scheduled tender opening cannot be before the submission deadline.");
+        ValidateTenderSchedule(request.SubmissionDeadline, request.OpeningDate);
+    }
+
+    internal static void ValidateTenderSchedule(
+        DateTime? submissionDeadline,
+        DateTime? openingDate,
+        string errorCode = "TENDER_OPENING_BEFORE_DEADLINE",
+        string errorMessage = "The scheduled tender opening cannot be before the submission deadline.")
+    {
+        if (submissionDeadline.HasValue && openingDate.HasValue && openingDate.Value < submissionDeadline.Value)
+            throw new ProcurementRequisitionSourcingValidationException(errorCode, errorMessage);
     }
 
     private static void EnsureSourceLineage(Guid? releaseId, Guid? caseId, ProcurementSourcingCaseEntryGateDto gate)

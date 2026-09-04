@@ -61,6 +61,7 @@ import { AwardVerificationResults } from '@/components/procurement/tenders/Award
 import { Calculator, Shield } from 'lucide-react';
 import { getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
 import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
+import { getTenderScheduleError } from '@/lib/tender-schedule';
 import { TenderHeaderControlActions } from '@/components/procurement/tenders/TenderHeaderControlActions';
 import { TenderRevisionsPanel } from '@/components/procurement/tenders/TenderRevisionsPanel';
 import { useAuth } from '@/hooks/use-auth';
@@ -247,12 +248,13 @@ export default function TenderDetailPage() {
         return;
       }
 
-      if (publishData.openingDate) {
-        const openingDate = new Date(publishData.openingDate);
-        if (openingDate <= submissionDeadline) {
-          toast.error('Opening date must be after submission deadline');
-          return;
-        }
+      const scheduleError = getTenderScheduleError(
+        publishData.submissionDeadline,
+        publishData.openingDate
+      );
+      if (scheduleError) {
+        toast.error(scheduleError);
+        return;
       }
 
       setPublishing(true);
@@ -1495,6 +1497,7 @@ export default function TenderDetailPage() {
             tenderId={tenderId}
             tenderStatus={tender.status}
             currentSubmissionDeadline={tender.submissionDeadline}
+            currentOpeningDate={tender.openingDate}
             revisions={tender.revisions || []}
             onChanged={loadTenderDetails}
           />
@@ -1767,6 +1770,7 @@ export default function TenderDetailPage() {
                   <Input
                     type="datetime-local"
                     value={publishData.openingDate}
+                    min={publishData.submissionDeadline || undefined}
                     onChange={(e) =>
                       setPublishData((prev) => ({
                         ...prev,

@@ -570,6 +570,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ITwoFactorAuthService, TwoFactorAuthService>();
             services.AddScoped<IDeviceSessionService, DeviceSessionService>();
             services.AddScoped<IPasswordResetService, PasswordResetService>();
+            services.AddScoped<IInternalUserTemporaryPasswordResetService, InternalUserTemporaryPasswordResetService>();
 
             // Configure HttpClient for geolocation services
             services.AddHttpClient("geolocation", client =>

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Api.Models
 {
@@ -305,6 +306,14 @@ namespace ErpSystem.Api.Models
         public bool IsDefault { get; set; }
         public required string GrantedAt { get; set; }
         public required TenantUserInfo User { get; set; }
+    }
+
+    public sealed class SaveTenantUserMappingRequest
+    {
+        public Guid UserId { get; set; }
+        public Guid TenantId { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public string? Reason { get; set; }
     }
 
     public class TenantUserInfo

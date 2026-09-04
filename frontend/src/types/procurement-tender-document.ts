@@ -163,6 +163,24 @@ export interface ProcurementTenderDocumentPolicyOption {
   sourceConfigurationProfileCode: string;
 }
 
+export interface ProcurementTenderDocumentContentArtifactOption {
+  id: string;
+  documentName?: string;
+  documentType?: string;
+  fileName: string;
+  filePath: string;
+  sha256: string;
+  version: number;
+  isCurrent: boolean;
+  verificationStatus: number;
+  malwareScanStatus: number;
+  workflowInstanceId: string;
+  workflowName: string;
+  entityType: string;
+  entityId: string;
+  stepName: string;
+}
+
 export interface ProcurementTenderDocumentReadiness {
   sourceType: ProcurementTenderDocumentSourceType;
   sourceId: string;

@@ -302,7 +302,10 @@ export function TenderPaymentVerificationPanel({
                         <TableCell>
                           {payment.journalEntryId ? (
                             <div className="space-y-1">
-                              <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800">
+                              <Badge
+                                variant="outline"
+                                className="border-green-200 bg-green-100 text-green-800"
+                              >
                                 Posted
                               </Badge>
                               <a
@@ -317,8 +320,12 @@ export function TenderPaymentVerificationPanel({
                                 </p>
                               )}
                             </div>
-                          ) : payment.status.trim().toLowerCase() === 'verified' ? (
-                            <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800">
+                          ) : payment.status.trim().toLowerCase() ===
+                            'verified' ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-200 bg-amber-100 text-amber-800"
+                            >
                               Posting pending
                             </Badge>
                           ) : (
@@ -382,8 +389,8 @@ export function TenderPaymentVerificationPanel({
           isFinanceRecovery
             ? 'Post tender fee payment to Finance'
             : decision?.isApproved
-            ? 'Approve tender fee payment'
-            : 'Reject tender fee payment'
+              ? 'Approve tender fee payment'
+              : 'Reject tender fee payment'
         }
         description={
           decision
@@ -418,8 +425,8 @@ export function TenderPaymentVerificationPanel({
                 isFinanceRecovery
                   ? 'Add recovery notes for the audit record'
                   : decision?.isApproved
-                  ? 'Add verification notes for the audit record'
-                  : 'Enter the reason this payment is being rejected'
+                    ? 'Add verification notes for the audit record'
+                    : 'Enter the reason this payment is being rejected'
               }
               disabled={verifying}
             />
@@ -451,7 +458,9 @@ export default function BidDetailPage() {
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [payments, setPayments] = useState<TenderPaymentDto[]>([]);
   const [template, setTemplate] = useState<EvaluationTemplate | null>(null);
-  const [sourceTender, setSourceTender] = useState<TenderDetailDto | null>(null);
+  const [sourceTender, setSourceTender] = useState<TenderDetailDto | null>(
+    null
+  );
   const [evaluationRouteError, setEvaluationRouteError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
@@ -474,10 +483,35 @@ export default function BidDetailPage() {
   };
 
   useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (
+      requestedTab &&
+      [
+        'overview',
+        'items',
+        'proposals',
+        'documents',
+        'payments',
+        'qs-boq',
+        'evaluation',
+        'interviews',
+      ].includes(requestedTab)
+    ) {
+      setActiveTab(requestedTab);
+    }
+  }, []);
+
+  useEffect(() => {
     if (bidId) {
       loadBidDetails();
     }
   }, [bidId]);
+
+  useEffect(() => {
+    if (activeTab !== 'evaluation' || !sourceTender) return;
+    const route = getTenderEvaluationRoute(sourceTender, bidId);
+    if (route.mode === 'controlled') router.replace(route.evaluationHref);
+  }, [activeTab, bidId, router, sourceTender]);
 
   const loadBidDetails = async () => {
     try {
@@ -636,6 +670,13 @@ export default function BidDetailPage() {
   const evaluationRoute: TenderEvaluationRoute | undefined = sourceTender
     ? getTenderEvaluationRoute(sourceTender, bidId)
     : undefined;
+  const handleTabChange = (value: string) => {
+    if (value === 'evaluation' && evaluationRoute?.mode === 'controlled') {
+      router.push(evaluationRoute.evaluationHref);
+      return;
+    }
+    setActiveTab(value);
+  };
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -644,7 +685,11 @@ export default function BidDetailPage() {
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
-            onClick={() => router.push('/procurement/bids')}
+            onClick={() =>
+              router.push(
+                `/procurement/bids?tenderId=${encodeURIComponent(bid.tenderId)}`
+              )
+            }
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
@@ -734,7 +779,7 @@ export default function BidDetailPage() {
       {/* Tabs */}
       <Tabs
         value={activeTab}
-        onValueChange={setActiveTab}
+        onValueChange={handleTabChange}
         className="space-y-4"
       >
         <TabsList
@@ -1525,9 +1570,9 @@ export default function BidDetailPage() {
                   Controlled committee evaluation
                 </CardTitle>
                 <CardDescription>
-                  This NCT, ICT, QBS, or QCBS tender is evaluated once through
-                  its signed committee lifecycle. Individual per-bid evaluation
-                  records are not used.
+                  Open the signed tender evaluation workspace to score this bid.
+                  All bids remain side by side in one controlled committee
+                  record so the comparison and audit history stay complete.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">
@@ -1548,200 +1593,202 @@ export default function BidDetailPage() {
             </Card>
           ) : evaluationRoute?.mode === 'legacy' ? (
             <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Evaluations</CardTitle>
-                  <CardDescription>
-                    {bid.evaluations?.length || 0} evaluation(s)
-                  </CardDescription>
-                </div>
-                <Button
-                  onClick={() =>
-                    router.push(
-                      `/procurement/evaluations/create?bidId=${bidId}`
-                    )
-                  }
-                  className="gap-2"
-                >
-                  <Award className="h-4 w-4" />
-                  Create Evaluation
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {!bid.evaluations || bid.evaluations.length === 0 ? (
-                <div className="text-center py-8">
-                  <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 mb-4">No evaluations yet</p>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Evaluations</CardTitle>
+                    <CardDescription>
+                      {bid.evaluations?.length || 0} evaluation(s)
+                    </CardDescription>
+                  </div>
                   <Button
                     onClick={() =>
                       router.push(
                         `/procurement/evaluations/create?bidId=${bidId}`
                       )
                     }
-                    variant="outline"
+                    className="gap-2"
                   >
-                    <Award className="h-4 w-4 mr-2" />
-                    Create First Evaluation
+                    <Award className="h-4 w-4" />
+                    Create Evaluation
                   </Button>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {bid.evaluations.map((evaluation) => (
-                    <Card key={evaluation.id} className="border">
-                      <CardHeader className="pb-2 pt-3 px-4">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <CardTitle className="text-sm font-semibold">
-                              {evaluation.evaluatorName || 'Unknown Evaluator'}
-                            </CardTitle>
-                            <CardDescription className="text-xs">
-                              {formatDate(evaluation.evaluationDate)}
-                            </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!bid.evaluations || bid.evaluations.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p className="text-gray-500 mb-4">No evaluations yet</p>
+                    <Button
+                      onClick={() =>
+                        router.push(
+                          `/procurement/evaluations/create?bidId=${bidId}`
+                        )
+                      }
+                      variant="outline"
+                    >
+                      <Award className="h-4 w-4 mr-2" />
+                      Create First Evaluation
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {bid.evaluations.map((evaluation) => (
+                      <Card key={evaluation.id} className="border">
+                        <CardHeader className="pb-2 pt-3 px-4">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <CardTitle className="text-sm font-semibold">
+                                {evaluation.evaluatorName ||
+                                  'Unknown Evaluator'}
+                              </CardTitle>
+                              <CardDescription className="text-xs">
+                                {formatDate(evaluation.evaluationDate)}
+                              </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <Badge
+                                variant={
+                                  evaluation.status === 'Submitted'
+                                    ? 'default'
+                                    : 'outline'
+                                }
+                                className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
+                              >
+                                {evaluation.status === 'Submitted'
+                                  ? 'Completed'
+                                  : evaluation.status}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() =>
+                                  router.push(
+                                    `/procurement/evaluations/${evaluation.id}`
+                                  )
+                                }
+                              >
+                                View
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <Badge
-                              variant={
-                                evaluation.status === 'Submitted'
-                                  ? 'default'
-                                  : 'outline'
-                              }
-                              className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
-                            >
-                              {evaluation.status === 'Submitted'
-                                ? 'Completed'
-                                : evaluation.status}
-                            </Badge>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() =>
-                                router.push(
-                                  `/procurement/evaluations/${evaluation.id}`
-                                )
-                              }
-                            >
-                              View
-                            </Button>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-2 pb-3 px-4 space-y-2">
-                        {/* Dynamic Criteria Scores */}
-                        {evaluation.evaluationCriteriaJson ? (
-                          (() => {
-                            try {
-                              const criteriaScores: CriteriaScore[] =
-                                JSON.parse(evaluation.evaluationCriteriaJson);
-                              const colors = [
-                                'text-blue-600',
-                                'text-green-600',
-                                'text-orange-600',
-                                'text-purple-600',
-                                'text-red-600',
-                                'text-cyan-600',
-                                'text-pink-600',
-                                'text-indigo-600',
-                                'text-teal-600',
-                              ];
-                              return (
-                                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                                  {criteriaScores.map((criteria, index) => (
-                                    <div key={criteria.criterionId}>
-                                      <p className="text-xs text-gray-500">
-                                        {criteria.criterionName}
-                                      </p>
-                                      <div className="flex items-baseline gap-1">
-                                        <p
-                                          className={`text-sm font-bold ${colors[index % colors.length]}`}
-                                        >
-                                          {criteria.score}
+                        </CardHeader>
+                        <CardContent className="pt-2 pb-3 px-4 space-y-2">
+                          {/* Dynamic Criteria Scores */}
+                          {evaluation.evaluationCriteriaJson ? (
+                            (() => {
+                              try {
+                                const criteriaScores: CriteriaScore[] =
+                                  JSON.parse(evaluation.evaluationCriteriaJson);
+                                const colors = [
+                                  'text-blue-600',
+                                  'text-green-600',
+                                  'text-orange-600',
+                                  'text-purple-600',
+                                  'text-red-600',
+                                  'text-cyan-600',
+                                  'text-pink-600',
+                                  'text-indigo-600',
+                                  'text-teal-600',
+                                ];
+                                return (
+                                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                                    {criteriaScores.map((criteria, index) => (
+                                      <div key={criteria.criterionId}>
+                                        <p className="text-xs text-gray-500">
+                                          {criteria.criterionName}
                                         </p>
-                                        <span className="text-xs text-gray-400">
-                                          / {criteria.maxScore}
-                                        </span>
+                                        <div className="flex items-baseline gap-1">
+                                          <p
+                                            className={`text-sm font-bold ${colors[index % colors.length]}`}
+                                          >
+                                            {criteria.score}
+                                          </p>
+                                          <span className="text-xs text-gray-400">
+                                            / {criteria.maxScore}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-gray-400">
+                                          Weighted:{' '}
+                                          {criteria.weightedScore.toFixed(1)}%
+                                        </p>
                                       </div>
-                                      <p className="text-xs text-gray-400">
-                                        Weighted:{' '}
-                                        {criteria.weightedScore.toFixed(1)}%
+                                    ))}
+                                    <div className="border-l pl-2">
+                                      <p className="text-xs text-gray-500 font-medium">
+                                        Total
+                                      </p>
+                                      <p className="text-sm font-bold text-indigo-600">
+                                        {evaluation.totalScore !== undefined &&
+                                        evaluation.totalScore !== null
+                                          ? `${evaluation.totalScore.toFixed(1)}%`
+                                          : criteriaScores
+                                              .reduce(
+                                                (sum, c) =>
+                                                  sum + c.weightedScore,
+                                                0
+                                              )
+                                              .toFixed(1) + '%'}
                                       </p>
                                     </div>
-                                  ))}
-                                  <div className="border-l pl-2">
-                                    <p className="text-xs text-gray-500 font-medium">
-                                      Total
-                                    </p>
-                                    <p className="text-sm font-bold text-indigo-600">
-                                      {evaluation.totalScore !== undefined &&
-                                      evaluation.totalScore !== null
-                                        ? `${evaluation.totalScore.toFixed(1)}%`
-                                        : criteriaScores
-                                            .reduce(
-                                              (sum, c) => sum + c.weightedScore,
-                                              0
-                                            )
-                                            .toFixed(1) + '%'}
-                                    </p>
                                   </div>
+                                );
+                              } catch {
+                                return (
+                                  <p className="text-xs text-gray-500">
+                                    Could not parse evaluation criteria
+                                  </p>
+                                );
+                              }
+                            })()
+                          ) : (
+                            <p className="text-xs text-gray-500">
+                              No detailed criteria scores available
+                            </p>
+                          )}
+                          {(evaluation.technicalComments ||
+                            evaluation.commercialComments ||
+                            evaluation.recommendation) && (
+                            <div className="text-xs space-y-1 pt-1 border-t">
+                              {evaluation.technicalComments && (
+                                <div>
+                                  <p className="font-medium text-gray-600">
+                                    Technical:
+                                  </p>
+                                  <p className="text-gray-700 line-clamp-2">
+                                    {evaluation.technicalComments}
+                                  </p>
                                 </div>
-                              );
-                            } catch {
-                              return (
-                                <p className="text-xs text-gray-500">
-                                  Could not parse evaluation criteria
-                                </p>
-                              );
-                            }
-                          })()
-                        ) : (
-                          <p className="text-xs text-gray-500">
-                            No detailed criteria scores available
-                          </p>
-                        )}
-                        {(evaluation.technicalComments ||
-                          evaluation.commercialComments ||
-                          evaluation.recommendation) && (
-                          <div className="text-xs space-y-1 pt-1 border-t">
-                            {evaluation.technicalComments && (
-                              <div>
-                                <p className="font-medium text-gray-600">
-                                  Technical:
-                                </p>
-                                <p className="text-gray-700 line-clamp-2">
-                                  {evaluation.technicalComments}
-                                </p>
-                              </div>
-                            )}
-                            {evaluation.commercialComments && (
-                              <div>
-                                <p className="font-medium text-gray-600">
-                                  Commercial:
-                                </p>
-                                <p className="text-gray-700 line-clamp-2">
-                                  {evaluation.commercialComments}
-                                </p>
-                              </div>
-                            )}
-                            {evaluation.recommendation && (
-                              <div className="bg-blue-50 p-2 rounded">
-                                <p className="font-medium text-blue-900">
-                                  Recommendation:
-                                </p>
-                                <p className="text-blue-800 line-clamp-2">
-                                  {evaluation.recommendation}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </CardContent>
+                              )}
+                              {evaluation.commercialComments && (
+                                <div>
+                                  <p className="font-medium text-gray-600">
+                                    Commercial:
+                                  </p>
+                                  <p className="text-gray-700 line-clamp-2">
+                                    {evaluation.commercialComments}
+                                  </p>
+                                </div>
+                              )}
+                              {evaluation.recommendation && (
+                                <div className="bg-blue-50 p-2 rounded">
+                                  <p className="font-medium text-blue-900">
+                                    Recommendation:
+                                  </p>
+                                  <p className="text-blue-800 line-clamp-2">
+                                    {evaluation.recommendation}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
             </Card>
           ) : (
             <Alert variant="destructive">
@@ -1755,7 +1802,9 @@ export default function BidDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => router.push(`/procurement/tenders/${bid.tenderId}`)}
+                  onClick={() =>
+                    router.push(`/procurement/tenders/${bid.tenderId}`)
+                  }
                 >
                   Return to tender
                 </Button>

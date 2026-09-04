@@ -45,6 +45,8 @@ describe('SettingsModulePage', () => {
     expect(screen.getByRole('heading', { name: 'Inventory Settings' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Units of Measure' }))
       .toHaveAttribute('href', '/administration/inventory/units-of-measure');
+    expect(screen.getByRole('link', { name: 'Units of Measure' }))
+      .toHaveClass('min-h-16', 'px-3', 'py-2');
     expect(screen.getByRole('link', { name: 'Warehouses & Locations' }))
       .toHaveAttribute('href', '/administration/inventory/warehouses');
     expect(screen.queryByRole('link', { name: 'Policy Profiles' })).not.toBeInTheDocument();

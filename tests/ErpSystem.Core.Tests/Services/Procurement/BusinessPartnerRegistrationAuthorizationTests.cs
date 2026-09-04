@@ -196,6 +196,65 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
     }
 
     [Fact]
+    public async Task RegistrationDetailPreservesRepeatableContactsAndBankAccounts()
+    {
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            RegistrationNumber = "APP-REPEATABLE-001",
+            ApplicantName = "Repeatable Details Supplier",
+            PartnerType = "Supplier",
+            RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods,
+            Status = "Submitted",
+            RegistrationDataJson = """
+                {
+                  "contacts": [
+                    { "contactName": "Primary Contact", "isPrimary": true },
+                    { "contactName": "Accounts Contact", "isPrimary": false }
+                  ],
+                  "bankAccounts": [
+                    { "bankName": "First Test Bank", "accountNumber": "TEST-001", "isPrimary": true },
+                    { "bankName": "Second Test Bank", "accountNumber": "TEST-002", "isPrimary": false }
+                  ]
+                }
+                """
+        };
+        var registrations = new Mock<IBusinessPartnerRegistrationRepository>();
+        registrations.Setup(item => item.GetWithDocumentsAsync(registration.Id))
+            .ReturnsAsync(registration);
+        var statusHistory =
+            new Mock<IBusinessPartnerRegistrationStatusHistoryRepository>();
+        statusHistory.Setup(item => item.GetHistoryByRegistrationAsync(registration.Id))
+            .ReturnsAsync([]);
+        var service = new BusinessPartnerRegistrationService(
+            registrations.Object,
+            Mock.Of<IBusinessPartnerRegistrationDocumentRepository>(),
+            statusHistory.Object,
+            Mock.Of<IBusinessPartnerRepository>(),
+            Mock.Of<IBusinessPartnerContactRepository>(),
+            Mock.Of<IBusinessPartnerFinancialRepository>(),
+            Mock.Of<IBusinessPartnerDocumentRepository>(),
+            Mock.Of<IBusinessPartnerLicenseRepository>(),
+            Mock.Of<IUnitOfWork>(),
+            Mock.Of<ICurrentUserProvider>(),
+            Mock.Of<IAppEventBus>(),
+            Mock.Of<IProcurementAccessControlService>(),
+            NullLogger<BusinessPartnerRegistrationService>.Instance);
+
+        var result = await service.GetByIdAsync(registration.Id);
+
+        result.Should().NotBeNull();
+        result!.RegistrationData.Should().NotBeNullOrWhiteSpace();
+        using var registrationData = System.Text.Json.JsonDocument.Parse(
+            result.RegistrationData!);
+        registrationData.RootElement.GetProperty("contacts")
+            .GetArrayLength().Should().Be(2);
+        registrationData.RootElement.GetProperty("bankAccounts")
+            .GetArrayLength().Should().Be(2);
+    }
+
+    [Fact]
     public async Task ReviewRejectsAnActorThatWasNotDerivedFromCurrentIdentity()
     {
         var fixture = new Fixture(allowed: true);
@@ -476,6 +535,22 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
                     TenantId = TenantId
                 });
 
+            var unitOfWork = new Mock<IUnitOfWork>();
+            unitOfWork.Setup(item => item.ExecuteInStrategyAsync(
+                    It.IsAny<Func<Task>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Func<Task> operation, CancellationToken _) => operation());
+            unitOfWork.Setup(item => item.BeginTransactionAsync(
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            unitOfWork.Setup(item => item.AcquireTransactionLockAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            unitOfWork.Setup(item => item.RollbackAsync(
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             Service = new BusinessPartnerRegistrationService(
                 Registrations.Object,
                 Mock.Of<IBusinessPartnerRegistrationDocumentRepository>(),
@@ -485,7 +560,7 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
                 Mock.Of<IBusinessPartnerFinancialRepository>(),
                 Mock.Of<IBusinessPartnerDocumentRepository>(),
                 Mock.Of<IBusinessPartnerLicenseRepository>(),
-                Mock.Of<IUnitOfWork>(),
+                unitOfWork.Object,
                 current.Object,
                 Mock.Of<IAppEventBus>(),
                 Access.Object,

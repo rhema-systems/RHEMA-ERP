@@ -85,4 +85,29 @@ public sealed class TenderSourceControlTests
         invalidAction.Should().Throw<ProcurementRequisitionSourcingValidationException>()
             .Where(exception => exception.Code == "TENDER_OPENING_BEFORE_DEADLINE");
     }
+
+    [Fact]
+    public void TenderScheduleRejectsOpeningBeforeDeadlineAtEveryWriteBoundary()
+    {
+        var deadline = new DateTime(2026, 9, 10, 12, 0, 0, DateTimeKind.Utc);
+
+        var invalid = () => TenderService.ValidateTenderSchedule(
+            deadline,
+            deadline.AddMinutes(-1));
+
+        invalid.Should().Throw<ProcurementRequisitionSourcingValidationException>()
+            .Where(exception => exception.Code == "TENDER_OPENING_BEFORE_DEADLINE");
+    }
+
+    [Fact]
+    public void TenderScheduleAllowsOpeningAtOrAfterDeadline()
+    {
+        var deadline = new DateTime(2026, 9, 10, 12, 0, 0, DateTimeKind.Utc);
+
+        var equal = () => TenderService.ValidateTenderSchedule(deadline, deadline);
+        var later = () => TenderService.ValidateTenderSchedule(deadline, deadline.AddMinutes(1));
+
+        equal.Should().NotThrow();
+        later.Should().NotThrow();
+    }
 }

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { buildUpdateTenderDto } from '@/lib/tender-form-payload';
+import { getTenderScheduleError } from '@/lib/tender-schedule';
 
 // Import step components
 import BasicInformation from '@/components/procurement/tenders/BasicInformation';
@@ -245,6 +246,15 @@ export default function EditTenderPage() {
 
 
   const handleSaveDraft = async () => {
+    const scheduleError = getTenderScheduleError(
+      formData.submissionDeadline,
+      formData.openingDate
+    );
+    if (scheduleError) {
+      toast.error(scheduleError);
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -295,12 +305,30 @@ export default function EditTenderPage() {
     console.log('🔵 formData:', formData);
     console.log('🔵 tenderId:', tenderId);
 
+    const scheduleError = getTenderScheduleError(
+      formData.submissionDeadline,
+      formData.openingDate
+    );
+    if (scheduleError) {
+      toast.error(scheduleError);
+      return;
+    }
+
     // Show confirmation dialog
     setShowConfirmDialog(true);
   };
 
   const confirmSubmit = async () => {
     console.log('🔵 User confirmed tender save');
+
+    const scheduleError = getTenderScheduleError(
+      formData.submissionDeadline,
+      formData.openingDate
+    );
+    if (scheduleError) {
+      toast.error(scheduleError);
+      return;
+    }
 
     try {
       setSaving(true);
@@ -343,6 +371,16 @@ export default function EditTenderPage() {
   };
 
   const handleNext = () => {
+    if (currentStep === 1) {
+      const scheduleError = getTenderScheduleError(
+        formData.submissionDeadline,
+        formData.openingDate
+      );
+      if (scheduleError) {
+        toast.error(scheduleError);
+        return;
+      }
+    }
     setCurrentStep(prev => Math.min(STEPS.length, prev + 1));
   };
 

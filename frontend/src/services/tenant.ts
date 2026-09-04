@@ -127,15 +127,14 @@ export class TenantService {
   }
 
   async addUserToTenant(data: { userId: string; tenantId: string; expiresAt?: string | null }) {
-    // Mock implementation - this endpoint doesn't exist yet
-    console.log('Adding user to tenant:', data);
-    return Promise.resolve();
+    return apiService.addUserToTenant({
+      ...data,
+      expiresAt: data.expiresAt?.trim() || null,
+    });
   }
 
   async removeUserFromTenant(userId: string, tenantId: string) {
-    // Mock implementation - this endpoint doesn't exist yet
-    console.log('Removing user from tenant:', userId, tenantId);
-    return Promise.resolve();
+    return apiService.removeUserFromTenant(userId, tenantId);
   }
 }
 

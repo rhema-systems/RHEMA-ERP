@@ -1,7 +1,9 @@
 using System.Text.Json;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -19,13 +21,16 @@ public sealed class WorkflowGovernanceController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IWorkflowRuntimeGovernanceService _governance;
+    private readonly IProcurementAccessControlService _procurementAccessControlService;
 
     public WorkflowGovernanceController(ApplicationDbContext db, ICurrentUserService currentUser,
-        IWorkflowRuntimeGovernanceService governance)
+        IWorkflowRuntimeGovernanceService governance,
+        IProcurementAccessControlService procurementAccessControlService)
     {
         _db = db;
         _currentUser = currentUser;
         _governance = governance;
+        _procurementAccessControlService = procurementAccessControlService;
     }
 
     [HttpGet("users")]
@@ -359,11 +364,38 @@ public sealed class WorkflowGovernanceController : ControllerBase
         var tenantId = RequireTenant();
         var actorId = RequireUser();
         var approval = await _db.WorkflowApprovals
-            .Include(item => item.StepInstance).ThenInclude(step => step.WorkflowInstance)
+            .Include(item => item.StepInstance).ThenInclude(step => step.WorkflowInstance).ThenInclude(instance => instance.EntityType)
             .FirstOrDefaultAsync(item => item.Id == approvalId && item.TenantId == tenantId && !item.IsDeleted,
                 cancellationToken);
         if (approval == null) return NotFound();
         if (approval.Status != WorkflowApprovalStatus.Pending || approval.ApproverId != actorId) return Forbid();
+        if (IsPurchaseRequisitionEntityType(approval.StepInstance.WorkflowInstance.EntityType?.Code) &&
+            !_currentUser.IsInRole("SuperAdmin"))
+        {
+            var requisitionNumber = await _db.PurchaseRequisitions
+                .AsNoTracking()
+                .Where(item => item.Id == approval.StepInstance.WorkflowInstance.EntityId &&
+                               item.TenantId == tenantId &&
+                               !item.IsDeleted)
+                .Select(item => item.RequisitionNumber)
+                .SingleOrDefaultAsync(cancellationToken);
+            var sourceReference = string.IsNullOrWhiteSpace(requisitionNumber)
+                ? approval.StepInstance.WorkflowInstance.EntityId.ToString("D")
+                : requisitionNumber;
+            var capability = await _procurementAccessControlService.EnforceCapabilityAsync(
+                new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = "procurement.requisition.approve",
+                    SourceType = "PurchaseRequisition",
+                    SourceReference = sourceReference
+                },
+                CorrelationId,
+                cancellationToken);
+            if (!capability.Allowed)
+            {
+                return StatusCode(403, ProcurementApprovalCapabilityProblem(capability.Message));
+            }
+        }
         if (string.IsNullOrWhiteSpace(request.Instructions)) return BadRequest("Correction instructions are required.");
         var ownerId = request.CorrectionOwnerId ?? approval.StepInstance.WorkflowInstance.InitiatedById;
         var ownerExists = await _db.Users.AsNoTracking().AnyAsync(user =>
@@ -513,6 +545,34 @@ public sealed class WorkflowGovernanceController : ControllerBase
     private Guid RequireTenant() => _currentUser.TenantId ?? throw new UnauthorizedAccessException("Tenant context is required.");
     private Guid RequireUser() => Guid.TryParse(_currentUser.UserId, out var id) ? id : throw new UnauthorizedAccessException("User context is required.");
     private bool IsAdmin() => AdminRoles.Any(_currentUser.IsInRole);
+    private string CorrelationId => string.IsNullOrWhiteSpace(HttpContext?.TraceIdentifier)
+        ? Guid.NewGuid().ToString("N")
+        : HttpContext.TraceIdentifier;
+
+    private ProblemDetails ProcurementApprovalCapabilityProblem(string detail)
+    {
+        const string code = "PR_APPROVAL_CAPABILITY_REQUIRED";
+        var problem = new ProblemDetails
+        {
+            Status = 403,
+            Title = code,
+            Detail = $"The effective procurement.requisition.approve capability is required for this purchase requisition workflow action. {detail}",
+            Instance = HttpContext?.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = CorrelationId;
+        return problem;
+    }
+
+    private static bool IsPurchaseRequisitionEntityType(string? value)
+    {
+        var normalized = (value ?? string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace("_", string.Empty)
+            .Replace("-", string.Empty);
+        return normalized.Equals("PurchaseRequisition", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("PR", StringComparison.OrdinalIgnoreCase);
+    }
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string? InferModule(string? entityType)
     {

@@ -3,6 +3,10 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
+import { ConfirmationDialog } from '../ui/confirmation-dialog';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Textarea } from '../ui/textarea';
 import { Badge } from '../ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import {
@@ -34,7 +38,10 @@ import {
   Eye,
   UserCheck
 } from 'lucide-react';
-import { User as UserType } from '../../services/admin-api.service';
+import {
+  ResetUserPasswordRequest,
+  User as UserType,
+} from '../../services/admin-api.service';
 import { cn } from '../../lib/utils';
 
 interface UserProfileProps {
@@ -42,7 +49,10 @@ interface UserProfileProps {
   onClose: () => void;
   onEdit?: (user: UserType) => void;
   onImpersonate?: (userId: string) => void;
-  onResetPassword?: (userId: string) => void;
+  onResetPassword?: (
+    userId: string,
+    request: ResetUserPasswordRequest
+  ) => Promise<void>;
   onSendWelcomeEmail?: (userId: string) => void;
 }
 
@@ -133,6 +143,28 @@ const mockPreferences: UserPreferences = {
   twoFactorEnabled: false
 };
 
+export const validateTemporaryPasswordReset = (
+  newPassword: string,
+  confirmation: string,
+  reason: string
+) => {
+  if (newPassword.length < 12)
+    return 'Temporary password must be at least 12 characters.';
+  if (!/[A-Z]/.test(newPassword))
+    return 'Temporary password must include an uppercase letter.';
+  if (!/[a-z]/.test(newPassword))
+    return 'Temporary password must include a lowercase letter.';
+  if (!/[0-9]/.test(newPassword))
+    return 'Temporary password must include a number.';
+  if (!/[^A-Za-z0-9]/.test(newPassword))
+    return 'Temporary password must include a special character.';
+  if (newPassword !== confirmation)
+    return 'Temporary password and confirmation must match.';
+  if (reason.trim().length < 10)
+    return 'Enter an administrative reason of at least 10 characters.';
+  return undefined;
+};
+
 export function UserProfile({
   user,
   onClose,
@@ -145,6 +177,61 @@ export function UserProfile({
   const [activityLogs] = useState<ActivityLog[]>(generateMockActivityLogs());
   const [sessions] = useState<UserSession[]>(generateMockSessions());
   const [preferences] = useState<UserPreferences>(mockPreferences);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [newTemporaryPassword, setNewTemporaryPassword] = useState('');
+  const [confirmTemporaryPassword, setConfirmTemporaryPassword] = useState('');
+  const [resetReason, setResetReason] = useState('');
+  const [resetError, setResetError] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+
+  const clearResetSecret = () => {
+    setNewTemporaryPassword('');
+    setConfirmTemporaryPassword('');
+    setResetReason('');
+    setResetError('');
+  };
+
+  const changeResetOpen = (open: boolean) => {
+    if (!open && resettingPassword) return;
+    setResetOpen(open);
+    if (!open) clearResetSecret();
+  };
+
+  const resetPassword = async () => {
+    const validation = validateTemporaryPasswordReset(
+      newTemporaryPassword,
+      confirmTemporaryPassword,
+      resetReason
+    );
+    if (validation) {
+      setResetError(validation);
+      return false;
+    }
+    if (!onResetPassword) {
+      setResetError('Password reset is unavailable for this account.');
+      return false;
+    }
+
+    try {
+      setResettingPassword(true);
+      setResetError('');
+      await onResetPassword(user.id, {
+        newPassword: newTemporaryPassword,
+        reason: resetReason.trim(),
+      });
+      clearResetSecret();
+      return true;
+    } catch (error) {
+      setResetError(
+        error instanceof Error
+          ? error.message
+          : 'The temporary password could not be set.'
+      );
+      return false;
+    } finally {
+      setResettingPassword(false);
+    }
+  };
 
   const getInitials = (firstName?: string, lastName?: string, username?: string) => {
     if (firstName && lastName) {
@@ -179,6 +266,7 @@ export function UserProfile({
   };
 
   return (
+    <>
     <div className="max-w-4xl max-h-[90vh] overflow-hidden">
       <div className="pb-4 border-b">
         <div className="flex items-center justify-between">
@@ -309,7 +397,10 @@ export function UserProfile({
                           variant="outline"
                           size="sm"
                           className="w-full justify-start"
-                          onClick={() => onResetPassword?.(user.id)}
+                          onClick={() => {
+                            setResetError('');
+                            setResetOpen(true);
+                          }}
                         >
                           <Key className="h-4 w-4 mr-2" />
                           Reset Password
@@ -507,6 +598,71 @@ export function UserProfile({
           </Tabs>
         </div>
     </div>
+    <ConfirmationDialog
+      open={resetOpen}
+      onOpenChange={changeResetOpen}
+      title={`Set temporary password for ${user.username}`}
+      description="The user must replace this temporary password at their next sign-in. It expires according to the tenant security policy. Share it only through an approved secure channel."
+      confirmText="Set temporary password"
+      isLoading={resettingPassword}
+      onConfirm={resetPassword}
+      maxWidth="520px"
+    >
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="admin-new-temporary-password">
+            New Temporary Password
+          </Label>
+          <Input
+            id="admin-new-temporary-password"
+            type="password"
+            autoComplete="new-password"
+            value={newTemporaryPassword}
+            onChange={(event) => setNewTemporaryPassword(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Use at least 12 characters with uppercase, lowercase, number, and
+            special-character content. No password is generated or saved in
+            the browser.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="admin-confirm-temporary-password">
+            Confirm Temporary Password
+          </Label>
+          <Input
+            id="admin-confirm-temporary-password"
+            type="password"
+            autoComplete="new-password"
+            value={confirmTemporaryPassword}
+            onChange={(event) =>
+              setConfirmTemporaryPassword(event.target.value)
+            }
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="admin-password-reset-reason">
+            Administrative reason
+          </Label>
+          <Textarea
+            id="admin-password-reset-reason"
+            value={resetReason}
+            maxLength={500}
+            onChange={(event) => setResetReason(event.target.value)}
+            placeholder="Record why this credential reset is required."
+          />
+        </div>
+        {resetError && (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            {resetError}
+          </div>
+        )}
+      </div>
+    </ConfirmationDialog>
+    </>
   );
 }
 

@@ -90,6 +90,7 @@ public sealed class PurchaseRequisitionLinkagesControllerTests
         Mock.Of<IProcurementRequisitionBudgetControlService>(),
         Mock.Of<IProcurementRequisitionAuthorityRouteService>(),
         Mock.Of<IProcurementRequisitionSourcingReleaseService>(),
+        Mock.Of<IProcurementAccessControlService>(),
         Mock.Of<IAppEventBus>(),
         NullLogger<PurchaseRequisitionsController>.Instance)
     {

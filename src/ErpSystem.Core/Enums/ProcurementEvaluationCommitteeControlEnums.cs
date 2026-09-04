@@ -17,7 +17,8 @@ public enum ProcurementEvaluationCommitteeControlStatus
 {
     Draft = 0,
     Active = 1,
-    Closed = 2
+    Closed = 2,
+    Retired = 3
 }
 
 public enum ProcurementEvaluationAppointmentStatus

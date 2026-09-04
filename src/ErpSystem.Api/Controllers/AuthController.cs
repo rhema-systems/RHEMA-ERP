@@ -1424,11 +1424,20 @@ namespace ErpSystem.Api.Controllers
         }
 
         [HttpGet("tenant/{tenantId}/users")]
-        [Authorize]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
         public async Task<IActionResult> GetTenantUsers(Guid tenantId)
         {
             try
             {
+                // UserTenant mappings grant broad ERP tenant access. Enforce the
+                // token tenant boundary before any target-tenant data access.
+                if (!_currentUserService.IsAuthenticated ||
+                    !_currentUserService.TenantId.HasValue ||
+                    _currentUserService.TenantId.Value != tenantId)
+                {
+                    return Forbid();
+                }
+
                 // Validate tenant exists
                 var tenant = await _tenantService.GetTenantByIdAsync(tenantId);
                 if (tenant == null || tenant.Status != TenantStatus.Active)

@@ -22,10 +22,11 @@ export const procurementSourcingCaseMethodLabels: Record<
 
 export const procurementSourcingCaseActions = (
   sourcingCase: Pick<ProcurementSourcingCase, 'status' | 'isSourceCurrent'>,
-  canManage: boolean
+  canManage: boolean,
+  canApprove: boolean = canManage
 ) => ({
   canClose:
-    canManage &&
+    canApprove &&
     sourcingCase.isSourceCurrent &&
     sourcingCase.status === 'InProgress',
   canCancel:

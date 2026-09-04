@@ -1,7 +1,7 @@
 import { getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
 import type { ProcurementMethodType } from '@/types/procurement-policy';
 
-type TenderEvaluationSource = {
+export type TenderEvaluationSource = {
   id: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType | number;
@@ -25,9 +25,10 @@ export function getTenderEvaluationRoute(
     return {
       mode: 'controlled',
       committeeHref,
-      evaluationHref: `/procurement/tenders/${tender.id}/controls`,
-      evaluationLabel:
-        presentation.advancedControlLabel ?? 'Controlled tender evaluation',
+      evaluationHref: bidId
+        ? `/procurement/tenders/${tender.id}/controls?bidId=${encodeURIComponent(bidId)}#evaluation-workspace`
+        : `/procurement/tenders/${tender.id}/controls#evaluation-workspace`,
+      evaluationLabel: bidId ? 'Evaluate this bid' : 'Open tender evaluation',
     };
   }
 
@@ -39,4 +40,18 @@ export function getTenderEvaluationRoute(
       : `/procurement/tenders/${tender.id}`,
     evaluationLabel: 'Create evaluation',
   };
+}
+
+export async function resolveTenderEvaluationHref(
+  tenderId: string,
+  bidId: string,
+  cachedTender: TenderEvaluationSource | undefined,
+  loadTender: (id: string) => Promise<TenderEvaluationSource>
+): Promise<string> {
+  const tender =
+    cachedTender?.sourcingMethod != null
+      ? cachedTender
+      : await loadTender(tenderId);
+
+  return getTenderEvaluationRoute(tender, bidId).evaluationHref;
 }

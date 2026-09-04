@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { getTenderEvaluationRoute } from './procurement-tender-evaluation-route';
+import {
+  getTenderEvaluationRoute,
+  resolveTenderEvaluationHref,
+} from './procurement-tender-evaluation-route';
 
 describe('tender evaluation routing', () => {
   it.each([
@@ -22,9 +25,10 @@ describe('tender evaluation routing', () => {
 
       expect(route.mode).toBe('controlled');
       expect(route.evaluationHref).toBe(
-        '/procurement/tenders/tender-1/controls'
+        '/procurement/tenders/tender-1/controls?bidId=bid-1#evaluation-workspace'
       );
       expect(route.evaluationHref).not.toContain('/evaluations/create');
+      expect(route.evaluationLabel).toBe('Evaluate this bid');
       expect(route.committeeHref).toBe(
         '/procurement/tenders/tender-1/committee-controls'
       );
@@ -43,6 +47,19 @@ describe('tender evaluation routing', () => {
     );
   });
 
+  it('opens the tender-wide scoring workspace when no bid is selected', () => {
+    const route = getTenderEvaluationRoute({
+      id: 'tender-1',
+      sourcingCaseId: 'case-1',
+      sourcingMethod: 'NationalCompetitiveTendering',
+    });
+
+    expect(route.evaluationHref).toBe(
+      '/procurement/tenders/tender-1/controls#evaluation-workspace'
+    );
+    expect(route.evaluationLabel).toBe('Open tender evaluation');
+  });
+
   it('fails closed to the legacy release route when no locked sourcing case exists', () => {
     const route = getTenderEvaluationRoute(
       { id: 'tender-3', sourcingMethod: 'NationalCompetitiveTendering' },
@@ -50,5 +67,22 @@ describe('tender evaluation routing', () => {
     );
 
     expect(route.mode).toBe('legacy');
+  });
+
+  it('reloads incomplete list data before selecting the evaluation route', async () => {
+    const href = await resolveTenderEvaluationHref(
+      'tender-1',
+      'bid-1',
+      { id: 'tender-1', sourcingCaseId: 'case-1' },
+      async () => ({
+        id: 'tender-1',
+        sourcingCaseId: 'case-1',
+        sourcingMethod: 'NationalCompetitiveTendering',
+      })
+    );
+
+    expect(href).toBe(
+      '/procurement/tenders/tender-1/controls?bidId=bid-1#evaluation-workspace'
+    );
   });
 });

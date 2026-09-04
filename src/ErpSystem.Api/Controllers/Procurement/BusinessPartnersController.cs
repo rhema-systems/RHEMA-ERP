@@ -462,6 +462,29 @@ public class BusinessPartnersController : ControllerBase
     }
 
     /// <summary>
+    /// Gets bank accounts for a business partner. Bank-account changes remain
+    /// protected by the governed supplier master-data workflow.
+    /// </summary>
+    [HttpGet("{id:guid}/bank-accounts")]
+    public async Task<ActionResult<IEnumerable<BusinessPartnerBankAccountDto>>> GetBankAccounts(Guid id)
+    {
+        try
+        {
+            var accounts = await _partnerService.GetBankAccountsAsync(id);
+            return Ok(accounts);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving bank accounts for business partner {PartnerId}", id);
+            return StatusCode(500, "An error occurred while retrieving business partner bank accounts");
+        }
+    }
+
+    /// <summary>
     /// Adds a contact to a business partner
     /// </summary>
     [HttpPost("{id:guid}/contacts")]

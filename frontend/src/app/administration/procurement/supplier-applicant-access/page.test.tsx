@@ -18,10 +18,26 @@ const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
   toastError: vi.fn(),
+  hasPermission: vi.fn(),
+  routerReplace: vi.fn(),
+  getStoredUser: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mocks.routerReplace }),
 }));
 
 vi.mock('@/hooks/use-auth', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({
+    hasPermission: mocks.hasPermission,
+    isLoading: false,
+  }),
+}));
+
+vi.mock('@/services/auth', () => ({
+  authService: {
+    getStoredUser: mocks.getStoredUser,
+  },
 }));
 
 vi.mock('sonner', () => ({
@@ -106,6 +122,8 @@ const openAndVerify = async () => {
 describe('supplier applicant verified-contact correction', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasPermission.mockReturnValue(true);
+    mocks.getStoredUser.mockReturnValue({ roles: ['ExternalUser'] });
     mocks.adminSummary.mockResolvedValue(summary);
     mocks.adminHistory.mockResolvedValue([pending]);
     mocks.requestContactCorrectionChallenge.mockResolvedValue({
@@ -209,5 +227,20 @@ describe('supplier applicant verified-contact correction', () => {
         name: 'Correct verified supplier contact',
       })
     ).toBeInTheDocument();
+  });
+
+  it('redirects an external supplier before protected administration queries run', async () => {
+    mocks.hasPermission.mockReturnValue(false);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mocks.routerReplace).toHaveBeenCalledWith('/external-portal');
+    });
+    expect(mocks.adminSummary).not.toHaveBeenCalled();
+    expect(mocks.adminHistory).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId('supplier-applicant-access-admin')
+    ).not.toBeInTheDocument();
   });
 });

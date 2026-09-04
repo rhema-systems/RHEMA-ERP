@@ -64,15 +64,6 @@ import { CivilEngineeringIpcEndorsementsPanel } from '@/components/projects/civi
 import { CivilEngineeringWeeklySupervisionPanel } from '@/components/projects/civil-engineering/CivilEngineeringWeeklySupervisionPanel';
 import { CivilEngineeringExtensionOfTimePanel } from '@/components/projects/civil-engineering/CivilEngineeringExtensionOfTimePanel';
 import { ProjectDesignTab } from './components/ProjectDesignTab';
-import { CivilEngineeringDesignWorkflowPanel } from '@/components/projects/civil-engineering/CivilEngineeringDesignWorkflowPanel';
-import { CivilEngineeringProjectEngineerAssignmentsPanel } from '@/components/projects/civil-engineering/CivilEngineeringProjectEngineerAssignmentsPanel';
-import { CivilEngineeringSiteInstructionsPanel } from '@/components/projects/civil-engineering/CivilEngineeringSiteInstructionsPanel';
-import { CivilEngineeringRfisPanel } from '@/components/projects/civil-engineering/CivilEngineeringRfisPanel';
-import { CivilEngineeringQualityTestsPanel } from '@/components/projects/civil-engineering/CivilEngineeringQualityTestsPanel';
-import { CivilEngineeringInspectionControlsPanel } from '@/components/projects/civil-engineering/CivilEngineeringInspectionControlsPanel';
-import { CivilEngineeringIpcEndorsementsPanel } from '@/components/projects/civil-engineering/CivilEngineeringIpcEndorsementsPanel';
-import { CivilEngineeringWeeklySupervisionPanel } from '@/components/projects/civil-engineering/CivilEngineeringWeeklySupervisionPanel';
-import { CivilEngineeringExtensionOfTimePanel } from '@/components/projects/civil-engineering/CivilEngineeringExtensionOfTimePanel';
 import { ProjectDefectsTab } from './components/ProjectDefectsTab';
 import { ProjectDocumentsTab } from './components/ProjectDocumentsTab';
 import { ProjectExecutionTab } from './components/ProjectExecutionTab';
