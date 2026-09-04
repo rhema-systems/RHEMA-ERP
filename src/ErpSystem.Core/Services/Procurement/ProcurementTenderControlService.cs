@@ -412,6 +412,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         EnsureStatus(control, ProcurementTenderControlStatus.Advertised, "TENDER_OPENING_NOT_READY");
         if (DateTime.UtcNow < control.SubmissionDeadlineUtc)
             throw Conflict("TENDER_OPENING_BEFORE_DEADLINE", "Public opening cannot start before the submission deadline.");
+        await EnsureOpeningCommitteeQuorumAsync(control, cancellationToken);
         var onTime = control.SubmissionReceipts.Where(item => !item.IsDeleted &&
             item.Disposition == ProcurementTenderSubmissionDisposition.OnTimeAccepted).OrderBy(item => item.ReceivedAtUtc).ToList();
         var paymentAdmissions = await AssessPaymentAdmissionsAsync(
@@ -531,6 +532,55 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             External(control.OpeningEvidenceReference,
                 qualitySelection ? "Signed technical-proposal opening register" : "Signed public opening register", "SRC-004"));
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
+    }
+
+    private async Task EnsureOpeningCommitteeQuorumAsync(
+        ProcurementTenderControl control,
+        CancellationToken cancellationToken)
+    {
+        ProcurementEvaluationCommitteeDto committee;
+        try
+        {
+            committee = await _evaluationCommittee.GetAsync(
+                ProcurementEvaluationSourceType.Tender,
+                control.TenderId,
+                cancellationToken);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException)
+        {
+            throw Conflict(
+                "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED",
+                "Formal opening requires an active eligible evaluation committee and server-confirmed quorum recorded after the bidding window closed.");
+        }
+
+        var permittedPhases = IsQualitySelection(control.Method)
+            ? new[] { ProcurementEvaluationPhase.Technical }
+            : new[]
+            {
+                ProcurementEvaluationPhase.Technical,
+                ProcurementEvaluationPhase.Combined
+            };
+        var meeting = committee.Meetings
+            .OrderByDescending(item => item.Sequence)
+            .FirstOrDefault();
+        var committeeReady = committee.Status ==
+                             ProcurementEvaluationCommitteeControlStatus.Active &&
+                             committee.CompositionReady &&
+                             committee.QuorumMet &&
+                             committee.Members.Count != 0 &&
+                             committee.Members.All(item =>
+                                 item.Status == ProcurementEvaluationAppointmentStatus.Accepted &&
+                                 item.EligibleToScore) &&
+                             meeting is not null &&
+                             permittedPhases.Contains(meeting.Phase) &&
+                             meeting.Status == ProcurementEvaluationMeetingStatus.QuorumConfirmed &&
+                             meeting.QuorumMet &&
+                             meeting.StartedAtUtc.HasValue &&
+                             meeting.StartedAtUtc.Value >= control.SubmissionDeadlineUtc;
+        if (!committeeReady)
+            throw Conflict(
+                "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED",
+                "Formal opening requires an active eligible evaluation committee and server-confirmed quorum recorded after the bidding window closed.");
     }
 
     public Task<ProcurementTenderControlDto> SaveTechnicalEvaluationAsync(

@@ -119,6 +119,10 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 cancellationToken);
         if (control is null)
         {
+            var blockedReasons = new List<string>();
+            if (!source.CommitteePreparationGate.Allowed)
+                blockedReasons.Add(source.CommitteePreparationGate.Message);
+            blockedReasons.Add("No source-specific evaluation committee has been constituted.");
             return new ProcurementEvaluationCommitteeReadinessDto
             {
                 SourceType = sourceType,
@@ -126,8 +130,10 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 SourceReference = source.Reference,
                 SourceExists = true,
                 HasControl = false,
-                BlockedReasons = ["No source-specific evaluation committee has been constituted."],
-                AllowedActions = CanAdminister() ? ["bind"] : []
+                BlockedReasons = blockedReasons,
+                AllowedActions = CanAdminister() && source.CommitteePreparationGate.Allowed
+                    ? ["bind"]
+                    : []
             };
         }
 
@@ -250,6 +256,7 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 item.CreationIdempotencyKey == request.IdempotencyKey,
                 cancellationToken);
         if (replay is not null) return Map(replay, source);
+        EnsureGate(source.CommitteePreparationGate);
 
         var existing = await Controls.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
@@ -397,6 +404,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             control.Status == ProcurementEvaluationCommitteeControlStatus.Active)
             return Map(control, await ResolveSourceAsync(control.SourceType, control.SourceId,
                 cancellationToken));
+        var source = await ResolveSourceAsync(control.SourceType, control.SourceId,
+            cancellationToken);
+        EnsureGate(source.CommitteePreparationGate);
         EnsureRowVersion(control.RowVersion, request.RowVersion, "EVALUATION_COMMITTEE");
         if (control.Status != ProcurementEvaluationCommitteeControlStatus.Draft)
             throw Conflict("EVALUATION_COMMITTEE_NOT_DRAFT",
@@ -427,8 +437,7 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         foreach (var appointment in control.Appointments.Where(item =>
                      item.Status == ProcurementEvaluationAppointmentStatus.Pending))
             await NotifyAppointmentAsync(control, appointment, cancellationToken);
-        return Map(control, await ResolveSourceAsync(control.SourceType, control.SourceId,
-            cancellationToken));
+        return Map(control, source);
     }
 
     public async Task<ProcurementEvaluationAppointmentDto> RespondToAppointmentAsync(
@@ -452,6 +461,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             appointment.CommitteeControl.CommitteeCode, correlationId, cancellationToken);
         if (appointment.AcceptanceIdempotencyKey == request.IdempotencyKey)
             return MapAppointment(appointment, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(appointment.CommitteeControl.SourceType,
+            appointment.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.CommitteePreparationGate);
         EnsureRowVersion(appointment.RowVersion, request.RowVersion, "EVALUATION_APPOINTMENT");
         if (appointment.Status != ProcurementEvaluationAppointmentStatus.Pending)
             throw Conflict("EVALUATION_APPOINTMENT_ALREADY_RESPONDED",
@@ -538,6 +550,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         var replay = appointment.ConflictDeclarations
             .FirstOrDefault(item => item.IdempotencyKey == request.IdempotencyKey);
         if (replay is not null) return MapAppointment(appointment, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(appointment.CommitteeControl.SourceType,
+            appointment.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.CommitteePreparationGate);
         EnsureRowVersion(appointment.RowVersion, request.AppointmentRowVersion,
             "EVALUATION_APPOINTMENT");
         if (appointment.Status != ProcurementEvaluationAppointmentStatus.Accepted)
@@ -612,6 +627,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         var replay = control.Meetings.FirstOrDefault(item =>
             item.IdempotencyKey == request.IdempotencyKey);
         if (replay is not null) return MapMeeting(replay, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(control.SourceType, control.SourceId,
+            cancellationToken);
+        EnsureGate(source.MeetingGate);
         EnsureRowVersion(control.RowVersion, request.CommitteeRowVersion,
             "EVALUATION_COMMITTEE");
         EnsureActive(control, DateTime.UtcNow);
@@ -688,6 +706,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             item.IdempotencyKey == request.IdempotencyKey &&
             item.AppointmentId == appointment.Id);
         if (replay is not null) return MapAttendance(replay);
+        var source = await ResolveSourceAsync(meeting.CommitteeControl.SourceType,
+            meeting.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.MeetingGate);
         if (meeting.AttendanceRecords.Any(item => item.AppointmentId == appointment.Id))
             throw Conflict("EVALUATION_ATTENDANCE_ALREADY_SIGNED",
                 "Attendance has already been signed for this appointment.");
@@ -754,6 +775,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             meeting.Status is ProcurementEvaluationMeetingStatus.QuorumConfirmed or
                 ProcurementEvaluationMeetingStatus.QuorumFailed)
             return MapMeeting(meeting, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(meeting.CommitteeControl.SourceType,
+            meeting.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.MeetingGate);
         EnsureRowVersion(meeting.RowVersion, request.RowVersion, "EVALUATION_MEETING");
         if (meeting.Status is ProcurementEvaluationMeetingStatus.QuorumConfirmed or
             ProcurementEvaluationMeetingStatus.Closed)
@@ -1443,7 +1467,8 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             var tender = await LoadTenderSourceAsync(sourceId, cancellationToken);
             if (tender.SourcingCase is null)
                 tender = await RecoverTenderSourceLineageAsync(tender, cancellationToken);
-            return SourceLineage.From(tender);
+            return await ApplyTenderEvaluationLifecycleAsync(
+                SourceLineage.From(tender), tender, cancellationToken);
         }
         var rfq = await Rfqs.GetQueryable(item =>
                 item.Id == sourceId &&
@@ -1458,6 +1483,70 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The RFQ was not found.");
         return SourceLineage.From(rfq);
+    }
+
+    private async Task<SourceLineage> ApplyTenderEvaluationLifecycleAsync(
+        SourceLineage source,
+        Tender tender,
+        CancellationToken cancellationToken)
+    {
+        var state = await TenderControls.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.TenderId == tender.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => new
+            {
+                item.Status,
+                item.SubmissionDeadlineUtc,
+                HasOnTimeSubmission = item.SubmissionReceipts.Any(receipt =>
+                    !receipt.IsDeleted &&
+                    receipt.Disposition ==
+                    ProcurementTenderSubmissionDisposition.OnTimeAccepted)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (state is null)
+        {
+            var notPublished = LifecycleGate.Blocked(
+                "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED",
+                "Publish the approved tender and open its governed bidding window before constituting the evaluation committee.");
+            return source with
+            {
+                CommitteePreparationGate = notPublished,
+                MeetingGate = notPublished
+            };
+        }
+
+        if (!state.HasOnTimeSubmission)
+        {
+            var noSubmission = LifecycleGate.Blocked(
+                "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED",
+                "At least one on-time sealed bid must be registered before the evaluation committee is constituted or begins member actions.");
+            return source with
+            {
+                CommitteePreparationGate = noSubmission,
+                MeetingGate = noSubmission
+            };
+        }
+
+        var committeeGate = LifecycleGate.Ready;
+        var meetingGate = DateTime.UtcNow < state.SubmissionDeadlineUtc
+            ? LifecycleGate.Blocked(
+                "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE",
+                "The bidding window must close before an evaluation meeting, attendance or quorum can be recorded.")
+            : LifecycleGate.Ready;
+        return source with
+        {
+            CommitteePreparationGate = committeeGate,
+            MeetingGate = meetingGate
+        };
+    }
+
+    private static void EnsureGate(LifecycleGate gate)
+    {
+        if (!gate.Allowed)
+            throw Conflict(gate.Code, gate.Message);
     }
 
     private async Task<Tender> LoadTenderSourceAsync(
@@ -1756,6 +1845,10 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         var blocked = new List<string>();
         if (control.Status != ProcurementEvaluationCommitteeControlStatus.Active)
             blocked.Add("The committee control is not active.");
+        if (!source.CommitteePreparationGate.Allowed)
+            blocked.Add(source.CommitteePreparationGate.Message);
+        if (!source.MeetingGate.Allowed)
+            blocked.Add(source.MeetingGate.Message);
         if (!IsEffective(control, now))
             blocked.Add("The committee control is not currently effective.");
         blocked.AddRange(compositionIssues);
@@ -1787,7 +1880,7 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             SignedVotingAttendanceCount =
                 latestMeeting?.SignedVotingAttendanceCount ?? 0,
             BlockedReasons = blocked.Distinct().ToList(),
-            AllowedActions = BuildAllowedActions(control, now)
+            AllowedActions = BuildAllowedActions(control, source, now)
         };
     }
 
@@ -1866,7 +1959,7 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 .OrderByDescending(item => item.RequestedAtUtc)
                 .Select(MapRecall).ToList(),
             Timeline = BuildTimeline(control),
-            AllowedActions = BuildAllowedActions(control, now),
+            AllowedActions = BuildAllowedActions(control, source, now),
             BlockedReasons = BuildReadiness(control, source).BlockedReasons,
             RowVersion = Convert.ToBase64String(control.RowVersion)
         };
@@ -2092,26 +2185,28 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
 
     private List<string> BuildAllowedActions(
         ProcurementEvaluationCommitteeControl control,
+        SourceLineage source,
         DateTime now)
     {
         var actions = new List<string>();
         if (CanAdminister() && control.Status ==
             ProcurementEvaluationCommitteeControlStatus.Draft)
         {
-            actions.Add("activate");
+            if (source.CommitteePreparationGate.Allowed)
+                actions.Add("activate");
             actions.Add("retireDraft");
         }
-        if (CanAdminister() && control.Status ==
+        if (source.CommitteePreparationGate.Allowed && CanAdminister() && control.Status ==
             ProcurementEvaluationCommitteeControlStatus.Retired)
             actions.Add("bind");
-        if (CanAdminister() && control.Status ==
+        if (source.MeetingGate.Allowed && CanAdminister() && control.Status ==
             ProcurementEvaluationCommitteeControlStatus.Active)
             actions.Add("createMeeting");
-        if (CanAdminister() && control.Meetings.Any(item =>
+        if (source.MeetingGate.Allowed && CanAdminister() && control.Meetings.Any(item =>
                 item.Status is ProcurementEvaluationMeetingStatus.Draft or
                     ProcurementEvaluationMeetingStatus.QuorumFailed))
             actions.Add("confirmQuorum");
-        var acceptsMemberActions = control.Status ==
+        var acceptsMemberActions = source.CommitteePreparationGate.Allowed && control.Status ==
                                    ProcurementEvaluationCommitteeControlStatus.Active &&
                                    IsEffective(control, now);
         var appointment = control.Appointments.FirstOrDefault(item =>
@@ -2125,7 +2220,8 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         if (acceptsMemberActions && appointment is not null &&
             AppointmentEligibilityIssues(appointment, now).Count == 0)
         {
-            actions.Add("signAttendance");
+            if (source.MeetingGate.Allowed)
+                actions.Add("signAttendance");
             if (control.Meetings.Any(item =>
                     item.Status == ProcurementEvaluationMeetingStatus.QuorumConfirmed &&
                     item.QuorumMet &&
@@ -2886,7 +2982,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         int ConfigurationProfileVersion,
         Guid MethodRuleId,
         string MethodRuleCode,
-        Guid? WorkflowDefinitionId)
+        Guid? WorkflowDefinitionId,
+        LifecycleGate CommitteePreparationGate,
+        LifecycleGate MeetingGate)
     {
         public static SourceLineage From(Tender tender)
         {
@@ -2927,7 +3025,17 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 profile.Version,
                 sourcingCase.MethodRuleId,
                 sourcingCase.MethodRuleCode,
-                methodRule.WorkflowDefinitionId);
+                methodRule.WorkflowDefinitionId,
+                LifecycleGate.Ready,
+                LifecycleGate.Ready);
         }
+    }
+
+    private sealed record LifecycleGate(bool Allowed, string Code, string Message)
+    {
+        public static LifecycleGate Ready { get; } = new(true, string.Empty, string.Empty);
+
+        public static LifecycleGate Blocked(string code, string message) =>
+            new(false, code, message);
     }
 }
