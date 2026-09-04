@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 6 — journal usability and account inquiry |
-| Status | `IMPLEMENTING` |
+| Status | `REVIEWING` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Branch | `codex/finance-account-inquiry-journal-ux-phase6` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Not started; implementation active |
+| Review status | Independent review active at clean implementer HEAD `a9a149c8` |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -96,12 +96,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
-| 1 | Pending | Implementation active | Phase 6 issued from exact primary base `35df12ea`, covering description-only line copying in standard and Unit journals plus secure exact-book paginated recent-account-transaction inquiry and complete UI request states. | Pending |
+| 1 | `a9a149c8c09056e03e3c3eb8ebac824e87b75832` | Independent review active | Clean three-commit implementation (`b54441fc`, `f4a651cb`, `a9a149c8`) delivered from exact base `35df12ea`. The structured handoff was re-requested because its final text was not surfaced; independent review is checking journal state semantics, tenant/book/security boundaries, immutable inquiry evidence, deterministic pagination, UI request/race states, and regression gates. | Pending |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 5 is independently approved and integrated, with its completion checkpoint committed as `35df12ea`. Phase 6 instructions were delivered to the existing implementer from that exact base. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Phase 6 is committed and clean at implementer HEAD `a9a149c8` on exact base `35df12ea`. Its structured handoff has been re-requested and independent review is active. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
-Monitor and independently review Phase 6, send corrections directly as needed, and integrate only after approval. When the final phase is complete, stop before any database migration/reset, cross-module producer cutover, destructive cleanup, push or PR action and report the remaining authorization gates to the user.
+Reconcile the Phase 6 handoff with independent Git review, send corrections directly as needed, and integrate only after approval. When the final phase is complete, stop before any database migration/reset, cross-module producer cutover, destructive cleanup, push or PR action and report the remaining authorization gates to the user.
