@@ -124,7 +124,9 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             .ToListAsync(cancellationToken);
         var requisitionIds = requisitions.Select(item => item.Id).ToList();
         var cases = await Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                requisitionIds.Contains(item.PurchaseRequisitionId) && !item.IsDeleted)
+                requisitionIds.Contains(item.PurchaseRequisitionId) && !item.IsDeleted &&
+                (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                 item.Status == ProcurementSourcingCaseStatus.InProgress))
             .AsNoTracking()
             .OrderByDescending(item => item.CaseSequence)
             .ToListAsync(cancellationToken);
@@ -186,7 +188,9 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         var currentReleaseCase = releaseReadiness.CurrentRelease is null
             ? null
             : await CaseQuery(false).SingleOrDefaultAsync(
-                item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id,
+                item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id &&
+                    (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                     item.Status == ProcurementSourcingCaseStatus.InProgress),
                 cancellationToken);
         var activeCase = await CaseQuery(false)
             .Where(item => item.PurchaseRequisitionId == requisitionId &&
@@ -361,7 +365,10 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             lots = lotSpecs.Select(item => new { item.Code, item.Title, item.Description, item.EstimatedValue, item.ItemIds }).ToArray()
         };
         var caseFingerprint = ComputeHash(JsonSerializer.Serialize(fingerprintObject, JsonOptions));
-        var existing = await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == readiness.CurrentRelease.Id, cancellationToken);
+        var existing = await CaseQuery(false).SingleOrDefaultAsync(item =>
+            item.SourcingReleaseId == readiness.CurrentRelease.Id &&
+            (item.Status == ProcurementSourcingCaseStatus.Ready ||
+             item.Status == ProcurementSourcingCaseStatus.InProgress), cancellationToken);
         if (existing is not null)
         {
             if (existing.CaseFingerprint != caseFingerprint)
@@ -537,7 +544,10 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         }
 
         var release = await _sourcingReleases.EnforceSourcingAsync(requisitionId, sourceType, sourceReference, normalizedCorrelation, cancellationToken);
-        var entity = await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id, cancellationToken);
+        var entity = await CaseQuery(false).SingleOrDefaultAsync(item =>
+            item.SourcingReleaseId == release.Id &&
+            (item.Status == ProcurementSourcingCaseStatus.Ready ||
+             item.Status == ProcurementSourcingCaseStatus.InProgress), cancellationToken);
         if (entity is null && string.Equals(sourceType, "Tender", StringComparison.OrdinalIgnoreCase))
         {
             var readiness = await GetReadinessAsync(requisitionId, expectedMethod, cancellationToken: cancellationToken);
@@ -569,7 +579,9 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             }
 
             entity = await CaseQuery(false)
-                .SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id, cancellationToken);
+                .SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id &&
+                    (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                     item.Status == ProcurementSourcingCaseStatus.InProgress), cancellationToken);
             if (entity is null)
                 throw new ProcurementRequisitionSourcingValidationException(
                     "SOURCING_CASE_REQUIRED",
@@ -646,7 +658,9 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
                 "The tender does not match the current immutable sourcing release.");
 
         var entity = await CaseQuery(false)
-            .SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id,
+            .SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id &&
+                (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                 item.Status == ProcurementSourcingCaseStatus.InProgress),
                 cancellationToken);
         if (entity is null)
         {
@@ -671,7 +685,9 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             }
 
             entity = await CaseQuery(false)
-                .SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id,
+                .SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id &&
+                    (item.Status == ProcurementSourcingCaseStatus.Ready ||
+                     item.Status == ProcurementSourcingCaseStatus.InProgress),
                     cancellationToken);
         }
 

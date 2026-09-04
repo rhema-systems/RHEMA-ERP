@@ -122,6 +122,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
   const [cloneSummary, setCloneSummary] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteEvidenceReference, setDeleteEvidenceReference] = useState('');
+  const [contentFile, setContentFile] = useState<File | null>(null);
 
   const template = useQuery({
     queryKey: ['procurement-tender-document-template', id],
@@ -150,6 +151,23 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
       }),
     enabled: Boolean(template.data?.templateCode),
   });
+  const contentWorkflow = useQuery({
+    queryKey: [
+      'procurement-tender-document-content-workflow',
+      template.data?.workflowInstanceId,
+    ],
+    queryFn: () => {
+      const workflowInstanceId = template.data?.workflowInstanceId;
+      if (!workflowInstanceId) {
+        throw new Error('The template approval workflow has not started.');
+      }
+      return service.templateWorkflowInstance(workflowInstanceId);
+    },
+    enabled: Boolean(
+      template.data?.status === 'PendingApproval' &&
+        template.data.workflowInstanceId
+    ),
+  });
 
   useEffect(() => {
     if (template.data) {
@@ -165,10 +183,26 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
     canManage &&
     allows('Edit', 'Update', 'EditTemplate', 'UpdateTemplate') &&
     template.data?.status === 'Draft';
+  const contentAttachable =
+    canManage &&
+    allows('AttachContent') &&
+    template.data?.status === 'PendingApproval' &&
+    Boolean(template.data.workflowInstanceId);
   const selectedPolicy = useMemo(
     () => policies.data?.find((item) => item.id === form?.policySetId),
     [form?.policySetId, policies.data]
   );
+  const currentContentStep = useMemo(
+    () =>
+      contentWorkflow.data?.steps.find(
+        (step) =>
+          step.stepInstanceId ===
+          contentWorkflow.data?.currentStepInstanceId
+      ),
+    [contentWorkflow.data]
+  );
+  const isSubmittedContentStep =
+    currentContentStep?.stepName.trim().toLowerCase() === 'submitted';
 
   const refresh = async () => {
     await Promise.all([template.refetch(), audit.refetch()]);
@@ -208,7 +242,9 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
 
   const save = async () => {
     if (!form) return;
-    const validation = validateTenderDocumentTemplate(form);
+    const validation = validateTenderDocumentTemplate(form, {
+      requireContent: false,
+    });
     if (validation) {
       toast.error(validation);
       return;
@@ -226,6 +262,82 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
       () => service.updateTemplate(id, request),
       'Controlled Draft saved'
     );
+  };
+
+  const attachContent = async () => {
+    const contentWorkflowEvidenceDocumentId =
+      form?.contentWorkflowEvidenceDocumentId;
+    if (!template.data || !contentWorkflowEvidenceDocumentId) {
+      toast.error(
+        'Select verified, scan-clean content from this approval workflow.'
+      );
+      return;
+    }
+    await run(
+      'attach-content',
+      () =>
+        service.attachTemplateContent(id, {
+          contentWorkflowEvidenceDocumentId,
+          rowVersion: template.data.rowVersion,
+        }),
+      'Verified workflow content attached'
+    );
+  };
+
+  const uploadContent = async () => {
+    if (!currentContentStep || !contentFile) {
+      toast.error('Choose the controlled tender-document file to upload.');
+      return;
+    }
+    try {
+      setBusy('upload-content');
+      await service.uploadTemplateWorkflowContent(
+        currentContentStep.stepInstanceId,
+        contentFile
+      );
+      setContentFile(null);
+      toast.success('Controlled content uploaded to the exact workflow');
+      await Promise.all([
+        contentWorkflow.refetch(),
+        queryClient.invalidateQueries({
+          queryKey: ['procurement-tender-document-content-artifacts'],
+        }),
+      ]);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Content upload failed'
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sendContentForApproval = async () => {
+    if (!currentContentStep || currentContentStep.evidence.total < 1) {
+      toast.error('Upload the controlled tender document before sending it.');
+      return;
+    }
+    try {
+      setBusy('send-content');
+      const result = await service.completeTemplateContentStep(
+        currentContentStep.stepInstanceId
+      );
+      if (result.success === false) {
+        throw new Error(
+          result.message || 'The workflow task could not be completed.'
+        );
+      }
+      toast.success('Controlled content sent to the approval step');
+      await contentWorkflow.refetch();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'The content workflow could not be advanced'
+      );
+    } finally {
+      setBusy(null);
+    }
   };
 
   const choosePolicy = (policySetId: string) => {
@@ -456,9 +568,10 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
             <div className="md:col-span-2">
               <TenderDocumentContentArtifactField
                 value={form.contentWorkflowEvidenceDocumentId}
+                workflowInstanceId={item.workflowInstanceId}
                 contentReference={form.contentReference}
                 checksumSha256={form.contentChecksumSha256}
-                disabled={!editable}
+                disabled={!contentAttachable}
                 onSelect={(artifact) =>
                   setForm((current) =>
                     current
@@ -467,6 +580,76 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                   )
                 }
               />
+              {contentAttachable && (
+                <div className="mt-3 space-y-3">
+                  {contentWorkflow.isError && (
+                    <p className="text-sm text-destructive">
+                      The exact approval workflow could not be loaded. Refresh
+                      the template and check the tenant session.
+                    </p>
+                  )}
+                  {isSubmittedContentStep && (
+                    <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+                      <div>
+                        <div className="text-sm font-medium">
+                          Stage controlled content
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Upload to this template&apos;s exact Submitted task,
+                          then send that task to the independent approval step.
+                        </div>
+                      </div>
+                      <Input
+                        key={contentFile?.name ?? 'empty-content-file'}
+                        type="file"
+                        accept=".pdf,.doc,.docx"
+                        disabled={busy !== null}
+                        onChange={(event) =>
+                          setContentFile(event.target.files?.[0] ?? null)
+                        }
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={busy !== null || !contentFile}
+                          onClick={() => void uploadContent()}
+                        >
+                          Upload controlled content
+                        </Button>
+                        <Button
+                          type="button"
+                          disabled={
+                            busy !== null || currentContentStep.evidence.total < 1
+                          }
+                          onClick={() => void sendContentForApproval()}
+                        >
+                          Send content for approval
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {!contentWorkflow.isLoading && !isSubmittedContentStep && (
+                    <Button asChild type="button" variant="outline">
+                      <Link href="/workflow/inbox">
+                        Open independent approval inbox
+                      </Link>
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    disabled={
+                      busy !== null ||
+                      !form.contentWorkflowEvidenceDocumentId ||
+                      form.contentWorkflowEvidenceDocumentId ===
+                        item.contentWorkflowEvidenceDocumentId
+                    }
+                    onClick={() => void attachContent()}
+                  >
+                    Attach verified content
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -651,7 +834,8 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           )}
         {canApprove &&
           allows('Publish', 'PublishTemplate') &&
-          item.status === 'PendingApproval' && (
+          item.status === 'PendingApproval' &&
+          Boolean(item.contentWorkflowEvidenceDocumentId) && (
             <Button onClick={() => setLifecycleAction('publish')}>
               Publish approved version
             </Button>

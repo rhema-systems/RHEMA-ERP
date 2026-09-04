@@ -25,7 +25,7 @@ public sealed class ProcurementTenderDocumentTemplatesControllerTests
             .Select(method => method.Name)
             .Should().Contain([
                 "GetSummary", "GetWorkflowOptions", "GetPolicyOptions", "Search", "Get",
-                "Create", "Update", "Submit", "Publish", "Reject", "Clone", "Retire", "DeleteDraft"
+                "Create", "Update", "AttachContent", "Submit", "Publish", "Reject", "Clone", "Retire", "DeleteDraft"
             ]);
     }
 

@@ -8,6 +8,8 @@ const api = vi.hoisted(() => ({
 const workflowApi = vi.hoisted(() => ({
   getWorkflowEvidenceReviewInstances: vi.fn(),
   getWorkflowStepEvidence: vi.fn(),
+  uploadStepAttachment: vi.fn(),
+  processStep: vi.fn(),
 }));
 
 vi.mock('@/services/api.service', () => ({ apiService: api }));
@@ -85,6 +87,87 @@ describe('procurement tender-document API client', () => {
     expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledWith('step-1');
   });
 
+  it('limits attachable content to the template exact workflow instance', async () => {
+    workflowApi.getWorkflowEvidenceReviewInstances.mockResolvedValue([
+      {
+        id: 'instance-exact',
+        workflowName: 'TDC Sourcing Approval',
+        entityType: 'Procurement Sourcing',
+        entityId: 'template-1',
+        steps: [
+          {
+            stepInstanceId: 'step-exact',
+            stepName: 'Approve source document',
+            evidence: { total: 1 },
+          },
+        ],
+      },
+      {
+        id: 'instance-unrelated',
+        workflowName: 'Purchase Requisition V2',
+        entityType: 'Purchase Requisition',
+        entityId: 'pr-1',
+        steps: [
+          {
+            stepInstanceId: 'step-unrelated',
+            stepName: 'Task',
+            evidence: { total: 1 },
+          },
+        ],
+      },
+    ]);
+    workflowApi.getWorkflowStepEvidence.mockResolvedValue([]);
+
+    await service.contentArtifactOptions('instance-exact');
+
+    expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledTimes(1);
+    expect(workflowApi.getWorkflowStepEvidence).toHaveBeenCalledWith(
+      'step-exact'
+    );
+  });
+
+  it('uploads and advances only the exact template workflow step selected by the UI', async () => {
+    workflowApi.getWorkflowEvidenceReviewInstances.mockResolvedValue([
+      {
+        id: 'instance-exact',
+        currentStepInstanceId: 'step-submitted',
+        workflowName: 'TDC Sourcing Approval',
+        entityType: 'Procurement Sourcing',
+        entityId: 'template-1',
+        steps: [
+          {
+            stepInstanceId: 'step-submitted',
+            stepName: 'Submitted',
+            evidence: { total: 0 },
+          },
+        ],
+      },
+    ]);
+    const file = new File(['controlled tender'], 'nct.pdf', {
+      type: 'application/pdf',
+    });
+
+    await expect(
+      service.templateWorkflowInstance('instance-exact')
+    ).resolves.toEqual(
+      expect.objectContaining({ currentStepInstanceId: 'step-submitted' })
+    );
+    await service.uploadTemplateWorkflowContent('step-submitted', file);
+    await service.completeTemplateContentStep('step-submitted');
+
+    expect(workflowApi.uploadStepAttachment).toHaveBeenCalledWith(
+      'step-submitted',
+      file,
+      undefined,
+      'Controlled tender-document content',
+      'Tender document'
+    );
+    expect(workflowApi.processStep).toHaveBeenCalledWith('step-submitted', {
+      action: 0,
+      comments: 'Controlled tender-document content uploaded for approval.',
+    });
+  });
+
   it('uses the dedicated template option and history endpoints', async () => {
     await service.templateSummary();
     await service.workflowOptions();
@@ -125,20 +208,36 @@ describe('procurement tender-document API client', () => {
     };
 
     await service.submitTemplate('template-1', lifecycle);
+    await service.attachTemplateContent('template-1', {
+      contentWorkflowEvidenceDocumentId: 'content-1',
+      rowVersion: 'AQID',
+    });
     await service.publishTemplate('template-1', lifecycle);
     await service.rejectTemplate('template-1', lifecycle);
     await service.retireTemplate('template-1', lifecycle);
     await service.deleteDraft('template-1', lifecycle);
 
+    expect(api.post).toHaveBeenNthCalledWith(
+      1,
+      '/procurement/tender-document-templates/template-1/submit',
+      lifecycle
+    );
+    expect(api.post).toHaveBeenNthCalledWith(
+      2,
+      '/procurement/tender-document-templates/template-1/content',
+      {
+        contentWorkflowEvidenceDocumentId: 'content-1',
+        rowVersion: 'AQID',
+      }
+    );
     for (const [index, action] of [
-      'submit',
       'publish',
       'reject',
       'retire',
       'delete-draft',
     ].entries()) {
       expect(api.post).toHaveBeenNthCalledWith(
-        index + 1,
+        index + 3,
         `/procurement/tender-document-templates/template-1/${action}`,
         lifecycle
       );

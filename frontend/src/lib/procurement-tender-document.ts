@@ -68,7 +68,8 @@ export const hasAnyTenderDocumentAction = (
 ) => actions.some((action) => hasTenderDocumentAction(allowedActions, action));
 
 export const validateTenderDocumentTemplate = (
-  value: SaveProcurementTenderDocumentTemplate
+  value: SaveProcurementTenderDocumentTemplate,
+  options: { requireContent?: boolean } = {}
 ) => {
   if (!value.templateCode.trim()) return 'Template code is required.';
   if (!value.name.trim()) return 'Template name is required.';
@@ -81,14 +82,22 @@ export const validateTenderDocumentTemplate = (
   if (value.policySetVersion < 1) return 'Policy version is required.';
   if (!value.sourceConfigurationProfileId)
     return 'Source configuration profile is required.';
-  if (!value.contentWorkflowEvidenceDocumentId)
-    return 'Select a controlled workflow evidence document.';
-  if (value.contentFileUploadRecordId)
-    return 'Controlled content must use one workflow evidence document.';
-  if (!value.contentReference.trim())
-    return 'Controlled content reference is required.';
-  if (!/^[A-Fa-f0-9]{64}$/.test(value.contentChecksumSha256.trim()))
-    return 'Content checksum must be a 64-character SHA-256 value.';
+  const hasAnyContent = Boolean(
+    value.contentWorkflowEvidenceDocumentId ||
+      value.contentFileUploadRecordId ||
+      value.contentReference.trim() ||
+      value.contentChecksumSha256.trim()
+  );
+  if (options.requireContent !== false || hasAnyContent) {
+    if (!value.contentWorkflowEvidenceDocumentId)
+      return 'Select a controlled workflow evidence document.';
+    if (value.contentFileUploadRecordId)
+      return 'Controlled content must use one workflow evidence document.';
+    if (!value.contentReference.trim())
+      return 'Controlled content reference is required.';
+    if (!/^[A-Fa-f0-9]{64}$/.test(value.contentChecksumSha256.trim()))
+      return 'Content checksum must be a 64-character SHA-256 value.';
+  }
   if (!value.workflowDefinitionId)
     return 'Exact Published workflow is required.';
   if (!value.effectiveFromUtc) return 'Effective-from date is required.';

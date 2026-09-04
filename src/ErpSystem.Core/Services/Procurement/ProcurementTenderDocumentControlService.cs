@@ -92,6 +92,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         _unitOfWork.Repository<WorkflowDefinition>();
     private IGenericRepository<WorkflowInstance> WorkflowInstanceRows =>
         _unitOfWork.Repository<WorkflowInstance>();
+    private IGenericRepository<WorkflowStepInstance> WorkflowStepInstanceRows =>
+        _unitOfWork.Repository<WorkflowStepInstance>();
     private IGenericRepository<ProcurementTenderControl> LegacyTenderControls =>
         _unitOfWork.Repository<ProcurementTenderControl>();
 
@@ -217,12 +219,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         EnsureAuthenticatedTenant();
         var correlation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(ManagePermission, request.TemplateCode, TemplateSourceType, correlation, cancellationToken);
-        ValidateTemplateRequest(request);
+        ValidateTemplateRequest(request, requireContent: false);
+        if (HasTemplateContent(request))
+            throw Validation("TENDER_DOCUMENT_CONTENT_WORKFLOW_REQUIRED",
+                "Create the Draft first, then attach content from its exact sourcing approval workflow.");
         var lineage = await ValidateTemplateLineageAsync(request, cancellationToken);
         await ValidateWorkflowDefinitionAsync(request.WorkflowDefinitionId, cancellationToken);
-        await ValidateTemplateContentArtifactAsync(
-            request.ContentWorkflowEvidenceDocumentId, request.ContentFileUploadRecordId,
-            request.ContentReference, request.ContentChecksumSha256, requireApproved: false, cancellationToken);
         var now = DateTime.UtcNow;
         var entity = new ProcurementTenderDocumentTemplateVersion
         {
@@ -260,17 +262,17 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
     {
         EnsureAuthenticatedTenant();
         var correlation = NormalizeCorrelation(correlationId);
-        ValidateTemplateRequest(request);
+        ValidateTemplateRequest(request, requireContent: false);
         var entity = await LoadTemplateAsync(id, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(ManagePermission, entity.TemplateCode, TemplateSourceType, correlation, cancellationToken);
         EnsureRowVersion(entity.RowVersion, request.RowVersion, "TENDER_DOCUMENT_TEMPLATE");
         EnsureTemplateStatus(entity, ProcurementTenderDocumentTemplateStatus.Draft,
             "Only a Draft tender-document template can be edited.");
+        if (HasTemplateContent(request))
+            throw Validation("TENDER_DOCUMENT_CONTENT_WORKFLOW_REQUIRED",
+                "Submit the Draft, then attach content from its exact sourcing approval workflow.");
         var lineage = await ValidateTemplateLineageAsync(request, cancellationToken);
         await ValidateWorkflowDefinitionAsync(request.WorkflowDefinitionId, cancellationToken);
-        await ValidateTemplateContentArtifactAsync(
-            request.ContentWorkflowEvidenceDocumentId, request.ContentFileUploadRecordId,
-            request.ContentReference, request.ContentChecksumSha256, requireApproved: false, cancellationToken);
         var before = TemplateSnapshot(entity);
         ApplyTemplateRequest(entity, request, lineage.Policy);
         var now = DateTime.UtcNow;
@@ -319,6 +321,64 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         }, cancellationToken);
     }
 
+    public async Task<ProcurementTenderDocumentTemplateDto> AttachTemplateContentAsync(
+        Guid id,
+        AttachProcurementTenderDocumentTemplateContentRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        var correlation = NormalizeCorrelation(correlationId);
+        var entity = await LoadTemplateAsync(id, tracked: true, cancellationToken);
+        await EnsureCapabilityAsync(ManagePermission, entity.TemplateCode, TemplateSourceType, correlation, cancellationToken);
+        EnsureRowVersion(entity.RowVersion, request.RowVersion, "TENDER_DOCUMENT_TEMPLATE");
+        EnsureTemplateStatus(entity, ProcurementTenderDocumentTemplateStatus.PendingApproval,
+            "Controlled content can be attached only after the exact approval workflow starts.");
+        if (!entity.WorkflowInstanceId.HasValue)
+            throw Conflict("TENDER_DOCUMENT_WORKFLOW_NOT_STARTED",
+                "Submit the Draft to start its exact sourcing approval workflow before attaching content.");
+        if (request.ContentWorkflowEvidenceDocumentId == Guid.Empty)
+            throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_REQUIRED",
+                "Select one workflow evidence document from this template's approval workflow.");
+
+        var artifact = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+            .GetQueryable(item => item.Id == request.ContentWorkflowEvidenceDocumentId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw NotFound("TENDER_DOCUMENT_WORKFLOW_EVIDENCE_NOT_FOUND",
+                "The workflow evidence document was not found in the current tenant.");
+        var belongsToExactWorkflow = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.Id == artifact.StepInstanceId && item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted && item.WorkflowInstanceId == entity.WorkflowInstanceId.Value)
+            .AnyAsync(cancellationToken);
+        if (!belongsToExactWorkflow)
+            throw Conflict("TENDER_DOCUMENT_CONTENT_WORKFLOW_MISMATCH",
+                "Controlled content must come from this template's exact sourcing approval workflow instance.");
+
+        await ValidateTemplateContentArtifactAsync(
+            artifact.Id, null, artifact.FilePath, artifact.Sha256,
+            requireApproved: true, cancellationToken);
+        var before = TemplateSnapshot(entity);
+        entity.ContentWorkflowEvidenceDocumentId = artifact.Id;
+        entity.ContentFileUploadRecordId = null;
+        entity.ContentReference = artifact.FilePath;
+        entity.ContentChecksumSha256 = artifact.Sha256.Trim().ToLowerInvariant();
+        var now = DateTime.UtcNow;
+        Touch(entity, now);
+        Capture(entity);
+
+        return await ExecuteAsync(async () =>
+        {
+            await Templates.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordTemplateEventAsync(entity, "ContentAttached", ProcurementControlEventResult.Succeeded,
+                before, TemplateSnapshot(entity),
+                "Verified, scan-clean content attached from the exact sourcing approval workflow.",
+                ContentEvidence(entity), correlation, now, cancellationToken);
+            return MapTemplate(entity);
+        }, cancellationToken);
+    }
+
     public async Task<ProcurementTenderDocumentTemplateDto> SubmitTemplateAsync(
         Guid id,
         ProcurementTenderDocumentTemplateLifecycleRequest request,
@@ -333,7 +393,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         EnsureTemplateStatus(entity, ProcurementTenderDocumentTemplateStatus.Draft,
             "Only a Draft tender-document template can be submitted.");
         EnsureEventEvidence(request.Evidence);
-        await ValidateTemplateForPublicationAsync(entity, cancellationToken);
+        await ValidateTemplateForSubmissionAsync(entity, cancellationToken);
         var before = TemplateSnapshot(entity);
         var now = DateTime.UtcNow;
         entity.Status = ProcurementTenderDocumentTemplateStatus.PendingApproval;
@@ -526,10 +586,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             PolicySetCode = source.PolicySetCode,
             PolicySetVersion = source.PolicySetVersion,
             SourceConfigurationProfileId = source.SourceConfigurationProfileId,
-            ContentReference = source.ContentReference,
-            ContentWorkflowEvidenceDocumentId = source.ContentWorkflowEvidenceDocumentId,
-            ContentFileUploadRecordId = source.ContentFileUploadRecordId,
-            ContentChecksumSha256 = source.ContentChecksumSha256,
+            ContentReference = string.Empty,
+            ContentWorkflowEvidenceDocumentId = null,
+            ContentFileUploadRecordId = null,
+            ContentChecksumSha256 = string.Empty,
             WorkflowDefinitionId = source.WorkflowDefinitionId,
             SupersedesVersionId = source.Id,
             ChangeSummary = request.ChangeSummary.Trim(),
@@ -1810,7 +1870,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         return (policy, profile);
     }
 
-    private async Task ValidateTemplateForPublicationAsync(
+    private async Task ValidateTemplateForSubmissionAsync(
         ProcurementTenderDocumentTemplateVersion template,
         CancellationToken cancellationToken)
     {
@@ -1821,9 +1881,6 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             throw Validation("TENDER_DOCUMENT_TEMPLATE_CHANGE_SUMMARY_REQUIRED",
                 "A change summary is required for a replacement version.");
         await ValidateWorkflowDefinitionAsync(template.WorkflowDefinitionId, cancellationToken);
-        await ValidateTemplateContentArtifactAsync(
-            template.ContentWorkflowEvidenceDocumentId, template.ContentFileUploadRecordId,
-            template.ContentReference, template.ContentChecksumSha256, requireApproved: true, cancellationToken);
         var request = new SaveProcurementTenderDocumentTemplateRequest
         {
             PolicySetId = template.PolicySetId,
@@ -1836,6 +1893,32 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (ComputeHash(template.LifecycleSnapshotJson) != template.IntegrityHash)
             throw Conflict("TENDER_DOCUMENT_TEMPLATE_INTEGRITY_FAILED",
                 "The tender-document template failed integrity verification.");
+    }
+
+    private async Task ValidateTemplateForPublicationAsync(
+        ProcurementTenderDocumentTemplateVersion template,
+        CancellationToken cancellationToken)
+    {
+        await ValidateTemplateForSubmissionAsync(template, cancellationToken);
+        await ValidateTemplateContentArtifactAsync(
+            template.ContentWorkflowEvidenceDocumentId, template.ContentFileUploadRecordId,
+            template.ContentReference, template.ContentChecksumSha256, requireApproved: true, cancellationToken);
+        if (!template.WorkflowInstanceId.HasValue)
+            throw Conflict("TENDER_DOCUMENT_WORKFLOW_NOT_STARTED",
+                "The configured shared workflow was not started.");
+        var contentStepInstanceId = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+            .GetQueryable(item => item.Id == template.ContentWorkflowEvidenceDocumentId!.Value &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Select(item => item.StepInstanceId)
+            .SingleAsync(cancellationToken);
+        var exactWorkflowContent = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.Id == contentStepInstanceId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.WorkflowInstanceId == template.WorkflowInstanceId.Value)
+            .AnyAsync(cancellationToken);
+        if (!exactWorkflowContent)
+            throw Conflict("TENDER_DOCUMENT_CONTENT_WORKFLOW_MISMATCH",
+                "Controlled content must come from this template's exact sourcing approval workflow instance.");
     }
 
     private async Task EnsureTemplateCompatibleAsync(
@@ -2617,25 +2700,54 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 "Template code and family version must be unique, including deleted Draft revisions.");
     }
 
-    private static void ValidateTemplateRequest(SaveProcurementTenderDocumentTemplateRequest request)
+    private static void ValidateTemplateRequest(
+        SaveProcurementTenderDocumentTemplateRequest request,
+        bool requireContent)
     {
         Require(request.TemplateCode, "TENDER_DOCUMENT_TEMPLATE_CODE_REQUIRED", "TemplateCode is required.");
         Require(request.Name, "TENDER_DOCUMENT_TEMPLATE_NAME_REQUIRED", "Name is required.");
         Require(request.DocumentTypeCode, "TENDER_DOCUMENT_TYPE_REQUIRED", "DocumentTypeCode is required.");
-        Require(request.ContentReference, "TENDER_DOCUMENT_CONTENT_REQUIRED", "ContentReference is required.");
-        Require(request.ContentChecksumSha256, "TENDER_DOCUMENT_CHECKSUM_REQUIRED",
-            "ContentChecksumSha256 is required.");
-        if (request.ContentChecksumSha256.Length != 64 ||
-            request.ContentChecksumSha256.Any(character => !Uri.IsHexDigit(character)))
-            throw Validation("TENDER_DOCUMENT_CHECKSUM_INVALID",
-                "ContentChecksumSha256 must be exactly 64 hexadecimal characters.");
-        if (!request.ContentWorkflowEvidenceDocumentId.HasValue || request.ContentFileUploadRecordId.HasValue)
+        var hasContent = HasTemplateContent(request);
+        if (requireContent && !hasContent)
             throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_REQUIRED",
                 "A controlled template must reference exactly one workflow evidence document.");
+        if (hasContent)
+        {
+            Require(request.ContentReference, "TENDER_DOCUMENT_CONTENT_REQUIRED", "ContentReference is required.");
+            Require(request.ContentChecksumSha256, "TENDER_DOCUMENT_CHECKSUM_REQUIRED",
+                "ContentChecksumSha256 is required.");
+            if (request.ContentChecksumSha256.Length != 64 ||
+                request.ContentChecksumSha256.Any(character => !Uri.IsHexDigit(character)))
+                throw Validation("TENDER_DOCUMENT_CHECKSUM_INVALID",
+                    "ContentChecksumSha256 must be exactly 64 hexadecimal characters.");
+            if (!request.ContentWorkflowEvidenceDocumentId.HasValue || request.ContentFileUploadRecordId.HasValue)
+                throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_REQUIRED",
+                    "A controlled template must reference exactly one workflow evidence document.");
+        }
         if (request.ApplicableMethods.Count == 0 || request.ApplicableMethods.Any(method => !Enum.IsDefined(method)))
             throw Validation("TENDER_DOCUMENT_TEMPLATE_METHOD_REQUIRED",
                 "At least one valid applicable procurement method is required.");
         ValidatePeriod(request.EffectiveFromUtc, request.EffectiveToUtc);
+    }
+
+    private static bool HasTemplateContent(SaveProcurementTenderDocumentTemplateRequest request)
+    {
+        var any = request.ContentWorkflowEvidenceDocumentId.HasValue ||
+            request.ContentFileUploadRecordId.HasValue ||
+            !string.IsNullOrWhiteSpace(request.ContentReference) ||
+            !string.IsNullOrWhiteSpace(request.ContentChecksumSha256);
+        var none = !request.ContentWorkflowEvidenceDocumentId.HasValue &&
+            !request.ContentFileUploadRecordId.HasValue &&
+            string.IsNullOrWhiteSpace(request.ContentReference) &&
+            string.IsNullOrWhiteSpace(request.ContentChecksumSha256);
+        if (any && !none &&
+            (!request.ContentWorkflowEvidenceDocumentId.HasValue ||
+             request.ContentFileUploadRecordId.HasValue ||
+             string.IsNullOrWhiteSpace(request.ContentReference) ||
+             string.IsNullOrWhiteSpace(request.ContentChecksumSha256)))
+            throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_INCOMPLETE",
+                "Content ID, controlled path, and SHA-256 must be supplied together.");
+        return any;
     }
 
     private static void ValidatePeriod(DateTime effectiveFromUtc, DateTime? effectiveToUtc)
@@ -2725,6 +2837,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             blocked.Add("At least one applicable procurement method is required.");
         if (item.Version > 1 && string.IsNullOrWhiteSpace(item.ChangeSummary))
             blocked.Add("A replacement version requires a change summary.");
+        if (!item.ContentWorkflowEvidenceDocumentId.HasValue)
+            blocked.Add(item.Status == ProcurementTenderDocumentTemplateStatus.PendingApproval
+                ? "Upload, independently verify, and attach one scan-clean content document from this exact approval workflow before publication."
+                : "Controlled content must be attached before publication.");
         return new ProcurementTenderDocumentTemplateDto
         {
             Id = list.Id,
@@ -3007,7 +3123,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         status switch
         {
             ProcurementTenderDocumentTemplateStatus.Draft => ["Edit", "Submit", "DeleteDraft"],
-            ProcurementTenderDocumentTemplateStatus.PendingApproval => ["Publish", "Reject"],
+            ProcurementTenderDocumentTemplateStatus.PendingApproval => ["AttachContent", "Publish", "Reject"],
             ProcurementTenderDocumentTemplateStatus.Published => ["Clone", "Retire"],
             ProcurementTenderDocumentTemplateStatus.Retired => ["Clone"],
             _ => []
@@ -3028,10 +3144,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         entity.PolicySetCode = policy.Code;
         entity.PolicySetVersion = policy.Version;
         entity.SourceConfigurationProfileId = policy.SourceConfigurationProfileId;
-        entity.ContentReference = request.ContentReference.Trim();
+        entity.ContentReference = request.ContentReference?.Trim() ?? string.Empty;
         entity.ContentWorkflowEvidenceDocumentId = request.ContentWorkflowEvidenceDocumentId;
         entity.ContentFileUploadRecordId = request.ContentFileUploadRecordId;
-        entity.ContentChecksumSha256 = request.ContentChecksumSha256.Trim().ToLowerInvariant();
+        entity.ContentChecksumSha256 = request.ContentChecksumSha256?.Trim().ToLowerInvariant() ?? string.Empty;
         entity.WorkflowDefinitionId = request.WorkflowDefinitionId;
         entity.ChangeSummary = TrimOrNull(request.ChangeSummary, 1000);
     }
