@@ -382,10 +382,16 @@ export interface SegmentStructure {
     dataType: string;
     separatorCharacter?: string;
     lookupTableRequired: boolean;
-    isMandatory: boolean;
+    isRequired: true;
     isReportingDimension: boolean;
     isNaturalAccount: boolean;
     isActive: boolean;
+    lifecycleStatus: 'Draft' | 'Active' | 'Frozen' | 'Retired';
+    rowVersion: string;
+    accountUsageCount: number;
+    canActivate: boolean;
+    canFreeze: boolean;
+    isSystemDefined: boolean;
     canBeModified?: boolean;
     description?: string;
     lookupValues?: SegmentLookupValue[];
@@ -1502,14 +1508,13 @@ export interface CreateSegmentDto {
     dataType: string;
     separatorCharacter?: string;
     lookupTableRequired: boolean;
-    isMandatory: boolean;
-    isReportingDimension: boolean;
     isNaturalAccount: boolean;
     description?: string;
 }
 
 export interface UpdateSegmentDto extends CreateSegmentDto {
     id: string;
+    rowVersion: string;
 }
 
 export interface CreateSegmentLookupValueDto {

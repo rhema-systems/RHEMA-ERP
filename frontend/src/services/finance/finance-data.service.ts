@@ -967,6 +967,14 @@ class FinanceDataService {
         return apiService.put<SegmentStructure>(`/finance/segments/${id}`, dto);
     }
 
+    async activateSegmentStructure(id: string, rowVersion: string, reason?: string): Promise<SegmentStructure> {
+        return apiService.post<SegmentStructure>(`/finance/segments/${id}/activate`, { rowVersion, reason });
+    }
+
+    async freezeSegmentStructure(id: string, rowVersion: string, reason?: string): Promise<SegmentStructure> {
+        return apiService.post<SegmentStructure>(`/finance/segments/${id}/freeze`, { rowVersion, reason });
+    }
+
     async deleteSegmentStructure(id: string): Promise<void> {
         return apiService.delete(`/finance/segments/${id}`);
     }

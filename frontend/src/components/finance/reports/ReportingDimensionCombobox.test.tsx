@@ -29,10 +29,16 @@ const lookupDimension: SegmentStructure = {
     segmentLength: 3,
     dataType: 'Alphanumeric',
     lookupTableRequired: true,
-    isMandatory: true,
+    isRequired: true,
     isReportingDimension: true,
     isNaturalAccount: false,
     isActive: true,
+    lifecycleStatus: 'Active',
+    rowVersion: 'fixture',
+    accountUsageCount: 0,
+    canActivate: false,
+    canFreeze: true,
+    isSystemDefined: false,
     lookupValues: [
         {
             id: 'finance',

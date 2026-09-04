@@ -252,14 +252,13 @@ export interface CreateSegmentDto {
   dataType: string;
   separatorCharacter?: string;
   lookupTableRequired: boolean;
-  isMandatory: boolean;
-  isReportingDimension: boolean;
   isNaturalAccount: boolean;
   description?: string;
 }
 
 export interface UpdateSegmentDto extends CreateSegmentDto {
   id: string;
+  rowVersion: string;
 }
 
 export interface CreateSegmentLookupValueDto {

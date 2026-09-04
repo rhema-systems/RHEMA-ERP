@@ -17,6 +17,9 @@ import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructu
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { AccountBookAssignments } from '@/components/finance/accounts/account-book-assignments';
+import { composeAccountIdentityPreview } from '@/components/finance/accounts/account-identity-preview';
+import { getSegmentAccess } from '@/components/finance/segments/segment-access';
+import { useAuth } from '@/hooks/use-auth';
 
 interface SegmentValue {
     segmentId: string;
@@ -28,11 +31,15 @@ interface SegmentValue {
 export default function NewAccountPage() {
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission, isLoading: authLoading } = useAuth();
+    const { canRead, canManage } = getSegmentAccess(hasPermission);
 
     // Settings and loading state
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [segments, setSegments] = useState<SegmentStructure[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadToken, setReloadToken] = useState(0);
     const [saving, setSaving] = useState(false);
 
     // Segment values for segmented COA
@@ -59,23 +66,32 @@ export default function NewAccountPage() {
     // Load settings and segments
     useEffect(() => {
         const loadData = async () => {
+            if (authLoading || !canRead) {
+                setLoading(false);
+                return;
+            }
             try {
                 setLoading(true);
+                setLoadError(null);
                 const [settingsData, segmentsData] = await Promise.all([
                     financeDataService.getFinanceSettings(),
                     financeDataService.getSegmentStructures(),
                 ]);
+                const activeSegments = segmentsData
+                    .filter(segment => segment.isActive && (segment.lifecycleStatus === 'Active' || segment.lifecycleStatus === 'Frozen'))
+                    .sort((a, b) => a.segmentPosition - b.segmentPosition);
                 setSettings(settingsData);
-                setSegments(segmentsData.sort((a, b) => a.segmentPosition - b.segmentPosition));
+                setSegments(activeSegments);
 
                 // Initialize segment values
                 const initialValues: Record<string, string> = {};
-                segmentsData.forEach(seg => {
+                activeSegments.forEach(seg => {
                     initialValues[seg.id] = '';
                 });
                 setSegmentValues(initialValues);
             } catch (error) {
                 console.error('Error loading data:', error);
+                setLoadError(error instanceof Error ? error.message : 'Failed to load settings and active account-number segments.');
                 toast({
                     title: 'Error',
                     description: 'Failed to load settings and segments',
@@ -86,39 +102,22 @@ export default function NewAccountPage() {
             }
         };
         loadData();
-    }, [toast]);
+    }, [authLoading, canRead, toast, reloadToken]);
 
     // Generate account code from segment values
     // Note: We ALWAYS use segmented accounts now
-    const generatedAccountCode = useMemo(() => {
-        if (segments.length === 0) return '';
-
-        const parts: string[] = [];
-        const sortedSegments = [...segments].sort((a, b) => a.segmentPosition - b.segmentPosition);
-
-        for (const segment of sortedSegments) {
-            const value = segmentValues[segment.id] || '';
-            if (value) {
-                parts.push(value.padStart(segment.segmentLength, '0'));
-            } else {
-                parts.push(''.padStart(segment.segmentLength, '0'));
-            }
-        }
-
-        // Join with the separator from settings (default to '-')
-        return parts.join(settings?.accountSeparator || '-');
-    }, [settings?.accountSeparator, segments, segmentValues]);
+    const generatedIdentity = useMemo(() => composeAccountIdentityPreview(
+        segments, segmentValues, settings?.accountSeparator || '-'),
+    [settings?.accountSeparator, segments, segmentValues]);
 
     // Update account code when segments change
     useEffect(() => {
-        if (generatedAccountCode) {
-            setFormData(prev => ({
-                ...prev,
-                accountCode: generatedAccountCode,
-                accountNumber: generatedAccountCode,
-            }));
-        }
-    }, [generatedAccountCode]);
+        setFormData(prev => ({
+            ...prev,
+            accountCode: generatedIdentity.naturalAccountCode,
+            accountNumber: generatedIdentity.accountNumber,
+        }));
+    }, [generatedIdentity]);
 
     const updateSegmentValue = (segmentId: string, value: string) => {
         setSegmentValues(prev => ({
@@ -150,7 +149,7 @@ export default function NewAccountPage() {
 
     const validateSegment = (seg: SegmentStructure, rawValue: string): string | undefined => {
         const value = rawValue.trim();
-        const isRequired = seg.isMandatory;
+        const isRequired = seg.isRequired;
 
         if (isRequired && !value) {
             return `${seg.segmentName} is required.`;
@@ -338,12 +337,24 @@ export default function NewAccountPage() {
         }
     };
 
-    if (loading) {
+    if (authLoading || loading) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
         );
+    }
+
+    if (!canRead || !canManage) {
+        return <Alert variant="destructive"><AlertDescription>Finance.Read and Finance.ChartOfAccounts.Configure are required to create a GL account.</AlertDescription></Alert>;
+    }
+
+    if (loadError) {
+        return <Alert variant="destructive"><AlertDescription>{loadError}<Button className="ml-3" size="sm" variant="outline" onClick={() => setReloadToken(value => value + 1)}>Retry</Button></AlertDescription></Alert>;
+    }
+
+    if (segments.length === 0) {
+        return <Alert variant="destructive"><AlertDescription>No active account-number structure is available. Configure and activate the required Finance segments before creating an account.</AlertDescription></Alert>;
     }
 
     // Note: Standard COA is no longer supported - we ALWAYS use segmented accounts
@@ -413,7 +424,7 @@ export default function NewAccountPage() {
                                             <div className="flex items-center gap-2">
                                                 <Label className="font-medium">
                                                     {segment.segmentName}
-                                                    {segment.isMandatory && <span className="text-red-500">*</span>}
+                                                    <span className="text-red-500">*</span>
                                                 </Label>
                                                 <Badge variant="outline" className="text-xs">
                                                     {segment.lookupTableRequired ? 'Dropdown' : 'Text/Dropdown'}
@@ -434,9 +445,9 @@ export default function NewAccountPage() {
                                         <Eye className="h-4 w-4" />
                                         <AlertDescription>
                                             <div className="flex items-center justify-between">
-                                                <span className="font-medium">Generated Account Code:</span>
+                                                <span className="font-medium">Generated Account Number:</span>
                                                 <span className="font-mono text-lg font-bold text-blue-700">
-                                                    {generatedAccountCode || '---/---/----'}
+                                                    {generatedIdentity.accountNumber}
                                                 </span>
                                             </div>
                                         </AlertDescription>
