@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Phase 6 — journal usability and account inquiry |
-| Status | `REVIEWING` |
+| Status | `COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Branch | `codex/finance-account-inquiry-journal-ux-phase6` |
@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `35df12ea77e487f2e46da56088b2933465ecbfb2` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-agent-coordinator` — active every 15 minutes |
-| Review status | Corrected clean HEAD `0cbd203c`; independent re-review active |
+| Review status | `APPROVED`; all Phase 6 findings closed and integrated |
 | Connectivity state | Recovered; implementer resumed from the preserved Phase 4 worktree checkpoint |
 
 ## Authoritative inputs
@@ -97,12 +97,12 @@ The coordinator must stop at the escalation gates in the coordination protocol, 
 | Cycle | Implementer HEAD | Result | Findings/corrections | Integration result |
 |---|---|---|---|---|
 | 1 | `a9a149c8c09056e03e3c3eb8ebac824e87b75832` | `CHANGES_REQUIRED` | P1: returned dimension snapshot/set/item evidence is not fully tenant-validated; exact-book/Posted authority is checked only on the transaction row rather than consistently against journal and posting-event evidence. P2: a current response carrying the wrong book code leaves the UI blank instead of showing an integrity error with Retry. Description-only line copying passed review. Focused backend 8/8 and frontend 10/10 tests passed; diff and worktree were clean. All three corrections and regression gates were sent directly. | Not integrated |
-| 2 | `0cbd203c7fd9269632fabe6fe90bfa701ed55595` | Independent re-review active | Narrow correction `0cbd203c` fails closed on tenant/book/status evidence mismatch and treats a current-response book mismatch as a retryable integrity error while retaining stale-request suppression. | Pending |
+| 2 | `0cbd203c7fd9269632fabe6fe90bfa701ed55595` | `APPROVED` | All three findings are closed: dimension evidence is tenant-validated and fails closed; transaction, journal, event and selected-book evidence must agree on tenant/book/Posted state; stale UI responses are suppressed while a current wrong-book response shows an integrity error with Retry. Independent verification passed 20 backend and 11 frontend tests, ESLint and diff checks; the worktree was clean and no schema/cross-module/posting behavior changed. | Four commits cherry-picked without conflict as `de8d026e`, `7875be0b`, `73543118`, and `744b9f48`. Task-owned files match the reviewed tree; only the coordination ledger differs. Primary verification passed: build with 0 errors, 20 focused backend tests, 11 frontend tests, targeted ESLint, and diff check. No migration was introduced. |
 
 ## Connectivity checkpoint
 
-Last verified durable point: Phase 6 corrections are committed and clean at `0cbd203c` on the original exact base; independent re-review is active. All migrations remain unapplied and no persistent database was mutated.
+Last verified durable point: Phase 6 is independently approved and integrated through primary commit `744b9f48d0dad42e2ddcaf15381e1fde45c3b3b0`. Build, 20 backend tests, 11 frontend tests, ESLint and diff gates passed. Phases 1A–6 are now complete. All migrations remain unapplied and no persistent database was mutated.
 
 ## Next action
 
-Review the corrected Phase 6 handoff, repeat independent verification, and integrate only after approval. When the final phase is complete, stop before any database migration/reset, cross-module producer cutover, destructive cleanup, push or PR action and report the remaining authorization gates to the user.
+Stop for user authorization before the database migration/reset and deterministic reseed rehearsal, cross-module producer V2 cutover, destructive worktree cleanup, push, or PR action. Report the completed implementation phases, integrated commits, outstanding unapplied migrations, known baseline failures, and recommended gated sequence.
