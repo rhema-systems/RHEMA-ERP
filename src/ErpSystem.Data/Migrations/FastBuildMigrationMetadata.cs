@@ -8,6 +8,14 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+// These Finance migration bodies retain their own Migration attributes but their generated
+// designers are omitted in fast builds. Supply the missing DbContext association so Debug
+// migration discovery is identical to the authoritative 448-migration chain.
+[DbContext(typeof(ApplicationDbContext))] partial class AddFinanceDiscountControlAccounts { }
+[DbContext(typeof(ApplicationDbContext))] partial class AddFinancePurchaseOrderPaymentTerm { }
+[DbContext(typeof(ApplicationDbContext))] partial class EnsureFinanceDiscountControlAccounts { }
+[DbContext(typeof(ApplicationDbContext))] partial class AddAccountingBooks { }
+
 // The first five Civil Engineering migrations keep their authoritative attributes in
 // generated designers for full builds. Fast Debug builds omit those designers, so these
 // lightweight partial registrations preserve runtime discovery without duplicating the
@@ -39,7 +47,9 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260311184920_AddProjectMaterialCostLedger")] partial class AddProjectMaterialCostLedger { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260311213738_AddProjectDeliverableExternalReviews")] partial class AddProjectDeliverableExternalReviews { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260312013725_AddProjectResourceRoutingRequirements")] partial class AddProjectResourceRoutingRequirements { }
+#if !TDC_INCLUDE_INITIAL_BASELINE_DESIGNER
 [DbContext(typeof(ApplicationDbContext)), Migration("20260313114533_InitialBaseline")] partial class InitialBaseline { }
+#endif
 [DbContext(typeof(ApplicationDbContext)), Migration("20260313125304_AddAucAccountToFixedAssetCategory")] partial class AddAucAccountToFixedAssetCategory { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260315081834_AddCrmSalesEntities")] partial class AddCrmSalesEntities { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260315150304_AddCrmCampaignEntities")] partial class AddCrmCampaignEntities { }

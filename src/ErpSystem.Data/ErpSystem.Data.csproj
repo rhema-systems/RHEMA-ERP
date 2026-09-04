@@ -14,6 +14,7 @@
     -->
     <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == '' and '$(Configuration)' == 'Debug' and '$(Tdc0402FocusedEfBuild)' != 'true' and '$(TdcFocusedEfToolingBuild)' != 'true'">true</TdcFastEfBuild>
     <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == ''">false</TdcFastEfBuild>
+    <DefineConstants Condition="'$(TdcEfToolingMigrationDesigner)' == 'Migrations\20260313114533_InitialBaseline.Designer.cs'">$(DefineConstants);TDC_INCLUDE_INITIAL_BASELINE_DESIGNER</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
