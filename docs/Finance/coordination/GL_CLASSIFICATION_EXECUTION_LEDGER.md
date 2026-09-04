@@ -19,7 +19,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `3c5620a3de9c5d3038be4b07b5026149815f4296` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | Not active; previous Phase 1A–6 heartbeat was retired after completion |
+| Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Review status | Awaiting Stage A handoff and independent review |
 | Connectivity state | Connected; implementing task reactivated |
 
