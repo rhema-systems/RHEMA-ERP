@@ -25,6 +25,7 @@ import { useDocumentSequence } from '@/hooks/use-document-sequence';
 import { FinanceDocumentTypes } from '@/types/document-numbering';
 import type { FiscalPeriod } from '@/types/finance';
 import type { UnitAccount } from '@/types/unit-accounts';
+import { appendJournalLine, createFreshUnitJournalLine } from '@/lib/finance/journal-line-addition';
 
 interface EntryLine {
     id: string;
@@ -119,10 +120,10 @@ export default function NewUnitJournalEntryPage() {
     );
 
     const addLine = () => {
-        setLines((current) => [
-            ...current,
-            { id: Date.now().toString(), unitAccountId: '', quantity: '', description: '' },
-        ]);
+        setLines((current) => appendJournalLine(
+            current,
+            description => createFreshUnitJournalLine(crypto.randomUUID(), description),
+        ));
     };
 
     const removeLine = (id: string) => {

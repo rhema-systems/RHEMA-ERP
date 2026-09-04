@@ -38,6 +38,7 @@ import {
     getMissingRequiredManualDimension,
     resolveManualDimensionValues,
 } from '@/lib/finance/manual-journal-dimensions';
+import { appendJournalLine, createFreshManualJournalLine } from '@/lib/finance/journal-line-addition';
 
 interface JournalLine {
     id: string;
@@ -219,20 +220,10 @@ export default function NewJournalEntryPage() {
     };
 
     const handleAddLine = () => {
-        setLines([
-            ...lines,
-            {
-                id: Date.now().toString(),
-                accountId: '',
-                description: '',
-                currencyCode: functionalCurrency,
-                exchangeRate: 1,
-                debit: 0,
-                credit: 0,
-                rateStatus: functionalCurrency ? 'ready' : 'idle',
-                dimensions: { ...defaultDimensions },
-            },
-        ]);
+        setLines(current => appendJournalLine(
+            current,
+            description => createFreshManualJournalLine(crypto.randomUUID(), functionalCurrency, description),
+        ));
     };
 
     const handleRemoveLine = (id: string) => {
