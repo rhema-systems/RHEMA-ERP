@@ -13,11 +13,11 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Phase | Post-Phase-6 Stage C2 — book-aware balance and currency-exposure foundation |
 | Status | `AUTHORIZED_PENDING_IMPLEMENTATION` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `a1783dce` |
+| Exact base | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
 | Branch | `codex/finance-multibook-balance-foundation` |
 | Worktree | To be created by implementing task from the exact base |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `a1783dce` |
+| Primary HEAD at activation | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
@@ -314,7 +314,8 @@ verification passed a zero-error test-project build, 114 focused tests with four
 EF no-pending-model and diff checks. Migration `20260905151918_AddStablePostingAccountingBookIdentity`
 remains unapplied; no configured database was accessed or mutated.
 
-Next, implement Stage C2 from exact base `a1783dce` on GPT-5.6 Sol Medium. Establish explicit relational
+Next, implement Stage C2 from exact base `a1783dce4b6fe749ba1b9f4a8562213429026478` on GPT-5.6 Sol Medium.
+Establish explicit relational
 book/account/period/currency balance and book/account/currency exposure read models whose authority is posted
 journal evidence; wire posting and reversal atomically; provide deterministic rebuild/reconciliation; make
 balance queries require and display one exact book; and restrict generic `Account.Balance` to documented
