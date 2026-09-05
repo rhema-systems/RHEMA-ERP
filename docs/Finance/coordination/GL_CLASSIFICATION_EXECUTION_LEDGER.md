@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C2 candidate `78ab2382` remains `CHANGES_REQUIRED`; one authority-set P1 blocks integration |
+| Review status | Final C2 candidate `c182ec26` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -380,3 +380,10 @@ eligible account set across preview/fingerprint/apply, fail-closed handling for 
 and mapped/unmapped zero-transaction regression coverage. The reviewer otherwise confirmed every earlier C2
 finding closed; 185 tests passed with five guarded SQL Server skips, EF no-pending-model and diff checks passed,
 and no database was accessed. The handoff must also record all six existing linear commits accurately.
+
+The implementer completed the final authority-set correction as
+`c182ec263698fcc6bb3c358655568de9bc65f4d7`; the worktree is clean. The correction aligns the governed
+account set and fingerprint with every compatibility mutation and adds zero-transaction eligibility and
+idempotency coverage. A final independent GPT-5.6 Sol High re-review is active over the complete seven-commit
+range. Integration remains blocked until approval and coordinator gates; configured `RHEMAERP` remains
+untouched and the C2 migration remains unapplied.
