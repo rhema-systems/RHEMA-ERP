@@ -1,0 +1,70 @@
+Using launch settings from <REPOSITORY>\src\ErpSystem.Api\Properties\launchSettings.json...
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Starting comprehensive QC checklist seeding for tenant 00000000-0000-0000-0000-000000000001
+warn: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      No active asset categories found for tenant 00000000-0000-0000-0000-000000000001. Using default categories.
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Found 6 asset categories: Power Systems, HVAC, Equipment, Vehicles, Electrical, Building Systems
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Created 11 checklist templates based on available asset categories
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Power Systems - Preventive Maintenance QC for Power Systems/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Power Systems - Corrective Maintenance QC for Power Systems/Corrective Maintenance/Corrective
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: HVAC - Preventive Maintenance QC for HVAC/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Equipment - Preventive Maintenance QC for Equipment/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Vehicles - Preventive Maintenance QC for Vehicles/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Electrical - Preventive Maintenance QC for Electrical/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Building Systems - Preventive Maintenance QC for Building Systems/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: General - Preventive Maintenance QC for All/Preventive Maintenance/Preventive
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: General - Corrective Maintenance QC for All/Corrective Maintenance/Corrective
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Emergency Maintenance QC for All/Emergency/Emergency
+info: ErpSystem.Data.Seeders.QualityControlChecklistSeeder[0]
+      Seeded QC checklist: Inspection QC for All/Inspection/Inspection
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Starting finance data seeding...
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Currencies seeded
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Exchange rates seeded
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Payment terms seeded
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Fiscal years seeded
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Fiscal periods seeded
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Ensured Phase 5 Finance segment/dimension manifest for tenant 00000000-0000-0000-0000-000000000001
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Seeded 45 and upgraded 0 system-managed Phase 5 COMPANY/NATURAL_ACCOUNT GL identities.
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Ensured 5 payroll GL accounts in Finance chart of accounts.
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Applied Finance classification manifest FIN-CLASSIFICATION-3.0 for tenant 00000000-0000-0000-0000-000000000001.
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Seeded 3 fixed asset categories
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Tax configuration seeded
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Finance settings seeded
+warn: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Skipping demo bank account TDC-DEMO-GHS-001; GL account 100-1001-0000 is missing.
+warn: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Skipping demo bank account TDC-DEMO-USD-001; GL account 100-1002-0000 is missing.
+warn: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Skipping demo bank account TDC-DEMO-PETTY-001; GL account 100-1003-0000 is missing.
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Finance-integrated top-level module definitions reconciled
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Retired 0 legacy document-type module mappings; posting origin is now explicit
+info: ErpSystem.Data.Seeders.FinanceDataSeeder[0]
+      Finance data seeding completed successfully!
+✅ Database seeding completed!
