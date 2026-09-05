@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage A.1 — migration-chain and deployment correction |
-| Status | `IN_PROGRESS` |
+| Status | `DECISION_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `7bc24b22` (resolve to full hash in the implementing worktree) |
 | Branch | `codex/finance-gl-cutover-rehearsal-corrections` |
@@ -20,8 +20,8 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `7bc24b22` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Stage A independently approved and integrated; Stage A.1 awaiting handoff |
-| Connectivity state | Available; implementing task reactivated for corrections |
+| Review status | Stage A.1 `CHANGES_REQUIRED`; named cross-module migration ownership requires authorization |
+| Connectivity state | Available; implementation paused at a clean reviewed checkpoint |
 
 ## Authoritative inputs
 
@@ -131,9 +131,18 @@ Last verified durable point: Stage A is ready for independent review. The config
 was read only; all disposable rehearsal targets were dropped. Migration-chain blockers prevent reset/reseed
 approval and Phase B must not start until the reviewed migration corrections pass both rehearsals.
 
+Stage A.1 candidate `f911931255dd8fc400c2e0d41fc388e529c5aab9` repaired the forward chain sufficiently for
+an empty 448-migration/two-pass seed rehearsal, while the representative clone reached the deliberate
+Phase 4 historical FX-evidence stop. Independent review rejected integration because the CRM and Projects
+historical changes do not restore predecessor schema on downgrade, populated-data safety coverage is
+incomplete, the readiness document retains a superseded `apply-migrations` diagnosis, and CRM/Projects/QS
+files fall outside the previously named Procurement/Inventory/Sales/HR cross-module authorization.
+`RHEMAERP` remained read only and all disposable databases were removed. The implementer is paused at the
+clean candidate pending a user decision on those named module-owned migration corrections.
+
 ## Next action
 
-Independently review the harness, discovery metadata, diagnostics, inventories and owner packets. Then assign
-the historical baseline collision, `apply-migrations` DI defect and invalid Phase 2 filtered-index predicate
-to their owners. Re-run empty and clone rehearsals through double seeding and invariant checks before
-authorizing the Phase B producer stacks or any developer-database reset.
+Obtain explicit authorization for owner-reviewed CRM and Projects historical migration corrections and the
+associated Quantity Survey migration-chain test, or revert those files and accept that the clean EF chain
+remains blocked. If authorized, require deterministic data-preserving Up/Down behavior, populated failure
+safety and downgrade tests before rerunning both rehearsals. Do not authorize Phase B or reset `RHEMAERP`.
