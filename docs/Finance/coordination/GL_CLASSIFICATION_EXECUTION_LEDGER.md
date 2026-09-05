@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C2 candidate `02488bcc` is under independent Sol High re-review |
+| Review status | Corrected C2 candidate `02488bcc` remains `CHANGES_REQUIRED`; narrow correction dispatched |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -344,3 +344,14 @@ The four-commit C2 range is now under independent GPT-5.6 Sol High re-review. Th
 complete structured handoff from the now-idle implementer on GPT-5.6 Sol Medium. No commit is authorized for
 integration until the re-review verifies every accounting, migration, concurrency, API, and governance
 correction; configured `RHEMAERP` remains read-only and Stage C3 remains blocked.
+
+Stage C2 review cycle 2 examined corrected clean candidate
+`02488bcc9771a3a476878b6c7614c71b3e7c77ef` using GPT-5.6 Sol High and returned
+`CHANGES_REQUIRED`. Most cycle-1 findings are closed, but three P1 gates remain: migration preflight accepts
+matching lowercase book/currency authorities instead of requiring the canonical runtime form and does not
+reject every Finance pseudo selector; the generic `Account.Balance` compatibility query does not require an
+enabled exact-book account mapping; and the rebuild fingerprint omits account type/mapping authority even
+though those inputs alter primary compatibility derivation. The coordinator sent a narrow correction with
+SQL Server fail-before-mutation coverage, mapping-denial tests, and fingerprint mutation tests directly to the
+active Sol Medium implementer. No integration, migration application, configured-database access, or Stage C3
+work is authorized until a clean corrected candidate passes another independent review.
