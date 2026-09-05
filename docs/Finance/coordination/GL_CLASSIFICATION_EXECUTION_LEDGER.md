@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C2 candidate `0467a9eb` rejected by independent Sol High review; corrections dispatched |
+| Review status | Corrected C2 candidate `02488bcc` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -337,3 +337,10 @@ this coordinator-owned ledger and must restore it to the exact-base version. Can
 two SQL Server tests environment-gated, 65 lifecycle/FX tests, EF no-pending-model, and diff checks; no database
 was mutated. A substantive Sol Medium correction cycle was dispatched with explicit migration, rebuild,
 consumer, concurrency, and regression requirements. Integration and Stage C3 remain blocked.
+
+The implementing task completed a substantive correction at clean HEAD
+`02488bcc9771a3a476878b6c7614c71b3e7c77ef` and restored the coordinator ledger to the exact-base blob.
+The four-commit C2 range is now under independent GPT-5.6 Sol High re-review. The coordinator requested the
+complete structured handoff from the now-idle implementer on GPT-5.6 Sol Medium. No commit is authorized for
+integration until the re-review verifies every accounting, migration, concurrency, API, and governance
+correction; configured `RHEMAERP` remains read-only and Stage C3 remains blocked.
