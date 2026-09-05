@@ -275,6 +275,30 @@ public sealed class BookBalanceReadModelC2Tests
                 "changed derivation authority must never reuse the prior rebuild as a false no-op");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Reconciliation_RejectsActivePostedLineWithDeletedHeaderBeforePreviewOrApply(bool apply)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Debit.Balance = 77m;
+        fixture.AddPostedEvidence(fixture.Lines(10m, 0m), fixture.Primary);
+        await fixture.Db.SaveChangesAsync();
+        var header = await fixture.Db.JournalEntries.IgnoreQueryFilters().SingleAsync();
+        header.IsDeleted = true;
+        await fixture.Db.SaveChangesAsync();
+
+        var action = () => fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", apply, apply ? "Corrupt evidence must fail" : null,
+                apply ? "deleted-header" : null, apply ? Guid.NewGuid() : null), Guid.NewGuid());
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*journal/header book evidence*");
+        fixture.Debit.Balance.Should().Be(77m);
+        (await fixture.Db.AccountBalances.CountAsync()).Should().Be(0);
+        (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(0);
+    }
+
     [Fact]
     public async Task ReconciliationDrift_CoversDerivedFlagsDatesTotalsAndExposureFingerprint()
     {

@@ -193,7 +193,10 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken) : null;
         await AcquireTenantProjectionLockAsync(tenantId, cancellationToken);
 
-        var transactions = await _context.AccountTransactions.AsNoTracking()
+        // Ignore filters only while loading the exact source graph: an active posted line whose
+        // header was soft-deleted is corrupt ledger evidence and must be observed and rejected,
+        // never disappear from reconciliation through the JournalEntry query filter.
+        var transactions = await _context.AccountTransactions.IgnoreQueryFilters().AsNoTracking()
             .Include(item => item.FiscalPeriod)
             .Include(item => item.JournalEntry)
             .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
@@ -204,7 +207,8 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
                 || item.JournalEntry.TenantId != tenantId
                 || item.JournalEntry.AccountingBookId != book.Id
                 || !string.Equals(item.JournalEntry.BookClassification, book.Code, StringComparison.Ordinal)
-                || !string.Equals(item.JournalEntry.PostingStatus, Posted, StringComparison.Ordinal)))
+                || !string.Equals(item.JournalEntry.PostingStatus, Posted, StringComparison.Ordinal)
+                || item.JournalEntry.IsDeleted))
             throw new InvalidOperationException("Posted journal/header book evidence does not exactly match the selected accounting book.");
         if (transactions.Any(item => !string.Equals(item.FunctionalCurrencyCode, functionalAuthority, StringComparison.Ordinal)
                 || (!string.IsNullOrWhiteSpace(item.TransactionCurrency)

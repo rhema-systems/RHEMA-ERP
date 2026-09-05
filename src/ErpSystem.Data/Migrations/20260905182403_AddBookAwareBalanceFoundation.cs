@@ -96,6 +96,8 @@ IF EXISTS (
     HAVING COUNT_BIG(*) > 1)
     THROW 51000, 'C2_ACCOUNT_BALANCE_PREFLIGHT: duplicate rows collide at the exact book balance grain.', 1;
 
+-- Active posted lines and deleted headers cannot coexist: later primary-balance derivation excludes
+-- deleted headers, so accepting them here would make migration and governed rebuild disagree.
 IF EXISTS (
     SELECT 1
     FROM [AccountTransactions] tx
@@ -108,7 +110,8 @@ IF EXISTS (
        OR DATALENGTH(tx.[BookClassification]) <> DATALENGTH(b.[Code])
        OR j.[BookClassification] COLLATE Latin1_General_100_BIN2 <> b.[Code] COLLATE Latin1_General_100_BIN2
        OR DATALENGTH(j.[BookClassification]) <> DATALENGTH(b.[Code])
-       OR tx.[PostingStatus] <> N'Posted' OR j.[PostingStatus] <> N'Posted'))
+       OR tx.[PostingStatus] <> N'Posted' OR j.[PostingStatus] <> N'Posted'
+       OR j.[IsDeleted] <> 0))
     THROW 51000, 'C2_PRIMARY_BALANCE_PREFLIGHT: posted journal line book/status evidence is inconsistent.', 1;");
 
             migrationBuilder.DropForeignKey(

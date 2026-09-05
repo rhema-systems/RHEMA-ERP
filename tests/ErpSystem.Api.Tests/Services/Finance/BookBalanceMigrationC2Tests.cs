@@ -33,6 +33,7 @@ public sealed class BookBalanceMigrationC2Tests
             .And.Contain("UPPER(LTRIM(RTRIM")
             .And.Contain("ALL_ACTIVE_BOOKS")
             .And.Contain("ALLCLASSIFIEDBOOKS")
+            .And.Contain("j.[IsDeleted] <> 0")
             .And.Contain("duplicate rows collide")
             .And.Contain("C2_PRIMARY_BOOK_PREFLIGHT")
             .And.Contain("FinanceSettings")
