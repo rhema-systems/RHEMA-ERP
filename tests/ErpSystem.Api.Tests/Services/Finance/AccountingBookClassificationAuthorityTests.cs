@@ -1,6 +1,7 @@
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -8,6 +9,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using ErpSystem.Data.Seeders;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -761,6 +763,8 @@ public sealed class AccountingBookClassificationAuthorityTests
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
+        SeedProvisioningTenant(db, tenantId);
+        await db.SaveChangesAsync();
         var service = new FinanceAccountProvisioningService(
             db, CurrentUser(tenantId).Object, NullLogger<FinanceAccountProvisioningService>.Instance);
         var request = new ProvisionFinanceAccountDto
@@ -785,6 +789,117 @@ public sealed class AccountingBookClassificationAuthorityTests
         (await db.AccountAccountingBooks.CountAsync()).Should().Be(3);
     }
 
+    [Theory]
+    [InlineData("1040", AccountType.Asset, "ASSET_OTHER")]
+    [InlineData("4930", AccountType.Revenue, "OTHER_INCOME")]
+    [InlineData("2210", AccountType.Liability, "OUTPUT_TAX")]
+    public async Task ProvisioningBoundary_AdoptsLegacyProcurementSeederIdentityAndIsIdempotent(
+        string accountCode,
+        AccountType accountType,
+        string expectedClassification)
+    {
+        var tenantId = Guid.NewGuid();
+        var legacyId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedProvisioningTenant(db, tenantId);
+        db.Accounts.Add(new Account
+        {
+            Id = legacyId, TenantId = tenantId, AccountCode = accountCode, AccountNumber = accountCode,
+            AccountName = "Legacy Procurement onboarding account", AccountType = accountType,
+            CurrencyCode = "GHS", IsSegmented = false, Status = AccountStatus.Active,
+            CreatedBy = "Development supplier-onboarding seeder", CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var service = new FinanceAccountProvisioningService(
+            db, CurrentUser(tenantId).Object, NullLogger<FinanceAccountProvisioningService>.Instance);
+        var request = new ProvisionFinanceAccountDto
+        {
+            TenantId = tenantId, AccountCode = accountCode, AccountNumber = accountCode,
+            AccountName = "Legacy Procurement onboarding account", CoreAccountType = accountType,
+            CurrencyCode = "GHS"
+        };
+
+        var adopted = await service.ProvisionAsync(request);
+        var repeated = await service.ProvisionAsync(request);
+
+        adopted.AccountId.Should().Be(legacyId);
+        adopted.WasCreated.Should().BeFalse();
+        repeated.AccountId.Should().Be(legacyId);
+        repeated.WasCreated.Should().BeFalse();
+        var account = await db.Accounts.Include(item => item.SegmentValues).SingleAsync();
+        account.AccountNumber.Should().NotBe(accountCode);
+        account.IsSegmented.Should().BeTrue();
+        account.SegmentValues.Where(item => !item.IsDeleted).Should().HaveCount(2);
+        adopted.ClassificationCode.Should().Be(expectedClassification);
+        adopted.AccountingBookCodes.Should().BeEquivalentTo("IFRS", "LOCAL_STATUTORY", "MANAGEMENT");
+        (await db.AccountAccountingBooks.CountAsync()).Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ProvisioningBoundary_RejectsLegacySeederWrongTypeWithoutMutation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedProvisioningTenant(db, tenantId);
+        var legacy = new Account
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountCode = "1040", AccountNumber = "1040",
+            AccountName = "Conflicting account", AccountType = AccountType.Liability,
+            CurrencyCode = "GHS", IsSegmented = false, Status = AccountStatus.Active,
+            CreatedBy = "Development supplier-onboarding seeder", CreatedAt = DateTime.UtcNow
+        };
+        db.Accounts.Add(legacy);
+        await db.SaveChangesAsync();
+        var service = new FinanceAccountProvisioningService(
+            db, CurrentUser(tenantId).Object, NullLogger<FinanceAccountProvisioningService>.Instance);
+
+        var action = () => service.ProvisionAsync(new ProvisionFinanceAccountDto
+        {
+            TenantId = tenantId, AccountCode = "1040", AccountName = "Receipt clearing",
+            CoreAccountType = AccountType.Asset, CurrencyCode = "GHS"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*different core account type*");
+        legacy.AccountNumber.Should().Be("1040");
+        (await db.AccountSegmentValues.CountAsync()).Should().Be(0);
+        (await db.AccountAccountingBooks.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProvisioningBoundary_RejectsLegacySeederWithConflictingIdentityEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedProvisioningTenant(db, tenantId);
+        var legacy = new Account
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountCode = "1040", AccountNumber = "1040",
+            AccountName = "Receipt clearing", AccountType = AccountType.Asset, CurrencyCode = "GHS",
+            IsSegmented = false, Status = AccountStatus.Active,
+            CreatedBy = "Development supplier-onboarding seeder", CreatedAt = DateTime.UtcNow
+        };
+        db.Accounts.Add(legacy);
+        db.AccountSegmentValues.Add(new AccountSegmentValue
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountId = legacy.Id,
+            SegmentStructureId = Guid.NewGuid(), SegmentPosition = 9, SegmentValue = "CORRUPT",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var service = new FinanceAccountProvisioningService(
+            db, CurrentUser(tenantId).Object, NullLogger<FinanceAccountProvisioningService>.Instance);
+
+        var action = () => service.ProvisionAsync(new ProvisionFinanceAccountDto
+        {
+            TenantId = tenantId, AccountCode = "1040", AccountName = "Receipt clearing",
+            CoreAccountType = AccountType.Asset, CurrencyCode = "GHS"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not ready*");
+        legacy.AccountNumber.Should().Be("1040");
+        (await db.AccountAccountingBooks.CountAsync()).Should().Be(0);
+    }
+
     [Fact]
     public void Migration_ContainsOnlyPhase1ABookClassificationOperations()
     {
@@ -804,6 +919,15 @@ public sealed class AccountingBookClassificationAuthorityTests
         new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"account-book-classification-{Guid.NewGuid():N}")
             .Options);
+
+    private static void SeedProvisioningTenant(ApplicationDbContext db, Guid tenantId) =>
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Code = "TDC",
+            Name = "TDC",
+            Status = TenantStatus.Active
+        });
 
     private static async Task CreateSqliteClassificationSchemaAsync(
         ApplicationDbContext db, bool includeRoleIndex = false, bool includeMappings = false)

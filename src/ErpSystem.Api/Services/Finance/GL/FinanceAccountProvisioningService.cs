@@ -12,6 +12,9 @@ namespace ErpSystem.Api.Services.Finance.GL;
 
 public sealed class FinanceAccountProvisioningService : IFinanceAccountProvisioningService
 {
+    private const string LegacyProcurementSeederActor = "Development supplier-onboarding seeder";
+    private static readonly HashSet<string> LegacyProcurementAccountCodes =
+        new(StringComparer.OrdinalIgnoreCase) { "1040", "4930", "2210" };
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<FinanceAccountProvisioningService> _logger;
@@ -51,7 +54,15 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
             : null;
 
         await new FinanceSegmentDimensionManifestSeeder(_db, _logger).SeedAsync(tenantId, DateTime.UtcNow, cancellationToken);
-        var identity = await _segmentIdentity.ResolveProvisioningIdentityAsync(tenantId, accountCode, cancellationToken);
+        var stableCodeMatches = await _db.Accounts.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.AccountCode == accountCode)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (stableCodeMatches.Count > 1)
+            throw new InvalidOperationException("Finance account provisioning found an ambiguous stable account code.");
+        var existingAccountId = stableCodeMatches.Count == 1 ? stableCodeMatches[0] : (Guid?)null;
+        var identity = await _segmentIdentity.ResolveProvisioningIdentityAsync(
+            tenantId, accountCode, existingAccountId, cancellationToken);
         var accountNumber = identity.AccountNumber;
 
         var matches = await _db.Accounts.Where(item => item.TenantId == tenantId && !item.IsDeleted
@@ -102,8 +113,35 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                 throw new InvalidOperationException("The existing Finance account has a different core account type.");
             var readiness = await _segmentIdentity.GetReadinessAsync(tenantId, account.Id, cancellationToken);
             if (!readiness.IsReady)
-                throw new InvalidOperationException(
-                    $"Existing Finance account '{account.AccountCode}' is not ready for the active account-number structure: {string.Join("; ", readiness.Issues)}");
+            {
+                if (await CanAdoptLegacyProcurementSeederAccountAsync(account, accountCode, cancellationToken))
+                {
+                    // This narrow bridge adopts only the three identities created by the former
+                    // executable Procurement seeder. Finance composes their canonical identity
+                    // while preserving the account ID and all downstream references.
+                    account.AccountNumber = accountNumber;
+                    account.IsSegmented = true;
+                    account.UpdatedAt = DateTime.UtcNow;
+                    account.UpdatedBy = _currentUser.UserName ?? "system";
+                    foreach (var value in identity.Values)
+                    {
+                        _db.AccountSegmentValues.Add(new AccountSegmentValue
+                        {
+                            Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
+                            SegmentStructureId = value.SegmentStructureId, SegmentPosition = value.SegmentPosition,
+                            SegmentValue = value.SegmentValue, SegmentLookupValueId = value.SegmentLookupValueId,
+                            EffectiveDate = DateTime.UtcNow, CreatedAt = DateTime.UtcNow,
+                            CreatedBy = _currentUser.UserName ?? "system"
+                        });
+                    }
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"Existing Finance account '{account.AccountCode}' is not ready for the active account-number structure: {string.Join("; ", readiness.Issues)}");
+                }
+            }
         }
 
         await new FinanceClassificationManifestSeeder(_db, _logger)
@@ -126,6 +164,27 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         if (transaction != null)
             await transaction.CommitAsync(cancellationToken);
         return result;
+    }
+
+    private async Task<bool> CanAdoptLegacyProcurementSeederAccountAsync(
+        Account account,
+        string accountCode,
+        CancellationToken cancellationToken)
+    {
+        if (!LegacyProcurementAccountCodes.Contains(accountCode)
+            || !string.Equals(account.AccountCode, accountCode, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(account.AccountNumber, accountCode, StringComparison.OrdinalIgnoreCase)
+            || account.IsSegmented
+            || !string.Equals(account.CreatedBy, LegacyProcurementSeederActor, StringComparison.Ordinal)
+            || (account.UpdatedBy is not null
+                && !string.Equals(account.UpdatedBy, LegacyProcurementSeederActor, StringComparison.Ordinal)))
+            return false;
+
+        var hasSegmentEvidence = await _db.AccountSegmentValues
+            .AnyAsync(item => item.AccountId == account.Id, cancellationToken);
+        var hasBookEvidence = await _db.AccountAccountingBooks
+            .AnyAsync(item => item.AccountId == account.Id, cancellationToken);
+        return !hasSegmentEvidence && !hasBookEvidence;
     }
 
     private static string NormalizeRequired(string? value, string label, int maxLength)

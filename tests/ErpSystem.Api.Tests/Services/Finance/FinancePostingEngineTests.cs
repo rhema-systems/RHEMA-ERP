@@ -889,6 +889,40 @@ public sealed class FinancePostingEngineTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData("IFRS", true)]
+    [InlineData("LOCAL_STATUTORY", false)]
+    [InlineData("UNKNOWN", false)]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task ProcurementV2Boundary_RejectsDisabledUnmappedOrWrongBookWithoutPosting(
+        string requestedBook,
+        bool disableDebitMapping)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1040", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4930", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        if (disableDebitMapping)
+        {
+            (await db.AccountAccountingBooks.SingleAsync(item => item.AccountId == debit.Id)).IsEnabled = false;
+            await db.SaveChangesAsync();
+        }
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.SourceModule = "Procurement";
+        request.OriginModuleCode = "PROC";
+        request.SourceDocumentType = "SupplierOnboardingTokenPayment";
+        request.AccountingBookCode = requestedBook;
+        request.IdempotencyKey = $"PROCUREMENT|SUPPLIER-ONBOARDING|{request.SourceDocumentId:N}|{requestedBook}|POST";
+        var action = () => CreateService(db, tenantId).PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
     [Fact]
     [Trait("Category", "AccountingBookAuthority")]
     public async Task ExactReversal_ShouldUseDisabledHistoricalMapping_AndRemainIdempotent()

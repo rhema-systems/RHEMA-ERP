@@ -131,6 +131,7 @@ public sealed class AccountSegmentIdentityService : IAccountSegmentIdentityServi
     public async Task<AccountSegmentIdentityResultDto> ResolveProvisioningIdentityAsync(
         Guid tenantId,
         string naturalAccountCode,
+        Guid? existingAccountId = null,
         CancellationToken cancellationToken = default)
     {
         var definitions = await ActiveDefinitions(tenantId)
@@ -157,7 +158,7 @@ public sealed class AccountSegmentIdentityService : IAccountSegmentIdentityServi
                 SegmentStructureId = natural.Id, SegmentPosition = natural.SegmentPosition,
                 SegmentValue = naturalAccountCode
             }
-        ], cancellationToken: cancellationToken);
+        ], existingAccountId: existingAccountId, cancellationToken: cancellationToken);
     }
 
     public async Task<AccountSegmentReadinessDto> GetReadinessAsync(

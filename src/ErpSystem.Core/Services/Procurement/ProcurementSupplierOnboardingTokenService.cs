@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
@@ -1419,17 +1420,19 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             throw Validation("SUPPLIER_ONBOARDING_FOREIGN_CURRENCY_NOT_SUPPORTED",
                 "Supplier-onboarding token payments currently require the tenant functional currency.");
 
-        // V1 used its documented IFRS default when no tenant FinanceSettings row existed.
-        // Retain that established single-book behavior during this tactical V2 conversion;
-        // a configured pseudo-book remains invalid and is never expanded by Procurement.
-        var accountingBookCode = settings?.SubledgerPostingMode?.Trim() ?? "IFRS";
-        if (string.IsNullOrWhiteSpace(accountingBookCode) ||
-            string.Equals(accountingBookCode, "ALL_ACTIVE_BOOKS", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(accountingBookCode, "AllClassifiedBooks", StringComparison.OrdinalIgnoreCase))
+        string accountingBookCode;
+        try
+        {
+            accountingBookCode = FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(
+                settings?.SubledgerPostingMode, settings is not null);
+        }
+        catch (ArgumentException exception)
+        {
             throw Validation("SUPPLIER_ONBOARDING_ACCOUNTING_BOOK_REQUIRED",
-                "Supplier-onboarding posting requires one configured concrete AccountingBookCode.");
+                exception.Message);
+        }
 
-        return new SupplierOnboardingPostingConfiguration(functional, accountingBookCode.ToUpperInvariant());
+        return new SupplierOnboardingPostingConfiguration(functional, accountingBookCode);
     }
 
     private static FinancePostingRequestV2Dto BuildPostingRequest(

@@ -85,29 +85,36 @@ Before integration, each owner must test:
 
 ## Procurement owner
 
-Current V1 producers:
+Stage B1 owner conversion status:
 
 - `src/ErpSystem.Core/Services/Procurement/ProcurementSupplierOnboardingTokenService.cs`
-  - `BuildPostingRequest`
+  - `BuildPostingRequest` now produces V2 with a concrete Finance-resolved book code.
 - `src/ErpSystem.Core/Services/Procurement/TenderBidService.cs`
-  - `BuildTenderFeePostingRequest`
+  - `BuildTenderFeePostingRequest` now produces V2 with the same resolver contract.
 
-Current Finance-account creation outside the Finance boundary:
+`FinanceSettings.SubledgerPostingMode` is a transitional single-book setting. The Finance-owned resolver
+maps only `IFRS`, `Local`/`LOCAL_STATUTORY`, and `Management`/`MANAGEMENT`; absent settings retain the
+historical IFRS choice, while blank, unknown, and pseudo-book values fail before posting. Procurement does
+not enumerate books or decide multi-book applicability.
+
+Finance-account provisioning status:
 
 - `src/ErpSystem.Data/Seeders/ProcurementSupplierOnboardingTestSeeder.cs`
-  - creates and edits `Account` rows and category/subcategory display strings directly.
+  - now uses `IFinanceAccountProvisioningService` and performs no direct `Account`, segment, classification,
+    or account-book mapping writes;
+  - Finance may adopt only the three exact development-seeder identities (`1040`, `4930`, `2210`) when they
+    retain the original seeder provenance and contain no segment or book evidence. IDs are preserved;
+    ambiguous, wrong-type, or partially configured rows fail closed.
 
-Required owner change:
+Stage B1 evidence scans:
 
-- construct `FinancePostingRequestV2Dto` and set a concrete `AccountingBookCode`;
-- add owner tests for supplier-onboarding and tender-fee serialization, mapping denial and idempotency;
-- remove direct account creation from Procurement seeding;
-- call `IFinanceAccountProvisioningService`, the Finance-owned account-provisioning boundary,
-  supplying stable account intent/code rather than category display text or a classification ID.
+- `rg -n --glob '*.cs' 'new\s+FinancePostingRequestDto|FinancePostingRequestDto\s+\w+\s*=' src/ErpSystem.Core/Services/Procurement src/ErpSystem.Data/Seeders/ProcurementSupplierOnboardingTestSeeder.cs`
+  returns no active Procurement V1 constructor;
+- `rg -n --glob '*.cs' 'new\s+Account\b|\.Accounts\.(Add|AddAsync|AddRange|AddRangeAsync|Update|Remove)|AccountCategory|AccountSubCategory' src/ErpSystem.Data/Seeders/ProcurementSupplierOnboardingTestSeeder.cs`
+  returns no direct Finance-account writer or display-category authority.
 
-Compile impact is limited to the renamed request type/property and any new provisioning interface.
-Runtime impact is deliberate: previously defaulted IFRS requests now require explicit owner policy and
-valid account/book mappings.
+This is an owner-scoped result only. Inventory and Sales V1 producers and Finance's temporary V1
+compatibility boundary remain, so the repository-wide no-active-V1 gate has not passed.
 
 ## Inventory owner
 

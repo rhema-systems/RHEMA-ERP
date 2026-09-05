@@ -14,6 +14,7 @@ public interface IAccountSegmentIdentityService
     Task<AccountSegmentIdentityResultDto> ResolveProvisioningIdentityAsync(
         Guid tenantId,
         string naturalAccountCode,
+        Guid? existingAccountId = null,
         CancellationToken cancellationToken = default);
 
     Task<AccountSegmentReadinessDto> GetReadinessAsync(

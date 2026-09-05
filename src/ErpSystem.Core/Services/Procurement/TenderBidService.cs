@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -2063,19 +2064,24 @@ public class TenderBidService : ITenderBidService
                 "TENDER_FEE_FOREIGN_CURRENCY_NOT_SUPPORTED",
                 "Tender fee payments must use the tenant functional currency until a controlled exchange-rate snapshot is provided.");
 
-        var accountingBookCode = settings?.SubledgerPostingMode?.Trim();
-        if (string.IsNullOrWhiteSpace(accountingBookCode) ||
-            string.Equals(accountingBookCode, "ALL_ACTIVE_BOOKS", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(accountingBookCode, "AllClassifiedBooks", StringComparison.OrdinalIgnoreCase))
+        string accountingBookCode;
+        try
+        {
+            accountingBookCode = FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(
+                settings?.SubledgerPostingMode, settings is not null);
+        }
+        catch (ArgumentException exception)
+        {
             throw new TenderBidInitiationValidationException(
                 "TENDER_FEE_ACCOUNTING_BOOK_REQUIRED",
-                "Tender fee posting requires one configured concrete AccountingBookCode.");
+                exception.Message);
+        }
 
         return new TenderFeePostingAccounts(
             receivingAccount.Id,
             revenueAccount.Id,
             functionalCurrency,
-            accountingBookCode.ToUpperInvariant());
+            accountingBookCode);
     }
 
     private static FinancePostingRequestV2Dto BuildTenderFeePostingRequest(
