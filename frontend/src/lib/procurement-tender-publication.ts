@@ -4,6 +4,7 @@ type TenderPublicationSource = {
   tenderType?: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType | number;
+  usesControlledTenderLifecycle?: boolean;
 };
 
 const legacyMethodNames: Record<number, ProcurementMethodType> = {
@@ -49,8 +50,9 @@ export function getTenderPublicationPresentation(
   const method = normalizeMethod(tender.sourcingMethod);
   const hasAdvancedSourcingCase = Boolean(tender.sourcingCaseId?.trim());
   const requiresControlledPublication =
-    hasAdvancedSourcingCase &&
-    Boolean(method && controlledPublicationMethods.has(method));
+    tender.usesControlledTenderLifecycle ??
+    (hasAdvancedSourcingCase &&
+      Boolean(method && controlledPublicationMethods.has(method)));
   const usesStatutoryAdvertisement =
     requiresControlledPublication &&
     Boolean(method && statutoryAdvertisementMethods.has(method));
@@ -74,8 +76,9 @@ export function getTenderPublicationPresentation(
       ? 'Advertisement evidence'
       : 'Publication evidence',
     advancedControlLabel:
-      method === 'QualityBasedSelection' ||
-      method === 'QualityAndCostBasedSelection'
+      requiresControlledPublication &&
+      (method === 'QualityBasedSelection' ||
+        method === 'QualityAndCostBasedSelection')
         ? 'QBS / QCBS Controls'
         : requiresControlledPublication
           ? 'NCT / ICT Controls'

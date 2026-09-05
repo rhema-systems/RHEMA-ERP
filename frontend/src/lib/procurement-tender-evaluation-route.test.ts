@@ -6,6 +6,25 @@ import {
 } from './procurement-tender-evaluation-route';
 
 describe('tender evaluation routing', () => {
+  it('uses the standard case route after loading the authoritative lifecycle mode', async () => {
+    const href = await resolveTenderEvaluationHref(
+      'tender-1',
+      'bid-1',
+      {
+        id: 'tender-1',
+        sourcingCaseId: 'case-1',
+        sourcingMethod: 'NationalCompetitiveTendering',
+      },
+      async () => ({
+        id: 'tender-1',
+        sourcingCaseId: 'case-1',
+        sourcingMethod: 'NationalCompetitiveTendering',
+        usesControlledTenderLifecycle: false,
+      })
+    );
+    expect(href).toBe('/procurement/evaluations/create?bidId=bid-1');
+  });
+
   it.each([
     'NationalCompetitiveTendering',
     'InternationalCompetitiveTendering',

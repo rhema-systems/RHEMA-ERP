@@ -7,6 +7,7 @@ import type { ProcurementMethodType } from '@/types/procurement-policy';
 import { throwProcurementResponseError } from '@/lib/procurement-api-error';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+export const tenderDetailQueryKey = (id: string) => ['procurement', 'tender', id] as const;
 
 // Helper function to get auth headers
 const getAuthHeaders = () => {
@@ -38,6 +39,7 @@ export interface TenderDto {
   sourcingReleaseId?: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType;
+  usesControlledTenderLifecycle?: boolean;
   bidCount: number;
   invitationCount: number;
   createdAt: string;
@@ -644,8 +646,7 @@ class TenderService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to publish tender');
+      await throwProcurementResponseError(response, 'Failed to publish tender');
     }
 
     return response.json();

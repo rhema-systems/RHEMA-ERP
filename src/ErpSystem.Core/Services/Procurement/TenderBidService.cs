@@ -959,6 +959,7 @@ public class TenderBidService : ITenderBidService
             var tender = bid.Tender ?? await _tenderRepository.GetByIdAsync(bid.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
             EnsureLegacyOpeningReady(tender, DateTime.UtcNow);
+            await _tenderControlService.EnsureStandardOpeningReadyAsync(tender.Id);
 
             if (bid.Status != "Submitted")
             {
@@ -1016,6 +1017,7 @@ public class TenderBidService : ITenderBidService
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
             EnsureLegacyOpeningReady(tender, DateTime.UtcNow);
+            await _tenderControlService.EnsureStandardOpeningReadyAsync(tender.Id);
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var submittedBids = bids.Where(b => b.Status == "Submitted").ToList();
 

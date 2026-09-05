@@ -11,9 +11,40 @@ const input = {
   sourcingCaseId: 'case-1',
   sourcingMethod: 'NationalCompetitiveTendering' as const,
   canReadProcurementRecords: true,
+  status: 'Closed',
+  bidCount: 2,
 };
 
 describe('tender header control actions', () => {
+  it.each([
+    'Draft',
+    'Submitted',
+    'Approved',
+    'Rejected',
+    'Cancelled',
+    undefined,
+  ])('hides later-stage navigation for %s tenders', (status) => {
+    expect(getTenderHeaderActions({ ...input, status })).toMatchObject({
+      showCommitteeControls: false,
+      showAwardReadiness: false,
+      showGhanepsExchange: false,
+    });
+  });
+
+  it('waits for submitted bids before committee work and closing before award readiness', () => {
+    expect(
+      getTenderHeaderActions({ ...input, status: 'Published', bidCount: 0 })
+    ).toMatchObject({
+      showCommitteeControls: false,
+      showAwardReadiness: false,
+      showGhanepsExchange: true,
+    });
+    expect(
+      getTenderHeaderActions({ ...input, status: 'Published', bidCount: 1 })
+        .showCommitteeControls
+    ).toBe(true);
+  });
+
   it('exposes all controls for a readable case-backed formal tender', () => {
     expect(getTenderHeaderActions(input)).toEqual({
       showCommitteeControls: true,

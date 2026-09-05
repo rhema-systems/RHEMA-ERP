@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { getTenderPublicationPresentation } from './procurement-tender-publication';
 
 describe('tender publication presentation', () => {
+  it('honours the server standard-route decision even when the tender has an NCT case', () => {
+    const presentation = getTenderPublicationPresentation({
+      tenderType: 'ITB',
+      sourcingCaseId: 'standard-case',
+      sourcingMethod: 'NationalCompetitiveTendering',
+      usesControlledTenderLifecycle: false,
+    });
+    expect(presentation.requiresControlledPublication).toBe(false);
+    expect(presentation.advancedControlLabel).toBeUndefined();
+    expect(presentation.supplierAccessMessage).not.toContain(
+      'publication controls'
+    );
+  });
+
   it('keeps release-only ITB publication simple and omits statutory controls', () => {
     const presentation = getTenderPublicationPresentation({
       tenderType: 'ITB',

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -67,7 +69,25 @@ import { TenderRevisionsPanel } from '@/components/procurement/tenders/TenderRev
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
+const tenderDetailTabs = [
+  'overview',
+  'items',
+  'proposals',
+  'documents',
+  'fees',
+  'invitations',
+  'clarifications',
+  'revisions',
+  'evaluators',
+  'qcbs',
+  'bids',
+  'award',
+  'verification',
+  'approvals',
+];
+
 export default function TenderDetailPage() {
+  const queryClient = useQueryClient();
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -79,11 +99,13 @@ export default function TenderDetailPage() {
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(
-    searchParams.get('tab') === 'verification' ? 'verification' : 'overview'
-  );
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = searchParams.get('tab') ?? 'overview';
+    return tenderDetailTabs.includes(tab) ? tab : 'overview';
+  });
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [publishData, setPublishData] = useState({
     submissionDeadline: '',
     openingDate: '',
@@ -111,9 +133,15 @@ export default function TenderDetailPage() {
         data.requiredDocuments
       );
       setTender(data);
+      queryClient.setQueryData(
+        tenderService.tenderDetailQueryKey(tenderId),
+        data
+      );
     } catch (error) {
       console.error('Error loading tender details:', error);
-      toast.error(getProcurementProblemMessage(error, 'Failed to load tender details'));
+      toast.error(
+        getProcurementProblemMessage(error, 'Failed to load tender details')
+      );
     } finally {
       setLoading(false);
     }
@@ -124,6 +152,15 @@ export default function TenderDetailPage() {
       loadTenderDetails();
     }
   }, [tenderId]);
+
+  const requestedTab = searchParams.get('tab');
+  useEffect(() => {
+    setActiveTab(
+      requestedTab && tenderDetailTabs.includes(requestedTab)
+        ? requestedTab
+        : 'overview'
+    );
+  }, [requestedTab]);
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<
@@ -208,6 +245,7 @@ export default function TenderDetailPage() {
           : '',
       }));
     }
+    setPublishError(null);
     setShowPublishDialog(true);
   };
 
@@ -233,19 +271,22 @@ export default function TenderDetailPage() {
   };
 
   const handlePublishConfirm = async () => {
+    setPublishError(null);
     try {
       // Validate dates
       if (!publishData.submissionDeadline) {
+        setPublishError('Submission deadline is required');
         toast.error('Submission deadline is required');
-        return;
+        return false;
       }
 
       const now = new Date();
       const submissionDeadline = new Date(publishData.submissionDeadline);
 
       if (submissionDeadline <= now) {
+        setPublishError('Submission deadline must be in the future');
         toast.error('Submission deadline must be in the future');
-        return;
+        return false;
       }
 
       const scheduleError = getTenderScheduleError(
@@ -253,8 +294,9 @@ export default function TenderDetailPage() {
         publishData.openingDate
       );
       if (scheduleError) {
+        setPublishError(scheduleError);
         toast.error(scheduleError);
-        return;
+        return false;
       }
 
       setPublishing(true);
@@ -290,7 +332,13 @@ export default function TenderDetailPage() {
       await loadTenderDetails();
     } catch (error: any) {
       console.error('Error publishing tender:', error);
-      toast.error(getProcurementProblemMessage(error, 'Failed to publish tender'));
+      const message = getProcurementProblemMessage(
+        error,
+        'Failed to publish tender'
+      );
+      setPublishError(message);
+      toast.error(message);
+      return false;
     } finally {
       setPublishing(false);
     }
@@ -352,6 +400,18 @@ export default function TenderDetailPage() {
 
   const publicationPresentation = getTenderPublicationPresentation(tender);
   const evaluationRoute = getTenderEvaluationRoute(tender);
+  const isPublishedStage = ['Published', 'Closed', 'Awarded'].includes(
+    tender.status
+  );
+  const hasSubmittedBids = tender.bidCount > 0;
+  const showEvaluationStage = isPublishedStage && hasSubmittedBids;
+  const showAwardStage = ['Closed', 'Awarded'].includes(tender.status);
+  const visibleActiveTab =
+    (!showAwardStage && ['award', 'verification'].includes(activeTab)) ||
+    (!showEvaluationStage && ['evaluators', 'qcbs'].includes(activeTab)) ||
+    (!isPublishedStage && activeTab === 'bids')
+      ? 'overview'
+      : activeTab;
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -390,7 +450,8 @@ export default function TenderDetailPage() {
             </Button>
           )}
 
-          {((tender.status === 'Draft' && canAdministerTender) || tender.status === 'Submitted') && (
+          {((tender.status === 'Draft' && canAdministerTender) ||
+            tender.status === 'Submitted') && (
             <WorkflowApprovalActions {...workflow.actionProps} showStepBadge />
           )}
 
@@ -406,6 +467,8 @@ export default function TenderDetailPage() {
             tenderType={tender.tenderType}
             sourcingCaseId={tender.sourcingCaseId}
             sourcingMethod={tender.sourcingMethod}
+            status={tender.status}
+            bidCount={tender.bidCount}
           />
           {tender.tenderType !== 'RFQ' && tender.status === 'Awarded' && (
             <Button
@@ -420,7 +483,8 @@ export default function TenderDetailPage() {
               Bidder Communications
             </Button>
           )}
-          {canAdministerTender && ['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+          {canAdministerTender &&
+            showEvaluationStage &&
             publicationPresentation.advancedControlLabel && (
               <Button
                 variant="outline"
@@ -501,7 +565,7 @@ export default function TenderDetailPage() {
 
       {/* Tabs */}
       <Tabs
-        value={activeTab}
+        value={visibleActiveTab}
         onValueChange={setActiveTab}
         className="space-y-4"
       >
@@ -538,30 +602,38 @@ export default function TenderDetailPage() {
             <FileText className="h-4 w-4 mr-2" />
             Amendments ({tender.revisions?.length || 0})
           </TabsTrigger>
-          <TabsTrigger value="evaluators">
-            <Users className="h-4 w-4 mr-2" />
-            {evaluationRoute.mode === 'controlled'
-              ? 'Evaluation Committee'
-              : `Evaluators (${tender.evaluators?.length || 0})`}
-          </TabsTrigger>
-          {evaluationRoute.mode === 'legacy' && (
+          {showEvaluationStage && (
+            <TabsTrigger value="evaluators">
+              <Users className="h-4 w-4 mr-2" />
+              {evaluationRoute.mode === 'controlled'
+                ? 'Evaluation Committee'
+                : `Evaluators (${tender.evaluators?.length || 0})`}
+            </TabsTrigger>
+          )}
+          {showEvaluationStage && evaluationRoute.mode === 'legacy' && (
             <TabsTrigger value="qcbs" disabled={!tender.useQCBSEvaluation}>
               <Calculator className="h-4 w-4 mr-2" />
               QCBS
             </TabsTrigger>
           )}
-          <TabsTrigger value="bids">
-            <Award className="h-4 w-4 mr-2" />
-            Bids ({tender.bids?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="award">
-            <Award className="h-4 w-4 mr-2" />
-            Award
-          </TabsTrigger>
-          <TabsTrigger value="verification">
-            <Shield className="h-4 w-4 mr-2" />
-            Verification
-          </TabsTrigger>
+          {isPublishedStage && (
+            <TabsTrigger value="bids">
+              <Award className="h-4 w-4 mr-2" />
+              Bids ({tender.bids?.length || 0})
+            </TabsTrigger>
+          )}
+          {showAwardStage && (
+            <TabsTrigger value="award">
+              <Award className="h-4 w-4 mr-2" />
+              Award
+            </TabsTrigger>
+          )}
+          {showAwardStage && (
+            <TabsTrigger value="verification">
+              <Shield className="h-4 w-4 mr-2" />
+              Verification
+            </TabsTrigger>
+          )}
           <WorkflowTabTrigger value="approvals" />
         </TabsList>
 
@@ -1457,18 +1529,19 @@ export default function TenderDetailPage() {
                               )}
                             </div>
                           )}
-                        {clarification.status === 'Pending' && canAdministerTender && (
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setSelectedClarification(clarification);
-                              setShowAnswerDialog(true);
-                            }}
-                          >
-                            <MessageSquare className="h-4 w-4 mr-2" />
-                            Answer Question
-                          </Button>
-                        )}
+                        {clarification.status === 'Pending' &&
+                          canAdministerTender && (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setSelectedClarification(clarification);
+                                setShowAnswerDialog(true);
+                              }}
+                            >
+                              <MessageSquare className="h-4 w-4 mr-2" />
+                              Answer Question
+                            </Button>
+                          )}
                       </CardContent>
                     </Card>
                   ))}
@@ -1642,6 +1715,11 @@ export default function TenderDetailPage() {
         maxWidth="900px"
         description={
           <div className="space-y-4">
+            {publishError && (
+              <Alert variant="destructive" role="alert">
+                <AlertDescription>{publishError}</AlertDescription>
+              </Alert>
+            )}
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
                 Review the supplier audience and submission schedule before

@@ -758,6 +758,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         return new ProcurementSourcingCaseEntryGateDto
         {
             SourcingCaseId = entity.Id,
+            HasAdvancedAuthorityRoute = ProcurementTenderRouting.HasAdvancedAuthority(entity.AuthorityRouteId, entity.AuthorityRouteReference),
             SourcingCaseNumber = entity.CaseNumber,
             SourcingReleaseId = entity.SourcingReleaseId,
             SourcePlanItemId = entity.SourcePlanItemId,
@@ -889,6 +890,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         return new ProcurementSourcingCaseEntryGateDto
         {
             SourcingCaseId = entity.Id,
+            HasAdvancedAuthorityRoute = ProcurementTenderRouting.HasAdvancedAuthority(entity.AuthorityRouteId, entity.AuthorityRouteReference),
             SourcingCaseNumber = entity.CaseNumber,
             SourcingReleaseId = entity.SourcingReleaseId,
             SourcePlanItemId = entity.SourcePlanItemId,

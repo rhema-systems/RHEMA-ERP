@@ -5,6 +5,7 @@ export type TenderEvaluationSource = {
   id: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType | number;
+  usesControlledTenderLifecycle?: boolean;
 };
 
 export type TenderEvaluationRoute = {
@@ -49,7 +50,9 @@ export async function resolveTenderEvaluationHref(
   loadTender: (id: string) => Promise<TenderEvaluationSource>
 ): Promise<string> {
   const tender =
-    cachedTender?.sourcingMethod != null
+    cachedTender?.sourcingMethod != null &&
+    (!cachedTender.sourcingCaseId ||
+      cachedTender.usesControlledTenderLifecycle !== undefined)
       ? cachedTender
       : await loadTender(tenderId);
 
