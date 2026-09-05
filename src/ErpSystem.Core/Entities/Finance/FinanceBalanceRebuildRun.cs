@@ -12,6 +12,7 @@ public sealed class FinanceBalanceRebuildRun : BusinessEntity
     [Required, MaxLength(200)] public string IdempotencyKey { get; set; } = string.Empty;
     [Required, MaxLength(500)] public string Reason { get; set; } = string.Empty;
     [Required, MaxLength(64)] public string SourceFingerprint { get; set; } = string.Empty;
+    [Required, MaxLength(64)] public string CommandFingerprint { get; set; } = string.Empty;
     public int BalanceRows { get; set; }
     public int ExposureRows { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal AbsoluteDrift { get; set; }

@@ -913,7 +913,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var dto = MapCurrencyLinkToDto(link, account);
                 var currencyCode = NormalizeCurrencyCode(link.LinkedCurrencyCode);
                 var transactionCount = await _unitOfWork.Repository<AccountTransaction>()
-                    .GetQueryable(t => t.AccountId == accountId
+                    .GetQueryable(t => t.TenantId == TenantId && t.AccountId == accountId
                         && t.TransactionCurrency == currencyCode
                         && !t.IsDeleted)
                     .CountAsync();
@@ -938,10 +938,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CurrencyCode = currencyCode,
                 LinkedCurrencyCode = currencyCode,
                 CurrencyName = currencyCode, // Use code as name for now
-                CurrentBalance = link.ForeignCurrencyBalance,
-                CurrentBalanceBaseCurrency = link.BaseCurrencyEquivalent,
-                ForeignCurrencyBalance = link.ForeignCurrencyBalance,
-                BaseCurrencyBalance = link.BaseCurrencyEquivalent,
+                // Currency links are configuration only. Their legacy mutable balances stopped being
+                // authoritative in C2; callers must select an exact book through the exposure inquiry.
+                CurrentBalance = null,
+                CurrentBalanceBaseCurrency = null,
+                ForeignCurrencyBalance = null,
+                BaseCurrencyBalance = null,
+                HasAuthoritativeCurrentBalance = false,
+                CurrentBalanceAuthority = "ExactBookExposureRequired",
                 CurrentExchangeRate = currentExchangeRate,
                 RevaluationFrequency = link.RevaluationFrequency.ToString(),
                 TransactionRateType = link.TransactionRateType,

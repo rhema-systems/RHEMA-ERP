@@ -105,7 +105,8 @@ public sealed class BookBalanceReadModelC2Tests
     public async Task Reconciliation_DryRunDoesNotMutate_ApprovedRebuildIsIdempotent()
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Db.AccountTransactions.AddRange(fixture.Lines(40m, 0m));
+        fixture.AddPostedEvidence(fixture.Lines(40m, 0m), fixture.Primary);
+        fixture.Debit.Balance = 999m;
         fixture.Db.AccountBalances.Add(new AccountBalance { TenantId = fixture.TenantId, AccountId = fixture.Debit.Id,
             AccountingBookId = fixture.Primary.Id, BookClassification = "IFRS", FiscalPeriodId = fixture.Period.Id,
             Currency = "GHS", ClosingBalance = 999m });
@@ -114,15 +115,163 @@ public sealed class BookBalanceReadModelC2Tests
         var dry = await fixture.Service.ReconcileAsync(fixture.TenantId,
             new("IFRS", false, null, null, null), Guid.NewGuid());
         dry.BalanceDriftCount.Should().BeGreaterThan(0);
+        dry.PrimaryCompatibilityDriftCount.Should().Be(1);
         (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(999m);
 
         var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
         var request = new BookBalanceReconciliationRequestDto("IFRS", true, "Reviewed C2 drift", "rebuild-1", checker);
         var applied = await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
         (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(40m);
+        fixture.Debit.Balance.Should().Be(40m);
         var repeated = await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
         repeated.RebuildRunId.Should().Be(applied.RebuildRunId);
         (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(10, -10, 0, true, false)]
+    [InlineData(-5, 10, 5, false, false)]
+    [InlineData(5, -10, -5, false, true)]
+    public async Task BackdatedPosting_RefreshesLaterDerivedFlags(
+        decimal laterClosing, decimal delta, decimal expected, bool isZero, bool isNegative)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var later = fixture.AddPeriod(10);
+        fixture.Db.AccountBalances.Add(new AccountBalance
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, AccountId = fixture.Debit.Id,
+            AccountingBookId = fixture.Primary.Id, BookClassification = fixture.Primary.Code,
+            FiscalPeriodId = later.Id, FiscalPeriod = later, Currency = "GHS",
+            OpeningBalance = laterClosing, ClosingBalance = laterClosing,
+            IsZeroBalance = laterClosing == 0m, IsNegativeBalance = laterClosing < 0m
+        });
+        await fixture.Db.SaveChangesAsync();
+        var line = delta >= 0 ? fixture.Lines(delta, 0m) : fixture.Lines(0m, -delta);
+
+        await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
+            fixture.Period.Id, "GHS", line, true, DateTime.UtcNow, null);
+        await fixture.Db.SaveChangesAsync();
+
+        var refreshed = await fixture.Db.AccountBalances.SingleAsync(item => item.FiscalPeriodId == later.Id);
+        refreshed.ClosingBalance.Should().Be(expected);
+        refreshed.IsZeroBalance.Should().Be(isZero);
+        refreshed.IsNegativeBalance.Should().Be(isNegative);
+        refreshed.IsReconciled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Rebuild_PrimaryCompatibilityExcludesAlternativeBookEvidence()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Debit.Balance = 2000m;
+        fixture.AddPostedEvidence(fixture.Lines(1000m, 0m), fixture.Primary);
+        var local = fixture.Lines(1000m, 0m);
+        foreach (var line in local)
+        {
+            line.AccountingBookId = fixture.Parallel.Id;
+            line.BookClassification = fixture.Parallel.Code;
+        }
+        fixture.AddPostedEvidence(local, fixture.Parallel);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", true, "Repair primary compatibility", "repair-primary", Guid.NewGuid()), Guid.NewGuid());
+
+        fixture.Debit.Balance.Should().Be(1000m);
+        (await fixture.Db.AccountTransactions.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ReconciliationFingerprint_CoversTransactionDateAndFiscalPlacement()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var lines = fixture.Lines(20m, 0m);
+        fixture.AddPostedEvidence(lines, fixture.Primary);
+        await fixture.Db.SaveChangesAsync();
+        var first = await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", false, null, null, null), Guid.NewGuid());
+
+        lines[0].TransactionDate = lines[0].TransactionDate.AddDays(1);
+        await fixture.Db.SaveChangesAsync();
+        var dateChanged = await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", false, null, null, null), Guid.NewGuid());
+        dateChanged.SourceFingerprint.Should().NotBe(first.SourceFingerprint);
+
+        fixture.Period.PeriodNumber++;
+        await fixture.Db.SaveChangesAsync();
+        var periodChanged = await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", false, null, null, null), Guid.NewGuid());
+        periodChanged.SourceFingerprint.Should().NotBe(dateChanged.SourceFingerprint);
+    }
+
+    [Fact]
+    public async Task SamePeriodBackdatedPosting_DoesNotRegressLastTransactionDate()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var recent = fixture.Lines(10m, 0m);
+        recent[0].TransactionDate = new DateTime(2026, 9, 25);
+        await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
+            fixture.Period.Id, "GHS", recent, true, DateTime.UtcNow, null);
+        await fixture.Db.SaveChangesAsync();
+        var older = fixture.Lines(5m, 0m);
+        older[0].TransactionDate = new DateTime(2026, 9, 5);
+        await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
+            fixture.Period.Id, "GHS", older, true, DateTime.UtcNow, null);
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Db.AccountBalances.SingleAsync()).LastTransactionDate
+            .Should().Be(new DateTime(2026, 9, 25));
+    }
+
+    [Fact]
+    public async Task RebuildIdempotency_BindsReasonMakerAndChecker()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.AddPostedEvidence(fixture.Lines(10m, 0m), fixture.Primary);
+        await fixture.Db.SaveChangesAsync();
+        var maker = Guid.NewGuid();
+        var checker = Guid.NewGuid();
+        await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", true, "Approved reason", "governed-key", checker), maker);
+
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId,
+                new("IFRS", true, "Changed reason", "governed-key", checker), maker))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governance evidence*");
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId,
+                new("IFRS", true, "Approved reason", "governed-key", checker), Guid.NewGuid()))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governance evidence*");
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId,
+                new("IFRS", true, "Approved reason", "governed-key", Guid.NewGuid()), maker))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governance evidence*");
+    }
+
+    [Fact]
+    public async Task ReconciliationDrift_CoversDerivedFlagsDatesTotalsAndExposureFingerprint()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var lines = fixture.Lines(20m, 0m, "USD", 2m, 0m);
+        fixture.AddPostedEvidence(lines, fixture.Primary);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", true, "Build projections", "full-drift-1", Guid.NewGuid()), Guid.NewGuid());
+
+        var balance = await fixture.Db.AccountBalances.SingleAsync();
+        balance.YearToDateDebits++;
+        balance.TransactionCount++;
+        balance.LastTransactionDate = balance.LastTransactionDate!.Value.AddDays(1);
+        balance.HasActivity = false;
+        balance.IsZeroBalance = true;
+        balance.IsNegativeBalance = true;
+        var exposure = await fixture.Db.AccountCurrencyExposures.SingleAsync();
+        exposure.TransactionCount++;
+        exposure.FirstTransactionDate = exposure.FirstTransactionDate!.Value.AddDays(1);
+        exposure.SourceFingerprint = new string('A', 64);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", false, null, null, null), Guid.NewGuid());
+        result.BalanceDriftCount.Should().BeGreaterThan(0);
+        result.ExposureDriftCount.Should().BeGreaterThan(0);
     }
 
     [Fact]
@@ -144,6 +293,7 @@ public sealed class BookBalanceReadModelC2Tests
         public AccountingBook Parallel { get; private set; } = null!;
         public Account Debit { get; private set; } = null!;
         public FiscalPeriod Period { get; private set; } = null!;
+        private FiscalYear _year = null!;
 
         private Fixture(ApplicationDbContext db) { Db = db; Service = new(db); }
         public static async Task<Fixture> CreateAsync()
@@ -163,11 +313,40 @@ public sealed class BookBalanceReadModelC2Tests
             f.Period = new FiscalPeriod { Id = Guid.NewGuid(), TenantId = f.TenantId, FiscalYearId = year.Id,
                 FiscalYear = year, PeriodName = "Sep", PeriodCode = "2026-09", PeriodNumber = 9,
                 StartDate = new(2026, 9, 1), EndDate = new(2026, 9, 30), IsOpen = true };
+            f._year = year;
             f.Db.AddRange(f.Primary, f.Parallel, f.Debit, year, f.Period,
                 new AccountAccountingBook { TenantId = f.TenantId, AccountId = f.Debit.Id, AccountingBookId = f.Primary.Id, IsEnabled = true },
                 new AccountAccountingBook { TenantId = f.TenantId, AccountId = f.Debit.Id, AccountingBookId = f.Parallel.Id, IsEnabled = true },
                 new AccountCurrencyLink { TenantId = f.TenantId, AccountId = f.Debit.Id, LinkedCurrencyCode = "USD", IsActive = true });
             await f.Db.SaveChangesAsync(); return f;
+        }
+        public FiscalPeriod AddPeriod(int number)
+        {
+            var period = new FiscalPeriod
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, FiscalYearId = _year.Id, FiscalYear = _year,
+                PeriodName = $"P{number}", PeriodCode = $"2026-{number:00}", PeriodNumber = number,
+                StartDate = new DateTime(2026, number, 1), EndDate = new DateTime(2026, number, 1).AddMonths(1).AddDays(-1),
+                IsOpen = true
+            };
+            Db.FiscalPeriods.Add(period);
+            return period;
+        }
+        public void AddPostedEvidence(IEnumerable<AccountTransaction> evidence, AccountingBook book)
+        {
+            foreach (var line in evidence)
+            {
+                var journal = new JournalEntry
+                {
+                    Id = line.JournalEntryId, TenantId = TenantId, JournalEntryNumber = $"J-{line.Id:N}",
+                    EntryDate = line.TransactionDate, PostingDate = line.TransactionDate,
+                    Description = "C2 evidence", JournalType = "General", PostingStatus = "Posted",
+                    AccountingBookId = book.Id, BookClassification = book.Code
+                };
+                line.JournalEntry = journal;
+                Db.JournalEntries.Add(journal);
+                Db.AccountTransactions.Add(line);
+            }
         }
         public AccountTransaction[] Lines(decimal debit, decimal credit, string currency = "GHS", decimal? txDebit = null, decimal? txCredit = null) =>
             new[] { new AccountTransaction { Id = Guid.NewGuid(), TenantId = TenantId, AccountId = Debit.Id,

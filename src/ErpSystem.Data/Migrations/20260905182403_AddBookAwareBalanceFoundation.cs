@@ -24,6 +24,28 @@ IF EXISTS (
     THROW 51000, 'C2_ACCOUNT_BALANCE_PREFLIGHT: blank/pseudo book or invalid functional currency evidence.', 1;
 
 IF EXISTS (
+    SELECT a.[TenantId]
+    FROM [Accounts] a
+    WHERE a.[IsDeleted] = 0
+    GROUP BY a.[TenantId]
+    HAVING (SELECT COUNT_BIG(*) FROM [AccountingBooks] b
+        WHERE b.[TenantId] = a.[TenantId] AND b.[IsDeleted] = 0
+          AND b.[IsDefault] = 1 AND b.[IsActive] = 1 AND b.[AllowsPosting] = 1) <> 1)
+    THROW 51000, 'C2_PRIMARY_BOOK_PREFLIGHT: each Finance tenant requires exactly one active default posting book.', 1;
+
+IF EXISTS (
+    SELECT 1 FROM [AccountBalances] ab
+    JOIN [Tenants] t ON t.[Id] = ab.[TenantId] AND t.[IsDeleted] = 0
+    OUTER APPLY (SELECT COUNT_BIG(*) MatchCount, MAX(fs.[BaseCurrency]) BaseCurrency
+        FROM [FinanceSettings] fs WHERE fs.[TenantId] = ab.[TenantId] AND fs.[IsDeleted] = 0) configured
+    CROSS APPLY (SELECT CASE WHEN configured.MatchCount = 1 THEN configured.BaseCurrency ELSE t.[BaseCurrency] END FunctionalCurrency) authority
+    WHERE configured.MatchCount > 1 OR authority.FunctionalCurrency IS NULL
+       OR DATALENGTH(authority.FunctionalCurrency) <> 6
+       OR ab.[Currency] COLLATE Latin1_General_100_BIN2 <> authority.FunctionalCurrency COLLATE Latin1_General_100_BIN2
+       OR DATALENGTH(ab.[Currency]) <> DATALENGTH(authority.FunctionalCurrency))
+    THROW 51000, 'C2_ACCOUNT_BALANCE_PREFLIGHT: balance currency does not exactly match tenant functional-currency authority.', 1;
+
+IF EXISTS (
     SELECT 1 FROM [AccountBalances] ab
     OUTER APPLY (SELECT COUNT_BIG(*) MatchCount FROM [AccountingBooks] b
         WHERE b.[TenantId] = ab.[TenantId] AND b.[IsDeleted] = 0
@@ -41,7 +63,22 @@ IF EXISTS (
       AND DATALENGTH(b.[Code]) = DATALENGTH(ab.[BookClassification])
     GROUP BY ab.[TenantId], ab.[AccountId], b.[Id], ab.[FiscalPeriodId], ab.[Currency]
     HAVING COUNT_BIG(*) > 1)
-    THROW 51000, 'C2_ACCOUNT_BALANCE_PREFLIGHT: duplicate rows collide at the exact book balance grain.', 1;");
+    THROW 51000, 'C2_ACCOUNT_BALANCE_PREFLIGHT: duplicate rows collide at the exact book balance grain.', 1;
+
+IF EXISTS (
+    SELECT 1
+    FROM [AccountTransactions] tx
+    JOIN [JournalEntries] j ON j.[Id] = tx.[JournalEntryId]
+    LEFT JOIN [AccountingBooks] b ON b.[Id] = tx.[AccountingBookId] AND b.[TenantId] = tx.[TenantId]
+    WHERE tx.[IsDeleted] = 0 AND (tx.[PostingStatus] = N'Posted' OR j.[PostingStatus] = N'Posted')
+      AND (b.[Id] IS NULL OR j.[TenantId] <> tx.[TenantId]
+       OR j.[AccountingBookId] <> tx.[AccountingBookId]
+       OR tx.[BookClassification] COLLATE Latin1_General_100_BIN2 <> b.[Code] COLLATE Latin1_General_100_BIN2
+       OR DATALENGTH(tx.[BookClassification]) <> DATALENGTH(b.[Code])
+       OR j.[BookClassification] COLLATE Latin1_General_100_BIN2 <> b.[Code] COLLATE Latin1_General_100_BIN2
+       OR DATALENGTH(j.[BookClassification]) <> DATALENGTH(b.[Code])
+       OR tx.[PostingStatus] <> N'Posted' OR j.[PostingStatus] <> N'Posted'))
+    THROW 51000, 'C2_PRIMARY_BALANCE_PREFLIGHT: posted journal line book/status evidence is inconsistent.', 1;");
 
             migrationBuilder.DropForeignKey(
                 name: "FK_AccountBalances_Accounts_AccountId",
@@ -92,6 +129,29 @@ FROM [AccountBalances] ab
 JOIN [AccountingBooks] b ON b.[TenantId] = ab.[TenantId] AND b.[IsDeleted] = 0
   AND b.[Code] COLLATE Latin1_General_100_BIN2 = ab.[BookClassification] COLLATE Latin1_General_100_BIN2
   AND DATALENGTH(b.[Code]) = DATALENGTH(ab.[BookClassification]);");
+
+            // Account.Balance is retained only as primary-book compatibility. Recompute from immutable
+            // posted header/line evidence so pre-C2 alternative-book amounts cannot remain commingled.
+            migrationBuilder.Sql(@"
+UPDATE a
+SET a.[Balance] = CASE WHEN a.[AccountType] IN (2,3,4)
+    THEN -COALESCE(primaryEvidence.[SignedBalance], 0)
+    ELSE COALESCE(primaryEvidence.[SignedBalance], 0) END
+FROM [Accounts] a
+JOIN [AccountingBooks] primaryBook ON primaryBook.[TenantId] = a.[TenantId]
+  AND primaryBook.[IsDefault] = 1 AND primaryBook.[IsActive] = 1
+  AND primaryBook.[AllowsPosting] = 1 AND primaryBook.[IsDeleted] = 0
+OUTER APPLY (
+    SELECT SUM(tx.[DebitAmount] - tx.[CreditAmount]) SignedBalance
+    FROM [AccountTransactions] tx
+    JOIN [JournalEntries] j ON j.[Id] = tx.[JournalEntryId]
+      AND j.[TenantId] = tx.[TenantId] AND j.[AccountingBookId] = tx.[AccountingBookId]
+      AND j.[PostingStatus] = N'Posted' AND j.[IsDeleted] = 0
+    WHERE tx.[TenantId] = a.[TenantId] AND tx.[AccountId] = a.[Id]
+      AND tx.[AccountingBookId] = primaryBook.[Id]
+      AND tx.[PostingStatus] = N'Posted' AND tx.[IsDeleted] = 0
+) primaryEvidence
+WHERE a.[IsDeleted] = 0;");
 
             migrationBuilder.AlterColumn<Guid>(
                 name: "AccountingBookId",
@@ -177,6 +237,7 @@ JOIN [AccountingBooks] b ON b.[TenantId] = ab.[TenantId] AND b.[IsDeleted] = 0
                     IdempotencyKey = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     Reason = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: false),
                     SourceFingerprint = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    CommandFingerprint = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
                     BalanceRows = table.Column<int>(type: "int", nullable: false),
                     ExposureRows = table.Column<int>(type: "int", nullable: false),
                     AbsoluteDrift = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
@@ -276,6 +337,26 @@ JOIN [AccountingBooks] b ON b.[TenantId] = ab.[TenantId] AND b.[IsDeleted] = 0
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // The predecessor Account.Balance contract combined every posted representation. Restore
+            // that exact compatibility shape on downgrade; do not leave a primary-only value under
+            // predecessor code that still assumes the historical combined coordinate.
+            migrationBuilder.Sql(@"
+UPDATE a
+SET a.[Balance] = CASE WHEN a.[AccountType] IN (2,3,4)
+    THEN -COALESCE(allEvidence.[SignedBalance], 0)
+    ELSE COALESCE(allEvidence.[SignedBalance], 0) END
+FROM [Accounts] a
+OUTER APPLY (
+    SELECT SUM(tx.[DebitAmount] - tx.[CreditAmount]) SignedBalance
+    FROM [AccountTransactions] tx
+    JOIN [JournalEntries] j ON j.[Id] = tx.[JournalEntryId]
+      AND j.[TenantId] = tx.[TenantId] AND j.[AccountingBookId] = tx.[AccountingBookId]
+      AND j.[PostingStatus] = N'Posted' AND j.[IsDeleted] = 0
+    WHERE tx.[TenantId] = a.[TenantId] AND tx.[AccountId] = a.[Id]
+      AND tx.[PostingStatus] = N'Posted' AND tx.[IsDeleted] = 0
+) allEvidence
+WHERE a.[IsDeleted] = 0;");
+
             migrationBuilder.DropForeignKey(
                 name: "FK_AccountBalances_AccountingBooks_TenantId_AccountingBookId",
                 table: "AccountBalances");

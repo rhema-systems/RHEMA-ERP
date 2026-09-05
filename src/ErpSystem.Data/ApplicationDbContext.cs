@@ -5769,6 +5769,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
             entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
             entity.Property(item => item.SourceFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.CommandFingerprint).HasMaxLength(64).IsRequired();
             entity.Property(item => item.AbsoluteDrift).HasColumnType("decimal(18,2)");
             entity.HasOne(item => item.AccountingBook).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })

@@ -12297,6 +12297,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("RequestedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CommandFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("SourceFingerprint")
                         .IsRequired()
                         .HasMaxLength(64)

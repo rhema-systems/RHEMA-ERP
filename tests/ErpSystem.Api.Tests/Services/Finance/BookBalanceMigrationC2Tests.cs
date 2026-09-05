@@ -29,7 +29,13 @@ public sealed class BookBalanceMigrationC2Tests
             .And.Contain("Latin1_General_100_BIN2")
             .And.Contain("DATALENGTH")
             .And.Contain("duplicate rows collide")
-            .And.Contain("UPDATE ab");
+            .And.Contain("C2_PRIMARY_BOOK_PREFLIGHT")
+            .And.Contain("FinanceSettings")
+            .And.Contain("UPDATE ab")
+            .And.Contain("UPDATE a");
+        var downSql = string.Join("\n", Operations(migration, "Down")
+            .OfType<SqlOperation>().Select(item => item.Sql));
+        downSql.Should().Contain("allEvidence").And.Contain("AccountTransactions");
         up.OfType<CreateTableOperation>().Select(item => item.Name)
             .Should().Contain(new[] { "AccountCurrencyExposures", "FinanceBalanceRebuildRuns" });
         Operations(migration, "Down").OfType<DropTableOperation>().Select(item => item.Name)

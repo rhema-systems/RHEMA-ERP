@@ -43,10 +43,16 @@ namespace ErpSystem.Core.DTOs.Finance
         public string CurrencyCode { get; set; } = string.Empty;
         public string LinkedCurrencyCode { get; set; } = string.Empty;
         public string? CurrencyName { get; set; }
-        public decimal CurrentBalance { get; set; }
-        public decimal CurrentBalanceBaseCurrency { get; set; }
-        public decimal ForeignCurrencyBalance { get; set; }
-        public decimal BaseCurrencyBalance { get; set; }
+        [Obsolete("AccountCurrencyLink is configuration. Use the exact-book balance/exposure inquiry.")]
+        public decimal? CurrentBalance { get; set; }
+        [Obsolete("AccountCurrencyLink is configuration. Use the exact-book balance/exposure inquiry.")]
+        public decimal? CurrentBalanceBaseCurrency { get; set; }
+        [Obsolete("AccountCurrencyLink is configuration. Use the exact-book balance/exposure inquiry.")]
+        public decimal? ForeignCurrencyBalance { get; set; }
+        [Obsolete("AccountCurrencyLink is configuration. Use the exact-book balance/exposure inquiry.")]
+        public decimal? BaseCurrencyBalance { get; set; }
+        public bool HasAuthoritativeCurrentBalance { get; set; }
+        public string CurrentBalanceAuthority { get; set; } = "ExactBookExposureRequired";
         public decimal? CurrentExchangeRate { get; set; }
         public decimal? OpeningBalance { get; set; }
         public decimal? OpeningBalanceBaseCurrency { get; set; }

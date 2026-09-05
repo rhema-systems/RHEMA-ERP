@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using ErpSystem.Core.DTOs.Finance;
@@ -28,6 +29,18 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
     {
         var active = lines.Where(line => !line.IsDeleted).ToArray();
         if (active.Length == 0) throw new InvalidOperationException("Posting contains no balance lines.");
+        // Exact reversal may lawfully target the now-inactive historical default book. In that one
+        // case the caller's already-validated primary flag preserves the original compatibility
+        // coordinate; ordinary and non-primary posting still require today's active authority.
+        var primaryBook = updatePrimaryCompatibilityBalance
+            ? await ResolveUniqueDefaultBookAsync(tenantId, requireActivePosting: false, cancellationToken)
+            : await ResolvePrimaryCompatibilityBookAsync(tenantId, cancellationToken);
+        if (updatePrimaryCompatibilityBalance != (primaryBook.Id == accountingBookId))
+            throw new InvalidOperationException(
+                "Primary compatibility selection does not match the authoritative active default posting book.");
+        var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
+        if (!string.Equals(functionalCurrencyCode, functionalAuthority, StringComparison.Ordinal))
+            throw new InvalidOperationException("Posting functional currency does not exactly match tenant authority.");
         if (active.Any(line => line.TenantId != tenantId || line.AccountingBookId != accountingBookId
                 || line.FiscalPeriodId != fiscalPeriodId
                 || !string.Equals(line.BookClassification, accountingBookCode, StringComparison.Ordinal)
@@ -83,7 +96,7 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             row.YearToDateCredits = Round(row.YearToDateCredits + credits);
             row.YearToDateNetMovement = Round(row.YearToDateDebits - row.YearToDateCredits);
             row.TransactionCount += group.Count();
-            row.LastTransactionDate = group.Max(line => line.TransactionDate);
+            row.LastTransactionDate = Max(row.LastTransactionDate, group.Max(line => line.TransactionDate));
             row.LastTransactionUserId = actorId;
             row.LastUpdated = postedAt;
             row.HasActivity = row.TransactionCount > 0;
@@ -100,6 +113,9 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
                 later.OpeningBalanceType = Side(later.OpeningBalance);
                 later.ClosingBalanceType = Side(later.ClosingBalance);
                 later.LastUpdated = postedAt;
+                later.IsZeroBalance = later.ClosingBalance == 0m;
+                later.IsNegativeBalance = later.ClosingBalance < 0m;
+                later.IsReconciled = true;
             }
 
             foreach (var ytd in rows.Where(item => item.AccountId == group.Key
@@ -113,7 +129,7 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         }
 
         await ApplyExposureDeltasAsync(tenantId, accountingBookId, accountingBookCode,
-            functionalCurrencyCode, active, postedAt, cancellationToken);
+            functionalCurrencyCode, period, active, postedAt, cancellationToken);
 
         if (updatePrimaryCompatibilityBalance)
             await ApplyPrimaryCompatibilityAsync(tenantId, active, cancellationToken);
@@ -146,6 +162,14 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
                 item.AccountingBookCode, item.FunctionalCurrencyCode, item.TransactionCurrencyCode,
                 item.SignedForeignBalance, item.SignedFunctionalBalance, item.TransactionCount,
                 item.FirstTransactionDate, item.LastTransactionDate)).ToListAsync(cancellationToken);
+        var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
+        if (balances.Any(item => !string.Equals(item.AccountingBookCode, book.Code, StringComparison.Ordinal)
+                || !string.Equals(item.FunctionalCurrencyCode, functionalAuthority, StringComparison.Ordinal))
+            || exposures.Any(item => !string.Equals(item.AccountingBookCode, book.Code, StringComparison.Ordinal)
+                || !string.Equals(item.FunctionalCurrencyCode, functionalAuthority, StringComparison.Ordinal)
+                || item.TransactionCurrencyCode.Length != 3
+                || !string.Equals(item.TransactionCurrencyCode, item.TransactionCurrencyCode.ToUpperInvariant(), StringComparison.Ordinal)))
+            throw new InvalidOperationException("Book balance evidence is noncanonical or has invalid tenant/book/currency lineage.");
         return new BookBalanceInquiryDto(book.Id, book.Code, balances, exposures);
     }
 
@@ -154,25 +178,39 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         CancellationToken cancellationToken = default)
     {
         var book = await ResolveBookAsync(tenantId, RequireCode(request.AccountingBookCode), cancellationToken);
+        var primaryBook = await ResolvePrimaryCompatibilityBookAsync(tenantId, cancellationToken);
+        var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
         if (request.Apply && (string.IsNullOrWhiteSpace(request.Reason) || string.IsNullOrWhiteSpace(request.IdempotencyKey)
             || !request.ApprovedByUserId.HasValue || request.ApprovedByUserId == Guid.Empty
             || request.ApprovedByUserId == requestedByUserId))
             throw new InvalidOperationException("An approved rebuild requires a reason, idempotency key, and a different maker/checker user.");
 
-        var ownsRebuildTransaction = request.Apply && _context.Database.CurrentTransaction == null;
+        // Preview and apply share the same serialized source snapshot. A dry run must not report a
+        // torn projection while a posting commits between its source and target reads.
+        var ownsRebuildTransaction = _context.Database.IsRelational()
+            && _context.Database.CurrentTransaction == null;
         await using var rebuildTransaction = ownsRebuildTransaction
-            ? await _context.Database.BeginTransactionAsync(cancellationToken) : null;
-        if (request.Apply)
-            await AcquireTenantProjectionLockAsync(tenantId, cancellationToken);
+            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken) : null;
+        await AcquireTenantProjectionLockAsync(tenantId, cancellationToken);
 
         var transactions = await _context.AccountTransactions.AsNoTracking()
             .Include(item => item.FiscalPeriod)
+            .Include(item => item.JournalEntry)
             .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
                 && item.BookClassification == book.Code && item.PostingStatus == Posted && !item.IsDeleted)
             .OrderBy(item => item.FiscalPeriod.FiscalYearId).ThenBy(item => item.FiscalPeriod.PeriodNumber)
             .ThenBy(item => item.AccountId).ThenBy(item => item.Id).ToListAsync(cancellationToken);
-        if (transactions.Any(item => !string.Equals(item.BookClassification, book.Code, StringComparison.Ordinal)))
-            throw new InvalidOperationException("Transaction book snapshots do not exactly match the selected accounting book.");
+        if (transactions.Any(item => !string.Equals(item.BookClassification, book.Code, StringComparison.Ordinal)
+                || item.JournalEntry.TenantId != tenantId
+                || item.JournalEntry.AccountingBookId != book.Id
+                || !string.Equals(item.JournalEntry.BookClassification, book.Code, StringComparison.Ordinal)
+                || !string.Equals(item.JournalEntry.PostingStatus, Posted, StringComparison.Ordinal)))
+            throw new InvalidOperationException("Posted journal/header book evidence does not exactly match the selected accounting book.");
+        if (transactions.Any(item => !string.Equals(item.FunctionalCurrencyCode, functionalAuthority, StringComparison.Ordinal)
+                || (!string.IsNullOrWhiteSpace(item.TransactionCurrency)
+                    && (item.TransactionCurrency.Length != 3
+                        || !string.Equals(item.TransactionCurrency, item.TransactionCurrency.ToUpperInvariant(), StringComparison.Ordinal)))))
+            throw new InvalidOperationException("Transaction currency evidence does not exactly match tenant/canonical currency authority.");
         var expectedBalances = BuildBalances(tenantId, book, transactions);
         var expectedExposures = BuildExposures(tenantId, book, transactions);
         var fingerprint = Fingerprint(transactions);
@@ -183,12 +221,28 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         var balanceDrift = CountBalanceDrift(expectedBalances, existingBalances);
         var exposureDrift = CountExposureDrift(expectedExposures, existingExposures);
         var absoluteDrift = AbsoluteBalanceDrift(expectedBalances, existingBalances);
+        var compatibilityDrift = 0;
+        Dictionary<Guid, decimal>? primaryCompatibility = null;
+        if (book.Id == primaryBook.Id)
+        {
+            var accounts = await _context.Accounts.Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                .ToDictionaryAsync(item => item.Id, item => item, cancellationToken);
+            primaryCompatibility = BuildPrimaryCompatibility(transactions, accounts);
+            compatibilityDrift = accounts.Values.Count(account =>
+                account.Balance != primaryCompatibility.GetValueOrDefault(account.Id));
+        }
 
         if (!request.Apply)
-            return new(book.Id, book.Code, false, balanceDrift, exposureDrift, absoluteDrift, fingerprint, null);
+        {
+            if (rebuildTransaction != null)
+                await rebuildTransaction.CommitAsync(cancellationToken);
+            return new(book.Id, book.Code, false, balanceDrift, exposureDrift, compatibilityDrift,
+                absoluteDrift, fingerprint, null);
+        }
 
         var result = await ExecuteRebuildAsync(tenantId, book, request, requestedByUserId, expectedBalances,
-            expectedExposures, fingerprint, balanceDrift, exposureDrift, absoluteDrift, cancellationToken);
+            expectedExposures, primaryCompatibility, fingerprint, balanceDrift, exposureDrift,
+            compatibilityDrift, absoluteDrift, cancellationToken);
         if (rebuildTransaction != null)
             await rebuildTransaction.CommitAsync(cancellationToken);
         return result;
@@ -196,17 +250,23 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
 
     private async Task<BookBalanceReconciliationDto> ExecuteRebuildAsync(Guid tenantId, AccountingBook book,
         BookBalanceReconciliationRequestDto request, Guid requestedByUserId, List<AccountBalance> balances,
-        List<AccountCurrencyExposure> exposures, string fingerprint, int balanceDrift, int exposureDrift,
+        List<AccountCurrencyExposure> exposures, Dictionary<Guid, decimal>? primaryCompatibility,
+        string fingerprint, int balanceDrift, int exposureDrift, int compatibilityDrift,
         decimal absoluteDrift, CancellationToken cancellationToken)
     {
+        // No executable API is exposed in C2. Any future command surface must enforce tenant/user
+        // authorization before calling this service; this fingerprint preserves maker/checker intent.
+        var commandFingerprint = RebuildCommandFingerprint(tenantId, book, request, requestedByUserId, fingerprint);
         var existingRun = await _context.FinanceBalanceRebuildRuns.AsNoTracking().SingleOrDefaultAsync(item =>
             item.TenantId == tenantId && item.AccountingBookId == book.Id
             && item.IdempotencyKey == request.IdempotencyKey!.Trim() && !item.IsDeleted, cancellationToken);
         if (existingRun != null)
         {
-            if (!string.Equals(existingRun.SourceFingerprint, fingerprint, StringComparison.Ordinal))
-                throw new InvalidOperationException("The rebuild idempotency key was already used for different source evidence.");
-            return new(book.Id, book.Code, true, 0, 0, 0m, fingerprint, existingRun.Id);
+            if (!string.Equals(existingRun.SourceFingerprint, fingerprint, StringComparison.Ordinal)
+                || !string.Equals(existingRun.CommandFingerprint, commandFingerprint, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "The rebuild idempotency key was already used for different source or governance evidence.");
+            return new(book.Id, book.Code, true, 0, 0, 0, 0m, fingerprint, existingRun.Id);
         }
 
         var ownsTransaction = _context.Database.CurrentTransaction == null;
@@ -219,11 +279,19 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
                 item.TenantId == tenantId && item.AccountingBookId == book.Id).ToListAsync(cancellationToken));
             _context.AccountBalances.AddRange(balances);
             _context.AccountCurrencyExposures.AddRange(exposures);
+            if (primaryCompatibility != null)
+            {
+                var accounts = await _context.Accounts.Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                    .ToListAsync(cancellationToken);
+                foreach (var account in accounts)
+                    account.Balance = primaryCompatibility.GetValueOrDefault(account.Id);
+            }
             var run = new FinanceBalanceRebuildRun
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
                 AccountingBookCode = book.Code, IdempotencyKey = request.IdempotencyKey!.Trim(),
                 Reason = request.Reason!.Trim(), SourceFingerprint = fingerprint,
+                CommandFingerprint = commandFingerprint,
                 BalanceRows = balances.Count, ExposureRows = exposures.Count, AbsoluteDrift = absoluteDrift,
                 RequestedByUserId = requestedByUserId, ApprovedByUserId = request.ApprovedByUserId!.Value,
                 CompletedAt = DateTime.UtcNow, Status = "Completed", CreatedAt = DateTime.UtcNow
@@ -231,7 +299,8 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             _context.FinanceBalanceRebuildRuns.Add(run);
             await _context.SaveChangesAsync(cancellationToken);
             if (transaction != null) await transaction.CommitAsync(cancellationToken);
-            return new(book.Id, book.Code, true, balanceDrift, exposureDrift, absoluteDrift, fingerprint, run.Id);
+            return new(book.Id, book.Code, true, balanceDrift, exposureDrift, compatibilityDrift,
+                absoluteDrift, fingerprint, run.Id);
         }
         catch
         {
@@ -241,7 +310,8 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
     }
 
     private async Task ApplyExposureDeltasAsync(Guid tenantId, Guid bookId, string bookCode,
-        string functionalCurrency, IReadOnlyCollection<AccountTransaction> lines, DateTime now,
+        string functionalCurrency, FiscalPeriod currentPeriod,
+        IReadOnlyCollection<AccountTransaction> lines, DateTime now,
         CancellationToken cancellationToken)
     {
         var foreign = lines.Where(line => !string.IsNullOrWhiteSpace(line.TransactionCurrency)
@@ -269,9 +339,16 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             row.FirstTransactionDate = Min(row.FirstTransactionDate, group.Min(line => line.TransactionDate));
             row.LastTransactionDate = Max(row.LastTransactionDate, group.Max(line => line.TransactionDate));
             row.LastRebuiltAt = now;
-            // This rolling evidence is not the journal authority; it makes incremental projection changes
-            // inspectable until a governed rebuild replaces it with the canonical full-source fingerprint.
-            row.SourceFingerprint = RollingFingerprint(row.SourceFingerprint, group);
+            // Fingerprint the complete authoritative exposure source, including the currently tracked
+            // posting lines. This keeps incremental and rebuilt projections comparable.
+            var persisted = await _context.AccountTransactions.AsNoTracking()
+                .Include(item => item.FiscalPeriod)
+                .Where(item => item.TenantId == tenantId && item.AccountingBookId == bookId
+                    && item.AccountId == group.Key.AccountId && item.PostingStatus == Posted
+                    && !item.IsDeleted && item.TransactionCurrency == group.Key.Currency)
+                .ToListAsync(cancellationToken);
+            row.SourceFingerprint = Fingerprint(persisted.Concat(group)
+                .GroupBy(item => item.Id).Select(items => items.First()), currentPeriod);
         }
     }
 
@@ -310,6 +387,40 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         if (matches.Count != 1 || !string.Equals(matches[0].Code, code, StringComparison.Ordinal))
             throw new KeyNotFoundException("The selected active accounting book is unavailable, noncanonical, or ambiguous.");
         return matches[0];
+    }
+
+    private async Task<AccountingBook> ResolvePrimaryCompatibilityBookAsync(Guid tenantId, CancellationToken token)
+        => await ResolveUniqueDefaultBookAsync(tenantId, requireActivePosting: true, token);
+
+    private async Task<AccountingBook> ResolveUniqueDefaultBookAsync(
+        Guid tenantId,
+        bool requireActivePosting,
+        CancellationToken token)
+    {
+        var books = await _context.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.IsDefault && !item.IsDeleted
+                && (!requireActivePosting || (item.IsActive && item.AllowsPosting)))
+            .Take(2).ToListAsync(token);
+        if (books.Count != 1)
+            throw new InvalidOperationException(
+                "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default posting book is required.");
+        return books[0];
+    }
+
+    private async Task<string> ResolveFunctionalCurrencyAsync(Guid tenantId, CancellationToken token)
+    {
+        var configured = await _context.FinanceSettings.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .Take(2).Select(item => item.BaseCurrency).ToListAsync(token);
+        if (configured.Count > 1)
+            throw new InvalidOperationException("Tenant functional-currency authority is ambiguous.");
+        var value = configured.Count == 1 ? configured[0] : await _context.Tenants.AsNoTracking()
+            .Where(item => item.Id == tenantId && !item.IsDeleted)
+            .Select(item => item.BaseCurrency).SingleOrDefaultAsync(token);
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 3
+            || !string.Equals(value, value.ToUpperInvariant(), StringComparison.Ordinal))
+            throw new InvalidOperationException("Tenant functional-currency authority is unavailable or noncanonical.");
+        return value;
     }
 
     private static List<AccountBalance> BuildBalances(Guid tenantId, AccountingBook book, List<AccountTransaction> transactions)
@@ -353,15 +464,47 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
                 SourceFingerprint = Fingerprint(group) }).ToList();
 
     private static int CountBalanceDrift(List<AccountBalance> expected, List<AccountBalance> actual) =>
-        expected.Count(item => !actual.Any(row => row.AccountId == item.AccountId && row.FiscalPeriodId == item.FiscalPeriodId
-            && row.Currency == item.Currency && row.PeriodDebits == item.PeriodDebits && row.PeriodCredits == item.PeriodCredits
-            && row.OpeningBalance == item.OpeningBalance && row.ClosingBalance == item.ClosingBalance))
-        + actual.Count(item => !expected.Any(row => row.AccountId == item.AccountId && row.FiscalPeriodId == item.FiscalPeriodId && row.Currency == item.Currency));
+        expected.Count(item => !actual.Any(row => BalanceEquivalent(item, row)))
+        + actual.Count(item => !expected.Any(row => BalanceEquivalent(row, item)));
 
     private static int CountExposureDrift(List<AccountCurrencyExposure> expected, List<AccountCurrencyExposure> actual) =>
-        expected.Count(item => !actual.Any(row => row.AccountId == item.AccountId && row.TransactionCurrencyCode == item.TransactionCurrencyCode
-            && row.SignedForeignBalance == item.SignedForeignBalance && row.SignedFunctionalBalance == item.SignedFunctionalBalance))
-        + actual.Count(item => !expected.Any(row => row.AccountId == item.AccountId && row.TransactionCurrencyCode == item.TransactionCurrencyCode));
+        expected.Count(item => !actual.Any(row => ExposureEquivalent(item, row)))
+        + actual.Count(item => !expected.Any(row => ExposureEquivalent(row, item)));
+
+    private static bool BalanceEquivalent(AccountBalance expected, AccountBalance actual) =>
+        expected.TenantId == actual.TenantId && expected.AccountId == actual.AccountId
+        && expected.AccountingBookId == actual.AccountingBookId
+        && string.Equals(expected.BookClassification, actual.BookClassification, StringComparison.Ordinal)
+        && expected.FiscalPeriodId == actual.FiscalPeriodId
+        && string.Equals(expected.Currency, actual.Currency, StringComparison.Ordinal)
+        && expected.OpeningBalance == actual.OpeningBalance
+        && expected.OpeningBalanceType == actual.OpeningBalanceType
+        && expected.PeriodDebits == actual.PeriodDebits && expected.PeriodCredits == actual.PeriodCredits
+        && expected.PeriodNetMovement == actual.PeriodNetMovement
+        && expected.ClosingBalance == actual.ClosingBalance
+        && expected.ClosingBalanceType == actual.ClosingBalanceType
+        && expected.YearToDateDebits == actual.YearToDateDebits
+        && expected.YearToDateCredits == actual.YearToDateCredits
+        && expected.YearToDateNetMovement == actual.YearToDateNetMovement
+        && expected.TransactionCount == actual.TransactionCount
+        && expected.LastTransactionDate == actual.LastTransactionDate
+        && expected.HasActivity == actual.HasActivity
+        && expected.IsZeroBalance == actual.IsZeroBalance
+        && expected.IsNegativeBalance == actual.IsNegativeBalance
+        && expected.IsReconciled == actual.IsReconciled;
+
+    private static bool ExposureEquivalent(AccountCurrencyExposure expected, AccountCurrencyExposure actual) =>
+        expected.TenantId == actual.TenantId && expected.AccountId == actual.AccountId
+        && expected.AccountingBookId == actual.AccountingBookId
+        && string.Equals(expected.AccountingBookCode, actual.AccountingBookCode, StringComparison.Ordinal)
+        && string.Equals(expected.FunctionalCurrencyCode, actual.FunctionalCurrencyCode, StringComparison.Ordinal)
+        && string.Equals(expected.TransactionCurrencyCode, actual.TransactionCurrencyCode, StringComparison.Ordinal)
+        && expected.SignedForeignBalance == actual.SignedForeignBalance
+        && expected.SignedFunctionalBalance == actual.SignedFunctionalBalance
+        && expected.TransactionCount == actual.TransactionCount
+        && expected.FirstTransactionDate == actual.FirstTransactionDate
+        && expected.LastTransactionDate == actual.LastTransactionDate
+        && string.Equals(expected.SourceFingerprint, actual.SourceFingerprint, StringComparison.Ordinal);
 
     private static decimal AbsoluteBalanceDrift(List<AccountBalance> expected, List<AccountBalance> actual)
     {
@@ -377,24 +520,39 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         }));
     }
 
-    private static string Fingerprint(IEnumerable<AccountTransaction> rows)
+    private static string Fingerprint(IEnumerable<AccountTransaction> rows, FiscalPeriod? fallbackPeriod = null)
     {
-        var text = new StringBuilder("RHEMA-FINANCE-BOOK-BALANCE-SOURCE|V1\n");
+        var text = new StringBuilder("RHEMA-FINANCE-BOOK-BALANCE-SOURCE|V2\n");
         foreach (var row in rows.OrderBy(item => item.Id))
+        {
+            var period = row.FiscalPeriod
+                ?? (fallbackPeriod?.Id == row.FiscalPeriodId ? fallbackPeriod : null)
+                ?? throw new InvalidOperationException("Fiscal-period evidence is required for balance fingerprinting.");
             text.Append(row.Id.ToString("N")).Append('|').Append(row.TenantId.ToString("N")).Append('|')
                 .Append(row.AccountingBookId.ToString("N")).Append('|').Append(row.BookClassification).Append('|')
                 .Append(row.AccountId.ToString("N")).Append('|').Append(row.FiscalPeriodId.ToString("N")).Append('|')
+                .Append(period.FiscalYearId.ToString("N")).Append('|')
+                .Append(period.PeriodNumber.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append(period.StartDate.ToString("O", CultureInfo.InvariantCulture)).Append('|')
+                .Append(period.EndDate.ToString("O", CultureInfo.InvariantCulture)).Append('|')
+                .Append(row.TransactionDate.ToString("O", CultureInfo.InvariantCulture)).Append('|')
                 .Append(row.FunctionalCurrencyCode).Append('|').Append(row.TransactionCurrency).Append('|')
                 .Append(row.DebitAmount.ToString("0.00", CultureInfo.InvariantCulture)).Append('|')
                 .Append(row.CreditAmount.ToString("0.00", CultureInfo.InvariantCulture)).Append('|')
                 .Append(row.TransactionDebitAmount.GetValueOrDefault().ToString("0.00", CultureInfo.InvariantCulture)).Append('|')
-                .Append(row.TransactionCreditAmount.GetValueOrDefault().ToString("0.00", CultureInfo.InvariantCulture)).Append('\n');
+                .Append(row.TransactionCreditAmount.GetValueOrDefault().ToString("0.00", CultureInfo.InvariantCulture)).Append('|')
+                .Append(row.PostingStatus).Append('|').Append(row.IsDeleted ? '1' : '0').Append('\n');
+        }
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
     }
 
-    private static string RollingFingerprint(string prior, IEnumerable<AccountTransaction> rows)
+    private static string RebuildCommandFingerprint(Guid tenantId, AccountingBook book,
+        BookBalanceReconciliationRequestDto request, Guid requestedByUserId, string sourceFingerprint)
     {
-        var evidence = $"RHEMA-FINANCE-BOOK-EXPOSURE-DELTA|V1|{prior}|{Fingerprint(rows)}";
+        var evidence = string.Join("|", "RHEMA-FINANCE-BOOK-BALANCE-REBUILD-COMMAND", "V1",
+            tenantId.ToString("N"), book.Id.ToString("N"), book.Code,
+            request.IdempotencyKey!.Trim(), request.Reason!.Trim(),
+            requestedByUserId.ToString("N"), request.ApprovedByUserId!.Value.ToString("N"), sourceFingerprint);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence)));
     }
 
@@ -404,4 +562,19 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
     private static string Side(decimal value) => value < 0m ? "CR" : "DR";
     private static DateTime Min(DateTime? current, DateTime candidate) => current.HasValue && current.Value < candidate ? current.Value : candidate;
     private static DateTime Max(DateTime? current, DateTime candidate) => current.HasValue && current.Value > candidate ? current.Value : candidate;
+
+    private static Dictionary<Guid, decimal> BuildPrimaryCompatibility(
+        IEnumerable<AccountTransaction> transactions, IReadOnlyDictionary<Guid, Account> accounts)
+    {
+        var result = accounts.Keys.ToDictionary(id => id, _ => 0m);
+        foreach (var group in transactions.GroupBy(item => item.AccountId))
+        {
+            if (!accounts.TryGetValue(group.Key, out var account))
+                throw new InvalidOperationException("Primary-book transaction references an unavailable account.");
+            var signed = Round(group.Sum(item => item.DebitAmount - item.CreditAmount));
+            result[group.Key] = account.AccountType is AccountType.Liability or AccountType.Equity or AccountType.Revenue
+                ? -signed : signed;
+        }
+        return result;
+    }
 }

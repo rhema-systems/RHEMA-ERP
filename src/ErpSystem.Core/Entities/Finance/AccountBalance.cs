@@ -13,7 +13,7 @@ namespace ErpSystem.Core.Entities.Finance;
 /// Performance Benefits:
 /// - Eliminates need to sum thousands of AccountTransaction records for balance inquiries
 /// - Enables instant Trial Balance and Financial Statement generation
-/// - Supports multi-dimensional balance reporting (by segment, currency, book)
+/// - Supports exact-book functional-currency reporting; transaction-currency exposure is separate
 /// - Provides year-to-date totals without complex aggregation queries
 /// 
 /// Update Strategy:
@@ -49,18 +49,15 @@ public class AccountBalance : BusinessEntity
     public Guid AccountingBookId { get; set; }
 
     /// <summary>
-    /// Book/Classification for parallel accounting frameworks.
-    /// Values: "IFRS", "LOCAL_STATUTORY", "MANAGEMENT"
-    /// Separate balances maintained for each book to support multiple reporting standards.
+    /// Immutable stable-code snapshot of the exact accounting book represented by this row.
     /// </summary>
     [Required]
     [MaxLength(20)]
     public string BookClassification { get; set; } = "IFRS";
 
     /// <summary>
-    /// Currency code for this balance record.
-    /// If account is multi-currency, separate balance records exist for each currency.
-    /// If NULL or matches base currency, this is the base currency balance.
+    /// Tenant functional currency for this balance row. Foreign-currency amounts are held only in
+    /// AccountCurrencyExposure and must not create additional AccountBalance currency rows.
     /// </summary>
     [MaxLength(3)]
     public string Currency { get; set; } = string.Empty;
@@ -112,7 +109,7 @@ public class AccountBalance : BusinessEntity
 
     /// <summary>
     /// Closing balance at the end of the fiscal period.
-    /// Calculated: Opening Balance + Period Debits - Period Credits (adjusted for account type)
+    /// Calculated in the invariant signed coordinate: Opening + Debits - Credits.
     /// Becomes opening balance for next period.
     /// </summary>
     [Required]
@@ -201,32 +198,26 @@ public class AccountBalance : BusinessEntity
     public string? LocationSegment { get; set; }
 
     // ========================================================================
-    // MULTI-CURRENCY SPECIFIC FIELDS
+    // LEGACY FX FIELDS (NOT AUTHORITATIVE IN THE C2 BALANCE GRAIN)
     // ========================================================================
     
     /// <summary>
-    /// Exchange rate used for currency conversion to base currency.
-    /// NULL if this is a base currency balance record.
-    /// Represents period-end rate or weighted average rate depending on policy.
-    /// Format: 1 Foreign Currency = X Base Currency units
+    /// Retained predecessor-schema field. C2 never uses it to represent transaction-currency
+    /// exposure; AccountCurrencyExposure is the exact-book authority for that evidence.
     /// </summary>
     [Column(TypeName = "decimal(18,6)")]
     public decimal? ExchangeRate { get; set; }
 
     /// <summary>
-    /// Base currency equivalent of closing balance.
-    /// For foreign currency accounts, stores converted amount in base currency.
-    /// For base currency accounts, equals ClosingBalance.
-    /// Used for consolidated financial reporting.
+    /// Retained predecessor-schema field. AccountBalance is already in the tenant functional
+    /// currency, so new C2 projection code does not derive or consume this value.
     /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal? BaseCurrencyEquivalent { get; set; }
 
     /// <summary>
-    /// Unrealized gain/loss on foreign currency balance (if applicable).
-    /// Calculated during currency revaluation process per IAS 21.
-    /// Represents difference between historical rate and period-end rate.
-    /// NULL if base currency or no revaluation performed.
+    /// Retained predecessor-schema field. Revaluation and exact-book exposure evidence live in
+    /// their dedicated models and must not be inferred from this nullable compatibility value.
     /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal? UnrealizedGainLoss { get; set; }
@@ -414,15 +405,15 @@ public class AccountBalance : BusinessEntity
 /// Index recommendations for AccountBalance table to optimize query performance.
 /// 
 /// CRITICAL INDEXES:
-/// 1. Composite index on (AccountId, FiscalPeriodId, BookClassification, Currency)
+/// 1. Composite index on (TenantId, AccountId, AccountingBookId, FiscalPeriodId, Currency)
 ///    - Primary lookup pattern for balance inquiries
 ///    - Ensures unique constraint on balance records
 /// 
-/// 2. Index on (FiscalPeriodId, BookClassification)
+/// 2. Index on (TenantId, AccountingBookId, FiscalPeriodId)
 ///    - Used for Trial Balance generation (all accounts for a period)
 ///    - Supports period-level aggregation queries
 /// 
-/// 3. Index on (AccountId, BookClassification) INCLUDE (ClosingBalance, Currency)
+/// 3. Index on (TenantId, AccountId, AccountingBookId) INCLUDE (ClosingBalance, Currency)
 ///    - Multi-period balance history queries
 ///    - Account roll-forward reports
 /// 
@@ -442,13 +433,13 @@ public class AccountBalance : BusinessEntity
 /// Database constraints to implement:
 /// 
 /// UNIQUE CONSTRAINT:
-/// - (AccountId, FiscalPeriodId, BookClassification, Currency)
+/// - (TenantId, AccountId, AccountingBookId, FiscalPeriodId, Currency)
 ///   Ensures only one balance record per account-period-book-currency combination
 /// 
 /// CHECK CONSTRAINTS:
 /// - OpeningBalanceType IN ('DR', 'CR')
 /// - ClosingBalanceType IN ('DR', 'CR')
-/// - BookClassification IN ('IFRS', 'LOCAL_STATUTORY', 'MANAGEMENT')
+/// - BookClassification is an immutable snapshot matching the related AccountingBook.Code
 /// - PeriodDebits >= 0
 /// - PeriodCredits >= 0
 /// - TransactionCount >= 0

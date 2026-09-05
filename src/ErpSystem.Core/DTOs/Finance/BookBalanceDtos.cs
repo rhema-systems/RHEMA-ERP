@@ -22,4 +22,5 @@ public sealed record BookBalanceReconciliationRequestDto(
 
 public sealed record BookBalanceReconciliationDto(
     Guid AccountingBookId, string AccountingBookCode, bool Applied, int BalanceDriftCount,
-    int ExposureDriftCount, decimal AbsoluteDrift, string SourceFingerprint, Guid? RebuildRunId);
+    int ExposureDriftCount, int PrimaryCompatibilityDriftCount, decimal AbsoluteDrift,
+    string SourceFingerprint, Guid? RebuildRunId);

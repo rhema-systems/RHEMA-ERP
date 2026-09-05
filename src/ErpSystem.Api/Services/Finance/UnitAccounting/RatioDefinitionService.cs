@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.GL;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -353,9 +354,20 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             {
                 case RatioComponentType.FinancialAccount:
                     if (!accountId.HasValue) return 0;
-                    var glBalance = await _unitOfWork.Repository<AccountBalance>()
-                        .FirstOrDefaultAsync(b => b.TenantId == TenantId && b.AccountId == accountId.Value && b.FiscalPeriodId == fiscalPeriodId);
-                    return glBalance?.ClosingBalance ?? 0;
+                    var authority = await PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(
+                        _unitOfWork, TenantId, cancellationToken);
+                    var glBalances = await _unitOfWork.Repository<AccountBalance>()
+                        .GetQueryable(b => b.TenantId == TenantId && b.AccountId == accountId.Value
+                            && b.FiscalPeriodId == fiscalPeriodId
+                            && b.AccountingBookId == authority.AccountingBookId
+                            && b.Currency == authority.FunctionalCurrencyCode
+                            && !b.IsDeleted)
+                        .Take(2)
+                        .Select(b => b.ClosingBalance)
+                        .ToListAsync(cancellationToken);
+                    if (glBalances.Count > 1)
+                        throw new InvalidOperationException("The exact primary-book account-balance grain is ambiguous.");
+                    return glBalances.SingleOrDefault();
 
                 case RatioComponentType.UnitAccount:
                     if (!accountId.HasValue) return 0;

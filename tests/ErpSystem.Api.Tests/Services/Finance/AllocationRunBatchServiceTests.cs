@@ -44,6 +44,8 @@ public sealed class AllocationRunBatchServiceTests
             .Include(item => item.Lines)
             .SingleAsync(item => item.Id == batch.Id);
         persisted.Status.Should().Be(AllocationRunBatchStatus.Draft);
+        persisted.BookClassification.Should().Be("PRIMARY_FULL");
+        persisted.FunctionalCurrencyCode.Should().Be("GHS");
         persisted.Lines.Should().HaveCount(2);
 
         var duplicate = () => service.CreateRunBatchAsync(CreateRunRequest(fixture));
@@ -242,7 +244,7 @@ public sealed class AllocationRunBatchServiceTests
         var targetTwo = SeedAccount(db, tenantId, "6120", "Rent - Admin", AccountType.Expense);
         var book = new AccountingBook
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS",
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "PRIMARY_FULL", Name = "Primary full book",
             IsDefault = true, IsActive = true, AllowsPosting = true
         };
         db.AccountingBooks.Add(book);
@@ -266,7 +268,7 @@ public sealed class AllocationRunBatchServiceTests
             AccountId = source.Id,
             AccountingBookId = book.Id,
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            BookClassification = book.Code,
             Currency = "GHS",
             ClosingBalance = 1000m,
             ClosingBalanceType = "DR"

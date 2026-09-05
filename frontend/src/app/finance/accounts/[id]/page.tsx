@@ -604,16 +604,12 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                         </div>
                                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2">
                                                             <div>
-                                                                <p className="text-muted-foreground">Foreign Balance</p>
-                                                                <p className="font-mono font-semibold">
-                                                                    {formatCurrency(link.foreignCurrencyBalance, link.linkedCurrencyCode)}
-                                                                </p>
+                                                                <p className="text-muted-foreground">Foreign Exposure</p>
+                                                                <p className="text-xs font-medium">Select an exact book in balance inquiry</p>
                                                             </div>
                                                             <div>
-                                                                <p className="text-muted-foreground">Base Balance</p>
-                                                                <p className="font-mono font-semibold">
-                                                                    {formatCurrency(link.baseCurrencyBalance, account.currencyCode)}
-                                                                </p>
+                                                                <p className="text-muted-foreground">Functional Exposure</p>
+                                                                <p className="text-xs font-medium">Not held on currency-link configuration</p>
                                                             </div>
                                                             <div>
                                                                 <p className="text-muted-foreground">Current Rate</p>

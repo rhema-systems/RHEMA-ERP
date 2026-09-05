@@ -21,12 +21,16 @@ public sealed class BookBalanceMigrationC2SqlServerTests
 
         (await database.ScalarAsync<Guid>("SELECT AccountingBookId FROM AccountBalances"))
             .Should().Be(evidence.BookId);
+        (await database.ScalarAsync<decimal>("SELECT Balance FROM Accounts WHERE TenantId = '" + evidence.TenantId + "'"))
+            .Should().Be(1000m, "legacy primary plus Local 2,000 must be repaired to the 1,000 primary representation");
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.foreign_keys WHERE name=N'FK_AccountBalances_Accounts_TenantId_AccountId'"))
             .Should().Be(1);
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name IN (N'AccountCurrencyExposures',N'FinanceBalanceRebuildRuns')"))
             .Should().Be(2);
 
         await database.ApplyAsync(up: false);
+        (await database.ScalarAsync<decimal>("SELECT Balance FROM Accounts WHERE TenantId = '" + evidence.TenantId + "'"))
+            .Should().Be(2000m);
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID(N'AccountBalances') AND name=N'AccountingBookId'"))
             .Should().Be(0);
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.foreign_keys WHERE name=N'FK_AccountBalances_Accounts_AccountId'"))
@@ -40,8 +44,11 @@ public sealed class BookBalanceMigrationC2SqlServerTests
         {
             ("ifrs", "GHS", false, false, false, false),
             ("IFRS ", "GHS", false, false, false, false),
+            ("UNKNOWN", "GHS", false, false, false, false),
             ("ALL_ACTIVE_BOOKS", "GHS", false, false, false, false),
             ("IFRS", "", false, false, false, false),
+            ("IFRS", "ghs", false, false, false, false),
+            ("IFRS", "USD", false, false, false, false),
             ("IFRS", "GHS", true, false, false, false),
             ("IFRS", "GHS", false, true, false, false),
             ("IFRS", "GHS", false, false, true, false),
@@ -57,6 +64,21 @@ public sealed class BookBalanceMigrationC2SqlServerTests
             (await action.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
             (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID(N'AccountBalances') AND name=N'AccountingBookId'"))
                 .Should().Be(0, "the complete preflight is the first migration operation");
+            (await database.ScalarAsync<decimal>("SELECT TOP(1) Balance FROM Accounts"))
+                .Should().Be(2000m, "preflight must fail before repairing generic balances");
+        }
+    }
+
+    [SqlServerFact]
+    public async Task Migration_RejectsMissingOrAmbiguousPrimaryAuthorityBeforeMutation()
+    {
+        foreach (var defaultBookCount in new[] { 0, 2 })
+        {
+            await using var database = await DisposableDatabase.CreateAsync();
+            await database.CreatePredecessorAsync("IFRS", "GHS", defaultBookCount: defaultBookCount);
+            var action = () => database.ApplyAsync(up: true);
+            (await action.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+            (await database.ScalarAsync<decimal>("SELECT TOP(1) Balance FROM Accounts")).Should().Be(2000m);
         }
     }
 
@@ -94,31 +116,44 @@ public sealed class BookBalanceMigrationC2SqlServerTests
 
         public async Task<(Guid TenantId, Guid BookId)> CreatePredecessorAsync(string balanceBookCode, string currency,
             bool crossTenantBook = false, bool crossTenantAccount = false, bool crossTenantPeriod = false,
-            bool ambiguousBook = false)
+            bool ambiguousBook = false, int defaultBookCount = 1)
         {
-            var tenantId = Guid.NewGuid(); var bookId = Guid.NewGuid(); var accountId = Guid.NewGuid(); var periodId = Guid.NewGuid();
+            var tenantId = Guid.NewGuid(); var bookId = Guid.NewGuid(); var localBookId = Guid.NewGuid();
+            var accountId = Guid.NewGuid(); var periodId = Guid.NewGuid();
             var bookTenantId = crossTenantBook ? Guid.NewGuid() : tenantId;
             var accountTenantId = crossTenantAccount ? Guid.NewGuid() : tenantId;
             var periodTenantId = crossTenantPeriod ? Guid.NewGuid() : tenantId;
             var duplicateBook = ambiguousBook
-                ? $"INSERT AccountingBooks VALUES ('{Guid.NewGuid()}','{tenantId}',N'IFRS',0);" : string.Empty;
+                ? $"INSERT AccountingBooks VALUES ('{Guid.NewGuid()}','{tenantId}',N'IFRS',0,0,1,1);" : string.Empty;
+            var secondDefault = defaultBookCount == 2 ? 1 : 0;
+            var primaryDefault = defaultBookCount == 0 ? 0 : 1;
+            var primaryJournalId = Guid.NewGuid(); var localJournalId = Guid.NewGuid();
             await ExecuteAsync($$"""
-CREATE TABLE Tenants (Id uniqueidentifier NOT NULL CONSTRAINT PK_Tenants PRIMARY KEY);
-CREATE TABLE AccountingBooks (Id uniqueidentifier NOT NULL CONSTRAINT PK_AccountingBooks PRIMARY KEY, TenantId uniqueidentifier NOT NULL, Code nvarchar(20) NOT NULL, IsDeleted bit NOT NULL, CONSTRAINT AK_AccountingBooks_TenantId_Id UNIQUE(TenantId,Id));
-CREATE TABLE Accounts (Id uniqueidentifier NOT NULL CONSTRAINT PK_Accounts PRIMARY KEY, TenantId uniqueidentifier NOT NULL, CONSTRAINT AK_Accounts_TenantId_Id UNIQUE(TenantId,Id));
+CREATE TABLE Tenants (Id uniqueidentifier NOT NULL CONSTRAINT PK_Tenants PRIMARY KEY, BaseCurrency nvarchar(3) NOT NULL, IsDeleted bit NOT NULL);
+CREATE TABLE AccountingBooks (Id uniqueidentifier NOT NULL CONSTRAINT PK_AccountingBooks PRIMARY KEY, TenantId uniqueidentifier NOT NULL, Code nvarchar(20) NOT NULL, IsDeleted bit NOT NULL, IsDefault bit NOT NULL, IsActive bit NOT NULL, AllowsPosting bit NOT NULL, CONSTRAINT AK_AccountingBooks_TenantId_Id UNIQUE(TenantId,Id));
+CREATE TABLE Accounts (Id uniqueidentifier NOT NULL CONSTRAINT PK_Accounts PRIMARY KEY, TenantId uniqueidentifier NOT NULL, AccountType int NOT NULL, Balance decimal(18,2) NOT NULL, IsDeleted bit NOT NULL, CONSTRAINT AK_Accounts_TenantId_Id UNIQUE(TenantId,Id));
 CREATE TABLE FiscalPeriods (Id uniqueidentifier NOT NULL CONSTRAINT PK_FiscalPeriods PRIMARY KEY, TenantId uniqueidentifier NOT NULL);
 CREATE INDEX IX_FiscalPeriods_TenantId ON FiscalPeriods(TenantId);
+CREATE TABLE FinanceSettings (Id uniqueidentifier NOT NULL CONSTRAINT PK_FinanceSettings PRIMARY KEY, TenantId uniqueidentifier NOT NULL, BaseCurrency nvarchar(3) NOT NULL, IsDeleted bit NOT NULL);
+CREATE TABLE JournalEntries (Id uniqueidentifier NOT NULL CONSTRAINT PK_JournalEntries PRIMARY KEY, TenantId uniqueidentifier NOT NULL, AccountingBookId uniqueidentifier NOT NULL, BookClassification nvarchar(20) NOT NULL, PostingStatus nvarchar(20) NOT NULL, IsDeleted bit NOT NULL);
+CREATE TABLE AccountTransactions (Id uniqueidentifier NOT NULL CONSTRAINT PK_AccountTransactions PRIMARY KEY, TenantId uniqueidentifier NOT NULL, AccountId uniqueidentifier NOT NULL, JournalEntryId uniqueidentifier NOT NULL, AccountingBookId uniqueidentifier NOT NULL, BookClassification nvarchar(20) NOT NULL, PostingStatus nvarchar(20) NOT NULL, DebitAmount decimal(18,2) NOT NULL, CreditAmount decimal(18,2) NOT NULL, IsDeleted bit NOT NULL);
 CREATE TABLE AccountBalances (Id uniqueidentifier NOT NULL CONSTRAINT PK_AccountBalances PRIMARY KEY, TenantId uniqueidentifier NOT NULL, AccountId uniqueidentifier NOT NULL, FiscalPeriodId uniqueidentifier NOT NULL, BookClassification nvarchar(20) NOT NULL, Currency nvarchar(3) NULL);
 CREATE INDEX IX_AccountBalances_AccountId ON AccountBalances(AccountId);
 CREATE INDEX IX_AccountBalances_FiscalPeriodId ON AccountBalances(FiscalPeriodId);
 CREATE UNIQUE INDEX IX_AccountBalances_TenantId_AccountId_FiscalPeriodId_BookClassification_Currency ON AccountBalances(TenantId,AccountId,FiscalPeriodId,BookClassification,Currency);
 ALTER TABLE AccountBalances ADD CONSTRAINT FK_AccountBalances_Accounts_AccountId FOREIGN KEY(AccountId) REFERENCES Accounts(Id);
 ALTER TABLE AccountBalances ADD CONSTRAINT FK_AccountBalances_FiscalPeriods_FiscalPeriodId FOREIGN KEY(FiscalPeriodId) REFERENCES FiscalPeriods(Id);
-INSERT Tenants VALUES ('{{tenantId}}');
-INSERT AccountingBooks VALUES ('{{bookId}}','{{bookTenantId}}',N'IFRS',0);
+INSERT Tenants VALUES ('{{tenantId}}',N'GHS',0);
+INSERT AccountingBooks VALUES ('{{bookId}}','{{bookTenantId}}',N'IFRS',0,{{primaryDefault}},1,1);
+INSERT AccountingBooks VALUES ('{{localBookId}}','{{tenantId}}',N'LOCAL_STATUTORY',0,{{secondDefault}},1,1);
 {{duplicateBook}}
-INSERT Accounts VALUES ('{{accountId}}','{{accountTenantId}}');
+INSERT Accounts VALUES ('{{accountId}}','{{accountTenantId}}',1,2000,0);
 INSERT FiscalPeriods VALUES ('{{periodId}}','{{periodTenantId}}');
+INSERT FinanceSettings VALUES ('{{Guid.NewGuid()}}','{{tenantId}}',N'GHS',0);
+INSERT JournalEntries VALUES ('{{primaryJournalId}}','{{tenantId}}','{{bookId}}',N'IFRS',N'Posted',0);
+INSERT JournalEntries VALUES ('{{localJournalId}}','{{tenantId}}','{{localBookId}}',N'LOCAL_STATUTORY',N'Posted',0);
+INSERT AccountTransactions VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{primaryJournalId}}','{{bookId}}',N'IFRS',N'Posted',1000,0,0);
+INSERT AccountTransactions VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{localJournalId}}','{{localBookId}}',N'LOCAL_STATUTORY',N'Posted',1000,0,0);
 INSERT AccountBalances VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{periodId}}',N'{{balanceBookCode.Replace("'", "''")}}',N'{{currency.Replace("'", "''")}}');
 """);
             return (tenantId, bookId);

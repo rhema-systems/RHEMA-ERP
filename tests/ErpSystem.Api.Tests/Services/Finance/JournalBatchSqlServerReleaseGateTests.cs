@@ -401,6 +401,44 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         (await verification.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(1);
     }
 
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookBalanceC2")]
+    public async Task ConcurrentPostingAndDryReconciliation_ShouldReadOneConsistentSerializedSnapshot()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+        await using var postingContext = database.CreateContext();
+        await using var previewContext = database.CreateContext();
+        var sourceId = Guid.NewGuid();
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "TEST", SourceDocumentType = "C2ConcurrentPreview",
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post", Description = "Concurrent C2 posting/preview",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"C2|CONCURRENT-PREVIEW|{sourceId:N}|IFRS|POST", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+
+        var posting = CreateSqlPostingEngine(postingContext, seeded.TenantId).PostAsync(request);
+        var preview = new BookBalanceReadModelService(previewContext).ReconcileAsync(seeded.TenantId,
+            new BookBalanceReconciliationRequestDto("IFRS", false, null, null, null), Guid.NewGuid());
+        await Task.WhenAll(posting, preview);
+
+        preview.Result.BalanceDriftCount.Should().Be(0,
+            "the preview must run wholly before or wholly after the posting under the shared projection lock");
+        preview.Result.ExposureDriftCount.Should().Be(0);
+        await using var verification = database.CreateContext();
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
     private static FinancePostingEngine CreateSqlPostingEngine(ApplicationDbContext context, Guid tenantId)
     {
         var currentUser = new Mock<ICurrentUserService>();

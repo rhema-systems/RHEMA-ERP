@@ -318,8 +318,12 @@ export interface AccountCurrencyLink {
     revaluationQuoteSide: ExchangeRateQuoteSide;
     effectiveDate?: string;
     effectiveEndDate?: string;
-    foreignCurrencyBalance: number;
-    baseCurrencyBalance: number;
+    /** @deprecated AccountCurrencyLink is configuration; use exact-book balance exposure. */
+    foreignCurrencyBalance: number | null;
+    /** @deprecated AccountCurrencyLink is configuration; use exact-book balance exposure. */
+    baseCurrencyBalance: number | null;
+    hasAuthoritativeCurrentBalance: boolean;
+    currentBalanceAuthority: 'ExactBookExposureRequired';
     currentExchangeRate?: number;
     lastRevaluationDate?: string;
     lastRevaluationAdjustment?: number;
