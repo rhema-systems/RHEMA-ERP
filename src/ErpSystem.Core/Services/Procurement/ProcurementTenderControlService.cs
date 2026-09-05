@@ -190,6 +190,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 "This statutory tender-control stage requires an advanced authority route. The sourcing case remains valid for the standard approved-PR tender workflow.");
         if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             throw Conflict("TENDER_APPROVAL_REQUIRED", "The tender must complete its document approval workflow before advertisement.");
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         if (lineage.Case.SelectedMethod == ProcurementMethodType.QualityAndCostBasedSelection)
         {
             if (!tender.UseQCBSEvaluation)

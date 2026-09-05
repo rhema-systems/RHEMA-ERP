@@ -199,6 +199,14 @@ public class EvaluationTemplatesController : ControllerBase
             var template = await _service.UpdateAsync(id, dto);
             return Ok(template);
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return NotFound(ex.Message);
@@ -221,6 +229,14 @@ public class EvaluationTemplatesController : ControllerBase
         {
             await _service.DeleteAsync(id);
             return NoContent();
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (InvalidOperationException ex)
         {

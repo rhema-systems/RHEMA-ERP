@@ -19,6 +19,37 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class TenderPersistenceRoundTripTests
 {
     [Theory]
+    [InlineData("create", "Draft")]
+    [InlineData("update", "Draft")]
+    [InlineData("submit", "Draft")]
+    [InlineData("approve", "Submitted")]
+    [InlineData("publish", "Approved")]
+    public async Task ConfigurationMismatchBlocksEachLifecycleBoundaryBeforeWrites(string stage, string status)
+    {
+        var fixture = new Fixture();
+        var tender = fixture.SeedDraftTender();
+        tender.Status = status;
+        tender.EvaluationTemplateId = Guid.NewGuid(); // Fixture returns a QCBS template.
+        tender.UseQCBSEvaluation = false;
+        fixture.Workflow.Setup(service => service.CanUserApproveAsync("Tender", tender.Id, fixture.UserId))
+            .ReturnsAsync(true);
+        Func<Task> action = stage switch
+        {
+            "create" => () => fixture.Service.CreateTenderAsync(new CreateTenderDto
+                { EvaluationTemplateId = tender.EvaluationTemplateId, UseQCBSEvaluation = false }),
+            "update" => () => fixture.Service.UpdateTenderAsync(tender.Id, new UpdateTenderDto
+                { EvaluationTemplateId = tender.EvaluationTemplateId, UseQCBSEvaluation = false }),
+            "submit" => () => fixture.Service.SubmitTenderForApprovalAsync(tender.Id, fixture.UserId),
+            "approve" => () => fixture.Service.ApproveTenderAsync(tender.Id, fixture.UserId),
+            _ => () => fixture.Service.PublishTenderAsync(tender.Id, new PublishTenderDto())
+        };
+        (await action.Should().ThrowAsync<TenderEvaluationConfigurationException>())
+            .Which.Code.Should().Be("TENDER_EVALUATION_METHOD_MISMATCH");
+        tender.Status.Should().Be(status);
+        fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task PublicationRoutesStandardAndAdvancedCasesWithoutDroppingDocumentChecks(bool advanced)
@@ -381,6 +412,10 @@ public sealed class TenderPersistenceRoundTripTests
 
             var unitOfWork = new Mock<IUnitOfWork>();
             UnitOfWork = unitOfWork;
+            var templates = new Mock<IGenericRepository<EvaluationTemplate>>();
+            templates.Setup(repository => repository.GetByIdAsync(It.IsAny<Guid>()))
+                .ReturnsAsync((Guid id) => Template(id, _templates.GetValueOrDefault(id, "Template A"), tenantId));
+            UnitOfWork.Setup(repository => repository.Repository<EvaluationTemplate>()).Returns(templates.Object);
             UnitOfWork.Setup(repository => repository.Repository<TenderBid>()).Returns(bids.Object);
             UnitOfWork.Setup(repository => repository.Repository<TenderEvaluation>()).Returns(evaluations.Object);
             UnitOfWork.Setup(repository => repository.Repository<ProcurementSourcingCase>()).Returns(sourcingCases.Object);
@@ -536,6 +571,10 @@ public sealed class TenderPersistenceRoundTripTests
             TenantId = tenantId,
             TemplateName = name,
             TemplateCode = name.Replace(" ", "-").ToUpperInvariant(),
+            ScoringMethod = "QCBS",
+            TechnicalWeight = name == "Template B" ? 65 : 70,
+            FinancialWeight = name == "Template B" ? 35 : 30,
+            MinimumTechnicalScore = name == "Template B" ? 80 : 75,
             Category = "Goods",
             TenderType = "ITB"
         };

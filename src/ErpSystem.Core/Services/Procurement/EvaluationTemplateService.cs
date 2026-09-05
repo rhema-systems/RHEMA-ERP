@@ -188,6 +188,20 @@ public class EvaluationTemplateService : IEvaluationTemplateService
             throw new InvalidOperationException($"Evaluation template with ID '{id}' not found");
         }
 
+        var linkedTenders = await _unitOfWork.Repository<Tender>().FindAsync(tender =>
+            tender.TenantId == _currentUserProvider.TenantId && !tender.IsDeleted && tender.EvaluationTemplateId == id);
+        if (linkedTenders.Any(tender => tender.Status != "Draft"))
+            throw new TenderEvaluationConfigurationException("EVALUATION_TEMPLATE_IN_USE",
+                "This template is used by a tender that has left Draft. Create a new template for future tenders; existing evaluation rules must remain unchanged.");
+        var proposed = new EvaluationTemplate
+        {
+            ScoringMethod = dto.ScoringMethod, TechnicalWeight = dto.TechnicalWeight,
+            FinancialWeight = dto.FinancialWeight, MinimumTechnicalScore = dto.MinimumTechnicalScore
+        };
+        foreach (var tender in linkedTenders)
+            TenderEvaluationConfiguration.Validate(proposed, tender.UseQCBSEvaluation,
+                tender.TechnicalWeight, tender.FinancialWeight, tender.MinimumTechnicalScore);
+
         // Validate criteria weights sum to 100 if any criteria provided
         if (dto.Criteria.Any())
         {
@@ -264,6 +278,11 @@ public class EvaluationTemplateService : IEvaluationTemplateService
         {
             throw new InvalidOperationException($"Evaluation template with ID '{id}' not found");
         }
+
+        if (await _unitOfWork.Repository<Tender>().ExistsAsync(tender =>
+                tender.TenantId == _currentUserProvider.TenantId && !tender.IsDeleted && tender.EvaluationTemplateId == id))
+            throw new TenderEvaluationConfigurationException("EVALUATION_TEMPLATE_IN_USE",
+                "This evaluation template is assigned to a tender and cannot be deleted.");
 
         // Delete criteria first
         await _criterionRepository.DeleteByTemplateIdAsync(id);

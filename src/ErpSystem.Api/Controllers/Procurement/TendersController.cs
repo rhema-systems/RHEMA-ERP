@@ -169,6 +169,14 @@ public class TendersController : ControllerBase
             var tender = await _tenderService.CreateTenderAsync(dto);
             return CreatedAtAction(nameof(GetTender), new { id = tender.Id }, tender);
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (ProcurementRequisitionSourcingBlockedException ex)
         {
             return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
@@ -228,6 +236,14 @@ public class TendersController : ControllerBase
             var tender = await _tenderService.UpdateTenderAsync(id, dto);
             return Ok(tender);
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -251,6 +267,14 @@ public class TendersController : ControllerBase
             var userId = _currentUserProvider.UserId;
             await _tenderService.SubmitTenderForApprovalAsync(id, userId);
             return NoContent();
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (ProcurementTenderWorkflowValidationException ex)
         {
@@ -279,6 +303,14 @@ public class TendersController : ControllerBase
             var userId = _currentUserProvider.UserId;
             await _tenderService.ApproveTenderAsync(id, userId, request?.Notes);
             return NoContent();
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -339,6 +371,14 @@ public class TendersController : ControllerBase
         {
             var tender = await _tenderService.PublishTenderAsync(id, dto);
             return Ok(tender);
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (ProcurementTenderDocumentControlConflictException ex)
         {

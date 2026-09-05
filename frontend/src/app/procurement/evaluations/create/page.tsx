@@ -22,6 +22,7 @@ import { createEvaluationIdempotencyKey, isEvaluationCommitteeControlError } fro
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
 import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
+import { getTenderEvaluationConfigurationError } from '@/lib/tender-evaluation-configuration';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -109,9 +110,10 @@ function CreateEvaluationContent() {
       }
 
       // Load evaluation template if assigned
-      if (bidData.evaluationTemplateId) {
+      setTemplate(null);
+      if (tenderData?.evaluationTemplateId) {
         try {
-          const templateData = await evaluationTemplateService.getById(bidData.evaluationTemplateId);
+          const templateData = await evaluationTemplateService.getById(tenderData.evaluationTemplateId);
           setTemplate(templateData);
 
           // Initialize scores for each criterion to 0
@@ -145,7 +147,7 @@ function CreateEvaluationContent() {
       return 0;
     }
 
-    if (template.scoringMethod === 'WeightedAverage') {
+    if (template.scoringMethod === 'WeightedAverage' || template.scoringMethod === 'QCBS') {
       // Calculate weighted average
       let totalWeightedScore = 0;
       let totalWeight = 0;
@@ -171,7 +173,7 @@ function CreateEvaluationContent() {
       });
 
       return count > 0 ? totalScore / count : 0;
-    } else {
+    } else if (template.scoringMethod === 'PassFail') {
       // PassFail - check if all mandatory criteria meet minimum
       let allPass = true;
       template.criteria.forEach(criterion => {
@@ -184,6 +186,7 @@ function CreateEvaluationContent() {
       });
       return allPass ? 100 : 0;
     }
+    return 0; // Unsupported methods are blocked; never treat them as PassFail.
   };
 
   const buildEvaluationCriteriaJson = (): string => {
@@ -309,6 +312,28 @@ function CreateEvaluationContent() {
   const evaluationRoute = sourceTender
     ? getTenderEvaluationRoute(sourceTender, bidId)
     : undefined;
+
+  const configurationError = sourceTender
+    ? getTenderEvaluationConfigurationError(sourceTender, template)
+    : undefined;
+
+  if (configurationError && evaluationRoute?.mode !== 'controlled') {
+    return (
+      <div className="container mx-auto py-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Evaluation configuration needs correction</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{configurationError}</p>
+            <p>No scores can be saved or submitted until this is resolved.</p>
+            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${sourceTender?.id}`)}>
+              Return to tender
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
 
   if (evaluationRoute?.mode === 'controlled') {
     return (
