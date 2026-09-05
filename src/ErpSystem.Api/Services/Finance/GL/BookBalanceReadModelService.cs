@@ -270,9 +270,10 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         if (existingRun != null)
         {
             if (!string.Equals(existingRun.SourceFingerprint, fingerprint, StringComparison.Ordinal)
-                || !string.Equals(existingRun.CommandFingerprint, commandFingerprint, StringComparison.Ordinal))
+                || !string.Equals(existingRun.CommandFingerprint, commandFingerprint, StringComparison.Ordinal)
+                || balanceDrift != 0 || exposureDrift != 0 || compatibilityDrift != 0 || absoluteDrift != 0m)
                 throw new InvalidOperationException(
-                    "The rebuild idempotency key was already used for different source or governance evidence.");
+                    "The rebuild idempotency key was already used for different source or governance evidence, or current projection drift.");
             return new(book.Id, book.Code, true, 0, 0, 0, 0m, fingerprint, existingRun.Id);
         }
 
@@ -288,10 +289,15 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             _context.AccountCurrencyExposures.AddRange(exposures);
             if (primaryCompatibility != null)
             {
-                var accounts = await _context.Accounts.Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                var eligibleAccountIds = primaryCompatibility.Keys.ToArray();
+                var accounts = await _context.Accounts.Where(item => item.TenantId == tenantId
+                        && eligibleAccountIds.Contains(item.Id) && !item.IsDeleted)
                     .ToListAsync(cancellationToken);
+                if (accounts.Count != eligibleAccountIds.Length)
+                    throw new InvalidOperationException(
+                        "Primary compatibility account authority changed before the governed rebuild could be applied.");
                 foreach (var account in accounts)
-                    account.Balance = primaryCompatibility.GetValueOrDefault(account.Id);
+                    account.Balance = primaryCompatibility[account.Id];
             }
             var run = new FinanceBalanceRebuildRun
             {
@@ -567,11 +573,12 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         LoadPrimaryCompatibilityAuthorityAsync(Guid tenantId, AccountingBook book,
             IReadOnlyCollection<AccountTransaction> transactions, CancellationToken cancellationToken)
     {
-        var accountIds = transactions.Select(item => item.AccountId).Distinct().OrderBy(item => item).ToArray();
         var accounts = await _context.Accounts.AsNoTracking()
-            .Where(item => item.TenantId == tenantId && accountIds.Contains(item.Id) && !item.IsDeleted)
-            .ToDictionaryAsync(item => item.Id, cancellationToken);
-        if (accounts.Count != accountIds.Length)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .OrderBy(item => item.Id).ToListAsync(cancellationToken);
+        var accountIds = accounts.Select(item => item.Id).ToArray();
+        var transactionAccountIds = transactions.Select(item => item.AccountId).ToHashSet();
+        if (transactionAccountIds.Except(accountIds).Any())
             throw new InvalidOperationException("Primary compatibility evidence references an unavailable account.");
 
         var mappings = await _context.AccountAccountingBooks.AsNoTracking()
@@ -579,20 +586,33 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
             .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
                 && accountIds.Contains(item.AccountId) && !item.IsDeleted)
             .ToListAsync(cancellationToken);
-        foreach (var accountId in accountIds)
+        var eligibleAccounts = new Dictionary<Guid, Account>();
+        var eligibleMappings = new List<AccountAccountingBook>();
+        foreach (var account in accounts)
         {
-            var eligible = mappings.Where(item => item.AccountId == accountId && item.IsEnabled).ToArray();
-            var account = accounts[accountId];
-            if (eligible.Length != 1 || eligible[0].AccountClassification is not { } classification
-                || classification.TenantId != tenantId || classification.AccountingBookId != book.Id
-                || classification.Status != AccountClassificationStatus.Active
-                || !classification.IsPostingClassification || classification.IsDeleted
-                || classification.CoreAccountType != account.AccountType)
+            var enabled = mappings.Where(item => item.AccountId == account.Id && item.IsEnabled).ToArray();
+            var classification = enabled.Length == 1 ? enabled[0].AccountClassification : null;
+            var valid = classification is not null
+                && classification.TenantId == tenantId && classification.AccountingBookId == book.Id
+                && classification.Status == AccountClassificationStatus.Active
+                && classification.IsPostingClassification && !classification.IsDeleted
+                && classification.CoreAccountType == account.AccountType;
+            if (valid)
+            {
+                eligibleAccounts.Add(account.Id, account);
+                eligibleMappings.Add(enabled[0]);
+                continue;
+            }
+
+            // C2 cannot truthfully derive legacy Account.Balance for an account outside the exact
+            // primary-book authority. Zero/inactive compatibility state is left untouched; posted
+            // evidence or a historical non-zero balance blocks the run rather than being guessed away.
+            if (transactionAccountIds.Contains(account.Id) || account.Balance != 0m)
                 throw new InvalidOperationException(
-                    "Primary compatibility rebuild requires one enabled compatible account/book classification mapping.");
+                    "Primary compatibility rebuild found posted or non-zero account evidence without one enabled compatible account/book classification mapping.");
         }
 
-        return (accounts, CompatibilityAuthorityFingerprint(accounts.Values, mappings.Where(item => item.IsEnabled)));
+        return (eligibleAccounts, CompatibilityAuthorityFingerprint(eligibleAccounts.Values, eligibleMappings));
     }
 
     private static string CompatibilityAuthorityFingerprint(

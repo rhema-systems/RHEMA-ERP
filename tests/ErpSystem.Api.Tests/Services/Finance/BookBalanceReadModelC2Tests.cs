@@ -128,6 +128,109 @@ public sealed class BookBalanceReadModelC2Tests
         (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(1);
     }
 
+    [Fact]
+    public async Task Reconciliation_IncludesMappedZeroTransactionAccountInPreviewFingerprintAndApplySet()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (account, _) = fixture.AddZeroTransactionAccount("mapped", 25m);
+        await fixture.Db.SaveChangesAsync();
+
+        var preview = await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", false, null, null, null), Guid.NewGuid());
+        preview.PrimaryCompatibilityDriftCount.Should().Be(1);
+
+        await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", true, "Repair mapped zero-activity account", "mapped-zero", Guid.NewGuid()), Guid.NewGuid());
+
+        account.Balance.Should().Be(0m);
+    }
+
+    [Theory]
+    [InlineData("unmapped")]
+    [InlineData("disabled")]
+    [InlineData("invalid-classification")]
+    public async Task Reconciliation_LeavesZeroBalanceIneligibleAccountsUntouched(string eligibility)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (account, _) = fixture.AddZeroTransactionAccount(eligibility, 0m);
+        await fixture.Db.SaveChangesAsync();
+
+        var preview = await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", false, null, null, null), Guid.NewGuid());
+        preview.PrimaryCompatibilityDriftCount.Should().Be(0);
+        await fixture.Service.ReconcileAsync(fixture.TenantId,
+            new("IFRS", true, "Verify ineligible account policy", $"ineligible-{eligibility}", Guid.NewGuid()), Guid.NewGuid());
+
+        account.Balance.Should().Be(0m);
+    }
+
+    [Theory]
+    [InlineData("unmapped")]
+    [InlineData("disabled")]
+    [InlineData("invalid-classification")]
+    public async Task Reconciliation_BlocksHistoricalNonzeroBalanceOutsideEligibleAccountSet(string eligibility)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (account, _) = fixture.AddZeroTransactionAccount(eligibility, 17m);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId,
+                new("IFRS", false, null, null, null), Guid.NewGuid()))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*non-zero account evidence*");
+        account.Balance.Should().Be(17m);
+        (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RebuildIdempotency_ConflictsWhenEligibleZeroTransactionAccountIsAdded()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var maker = Guid.NewGuid();
+        var request = new BookBalanceReconciliationRequestDto(
+            "IFRS", true, "Governed zero-activity rebuild", "eligible-account-added", Guid.NewGuid());
+        await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
+        fixture.AddZeroTransactionAccount("mapped", 0m);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, request, maker))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*different source or governance evidence*");
+    }
+
+    [Fact]
+    public async Task RebuildIdempotency_ConflictsWhenZeroTransactionAccountEligibilityChanges()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (_, mapping) = fixture.AddZeroTransactionAccount("mapped", 0m);
+        await fixture.Db.SaveChangesAsync();
+        var maker = Guid.NewGuid();
+        var request = new BookBalanceReconciliationRequestDto(
+            "IFRS", true, "Governed eligibility rebuild", "eligible-account-changed", Guid.NewGuid());
+        await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
+        mapping!.IsEnabled = false;
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, request, maker))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*different source or governance evidence*");
+    }
+
+    [Fact]
+    public async Task RebuildIdempotency_ConflictsWhenMappedZeroTransactionCompatibilityDrifts()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (account, _) = fixture.AddZeroTransactionAccount("mapped", 0m);
+        await fixture.Db.SaveChangesAsync();
+        var maker = Guid.NewGuid();
+        var request = new BookBalanceReconciliationRequestDto(
+            "IFRS", true, "Governed compatibility rebuild", "eligible-account-drift", Guid.NewGuid());
+        await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
+        account.Balance = 31m;
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, request, maker))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*projection drift*");
+        account.Balance.Should().Be(31m);
+    }
+
     [Theory]
     [InlineData(10, -10, 0, true, false)]
     [InlineData(-5, 10, 5, false, false)]
@@ -433,6 +536,40 @@ public sealed class BookBalanceReadModelC2Tests
                 default: throw new ArgumentOutOfRangeException(nameof(mutation));
             }
             await Db.SaveChangesAsync();
+        }
+        public (Account Account, AccountAccountingBook? Mapping) AddZeroTransactionAccount(
+            string eligibility, decimal balance)
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..8];
+            var account = new Account
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, AccountCode = $"Z{suffix}",
+                AccountNumber = $"Z{suffix}", AccountName = "Zero activity",
+                AccountType = AccountType.Asset, CurrencyCode = "GHS",
+                Status = AccountStatus.Active, Balance = balance
+            };
+            Db.Accounts.Add(account);
+            if (eligibility == "unmapped") return (account, null);
+
+            var classification = PrimaryClassification;
+            if (eligibility == "invalid-classification")
+            {
+                classification = new AccountClassification
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, AccountingBookId = Primary.Id,
+                    Code = $"RETIRED_{suffix}", Name = "Retired", CoreAccountType = AccountType.Asset,
+                    Status = AccountClassificationStatus.Retired, IsPostingClassification = true
+                };
+                Db.AccountClassifications.Add(classification);
+            }
+            var mapping = new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, AccountId = account.Id,
+                AccountingBookId = Primary.Id, AccountClassificationId = classification.Id,
+                AccountClassification = classification, IsEnabled = eligibility != "disabled"
+            };
+            Db.AccountAccountingBooks.Add(mapping);
+            return (account, mapping);
         }
         public FiscalPeriod AddPeriod(int number)
         {
