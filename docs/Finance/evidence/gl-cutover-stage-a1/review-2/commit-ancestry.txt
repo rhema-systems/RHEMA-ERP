@@ -1,6 +1,8 @@
 Exact base: 7bc24b22c0624aec9acae580ba8049d5f5a83425
-Reviewed candidate: 5404a1c8fa4c018a8f51a5fda2ad1124771fd00e
+Final evidence-bearing candidate: 0263b16acffce062ebc106bf6fe30e348431b7fe
 Evidence-harness checkpoint: b85d88b19219e4f7c1bf3b0959057e07a03271ba
+Candidate tree: ce279a45ec09d59936a7475721b0a9cf397a7353
+LF-terminated sequence SHA-256: 83C5CE3DD66525AB7BEAFC869343AB7A70116DEECB06F7A90B6C72209E59C6C4
 
 0130ac4e02aa306010b09e59ef325bef8556131d
 18a5c8a4187b8ab0c72d19ce105d1960c4af76e5
@@ -9,3 +11,9 @@ f911931255dd8fc400c2e0d41fc388e529c5aab9
 1fa2a86b082fc77964eef9a8523fb0d416ecb4ed
 5404a1c8fa4c018a8f51a5fda2ad1124771fd00e
 b85d88b19219e4f7c1bf3b0959057e07a03271ba
+ba0e8bfa35dd6f54f31f3193003328b4127f19d3
+dfe7d12bf6dacc5ab5007ece72300d0184014d1e
+0263b16acffce062ebc106bf6fe30e348431b7fe
+
+Final metadata-only correction: HEAD
+Resolve this sentinel with git rev-parse HEAD before comparing the full 11-entry sequence to git rev-list.

@@ -127,7 +127,8 @@ both guarded rehearsals reach their required terminal gates.
 
 ## Post-Phase-6 Stage A.1 rehearsal corrections
 
-The authoritative reviewed-candidate ancestry from exact base
+The authoritative Stage A.1 evidence-bearing candidate is
+`0263b16acffce062ebc106bf6fe30e348431b7fe`. Its complete ancestry from exact base
 `7bc24b22c0624aec9acae580ba8049d5f5a83425` is, without omission:
 
 1. `0130ac4e02aa306010b09e59ef325bef8556131d`
@@ -137,9 +138,18 @@ The authoritative reviewed-candidate ancestry from exact base
 5. `1fa2a86b082fc77964eef9a8523fb0d416ecb4ed`
 6. `5404a1c8fa4c018a8f51a5fda2ad1124771fd00e`
 7. `b85d88b19219e4f7c1bf3b0959057e07a03271ba`
+8. `ba0e8bfa35dd6f54f31f3193003328b4127f19d3`
+9. `dfe7d12bf6dacc5ab5007ece72300d0184014d1e`
+10. `0263b16acffce062ebc106bf6fe30e348431b7fe`
+11. `HEAD` — the metadata-only handoff correction that contains this list
 
-Subsequent evidence/harness correction commits must be appended to this list in handoff and integration;
-they do not replace or implicitly include the first `0130ac4e` migration/seed repair.
+This list must match `git rev-list --ancestry-path --reverse 7bc24b22c0624aec9acae580ba8049d5f5a83425..0263b16acffce062ebc106bf6fe30e348431b7fe`
+exactly. Its LF-terminated SHA-256 is
+`83C5CE3DD66525AB7BEAFC869343AB7A70116DEECB06F7A90B6C72209E59C6C4`, and the candidate tree is
+`ce279a45ec09d59936a7475721b0a9cf397a7353`. For final-branch validation, resolve entry 11 with
+`git rev-parse HEAD`, append it to the ten literal candidate hashes, and compare the resulting sequence to
+`git rev-list --ancestry-path --reverse 7bc24b22c0624aec9acae580ba8049d5f5a83425..HEAD`. The handoff reports
+the resolved hash. This `HEAD` sentinel is necessary because a Git commit cannot embed its own final hash.
 
 Stage A.1 repaired the CRM clean-chain collision, SQL Server singleton-role filter, and application
 `apply-migrations` DI registration. Continuing the guarded fresh rehearsal exposed and corrected a missing
