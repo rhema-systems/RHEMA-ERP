@@ -1,6 +1,6 @@
 # GL Classification and Revaluation Refactor — Execution Ledger
 
-Last reconciled: 2026-09-04 (Africa/Accra)
+Last reconciled: 2026-09-05 (Africa/Accra)
 
 ## Objective
 
@@ -10,18 +10,19 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage A.1 — migration/reset/reseed rehearsal corrections |
-| Status | `REVIEW_REQUIRED` |
+| Phase | Post-Phase-6 Stage B1 — Procurement owner V2/provisioning conversion |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `7bc24b22c0624aec9acae580ba8049d5f5a83425` |
-| Branch | `codex/finance-gl-cutover-rehearsal-corrections` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-rehearsal-corrections` |
+| Exact base | `0f88eff289ba563cdd0707166df6b3e10fe585af` |
+| Branch | `codex/procurement-finance-v2-cutover` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-procurement-finance-v2-cutover` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `7bc24b22c0624aec9acae580ba8049d5f5a83425` |
+| Primary HEAD at activation | `0f88eff289ba563cdd0707166df6b3e10fe585af` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Stage A.1 correction cycle complete; post-review stack ready for independent review |
-| Connectivity state | Available; rehearsal evidence captured and disposable targets removed |
+| Model routing | Implementer: GPT-5.6 Terra Medium; independent contract review: GPT-5.6 Sol High |
+| Review status | Stage A.1 approved and integrated; Stage B1 owner packet issued |
+| Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
 
@@ -225,9 +226,24 @@ guide still contradicted the actual `apply-migrations`/clone procedure. The coor
 corrections directly to the implementer using GPT-5.6 Sol Medium. Integration, Phase B and any mutation of
 configured `RHEMAERP` remain blocked pending a clean corrected handoff and satisfactory re-review.
 
+Stage A.1 final candidate `286f2a294d9f14bd31c7f01a3447dd682f666a89` passed independent GPT-5.6
+Sol High review. The complete eleven-commit candidate was integrated locally as `85489e04`, `9cbc68a2`,
+`2118aa13`, `1c62406f`, `44acbbab`, `a5a666cc`, `985afe21`, `dd8b8fb9`, `a0ff5dc4`, `70149939`, and
+`59025ea9`. Fresh-checkout validation exposed that the retained evidence manifest described literal CRLF
+bytes while the original Git blobs were LF. Integration corrections `ceefa127` and `0f88eff2` stored the
+reviewed bytes exactly and declared path-scoped `whitespace=cr-at-eol`; independent review then approved the
+integrated state. Evidence validation and plain range `git diff --check` pass, all 448 migrations are
+discoverable, EF reports no pending model changes, the test project builds with zero errors, and the focused
+migration suite reports 6 passed/5 environment-gated SQL tests skipped. The retained guarded SQL Server
+evidence records 11/11 full-chain tests passed. No configured `RHEMAERP` mutation occurred and no disposable
+rehearsal database or backup remains.
+
 ## Next action
 
-Independently review the Stage A.1 migration/deployment corrections, successful 448-migration empty rehearsal,
-double-seed invariant evidence, and representative clone's intentional Phase 4 evidence stop. If approved,
-integrate this stack and authorize the separately coordinated Phase B owner packets; retain the approved
-clean reset/reseed route rather than fabricating immutable evidence for the configured development database.
+Execute the bounded Procurement owner packet from exact base `0f88eff2`: convert the two active posting
+producers to V2 with explicit governed `AccountingBookCode`, replace the executable supplier-onboarding
+seeder's direct Finance `Account` writes with `IFinanceAccountProvisioningService`, add the required
+owner-facing comments and denial/idempotency/canonical-identity tests, and return a clean structured handoff.
+Do not change Procurement economics or unrelated Procurement behavior. Independently review the packet before
+local integration, then issue the Inventory packet. Keep configured `RHEMAERP` read-only until the later
+reset/migration gate is separately reconciled.
