@@ -50,7 +50,7 @@ const statusPresentation: Record<
   }
 > = {
   unknown: {
-    label: 'Unknown',
+    label: 'Unverified',
     icon: CircleHelp,
     badgeClassName: 'border-slate-200 bg-slate-50 text-slate-700',
     iconClassName: 'text-slate-500',
@@ -137,9 +137,20 @@ export function ProcurementUatFlowSidebar({
               )}
             </div>
             <Badge variant="outline" className="shrink-0 font-normal">
-              {progress.completed}/{progress.total} complete
+              {progress.unverified > 0
+                ? progress.completed > 0
+                  ? `${progress.completed} complete`
+                  : 'Progress unverified'
+                : `${progress.completed}/${progress.total} complete`}
             </Badge>
           </div>
+          <p
+            className="text-xs text-muted-foreground"
+            aria-label="Process progress coverage"
+          >
+            Step {context.current.index + 1} of {progress.total}
+            {progress.unverified > 0 && ` · ${progress.unverified} unverified`}
+          </p>
         </CardHeader>
 
         <CardContent className="space-y-3 p-4 pt-0">

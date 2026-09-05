@@ -53,6 +53,10 @@ describe('procurement UAT flow', () => {
       'purchase-requisition': { status: 'in-progress' },
     });
 
-    expect(procurementUatProgress(flow)).toEqual({ completed: 2, total: 12 });
+    expect(procurementUatProgress(flow)).toEqual({
+      completed: 2,
+      total: 12,
+      unverified: 9,
+    });
   });
 });
