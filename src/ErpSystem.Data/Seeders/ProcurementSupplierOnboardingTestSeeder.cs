@@ -3,10 +3,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -30,13 +32,16 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
     private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ApplicationDbContext _context;
+    private readonly IFinanceAccountProvisioningService _financeAccountProvisioning;
     private readonly ILogger<ProcurementSupplierOnboardingTestSeeder> _logger;
 
     public ProcurementSupplierOnboardingTestSeeder(
         ApplicationDbContext context,
+        IFinanceAccountProvisioningService financeAccountProvisioning,
         ILogger<ProcurementSupplierOnboardingTestSeeder> logger)
     {
         _context = context;
+        _financeAccountProvisioning = financeAccountProvisioning;
         _logger = logger;
     }
 
@@ -58,34 +63,25 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
 
         var receiptAccount = await EnsureAccountAsync(
             tenant.Id,
-            Guid.Parse("70000000-0000-0000-0000-000000000101"),
             "1040",
             "Supplier Onboarding Receipt Clearing",
             AccountType.Asset,
-            "Current Assets",
-            "Receipts Clearing",
             cancellationToken);
         var revenueAccount = await EnsureAccountAsync(
             tenant.Id,
-            Guid.Parse("70000000-0000-0000-0000-000000000102"),
             "4930",
             "Supplier Onboarding Fee Revenue",
             AccountType.Revenue,
-            "Other Revenue",
-            "Supplier Registration Fees",
             cancellationToken);
         var taxAccount = await EnsureAccountAsync(
             tenant.Id,
-            Guid.Parse("70000000-0000-0000-0000-000000000103"),
             "2210",
             "Supplier Onboarding Tax Payable",
             AccountType.Liability,
-            "Current Liabilities",
-            "Tax Payables",
             cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
-        await EnsurePaymentMethodsAsync(tenant.Id, receiptAccount.Id, cancellationToken);
+        await EnsurePaymentMethodsAsync(tenant.Id, receiptAccount.AccountId, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         var workflow = await _context.WorkflowDefinitions
@@ -115,8 +111,8 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
 
         var profile = await EnsureConfigurationProfileAsync(
             tenant.Id,
-            revenueAccount.Id,
-            taxAccount.Id,
+            revenueAccount.AccountId,
+            taxAccount.AccountId,
             workflow.Id,
             cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
@@ -148,63 +144,27 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
             policy.Code);
     }
 
-    private async Task<Account> EnsureAccountAsync(
+    private async Task<ProvisionedFinanceAccountDto> EnsureAccountAsync(
         Guid tenantId,
-        Guid preferredId,
         string accountCode,
         string accountName,
         AccountType accountType,
-        string accountCategory,
-        string accountSubCategory,
         CancellationToken cancellationToken)
     {
-        var account = await _context.Accounts.SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.AccountCode == accountCode && !item.IsDeleted,
-            cancellationToken);
-        if (account is null)
+        // Procurement owns this test intent, not Finance account structure. Provisioning keeps
+        // tenant, reviewed classification, canonical segments and enabled book mappings under
+        // Finance authority; do not restore direct Account/category-caption writes here.
+        return await _financeAccountProvisioning.ProvisionAsync(new ProvisionFinanceAccountDto
         {
-            var idInUse = await _context.Accounts.AnyAsync(item => item.Id == preferredId, cancellationToken);
-            account = new Account
-            {
-                Id = idInUse ? Guid.NewGuid() : preferredId,
-                TenantId = tenantId,
-                AccountCode = accountCode,
-                AccountNumber = accountCode,
-                AccountName = accountName,
-                AccountType = accountType,
-                AccountCategory = accountCategory,
-                AccountSubCategory = accountSubCategory,
-                Description = "Development/test posting account for the governed supplier-onboarding token flow.",
-                IsSegmented = false,
-                CurrencyCode = "GHS",
-                IsMultiCurrency = false,
-                IsIFRSClassified = true,
-                IsBaseClassified = true,
-                IsLocalClassified = true,
-                AllowDirectPosting = true,
-                IsControlAccount = false,
-                BudgetTrackingEnabled = false,
-                Status = AccountStatus.Active,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = CreatedBy
-            };
-            _context.Accounts.Add(account);
-        }
-        else
-        {
-            account.AccountName = accountName;
-            account.AccountType = accountType;
-            account.AccountCategory = accountCategory;
-            account.AccountSubCategory = accountSubCategory;
-            account.CurrencyCode = "GHS";
-            account.AllowDirectPosting = true;
-            account.IsControlAccount = false;
-            account.Status = AccountStatus.Active;
-            account.UpdatedAt = DateTime.UtcNow;
-            account.UpdatedBy = CreatedBy;
-        }
-
-        return account;
+            TenantId = tenantId,
+            AccountCode = accountCode,
+            AccountNumber = accountCode,
+            AccountName = accountName,
+            CoreAccountType = accountType,
+            CurrencyCode = "GHS",
+            Description = "Development/test posting account for the governed supplier-onboarding token flow.",
+            IsSegmented = true
+        }, cancellationToken);
     }
 
     private async Task EnsurePaymentMethodsAsync(

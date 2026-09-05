@@ -179,7 +179,12 @@ public sealed class FinanceClassificationManifestSeeder
         if (naturalCode == "1590") return "ACCUMULATED_DEPRECIATION";
         if (naturalCode is "2000" or "2120") return "PAYABLE_CONTROL";
         if (naturalCode is "2100" or "2110") return "ACCRUED_LIABILITY";
-        if (naturalCode == "2200") return "OUTPUT_TAX";
+        // Stable Procurement onboarding accounts are Finance-reviewed aliases: receipt clearing
+        // is an ordinary asset (not a monetary cash role), fee income is other income, and the
+        // statutory tax liability is output tax. Keep these codes in the Finance manifest so
+        // producers can use provisioning without selecting classifications by display text.
+        if (naturalCode == "1040" && accountType == AccountType.Asset) return "ASSET_OTHER";
+        if (naturalCode is "2200" or "2210") return "OUTPUT_TAX";
         if (naturalCode == "2500") return "DEBT";
         return accountType switch
         {
@@ -187,7 +192,7 @@ public sealed class FinanceClassificationManifestSeeder
             AccountType.Equity when naturalCode is "3000" or "3100" => "EQUITY",
             AccountType.Revenue when naturalCode is "4000" or "4100" or "4110" => "REVENUE",
             AccountType.Revenue when naturalCode == "4210" => "REVENUE_DEDUCTIONS",
-            AccountType.Revenue when naturalCode is "4900" or "4910" or "4920" or "7100" or "7200" => "OTHER_INCOME",
+            AccountType.Revenue when naturalCode is "4900" or "4910" or "4920" or "4930" or "7100" or "7200" => "OTHER_INCOME",
             AccountType.Expense when naturalCode == "5000" => "COST_OF_SALES",
             AccountType.Expense when naturalCode is "7110" or "7210" => "OTHER_EXPENSE",
             AccountType.Expense when naturalCode is "6000" or "6020" or "6100" or "6200" or "6300" or "6400" or "6500" or "6600" => "EXPENSE",

@@ -250,6 +250,12 @@ if (args.Length > 0 && args[0] == "seed-supplier-onboarding-e2e")
 
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserService>(_ =>
+        new MaintenanceCurrentUserContext(Guid.Parse("00000000-0000-0000-0000-000000000001")));
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider>(_ =>
+        new MaintenanceCurrentUserContext(Guid.Parse("00000000-0000-0000-0000-000000000001")));
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService,
+        ErpSystem.Api.Services.Finance.GL.FinanceAccountProvisioningService>();
     tempBuilder.Services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
 
     var tempApp = tempBuilder.Build();

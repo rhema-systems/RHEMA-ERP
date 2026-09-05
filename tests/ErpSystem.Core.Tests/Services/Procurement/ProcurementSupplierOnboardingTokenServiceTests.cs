@@ -1020,9 +1020,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                     Task.FromResult<WorkflowInstance?>(WorkflowInstance));
             var finance = new Mock<IFinancePostingEngine>();
             finance.Setup(item => item.PostAsync(
-                    It.IsAny<FinancePostingRequestDto>(),
+                    It.IsAny<FinancePostingRequestV2Dto>(),
                     It.IsAny<CancellationToken>()))
-                .Returns(async (FinancePostingRequestDto request, CancellationToken cancellationToken) =>
+                .Returns(async (FinancePostingRequestV2Dto request, CancellationToken cancellationToken) =>
                 {
                     PostedRequest = request;
                     FinancePostCount++;
@@ -1073,9 +1073,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         public FinancePaymentMethod? PaymentMethod { get; }
         public WorkflowDefinition? WorkflowDefinition { get; }
         public WorkflowInstance? WorkflowInstance { get; private set; }
-        public FinancePostingRequestDto? PostedRequest { get; private set; }
+        public FinancePostingRequestV2Dto? PostedRequest { get; private set; }
         public int FinancePostCount { get; private set; }
-        public Func<FinancePostingRequestDto, CancellationToken, Task>? FinancePostHandler { get; set; }
+        public Func<FinancePostingRequestV2Dto, CancellationToken, Task>? FinancePostHandler { get; set; }
         public ProcurementSupplierOnboardingTokenService Service { get; }
         public bool HasActiveTransaction => _unitOfWork.HasActiveTransaction;
 
