@@ -156,6 +156,14 @@ temporarily to Sol High only for an unresolved material defect or unusually diff
 decision. Apply switches only between completed turns after reconciling the task checkpoint; record each
 exception or escalation here.
 
+Stage A.1 review cycle 2 examined clean candidate `5404a1c8` using an independent GPT-5.6 Sol High reviewer
+and returned `CHANGES_REQUIRED`. The code-level migration corrections, 448-migration discovery, EF model
+alignment and focused tests passed, but the declared integration list omitted ancestor commit `0130ac4e`;
+the sanitized A5/A2 SQL Server rehearsal evidence was not retained for independent audit; and the readiness
+guide still contradicted the actual `apply-migrations`/clone procedure. The coordinator dispatched these
+corrections directly to the implementer using GPT-5.6 Sol Medium. Integration, Phase B and any mutation of
+configured `RHEMAERP` remain blocked pending a clean corrected handoff and satisfactory re-review.
+
 ## Next action
 
 Complete deterministic data-preserving CRM/Projects Up/Down behavior, populated failure-safety and downgrade
