@@ -608,6 +608,18 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .Include(item => item.TenderEvaluator)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        // A recalled sheet can be replaced by a new evaluation projection.
+        // Retain the latest projection per bidder/voter, including a new draft
+        // so an unfinished replacement cannot reuse the previous recommendation.
+        // The separate SOD resolver deliberately retains all evaluator history.
+        evaluations = evaluations
+            .GroupBy(item => new { item.TenderBidId, item.TenderEvaluatorId })
+            .Select(group => group
+                .OrderByDescending(item => item.SubmittedDate ?? item.UpdatedAt ?? item.EvaluationDate)
+                .ThenByDescending(item => item.CreatedAt)
+                .ThenByDescending(item => item.Id)
+                .First())
+            .ToList();
         var evaluationsComplete = evaluations.Count != 0 &&
                                   evaluations.All(IsCompletedLegacyEvaluation);
         var recommended = evaluationsComplete
@@ -1017,18 +1029,21 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
 
-        var evaluationIds = evaluations.Select(item => item.Id).ToHashSet();
+        // The committee owns one attempt stream per voter and bid. The immutable
+        // snapshot identifies the evaluation projection; the subject is the bid.
+        var bidIds = evaluations.Select(item => item.TenderBidId).ToHashSet();
         var sheets = await _unitOfWork.Repository<ProcurementEvaluationScoreSheet>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.CommitteeControlId == current.Id &&
                 item.Phase == ProcurementEvaluationPhase.Combined &&
                 item.ScoreSubjectType == "TenderEvaluation" &&
-                evaluationIds.Contains(item.ScoreSubjectId) &&
+                bidIds.Contains(item.ScoreSubjectId) &&
                 !item.IsDeleted)
+            .Include(item => item.Appointment)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-        var latest = sheets.GroupBy(item => item.ScoreSubjectId)
+        var latest = sheets.GroupBy(item => new { item.AppointmentId, item.ScoreSubjectId })
             .Select(group => group.OrderByDescending(item => item.Attempt)
                 .ThenByDescending(item => item.SubmittedAtUtc).First())
             .ToList();
@@ -1041,10 +1056,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .AsNoTracking()
             .ToListAsync(cancellationToken);
         var allCurrent = evaluations.Count != 0 &&
+                         latest.Count == evaluations.Count &&
                          evaluations.All(evaluation =>
-                             latest.Count(sheet => sheet.ScoreSubjectId == evaluation.Id &&
+                             latest.Count(sheet => LegacyScoreMatchesEvaluation(evaluation, sheet) &&
                                                    sheet.Status ==
-                                                   ProcurementEvaluationScoreSheetStatus.Locked) == 1) &&
+                                                   ProcurementEvaluationScoreSheetStatus.Locked &&
+                                                   LegacyScoreSnapshotMatches(evaluation, sheet)) == 1) &&
                          !recalls.Any(item =>
                              item.Status is ProcurementEvaluationScoreRecallStatus.PendingApproval or
                                  ProcurementEvaluationScoreRecallStatus.Approved);
@@ -1057,7 +1074,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             current.CompositionIntegrityHash);
         foreach (var sheet in latest)
         {
-            var dto = state.Evaluations.SingleOrDefault(item => item.EvaluationId == sheet.ScoreSubjectId);
+            var evaluationId = TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId");
+            var dto = state.Evaluations.SingleOrDefault(item => item.EvaluationId == evaluationId);
             if (dto is not null)
                 dto.ScoreAttempts.Add(MapScore(sheet,
                     recalls.Where(item => item.ScoreSheetId == sheet.Id)
@@ -1884,15 +1902,17 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                          StringComparison.OrdinalIgnoreCase)))
         {
             if (evaluation.TenderEvaluator is null ||
+                evaluation.TenderEvaluator.IsDeleted ||
                 evaluation.TenderEvaluator.TenantId != _currentUser.TenantId ||
                 evaluation.TenderEvaluator.TenderId != source.Id ||
                 evaluation.TenderEvaluatorId != evaluation.TenderEvaluator.Id ||
+                evaluation.TenderEvaluator.UserId == Guid.Empty ||
+                evaluation.TenderBid.IsDeleted ||
                 evaluation.TenderBid.TenantId != _currentUser.TenantId)
                 throw AmbiguousEvaluatorLineage(
                     "A legacy tender evaluation has missing or foreign evaluator lineage.");
             state.ValidEvaluationIds.Add(evaluation.Id);
-            state.LegacyEvaluationActors[evaluation.Id] =
-                evaluation.TenderEvaluator.UserId;
+            state.LegacyEvaluations[evaluation.Id] = evaluation;
             state.Items.Add(DirectEvaluatorLineage(
                 "LegacyTenderEvaluation",
                 evaluation.Id,
@@ -2012,11 +2032,11 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                             : source.IsLegacyTender
                                 ? "LegacyTenderCommitteeScore"
                                 : "FormalTenderCommitteeScore",
-                    EvaluationId = sheet.ScoreSubjectType == "TenderEvaluation" ||
-                                   sheet.ScoreSubjectType ==
-                                   "ProcurementRfqEvaluation"
-                        ? sheet.ScoreSubjectId
-                        : null,
+                    EvaluationId = sheet.ScoreSubjectType == "TenderEvaluation"
+                        ? TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId")
+                        : sheet.ScoreSubjectType == "ProcurementRfqEvaluation"
+                            ? sheet.ScoreSubjectId
+                            : null,
                     CommitteeControlId = sheet.CommitteeControlId,
                     AppointmentId = sheet.AppointmentId,
                     ScoreSheetId = sheet.Id,
@@ -2049,13 +2069,84 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                    state.ValidEvaluationIds.Contains(
                        sheet.ScoreSubjectId);
         if (source.IsLegacyTender)
-            return sheet.ScoreSubjectType == "TenderEvaluation" &&
-                   state.LegacyEvaluationActors.TryGetValue(
-                       sheet.ScoreSubjectId, out var evaluatorId) &&
-                   evaluatorId == sheet.SubmittedByUserId;
+            return TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId") is { } evaluationId &&
+                   state.LegacyEvaluations.TryGetValue(evaluationId, out var evaluation) &&
+                   LegacyScoreMatchesEvaluation(evaluation, sheet);
         return sheet.ScoreSubjectType ==
                "ProcurementTenderControl" &&
                sheet.ScoreSubjectId == source.Id;
+    }
+
+    private static bool LegacyScoreMatchesEvaluation(
+        TenderEvaluation evaluation,
+        ProcurementEvaluationScoreSheet sheet) =>
+        sheet.ScoreSubjectType == "TenderEvaluation" &&
+        sheet.Phase == ProcurementEvaluationPhase.Combined &&
+        sheet.ScoreSubjectId == evaluation.TenderBidId &&
+        sheet.TenantId == evaluation.TenantId &&
+        sheet.Appointment is not null &&
+        sheet.Appointment.TenantId == evaluation.TenantId &&
+        sheet.Appointment.CommitteeControlId == sheet.CommitteeControlId &&
+        sheet.Appointment.UserId == sheet.SubmittedByUserId &&
+        evaluation.TenderEvaluator is not null &&
+        evaluation.TenderEvaluator.TenantId == evaluation.TenantId &&
+        evaluation.TenderEvaluator.UserId == sheet.SubmittedByUserId &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId") == evaluation.Id &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "TenderBidId") == evaluation.TenderBidId &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "TenderEvaluatorId") == evaluation.TenderEvaluatorId &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluatorUserId") == sheet.SubmittedByUserId;
+
+    private static bool LegacyScoreSnapshotMatches(
+        TenderEvaluation evaluation,
+        ProcurementEvaluationScoreSheet sheet)
+    {
+        var submittedAtUtc = evaluation.SubmittedDate ?? evaluation.UpdatedAt ?? evaluation.EvaluationDate;
+        // SQL datetime2 retains the UTC instant, but not DateTime.Kind. Restore
+        // the writer's UTC designation without converting the stored value.
+        if (submittedAtUtc.Kind == DateTimeKind.Unspecified)
+            submittedAtUtc = DateTime.SpecifyKind(submittedAtUtc, DateTimeKind.Utc);
+        var expected = TenderEvaluationService.BuildLegacyScoreSnapshot(evaluation, submittedAtUtc);
+        try
+        {
+            using var actualDocument = JsonDocument.Parse(sheet.ScoreSnapshotJson);
+            using var expectedDocument = JsonDocument.Parse(expected);
+            return ScoreSnapshotValuesEqual(actualDocument.RootElement, expectedDocument.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ScoreSnapshotValuesEqual(JsonElement actual, JsonElement expected)
+    {
+        if (actual.ValueKind != expected.ValueKind) return false;
+        switch (actual.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var actualProperties = actual.EnumerateObject().ToList();
+                var expectedProperties = expected.EnumerateObject().ToList();
+                return actualProperties.Count == expectedProperties.Count &&
+                       actualProperties.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count() == actualProperties.Count &&
+                       expectedProperties.All(property =>
+                           actual.TryGetProperty(property.Name, out var value) &&
+                           ScoreSnapshotValuesEqual(value, property.Value));
+            case JsonValueKind.Array:
+                var actualItems = actual.EnumerateArray().ToList();
+                var expectedItems = expected.EnumerateArray().ToList();
+                return actualItems.Count == expectedItems.Count &&
+                       actualItems.Zip(expectedItems).All(pair => ScoreSnapshotValuesEqual(pair.First, pair.Second));
+            case JsonValueKind.Number:
+                // Decimal scale may change on a database round trip. Values
+                // must remain exactly equal; no floating-point tolerance.
+                return actual.TryGetDecimal(out var actualValue) &&
+                       expected.TryGetDecimal(out var expectedValue) &&
+                       actualValue == expectedValue;
+            case JsonValueKind.String:
+                return actual.GetString() == expected.GetString();
+            default:
+                return actual.GetRawText() == expected.GetRawText();
+        }
     }
 
     private async Task AddAuthorityActorsAsync(
@@ -2662,7 +2753,9 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         try
         {
             using var document = JsonDocument.Parse(json);
-            return document.RootElement.TryGetProperty(property, out var value)
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty(property, out var value) &&
+                   value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
         }
@@ -2792,7 +2885,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         public List<ProcurementAwardEvaluatorLineageDto> Items { get; } = [];
         public HashSet<Guid> ApprovalActorUserIds { get; } = [];
         public HashSet<Guid> ValidEvaluationIds { get; } = [];
-        public Dictionary<Guid, Guid> LegacyEvaluationActors { get; } = [];
+        public Dictionary<Guid, TenderEvaluation> LegacyEvaluations { get; } = [];
         public Guid? MethodRuleId { get; set; }
         public string? MethodRuleCode { get; set; }
     }

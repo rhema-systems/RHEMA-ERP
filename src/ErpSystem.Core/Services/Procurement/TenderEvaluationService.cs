@@ -1476,7 +1476,7 @@ public class TenderEvaluationService : ITenderEvaluationService
                 "Every current submitted tender evaluation for every bid and evaluator must have its matching current locked committee score sheet.");
     }
 
-    private static string BuildLegacyScoreSnapshot(
+    internal static string BuildLegacyScoreSnapshot(
         TenderEvaluation evaluation,
         DateTime submittedAtUtc) =>
         JsonSerializer.Serialize(new
