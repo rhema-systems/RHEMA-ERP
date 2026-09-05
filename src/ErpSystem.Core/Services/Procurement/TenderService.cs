@@ -117,7 +117,7 @@ public class TenderService : ITenderService
             var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
             result.SourcingMethod = await GetSourcingMethodAsync(tender);
             result.UsesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
-            return result;
+            return await ProtectBidSummariesAsync(result);
         }
         catch (Exception ex)
         {
@@ -146,7 +146,7 @@ public class TenderService : ITenderService
             var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
             result.SourcingMethod = await GetSourcingMethodAsync(tender);
             result.UsesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
-            return result;
+            return await ProtectBidSummariesAsync(result);
         }
         catch (Exception ex)
         {
@@ -421,7 +421,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return await ProtectBidSummariesAsync(MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids));
         }
         catch (Exception ex)
         {
@@ -722,7 +722,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return await ProtectBidSummariesAsync(MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids));
         }
         catch (Exception ex)
         {
@@ -1937,9 +1937,9 @@ public class TenderService : ITenderService
         };
     }
 
-    private static TenderBidSummaryDto MapBidToSummaryDto(TenderBid bid, Tender? tender = null)
+    internal static TenderBidSummaryDto MapBidToSummaryDto(TenderBid bid, Tender? tender = null)
     {
-        return new TenderBidSummaryDto
+        var result = new TenderBidSummaryDto
         {
             Id = bid.Id,
             TenderId = bid.TenderId,
@@ -1963,6 +1963,24 @@ public class TenderService : ITenderService
             IsQualifiedTechnically = bid.IsQualifiedTechnically,
             DisqualificationReason = bid.DisqualificationReason
         };
+        return bid.OpenedDate.HasValue ? result : ProcurementBidDisclosure.Seal(result);
+    }
+
+    private async Task<TenderDetailDto> ProtectBidSummariesAsync(TenderDetailDto result)
+    {
+        foreach (var bid in result.Bids)
+        {
+            // Tender-wide views are not the supplier's own-bid access path.
+            if (bid.IsSealed || !await _tenderControlService.ShouldConcealFinancialProposalAsync(result.Id, bid.Id)) continue;
+            bid.IsFinancialProposalSealed = true;
+            bid.TotalBidAmount = 0m;
+            bid.Currency = null;
+            bid.FinancialScore = null;
+            bid.CombinedScore = null;
+            bid.TotalScore = null;
+            bid.Rank = null;
+        }
+        return result;
     }
 
     #region Tender LOT Methods

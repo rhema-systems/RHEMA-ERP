@@ -7,6 +7,8 @@ namespace ErpSystem.Core.DTOs.Procurement;
 /// </summary>
 public class TenderBidSummaryDto
 {
+    public bool IsSealed { get; set; }
+    public bool IsFinancialProposalSealed { get; set; }
     public Guid Id { get; set; }
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
@@ -37,6 +39,8 @@ public class TenderBidSummaryDto
 /// </summary>
 public class TenderBidDetailDto
 {
+    public bool IsSealed { get; set; }
+    public bool IsFinancialProposalSealed { get; set; }
     public Guid Id { get; set; }
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
@@ -540,6 +544,7 @@ public class UpdateInterviewDto
 /// </summary>
 public class SupplierBidListItemDto
 {
+    public bool IsSealed { get; set; }
     public string BidNumber { get; set; } = string.Empty;
     public string BusinessPartnerName { get; set; } = string.Empty;
     public string BusinessPartnerCode { get; set; } = string.Empty;

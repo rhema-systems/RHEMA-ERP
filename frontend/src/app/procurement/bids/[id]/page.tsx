@@ -56,11 +56,49 @@ import { Textarea } from '@/components/ui/textarea';
 import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
-import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { tenderService, type TenderDetailDto, type TenderDocumentRequirement } from '@/services/tenderService';
 import {
   getTenderEvaluationRoute,
   type TenderEvaluationRoute,
 } from '@/lib/procurement-tender-evaluation-route';
+
+const isProposalDocumentType = (documentType: string) =>
+  documentType === 'TechnicalProposal' || documentType === 'CommercialProposal';
+
+function BidDocumentRequirements({ bid, tender }: { bid: TenderBidDetailDto; tender: TenderDetailDto | null }) {
+  let requirements: TenderDocumentRequirement[];
+  try {
+    if (!tender) throw new Error('Tender unavailable');
+    const parsed: unknown = tender.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
+    if (!Array.isArray(parsed) || !parsed.every((item) => item &&
+      typeof item.documentType === 'string' && typeof item.documentName === 'string' &&
+      typeof item.isRequired === 'boolean')) throw new Error('Invalid requirements');
+    requirements = parsed.filter((item) => !isProposalDocumentType(item.documentType));
+  } catch {
+    return <Alert className="mb-4"><AlertTitle>Document requirements unavailable</AlertTitle><AlertDescription>Uploaded files are listed below, but completeness cannot be checked until the tender requirements load correctly.</AlertDescription></Alert>;
+  }
+
+  if (!requirements.length) return <p className="mb-4 text-sm text-muted-foreground">No supporting-document requirements were configured for this tender. Technical and commercial proposals are listed under Proposals.</p>;
+  return (
+    <section aria-label="Document requirements" className="mb-6 space-y-2">
+      <h3 className="font-medium">Tender supporting-document requirements</h3>
+      <p className="text-sm text-muted-foreground">{requirements.filter((item) => item.isRequired).length} required · {requirements.filter((item) => !item.isRequired).length} optional. Upload presence does not confirm document validity.</p>
+      <ul className="divide-y rounded-lg border">
+        {requirements.map((requirement, index) => {
+          const count = bid.documents?.filter((document) => document.documentType === requirement.documentType).length ?? 0;
+          const withheld = bid.isFinancialProposalSealed;
+          const status = count ? `Uploaded (${count})` : withheld ? 'Not available in this phase' : requirement.isRequired ? 'Missing' : 'Not supplied';
+          return (
+            <li key={`${requirement.documentType}-${index}`} className="flex items-center justify-between gap-4 p-3 text-sm">
+              <span>{requirement.documentName}<span className="ml-2 text-muted-foreground">{requirement.isRequired ? 'Required' : 'Optional'}</span></span>
+              <Badge variant={!count && !withheld && requirement.isRequired ? 'destructive' : 'secondary'}>{status}</Badge>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 // Interface for criteria scores stored in evaluationCriteriaJson
 interface CriteriaScore {
@@ -667,6 +705,49 @@ export default function BidDetailPage() {
     );
   }
 
+  const openBidConfirmation = (
+    <ConfirmationDialog
+      open={showOpenDialog && canAdministerTender}
+      onOpenChange={setShowOpenDialog}
+      title="Mark Bid as Opened"
+      description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."
+      confirmText="Mark as Opened"
+      cancelText="Cancel"
+      variant="default"
+      onConfirm={confirmOpenBid}
+      isLoading={opening}
+    />
+  );
+
+  if (bid.isSealed) {
+    const openingTime = sourceTender?.openingDate ? Date.parse(sourceTender.openingDate) : NaN;
+    const closingTime = sourceTender?.submissionDeadline ? Date.parse(sourceTender.submissionDeadline) : NaN;
+    const canRequestOpening = canAdministerTender && bid.status === 'Submitted' &&
+      sourceTender?.status === 'Closed' && sourceTender.usesControlledTenderLifecycle === false &&
+      closingTime <= Date.now() && openingTime <= Date.now();
+    return (
+      <div className="container mx-auto py-6 space-y-6">
+        <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${bid.tenderId}`)}>
+          <ArrowLeft className="h-4 w-4 mr-2" />Return to tender
+        </Button>
+        <Card>
+          <CardHeader><CardTitle>Bid sealed</CardTitle></CardHeader>
+          <CardContent>
+            <p className="font-mono mb-2">{bid.bidNumber}</p>
+            <p>Prices, proposals and attachments remain confidential until formal bid opening. Complete the committee, closing-time and quorum prerequisites from the tender process flow.</p>
+            {canRequestOpening && (
+              <Button className="mt-4" onClick={handleOpenBid} disabled={opening}>Open bid</Button>
+            )}
+          </CardContent>
+        </Card>
+        {openBidConfirmation}
+      </div>
+    );
+  }
+
+  const supportingDocuments = (bid.documents ?? []).filter(
+    (document) => !isProposalDocumentType(document.documentType)
+  );
   const evaluationRoute: TenderEvaluationRoute | undefined = sourceTender
     ? getTenderEvaluationRoute(sourceTender, bidId)
     : undefined;
@@ -720,7 +801,7 @@ export default function BidDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
-              {formatCurrency(bid.totalBidAmount, bid.currency)}
+              {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
             </p>
           </CardContent>
         </Card>
@@ -802,13 +883,7 @@ export default function BidDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">
             <Upload className="h-4 w-4 mr-2" />
-            Documents (
-            {bid.documents?.filter(
-              (doc) =>
-                doc.documentType !== 'TechnicalProposal' &&
-                doc.documentType !== 'CommercialProposal'
-            ).length || 0}
-            )
+            Documents ({supportingDocuments.length})
           </TabsTrigger>
           <TabsTrigger value="payments">
             <DollarSign className="h-4 w-4 mr-2" />
@@ -857,7 +932,7 @@ export default function BidDetailPage() {
               <div>
                 <p className="text-sm text-gray-500">Total Bid Amount</p>
                 <p className="font-semibold">
-                  {formatCurrency(bid.totalBidAmount, bid.currency)}
+                  {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                 </p>
               </div>
               <div>
@@ -1298,7 +1373,7 @@ export default function BidDetailPage() {
                           Total Bid Amount:
                         </span>
                         <span className="text-2xl font-bold text-blue-600 break-all text-right">
-                          {formatCurrency(bid.totalBidAmount, bid.currency)}
+                          {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                         </span>
                       </div>
                     </div>
@@ -1470,17 +1545,13 @@ export default function BidDetailPage() {
         <TabsContent value="documents" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Required Documents</CardTitle>
+              <CardTitle>Supporting Documents</CardTitle>
               <CardDescription>
-                {bid.documents?.filter(
-                  (doc) =>
-                    doc.documentType !== 'TechnicalProposal' &&
-                    doc.documentType !== 'CommercialProposal'
-                ).length || 0}{' '}
-                document(s)
+                {supportingDocuments.length} supporting file(s) uploaded. Technical and commercial proposals are shown separately.
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {bid.status !== 'Submitted' && <BidDocumentRequirements bid={bid} tender={sourceTender} />}
               {bid.status === 'Submitted' ? (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-yellow-800">
@@ -1490,14 +1561,9 @@ export default function BidDetailPage() {
                     </span>
                   </div>
                 </div>
-              ) : !bid.documents ||
-                bid.documents.filter(
-                  (doc) =>
-                    doc.documentType !== 'TechnicalProposal' &&
-                    doc.documentType !== 'CommercialProposal'
-                ).length === 0 ? (
+              ) : !supportingDocuments.length ? (
                 <p className="text-center py-8 text-gray-500">
-                  No required documents uploaded
+                  No supporting files uploaded
                 </p>
               ) : (
                 <Table>
@@ -1510,13 +1576,7 @@ export default function BidDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bid.documents
-                      .filter(
-                        (doc) =>
-                          doc.documentType !== 'TechnicalProposal' &&
-                          doc.documentType !== 'CommercialProposal'
-                      )
-                      .map((doc) => (
+                    {supportingDocuments.map((doc) => (
                         <TableRow key={doc.id}>
                           <TableCell>
                             <Badge variant="outline">{doc.documentType}</Badge>
@@ -1896,17 +1956,7 @@ export default function BidDetailPage() {
       </Tabs>
 
       {/* Open Bid Confirmation Dialog */}
-      <ConfirmationDialog
-        open={showOpenDialog && canAdministerTender}
-        onOpenChange={setShowOpenDialog}
-        title="Mark Bid as Opened"
-        description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."
-        confirmText="Mark as Opened"
-        cancelText="Cancel"
-        variant="default"
-        onConfirm={confirmOpenBid}
-        isLoading={opening}
-      />
+      {openBidConfirmation}
     </div>
   );
 }

@@ -1642,7 +1642,7 @@ export default function TenderDetailPage() {
                           {bid.businessPartnerName}
                         </TableCell>
                         <TableCell className="font-semibold">
-                          {formatCurrency(bid.totalBidAmount, bid.currency)}
+                          {bid.isSealed || bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                         </TableCell>
                         <TableCell>{formatDate(bid.submittedDate)}</TableCell>
                         <TableCell>
