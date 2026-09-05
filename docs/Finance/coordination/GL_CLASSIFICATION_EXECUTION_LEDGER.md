@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C2 candidate `02488bcc` remains `CHANGES_REQUIRED`; narrow correction dispatched |
+| Review status | C2 candidate `4a79f68a` closes cycle-2 items; one deleted-header consistency P1 remains |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -355,3 +355,11 @@ though those inputs alter primary compatibility derivation. The coordinator sent
 SQL Server fail-before-mutation coverage, mapping-denial tests, and fingerprint mutation tests directly to the
 active Sol Medium implementer. No integration, migration application, configured-database access, or Stage C3
 work is authorized until a clean corrected candidate passes another independent review.
+
+The implementer then produced clean correction `4a79f68aa1579f73c6619f32508532e2b82ed62b`, which appears to
+close canonical-authority preflight, exact mapping eligibility, and rebuild derivation fingerprints. Before
+re-review completed, the independent reviewer identified one further P1: migration compatibility backfill
+excludes soft-deleted journal headers while runtime rebuild can include their active lines, so identical ledger
+evidence can produce different authoritative balances. The coordinator dispatched a final Sol Medium
+fail-before-mutation correction requiring aligned migration/runtime rejection and unit plus SQL Server coverage.
+Integration, Stage C3, migration application, and configured-database access remain blocked.
