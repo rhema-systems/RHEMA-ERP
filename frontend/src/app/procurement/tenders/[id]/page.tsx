@@ -400,21 +400,7 @@ export default function TenderDetailPage() {
               Publish Tender
             </Button>
           )}
-          {canAdministerTender && ['Approved', 'Published', 'Awarded'].includes(tender.status) &&
-            tender.sourcingCaseId &&
-            tender.tenderType !== 'RFQ' && (
-              <Button
-                variant="outline"
-                onClick={() =>
-                  router.push(
-                    `/procurement/tenders/${tenderId}/document-controls`
-                  )
-                }
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Document Register
-              </Button>
-            )}
+          {/* Document-register navigation lives in the process guide, not twice in the page chrome. */}
           <TenderHeaderControlActions
             tenderId={tenderId}
             tenderType={tender.tenderType}

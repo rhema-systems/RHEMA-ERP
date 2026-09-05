@@ -1,10 +1,59 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ProcurementUatFlowSidebar } from './ProcurementUatFlowSidebar';
 
 describe('ProcurementUatFlowSidebar', () => {
+  it('provides the document register action for an approved tender awaiting publication', () => {
+    render(
+      <ProcurementUatFlowSidebar
+        currentStage="tender-documents-publication"
+        stageStates={{
+          'tender-rfq-preparation': { status: 'complete' },
+          'tender-documents-publication': {
+            status: 'ready',
+            href: '/procurement/tenders/tender-1/document-controls',
+            actionLabel: 'Open document register',
+          },
+          'supplier-bidding': { status: 'not-started' },
+        }}
+      />
+    );
+
+    expect(
+      screen.getByRole('link', { name: 'Current action: Open document register' })
+    ).toHaveAttribute('href', '/procurement/tenders/tender-1/document-controls');
+  });
+
+  it('keeps earlier document-register access in the full flow after moving to bidding', () => {
+    render(
+      <ProcurementUatFlowSidebar
+        currentStage="supplier-bidding"
+        stageStates={{
+          'tender-documents-publication': {
+            status: 'complete',
+            href: '/procurement/tenders/tender-1/document-controls',
+            actionLabel: 'Open document register',
+          },
+          'supplier-bidding': {
+            status: 'in-progress',
+            href: '/procurement/tenders/tender-1',
+            actionLabel: 'Open tender',
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByText('View full process'));
+    expect(
+      screen.getByRole('link', { name: 'Open document register' })
+    ).toHaveAttribute('href', '/procurement/tenders/tender-1/document-controls');
+    expect(
+      screen.getByRole('link', { name: 'Current action: Open tender' })
+    ).toBeInTheDocument();
+  });
+
   it('keeps the default view focused on the immediate dependency, blocker, and next stage', () => {
     render(
       <ProcurementUatFlowSidebar
