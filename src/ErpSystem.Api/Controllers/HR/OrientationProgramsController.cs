@@ -1,16 +1,25 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The orientation catalogue — authoring surface, HR only. Participants never come here: they reach
+/// content through their own enrollment (<c>api/employee-orientations</c>), which is also where the
+/// assessment is served with the answer key stripped. Exposing this controller to participants would
+/// hand them <c>IsCorrect</c> on every option straight from the authoring DTO.
+/// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-programs")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OrientationProgramsController : ControllerBase
 {
     private readonly IOrientationProgramService _service;
@@ -27,39 +36,48 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<PagedResult<OrientationProgramSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationProgramSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OrientationProgramDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("code/{programCode}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OrientationProgramDto?>> GetByCode(string programCode)
         => Ok(await _service.GetByProgramCodeAsync(programCode));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationProgramSummaryDto>>> GetByStatus(OrientationProgramStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("category/{categoryId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationProgramSummaryDto>>> GetByCategory(Guid categoryId)
         => Ok(await _service.GetByCategoryAsync(categoryId));
 
     [HttpGet("type/{programType}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationProgramSummaryDto>>> GetByType(OrientationProgramType programType)
         => Ok(await _service.GetByTypeAsync(programType));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationProgramSummaryDto>>> GetActive()
         => Ok(await _service.GetActiveProgramsAsync());
 
     [HttpGet("organization-unit/{organizationUnitId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationProgramSummaryDto>>> GetByOrganizationUnit(Guid organizationUnitId)
         => Ok(await _service.GetByOwnerOrganizationUnitAsync(organizationUnitId));
 
@@ -68,6 +86,7 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationProgramDto>> Create([FromBody] CreateOrientationProgramDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -79,6 +98,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationProgramDto>> Update(Guid id, [FromBody] UpdateOrientationProgramDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -89,6 +109,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/status")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeOrientationProgramStatusDto dto)
     {
         if (id != dto.ProgramId) return BadRequest("ID mismatch.");
@@ -100,6 +121,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -111,10 +133,12 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}/modules")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationModuleDto>>> GetModules(Guid id)
         => Ok(await _service.GetModulesAsync(id));
 
     [HttpPost("{id:guid}/modules")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationModuleDto>> AddModule(Guid id, [FromBody] CreateOrientationModuleDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -126,6 +150,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpPut("modules/{moduleId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationModuleDto>> UpdateModule(Guid moduleId, [FromBody] UpdateOrientationModuleDto dto)
     {
         if (moduleId != dto.Id) return BadRequest("ID mismatch.");
@@ -136,6 +161,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpDelete("modules/{moduleId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeleteModule(Guid moduleId)
     {
         await _service.DeleteModuleAsync(moduleId);
@@ -147,10 +173,12 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpGet("modules/{moduleId:guid}/content-items")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationContentItemDto>>> GetContentItems(Guid moduleId)
         => Ok(await _service.GetContentItemsAsync(moduleId));
 
     [HttpPost("modules/{moduleId:guid}/content-items")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationContentItemDto>> AddContentItem(Guid moduleId, [FromBody] CreateOrientationContentItemDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -162,6 +190,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpPut("content-items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationContentItemDto>> UpdateContentItem(Guid itemId, [FromBody] UpdateOrientationContentItemDto dto)
     {
         if (itemId != dto.Id) return BadRequest("ID mismatch.");
@@ -172,6 +201,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpDelete("content-items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeleteContentItem(Guid itemId)
     {
         await _service.DeleteContentItemAsync(itemId);
@@ -183,10 +213,12 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}/prerequisites")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationPrerequisiteDto>>> GetPrerequisites(Guid id)
         => Ok(await _service.GetPrerequisitesAsync(id));
 
     [HttpPost("{id:guid}/prerequisites")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationPrerequisiteDto>> AddPrerequisite(Guid id, [FromBody] CreateOrientationPrerequisiteDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -198,6 +230,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpDelete("prerequisites/{prerequisiteId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeletePrerequisite(Guid prerequisiteId)
     {
         await _service.DeletePrerequisiteAsync(prerequisiteId);
@@ -209,10 +242,12 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}/audience-rules")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationAudienceRuleDto>>> GetAudienceRules(Guid id)
         => Ok(await _service.GetAudienceRulesAsync(id));
 
     [HttpPost("{id:guid}/audience-rules")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationAudienceRuleDto>> AddAudienceRule(Guid id, [FromBody] CreateOrientationAudienceRuleDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -224,6 +259,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpPut("audience-rules/{ruleId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationAudienceRuleDto>> UpdateAudienceRule(Guid ruleId, [FromBody] UpdateOrientationAudienceRuleDto dto)
     {
         if (ruleId != dto.Id) return BadRequest("ID mismatch.");
@@ -234,6 +270,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpDelete("audience-rules/{ruleId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeleteAudienceRule(Guid ruleId)
     {
         await _service.DeleteAudienceRuleAsync(ruleId);
@@ -245,10 +282,12 @@ public class OrientationProgramsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}/questions")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationAssessmentQuestionDto>>> GetQuestions(Guid id)
         => Ok(await _service.GetQuestionsAsync(id));
 
     [HttpPost("{id:guid}/questions")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationAssessmentQuestionDto>> AddQuestion(Guid id, [FromBody] CreateOrientationAssessmentQuestionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -260,6 +299,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpPut("questions/{questionId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationAssessmentQuestionDto>> UpdateQuestion(Guid questionId, [FromBody] UpdateOrientationAssessmentQuestionDto dto)
     {
         if (questionId != dto.Id) return BadRequest("ID mismatch.");
@@ -271,6 +311,7 @@ public class OrientationProgramsController : ControllerBase
     }
 
     [HttpDelete("questions/{questionId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeleteQuestion(Guid questionId)
     {
         await _service.DeleteQuestionAsync(questionId);

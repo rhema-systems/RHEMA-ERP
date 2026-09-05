@@ -20,6 +20,9 @@ public class EmergencyPlanRepository : GenericRepository<EmergencyPlan>, IEmerge
         await _dbSet.Include(p => p.Location).Include(p => p.PlanOwner)
             .FirstOrDefaultAsync(p => p.PlanNumber == planNumber && !p.IsDeleted);
 
+    // AsSplitQuery: four collection includes is the 8060-byte single-query shape that 500'd
+    // incident detail reads once children existed. Drill Location/Department are included
+    // because the drill mapper reads them — blank names otherwise.
     public async Task<EmergencyPlan?> GetWithFullDetailsAsync(Guid id) =>
         await _dbSet
             .Include(p => p.Location)
@@ -27,7 +30,10 @@ public class EmergencyPlanRepository : GenericRepository<EmergencyPlan>, IEmerge
             .Include(p => p.AssemblyPoints).ThenInclude(a => a.Location)
             .Include(p => p.EmergencyContacts)
             .Include(p => p.Drills).ThenInclude(d => d.Coordinator)
+            .Include(p => p.Drills).ThenInclude(d => d.Location)
+            .Include(p => p.Drills).ThenInclude(d => d.Department)
             .Include(p => p.TeamMembers).ThenInclude(t => t.Employee)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<EmergencyPlan>> GetAllSummaryAsync() =>
@@ -55,17 +61,22 @@ public class EmergencyDrillRepository : GenericRepository<EmergencyDrill>, IEmer
 {
     public EmergencyDrillRepository(ApplicationDbContext context) : base(context) { }
 
+    // Location and Department are included because the drill mapper reads them — without
+    // them every list read mapped blank location/department names.
+    private IQueryable<EmergencyDrill> WithNavigations() =>
+        _dbSet.Include(d => d.Coordinator).Include(d => d.Location).Include(d => d.Department);
+
     public async Task<EmergencyDrill?> GetByNumberAsync(string drillNumber) =>
-        await _dbSet.Include(d => d.Coordinator)
+        await WithNavigations()
             .FirstOrDefaultAsync(d => d.DrillNumber == drillNumber && !d.IsDeleted);
 
     public async Task<IEnumerable<EmergencyDrill>> GetByPlanIdAsync(Guid planId) =>
-        await _dbSet.Include(d => d.Coordinator)
+        await WithNavigations()
             .Where(d => d.EmergencyPlanId == planId && !d.IsDeleted)
             .OrderByDescending(d => d.DrillDate).ToListAsync();
 
     public async Task<IEnumerable<EmergencyDrill>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate) =>
-        await _dbSet.Include(d => d.Coordinator)
+        await WithNavigations()
             .Where(d => d.DrillDate >= fromDate && d.DrillDate <= toDate && !d.IsDeleted)
             .OrderByDescending(d => d.DrillDate).ToListAsync();
 
@@ -73,7 +84,7 @@ public class EmergencyDrillRepository : GenericRepository<EmergencyDrill>, IEmer
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet.Include(d => d.Coordinator)
+        return await WithNavigations()
             .Where(d => !d.IsDeleted && d.NextDrillScheduledDate != null
                      && d.NextDrillScheduledDate >= now && d.NextDrillScheduledDate <= cutoff)
             .OrderBy(d => d.NextDrillScheduledDate).ToListAsync();
@@ -166,7 +177,8 @@ public class SafetySignRepository : GenericRepository<SafetySign>, ISafetySignRe
         await _dbSet.Include(s => s.Location).FirstOrDefaultAsync(s => s.SignCode == signCode && !s.IsDeleted);
 
     public async Task<IEnumerable<SafetySign>> GetByLocationAsync(Guid locationId) =>
-        await _dbSet.Where(s => s.LocationId == locationId && !s.IsDeleted).OrderBy(s => s.SignCode).ToListAsync();
+        await _dbSet.Include(s => s.Location)
+            .Where(s => s.LocationId == locationId && !s.IsDeleted).OrderBy(s => s.SignCode).ToListAsync();
 
     public async Task<IEnumerable<SafetySign>> GetByTypeAsync(SheSafetySignType type) =>
         await _dbSet.Include(s => s.Location).Where(s => s.SignType == type && !s.IsDeleted)
@@ -220,9 +232,9 @@ public class ShePerformanceSnapshotRepository : GenericRepository<ShePerformance
             .Where(s => s.LocationId == locationId && !s.IsDeleted)
             .OrderByDescending(s => s.Year).ThenByDescending(s => s.PeriodNumber).ToListAsync();
 
-    public async Task<ShePerformanceSnapshot?> GetLatestAsync() =>
+    public async Task<ShePerformanceSnapshot?> GetLatestAsync(Guid tenantId) =>
         await _dbSet.Include(s => s.Location).Include(s => s.PreparedBy)
-            .Where(s => !s.IsDeleted)
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted)
             .OrderByDescending(s => s.PreparedDate).FirstOrDefaultAsync();
 }
 
@@ -274,6 +286,8 @@ public class SafetyMeetingRepository : GenericRepository<SafetyMeeting>, ISafety
         await _dbSet.Include(m => m.Committee)
             .FirstOrDefaultAsync(m => m.MeetingNumber == meetingNumber && !m.IsDeleted);
 
+    // Split query: three collection includes in one query multiply rows (and the joined width is
+    // the 8060-byte worktable shape that 500'd the incident detail read).
     public async Task<SafetyMeeting?> GetWithFullDetailsAsync(Guid id) =>
         await _dbSet
             .Include(m => m.Committee)
@@ -281,18 +295,23 @@ public class SafetyMeetingRepository : GenericRepository<SafetyMeeting>, ISafety
             .Include(m => m.Attendees).ThenInclude(a => a.Employee)
             .Include(m => m.ActionItems).ThenInclude(a => a.AssignedTo)
             .Include(m => m.Documents)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
 
+    // List reads carry Committee (the mapper's CommitteeName) and ActionItems (the summary's
+    // OpenActionItemCount — without the include it maps 0 on every row).
     public async Task<IEnumerable<SafetyMeeting>> GetByCommitteeIdAsync(Guid committeeId) =>
-        await _dbSet.Where(m => m.CommitteeId == committeeId && !m.IsDeleted)
+        await _dbSet.Include(m => m.Committee).Include(m => m.ActionItems)
+            .Where(m => m.CommitteeId == committeeId && !m.IsDeleted)
             .OrderByDescending(m => m.MeetingDate).ToListAsync();
 
     public async Task<IEnumerable<SafetyMeeting>> GetByTypeAsync(SheSafetyMeetingType type) =>
-        await _dbSet.Include(m => m.Committee).Where(m => m.Type == type && !m.IsDeleted)
+        await _dbSet.Include(m => m.Committee).Include(m => m.ActionItems)
+            .Where(m => m.Type == type && !m.IsDeleted)
             .OrderByDescending(m => m.MeetingDate).ToListAsync();
 
     public async Task<IEnumerable<SafetyMeeting>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate) =>
-        await _dbSet.Include(m => m.Committee)
+        await _dbSet.Include(m => m.Committee).Include(m => m.ActionItems)
             .Where(m => m.MeetingDate >= fromDate && m.MeetingDate <= toDate && !m.IsDeleted)
             .OrderByDescending(m => m.MeetingDate).ToListAsync();
 }
@@ -355,6 +374,7 @@ public class SheReturnToWorkPlanRepository : GenericRepository<SheReturnToWorkPl
             .Include(p => p.Supervisor)
             .Include(p => p.Phases).ThenInclude(ph => ph.AssessedBy)
             .Include(p => p.Reviews).ThenInclude(r => r.ReviewedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<SheReturnToWorkPlan>> GetAllSummaryAsync() =>

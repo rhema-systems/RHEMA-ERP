@@ -2400,7 +2400,12 @@ public class PerformanceImprovementPlan : TenantEntity
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
 
-    public PipStatus Status { get; set; } = PipStatus.Active;
+    /// <summary>
+    /// Defaults to <see cref="PipStatus.Draft"/>: a plan is in force only once it has been
+    /// approved through the workflow engine, so a record created without an explicit status must
+    /// not be live against the employee.
+    /// </summary>
+    public PipStatus Status { get; set; } = PipStatus.Draft;
 
     // Issues Identified
     [MaxLength(2000)]

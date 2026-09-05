@@ -23,30 +23,36 @@ public class SheContractorRepository : GenericRepository<SheContractor>, ISheCon
             .Include(c => c.PreQualifiedBy)
             .Include(c => c.Inductions).ThenInclude(i => i.ConductedBy)
             .Include(c => c.SheInspections).ThenInclude(i => i.Inspector)
+            .Include(c => c.SheInspections).ThenInclude(i => i.Location)
             .Include(c => c.NonCompliances).ThenInclude(n => n.IssuedBy)
+            .Include(c => c.NonCompliances).ThenInclude(n => n.ClosedBy)
             .Include(c => c.Documents).ThenInclude(d => d.UploadedBy)
+            .Include(c => c.Documents).ThenInclude(d => d.VerifiedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
 
     public async Task<IEnumerable<SheContractor>> GetAllSummaryAsync() =>
         await _dbSet.Include(c => c.NonCompliances).Where(c => !c.IsDeleted).OrderBy(c => c.CompanyName).ToListAsync();
 
     public async Task<IEnumerable<SheContractor>> GetByStatusAsync(SheContractorStatus status) =>
-        await _dbSet.Where(c => c.SheStatus == status && !c.IsDeleted).OrderBy(c => c.CompanyName).ToListAsync();
+        await _dbSet.Include(c => c.NonCompliances)
+            .Where(c => c.SheStatus == status && !c.IsDeleted).OrderBy(c => c.CompanyName).ToListAsync();
 
     public async Task<IEnumerable<SheContractor>> GetActiveAsync() =>
-        await _dbSet.Where(c => c.IsActive && !c.IsDeleted).OrderBy(c => c.CompanyName).ToListAsync();
+        await _dbSet.Include(c => c.NonCompliances)
+            .Where(c => c.IsActive && !c.IsDeleted).OrderBy(c => c.CompanyName).ToListAsync();
 
     public async Task<IEnumerable<SheContractor>> GetExpiringPreQualificationAsync(int daysAhead = 30)
     {
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
-        return await _dbSet
+        return await _dbSet.Include(c => c.NonCompliances)
             .Where(c => !c.IsDeleted && c.SheStatus == SheContractorStatus.Approved
                      && c.PreQualificationExpiryDate != null && c.PreQualificationExpiryDate <= cutoff)
             .OrderBy(c => c.PreQualificationExpiryDate).ToListAsync();
     }
 
     public async Task<IEnumerable<SheContractor>> GetWithOpenNonCompliancesAsync() =>
-        await _dbSet
+        await _dbSet.Include(c => c.NonCompliances)
             .Where(c => !c.IsDeleted && c.NonCompliances.Any(n => n.Status != SheNonComplianceStatus.Closed))
             .OrderBy(c => c.CompanyName).ToListAsync();
 }
@@ -60,7 +66,7 @@ public class SheContractorInspectionRepository : GenericRepository<SheContractor
             .FirstOrDefaultAsync(i => i.InspectionNumber == inspectionNumber && !i.IsDeleted);
 
     public async Task<IEnumerable<SheContractorInspection>> GetByContractorIdAsync(Guid contractorId) =>
-        await _dbSet.Include(i => i.Inspector)
+        await _dbSet.Include(i => i.Inspector).Include(i => i.Location)
             .Where(i => i.ContractorId == contractorId && !i.IsDeleted)
             .OrderByDescending(i => i.InspectionDate).ToListAsync();
 }
@@ -70,7 +76,7 @@ public class SheContractorNonComplianceRepository : GenericRepository<SheContrac
     public SheContractorNonComplianceRepository(ApplicationDbContext context) : base(context) { }
 
     private IQueryable<SheContractorNonCompliance> WithNavigations() =>
-        _dbSet.Include(n => n.Contractor).Include(n => n.IssuedBy);
+        _dbSet.Include(n => n.Contractor).Include(n => n.IssuedBy).Include(n => n.ClosedBy);
 
     public async Task<SheContractorNonCompliance?> GetByNumberAsync(string noticeNumber) =>
         await WithNavigations().FirstOrDefaultAsync(n => n.NoticeNumber == noticeNumber && !n.IsDeleted);
@@ -104,20 +110,23 @@ public class SheContractorDocumentRepository : GenericRepository<SheContractorDo
 {
     public SheContractorDocumentRepository(ApplicationDbContext context) : base(context) { }
 
+    private IQueryable<SheContractorDocument> WithNavigations() =>
+        _dbSet.Include(d => d.Contractor).Include(d => d.UploadedBy).Include(d => d.VerifiedBy);
+
     public async Task<IEnumerable<SheContractorDocument>> GetByContractorIdAsync(Guid contractorId) =>
-        await _dbSet.Where(d => d.ContractorId == contractorId && !d.IsDeleted)
+        await WithNavigations().Where(d => d.ContractorId == contractorId && !d.IsDeleted)
             .OrderByDescending(d => d.UploadedDate).ToListAsync();
 
     public async Task<IEnumerable<SheContractorDocument>> GetExpiringAsync(int daysAhead = 30)
     {
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
-        return await _dbSet.Include(d => d.Contractor)
+        return await WithNavigations()
             .Where(d => !d.IsDeleted && d.ExpiryDate != null && d.ExpiryDate <= cutoff)
             .OrderBy(d => d.ExpiryDate).ToListAsync();
     }
 
     public async Task<IEnumerable<SheContractorDocument>> GetUnverifiedAsync() =>
-        await _dbSet.Include(d => d.Contractor)
+        await WithNavigations()
             .Where(d => !d.IsVerified && !d.IsDeleted)
             .OrderBy(d => d.UploadedDate).ToListAsync();
 }
@@ -130,10 +139,6 @@ public class SheTrainingPlanRepository : GenericRepository<SheTrainingPlan>, ISh
 {
     public SheTrainingPlanRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<SheTrainingPlan?> GetByNumberAsync(string planNumber) =>
-        await _dbSet.Include(p => p.PreparedBy)
-            .FirstOrDefaultAsync(p => p.PlanNumber == planNumber && !p.IsDeleted);
-
     public async Task<SheTrainingPlan?> GetWithProgramsAsync(Guid id) =>
         await _dbSet
             .Include(p => p.OrganizationUnit)
@@ -142,13 +147,18 @@ public class SheTrainingPlanRepository : GenericRepository<SheTrainingPlan>, ISh
             .Include(p => p.Programs)
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
+    // List reads carry every nav the plan mapper resolves — an uneven include maps blank
+    // org-unit/approver names on the register rows.
+    private IQueryable<SheTrainingPlan> WithListNavigations() =>
+        _dbSet.Include(p => p.PreparedBy).Include(p => p.ApprovedBy).Include(p => p.OrganizationUnit);
+
     public async Task<IEnumerable<SheTrainingPlan>> GetByYearAsync(int year) =>
-        await _dbSet.Include(p => p.PreparedBy)
+        await WithListNavigations()
             .Where(p => p.Year == year && !p.IsDeleted)
             .OrderByDescending(p => p.Year).ThenBy(p => p.Quarter).ToListAsync();
 
     public async Task<IEnumerable<SheTrainingPlan>> GetByStatusAsync(SheTrainingPlanStatus status) =>
-        await _dbSet.Include(p => p.PreparedBy)
+        await WithListNavigations()
             .Where(p => p.Status == status && !p.IsDeleted)
             .OrderByDescending(p => p.Year).ToListAsync();
 }
@@ -160,9 +170,8 @@ public class SheTrainingProgramRepository : GenericRepository<SheTrainingProgram
     private IQueryable<SheTrainingProgram> WithListNavigations() =>
         _dbSet.Include(p => p.Location).Include(p => p.Trainer).Include(p => p.Plan);
 
-    public async Task<SheTrainingProgram?> GetByCodeAsync(string programCode) =>
-        await WithListNavigations().FirstOrDefaultAsync(p => p.ProgramCode == programCode && !p.IsDeleted);
-
+    // Split query: the attendance collection multiplied by four reference includes is the
+    // 8060-byte worktable shape that 500'd the incident detail read.
     public async Task<SheTrainingProgram?> GetWithAttendancesAsync(Guid id) =>
         await _dbSet
             .Include(p => p.Location)
@@ -170,6 +179,7 @@ public class SheTrainingProgramRepository : GenericRepository<SheTrainingProgram
             .Include(p => p.Plan)
             .Include(p => p.EvaluatedBy)
             .Include(p => p.Attendances).ThenInclude(a => a.Employee)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<SheTrainingProgram>> GetByPlanIdAsync(Guid planId) =>

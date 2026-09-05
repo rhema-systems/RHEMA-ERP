@@ -1,7 +1,9 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +11,8 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-transfers")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[MovementBusinessRules]
 public class StaffTransfersController : ControllerBase
 {
     private readonly IStaffTransferService _service;
@@ -26,30 +29,37 @@ public class StaffTransfersController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffTransferDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("movement/{movementId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffTransferDto?>> GetByMovement(Guid movementId)
         => Ok(await _service.GetByMovementIdAsync(movementId));
 
     [HttpGet("type/{type}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffTransferDto>>> GetByType(StaffTransferType type)
         => Ok(await _service.GetByTypeAsync(type));
 
     [HttpGet("reason-category/{reasonCategory}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffTransferDto>>> GetByReasonCategory(StaffTransferReasonCategory reasonCategory)
         => Ok(await _service.GetByReasonCategoryAsync(reasonCategory));
 
     [HttpGet("inter-company")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffTransferDto>>> GetInterCompany()
         => Ok(await _service.GetInterCompanyTransfersAsync());
 
     [HttpGet("relocation")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffTransferDto>>> GetRelocation()
         => Ok(await _service.GetRelocationTransfersAsync());
 
     [HttpGet("in-transition")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffTransferDto>>> GetInTransition()
         => Ok(await _service.GetInTransitionAsync());
 
@@ -58,6 +68,7 @@ public class StaffTransfersController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffTransferDto>> Create([FromBody] CreateStaffTransferDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -73,6 +84,7 @@ public class StaffTransfersController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffTransferDto>> Update(Guid id, [FromBody] UpdateStaffTransferDto dto)
     {
         if (id != dto.Id)        return BadRequest("ID mismatch.");
@@ -85,6 +97,7 @@ public class StaffTransfersController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);

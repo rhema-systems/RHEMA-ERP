@@ -82,12 +82,21 @@ public class OrientationNotificationService : IOrientationNotificationService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _notificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read for ProgramTitle. The list reads were given the include, but the entity built here
+        // has only the FK, so the notification came back unable to name the programme it is about —
+        // which is most of what an inbox row shows.
+        return (await _notificationRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
-    public async Task<bool> MarkAsReadAsync(Guid notificationId, CancellationToken cancellationToken = default)
+    public async Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNotificationAsync(notificationId);
+
+        // Read state belongs to the recipient. Reported as not-found rather than forbidden so the
+        // endpoint does not confirm that someone else's notification id exists.
+        if (entity.RecipientEmployeeId != recipientEmployeeId)
+            throw new ArgumentException($"Orientation notification with ID '{notificationId}' not found.");
 
         if (!entity.IsRead)
         {

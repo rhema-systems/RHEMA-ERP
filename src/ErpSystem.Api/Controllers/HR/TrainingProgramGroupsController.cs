@@ -1,14 +1,17 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/training-program-groups")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[TrainingBusinessRulesAttribute]
 public class TrainingProgramGroupsController : ControllerBase
 {
     private readonly ITrainingProgramGroupService _service;
@@ -29,6 +32,7 @@ public class TrainingProgramGroupsController : ControllerBase
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingProgramGroupDto>> Create([FromBody] CreateTrainingProgramGroupDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -43,6 +47,7 @@ public class TrainingProgramGroupsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingProgramGroupDto>> Update(Guid id, [FromBody] UpdateTrainingProgramGroupDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -55,6 +60,7 @@ public class TrainingProgramGroupsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);

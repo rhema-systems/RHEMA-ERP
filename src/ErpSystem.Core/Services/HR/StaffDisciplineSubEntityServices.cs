@@ -1,12 +1,75 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
+
+/// <summary>
+/// The rule every disciplinary sanction shares: a penalty must have a confirmed decision behind it.
+/// </summary>
+/// <remarks>
+/// ⚠ It lives here rather than on one service because the four sanctions are four separate classes
+/// in this file, and the guard was private to the termination one — which is precisely how warning,
+/// suspension and fine came to be unguarded. A shared rule with four call sites cannot drift; four
+/// copies would.
+/// </remarks>
+internal static class DisciplineSanctionGuard
+{
+    /// <summary>
+    /// Refuses a sanction until the decision behind it is final and any appeal against it has been
+    /// answered.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things were unguarded. A termination could be recorded against a case in ANY status
+    /// — a draft, or one whose proposed sanction was still sitting in an approver's queue — so the
+    /// record could say an employee had been dismissed on a decision nobody had confirmed. And it
+    /// could be recorded while an appeal was live and undecided, which is the procedural failure this
+    /// whole area exists to prevent: dismissing someone while they are still contesting the finding.</para>
+    ///
+    /// <para>⚠ <b>It guarded the termination alone, and the other three sanctions were open.</b> The
+    /// closure ledger's D-18 recorded this as "a warning is not [gated]"; running it found
+    /// <b>warning, suspension AND fine</b> all accepted against a case in <c>UnderReview</c> with no
+    /// decision at all. Every one of those entities says in its own summary that it is "created when
+    /// the decision includes" that penalty — so a sanction with no decision behind it contradicts the
+    /// model as designed, not merely good practice. All four now call this.</para>
+    ///
+    /// <para><b>FR-HR-092 is NOT implemented as a flag here.</b> "The MD shall sign all terminations
+    /// except procedural ones, which HR approves automatically per policy" is a statement about WHO
+    /// CONFIRMS the decision, and that is already expressed: the action type carries its
+    /// <c>MinimumAuthority</c>, and the workflow definition routes on it. A dismissal action type set
+    /// to Management routes to the MD; a procedural one set to Hr does not. Adding an "MD signed"
+    /// boolean here would be a second, unenforced copy of a fact the approval record already holds —
+    /// and it would have to be kept in step with it by hand.</para>
+    /// </remarks>
+    public static async Task EnsureFoundedAsync(
+        StaffDisciplinaryAction disciplinaryCase,
+        IStaffDisciplineAppealRepository appealRepository,
+        Guid tenantId,
+        string sanctionNoun)
+    {
+        if (disciplinaryCase.Status is not (DisciplinaryStatus.DecisionMade
+            or DisciplinaryStatus.UnderAppeal
+            or DisciplinaryStatus.Closed))
+        {
+            throw new InvalidOperationException(
+                $"A {sanctionNoun} cannot be recorded for a case in '{disciplinaryCase.Status}' status. "
+                + "The decision must be confirmed first.");
+        }
+
+        var appeal = await appealRepository.GetByCaseIdAsync(tenantId, disciplinaryCase.Id);
+        if (appeal != null && appeal.AppealOutcome == null)
+            throw new InvalidOperationException(
+                "This decision is under appeal and the appeal has not been decided. "
+                + $"Record the appeal outcome before recording a {sanctionNoun}.");
+    }
+}
+
 
 // ============================================================================
 // STAFF DISCIPLINE INVESTIGATION SERVICE
@@ -25,16 +88,22 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     public StaffDisciplineInvestigationService(
         IStaffDisciplineInvestigationRepository investigationRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        ICompanyHrPolicyProvider policyProvider,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineInvestigationService> logger)
     {
         _investigationRepository = investigationRepository;
         _caseRepository = caseRepository;
+        _policyProvider = policyProvider;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
+
+    // FR-HR-178's four weeks is a tenant setting now; this queue must answer the same question the
+    // case advisory does, which was the whole reason the caller's `maxDays` stopped being the rule.
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -43,7 +112,7 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -57,16 +126,18 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineInvestigation> GetOwnedInvestigationByCaseAsync(Guid caseId)
     {
-        var entity = await _investigationRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _investigationRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No investigation found for case '{caseId}'.");
         return entity;
     }
@@ -74,7 +145,7 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     public async Task<StaffDisciplineInvestigationDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _investigationRepository.GetByCaseIdAsync(caseId);
+        var entity = await _investigationRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -83,22 +154,31 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetByInvestigatorAsync(Guid investigatorId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _investigationRepository.GetByInvestigatorAsync(investigatorId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _investigationRepository.GetByInvestigatorAsync(tenantId, investigatorId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOpenInvestigationsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _investigationRepository.GetOpenInvestigationsAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _investigationRepository.GetOpenInvestigationsAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
-    public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int maxDays = 30, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// "Overdue" is FR-HR-178's four weeks, taken from the tenant's HR policy settings — not
+    /// the caller's choice. It used to be a <c>maxDays</c> argument defaulting to 30, so this queue,
+    /// the case advisory and any future reminder could each answer the same question differently and
+    /// the spec's own figure appeared nowhere. The parameter is kept so an ad-hoc wider sweep is
+    /// still possible, but it now defaults to the rule.
+    /// </remarks>
+    public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int? maxDays = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _investigationRepository.GetOverdueInvestigationsAsync(maxDays);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var policy = await _policyProvider.GetAsync(cancellationToken);
+        var entities = await _investigationRepository.GetOverdueInvestigationsAsync(
+            tenantId, maxDays ?? policy.InvestigationDays);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineInvestigationDto> OpenAsync(OpenInvestigationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -109,7 +189,7 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
         if (!disciplinaryCase.RequiresInvestigation)
             throw new InvalidOperationException("This case is not flagged as requiring an investigation.");
 
-        var existing = await _investigationRepository.GetByCaseIdAsync(dto.CaseId);
+        var existing = await _investigationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("An investigation has already been opened for this case.");
 
@@ -132,8 +212,15 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Investigation opened for case {CaseId}", dto.CaseId);
+        // Re-read so the response carries the resolved names. Mapping the just-written
+        // entity returns investigatorName / hearingOfficerName / representativeEmployeeName
+        // as null, because a freshly added or updated entity has no navigation loaded — the
+        // create response then disagrees with the detail read that follows it. Caught by
+        // slice 11; same shape as the succession document uploader (D-14's slice).
 
-        return entity.ToDto();
+        var saved = await _investigationRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<StaffDisciplineInvestigationDto> UpdateAsync(UpdateInvestigationDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -151,7 +238,9 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
         await _investigationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // Re-read so the response carries the resolved names — see the note on the sibling writer.
+        var saved = await _investigationRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> CompleteAsync(Guid caseId, string findings, Guid userId, CancellationToken cancellationToken = default)
@@ -218,7 +307,7 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -232,16 +321,18 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineHearing> GetOwnedHearingByCaseAsync(Guid caseId)
     {
-        var entity = await _hearingRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _hearingRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No hearing found for case '{caseId}'.");
         return entity;
     }
@@ -249,7 +340,7 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
     public async Task<StaffDisciplineHearingDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _hearingRepository.GetByCaseIdAsync(caseId);
+        var entity = await _hearingRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -258,22 +349,22 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
     public async Task<IEnumerable<StaffDisciplineHearingDto>> GetByHearingOfficerAsync(Guid officerId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _hearingRepository.GetByHearingOfficerAsync(officerId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _hearingRepository.GetByHearingOfficerAsync(tenantId, officerId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineHearingDto>> GetUpcomingHearingsAsync(int daysAhead = 14, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _hearingRepository.GetUpcomingHearingsAsync(daysAhead);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _hearingRepository.GetUpcomingHearingsAsync(tenantId, daysAhead);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineHearingDto>> GetAwaitingOutcomeAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _hearingRepository.GetAwaitingOutcomeAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _hearingRepository.GetAwaitingOutcomeAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineHearingDto> ScheduleAsync(ScheduleHearingDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -284,7 +375,7 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
         if (!disciplinaryCase.HearingRequired)
             throw new InvalidOperationException("This case is not flagged as requiring a hearing.");
 
-        var existing = await _hearingRepository.GetByCaseIdAsync(dto.CaseId);
+        var existing = await _hearingRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A hearing has already been scheduled for this case.");
 
@@ -309,7 +400,9 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
 
         _logger.LogInformation("Hearing scheduled for case {CaseId} on {HearingDate}", dto.CaseId, dto.HearingDate);
 
-        return entity.ToDto();
+        // Re-read so the response carries the resolved names — see the note on the sibling writer.
+        var saved = await _hearingRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<StaffDisciplineHearingDto> RecordOutcomeAsync(RecordHearingOutcomeDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -341,8 +434,15 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Hearing outcome recorded for case {CaseId}", dto.CaseId);
+        // Re-read so the response carries the resolved names. Mapping the just-written
+        // entity returns investigatorName / hearingOfficerName / representativeEmployeeName
+        // as null, because a freshly added or updated entity has no navigation loaded — the
+        // create response then disagrees with the detail read that follows it. Caught by
+        // slice 11; same shape as the succession document uploader (D-14's slice).
 
-        return entity.ToDto();
+        var saved = await _hearingRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+
+        return (saved ?? entity).ToDto();
     }
 }
 
@@ -358,6 +458,9 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
 {
     private readonly IStaffDisciplineWarningRepository _warningRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    // ⚠ Injected for DisciplineSanctionGuard: a sanction is refused while an appeal against the
+    // decision is live and undecided.
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineWarningService> _logger;
@@ -365,12 +468,14 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
     public StaffDisciplineWarningService(
         IStaffDisciplineWarningRepository warningRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineWarningService> logger)
     {
         _warningRepository = warningRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -383,7 +488,7 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -397,16 +502,18 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineWarning> GetOwnedWarningByCaseAsync(Guid caseId)
     {
-        var entity = await _warningRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _warningRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No warning penalty found for case '{caseId}'.");
         return entity;
     }
@@ -414,7 +521,7 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
     public async Task<StaffDisciplineWarningDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _warningRepository.GetByCaseIdAsync(caseId);
+        var entity = await _warningRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -423,29 +530,29 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
     public async Task<IEnumerable<StaffDisciplineWarningDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _warningRepository.GetByEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _warningRepository.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineWarningDto>> GetActiveWarningsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _warningRepository.GetActiveWarningsForEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _warningRepository.GetActiveWarningsForEmployeeAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineWarningDto>> GetByTypeAsync(DisciplinaryWarningType warningType, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _warningRepository.GetByTypeAsync(warningType);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _warningRepository.GetByTypeAsync(tenantId, warningType);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineWarningDto>> GetExpiringAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _warningRepository.GetExpiringAsync(daysAhead);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _warningRepository.GetExpiringAsync(tenantId, daysAhead);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineWarningDto> RecordAsync(RecordWarningPenaltyDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -453,7 +560,9 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
-        var existing = await _warningRepository.GetByCaseIdAsync(dto.CaseId);
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "warning");
+
+        var existing = await _warningRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A warning penalty already exists for this case. Use Update instead.");
 
@@ -513,6 +622,9 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
 {
     private readonly IStaffDisciplineSuspensionRepository _suspensionRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    // ⚠ Injected for DisciplineSanctionGuard: a sanction is refused while an appeal against the
+    // decision is live and undecided.
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineSuspensionService> _logger;
@@ -520,12 +632,14 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
     public StaffDisciplineSuspensionService(
         IStaffDisciplineSuspensionRepository suspensionRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineSuspensionService> logger)
     {
         _suspensionRepository = suspensionRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -538,7 +652,7 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -552,16 +666,18 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineSuspension> GetOwnedSuspensionByCaseAsync(Guid caseId)
     {
-        var entity = await _suspensionRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _suspensionRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No suspension penalty found for case '{caseId}'.");
         return entity;
     }
@@ -569,7 +685,7 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
     public async Task<StaffDisciplineSuspensionDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _suspensionRepository.GetByCaseIdAsync(caseId);
+        var entity = await _suspensionRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -578,22 +694,22 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
     public async Task<IEnumerable<StaffDisciplineSuspensionDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _suspensionRepository.GetByEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _suspensionRepository.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineSuspensionDto>> GetCurrentlyActiveAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _suspensionRepository.GetCurrentlyActiveAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _suspensionRepository.GetCurrentlyActiveAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineSuspensionDto>> GetUpcomingAsync(int daysAhead = 7, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _suspensionRepository.GetUpcomingAsync(daysAhead);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _suspensionRepository.GetUpcomingAsync(tenantId, daysAhead);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineSuspensionDto> RecordAsync(RecordSuspensionPenaltyDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -601,7 +717,14 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
-        var existing = await _suspensionRepository.GetByCaseIdAsync(dto.CaseId);
+        // ⚠ A PRECAUTIONARY suspension — sending somebody home pending the investigation — is a real
+        // and legitimate act, and it is NOT what this entity models. `StaffDisciplineSuspension`
+        // carries only dates and a with-pay flag, and its own summary says "created when the decision
+        // includes a suspension". So this is a penalty, and a penalty needs a decision behind it. If
+        // TDC needs precautionary suspension it needs its own concept on the case, not this one.
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "suspension");
+
+        var existing = await _suspensionRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A suspension penalty already exists for this case. Use Update instead.");
 
@@ -661,6 +784,9 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
 {
     private readonly IStaffDisciplineFineRepository _fineRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    // ⚠ Injected for DisciplineSanctionGuard: a sanction is refused while an appeal against the
+    // decision is live and undecided.
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineFineService> _logger;
@@ -668,12 +794,14 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     public StaffDisciplineFineService(
         IStaffDisciplineFineRepository fineRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineFineService> logger)
     {
         _fineRepository = fineRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -686,7 +814,7 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -700,16 +828,18 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineFine> GetOwnedFineByCaseAsync(Guid caseId)
     {
-        var entity = await _fineRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _fineRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No fine record found for case '{caseId}'.");
         return entity;
     }
@@ -717,7 +847,7 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     public async Task<StaffDisciplineFineDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _fineRepository.GetByCaseIdAsync(caseId);
+        var entity = await _fineRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -726,28 +856,28 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     public async Task<IEnumerable<StaffDisciplineFineDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _fineRepository.GetByEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _fineRepository.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineFineDto>> GetOutstandingAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _fineRepository.GetOutstandingAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _fineRepository.GetOutstandingAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineFineDto>> GetOverdueAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _fineRepository.GetOverdueAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _fineRepository.GetOverdueAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<decimal> GetTotalOutstandingBalanceForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _fineRepository.GetByEmployeeAsync(employeeId);
+        var entities = await _fineRepository.GetByEmployeeAsync(tenantId, employeeId);
         return entities
             .Where(e => e.TenantId == tenantId
                      && e.FinePaymentStatus != DisciplinaryFinePaymentStatus.FullyPaid)
@@ -759,7 +889,9 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
-        var existing = await _fineRepository.GetByCaseIdAsync(dto.CaseId);
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "fine");
+
+        var existing = await _fineRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A fine penalty already exists for this case. Use RecordPayment to update the payment status.");
 
@@ -824,6 +956,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
 {
     private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    private readonly IHrWorkingDayCalculator _workingDays;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineAppealService> _logger;
@@ -831,12 +964,14 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     public StaffDisciplineAppealService(
         IStaffDisciplineAppealRepository appealRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IHrWorkingDayCalculator workingDays,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineAppealService> logger)
     {
         _appealRepository = appealRepository;
         _caseRepository = caseRepository;
+        _workingDays = workingDays;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -849,7 +984,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -863,16 +998,18 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineAppeal> GetOwnedAppealByCaseAsync(Guid caseId)
     {
-        var entity = await _appealRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _appealRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No appeal found for case '{caseId}'.");
         return entity;
     }
@@ -880,7 +1017,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     public async Task<StaffDisciplineAppealDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _appealRepository.GetByCaseIdAsync(caseId);
+        var entity = await _appealRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -889,7 +1026,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     public async Task<StaffDisciplineAppealDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _appealRepository.GetWithFullDetailsAsync(id);
+        var entity = await _appealRepository.GetWithFullDetailsAsync(tenantId, id);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -898,60 +1035,93 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     public async Task<IEnumerable<StaffDisciplineAppealDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _appealRepository.GetByEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _appealRepository.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineAppealDto>> GetByStatusAsync(DisciplineAppealStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _appealRepository.GetByStatusAsync(status);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _appealRepository.GetByStatusAsync(tenantId, status);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineAppealDto>> GetPendingHearingScheduleAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _appealRepository.GetPendingHearingScheduleAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _appealRepository.GetPendingHearingScheduleAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineAppealDto>> GetAwaitingOutcomeAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _appealRepository.GetAwaitingOutcomeAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _appealRepository.GetAwaitingOutcomeAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
-    public async Task<StaffDisciplineAppealDto> FileAsync(FileAppealDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// The appellant is the case's own employee and is never taken from the request. An appeal is
+    /// the subject's act, so this refuses the call from anyone else — HR included, exactly as the
+    /// staff-movement acceptance path does. HR's role here is to schedule and decide, not to appeal
+    /// on someone's behalf.
+    /// </remarks>
+    public async Task<StaffDisciplineAppealDto> FileAsync(FileAppealDto dto, Guid tenantId, Guid appellantEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
+
+        if (disciplinaryCase.EmployeeId != appellantEmployeeId)
+            throw new UnauthorizedAccessException("Only the employee a case was brought against can appeal it.");
+
+        // FR-HR-180 — five WORKING days from the decision. The window is enforced, unlike the two
+        // advisory clocks on the case: an appeal filed out of time is not a late act that can still
+        // be dealt with, it is one the employer is entitled to refuse to hear, and letting it through
+        // silently would misrepresent the position to both sides.
+        //
+        // It runs from the DECISION DATE, not from the case being closed: the decision is the thing
+        // being appealed and the point from which the employee knows there is something to appeal.
+        if (disciplinaryCase.DecisionDate is DateTime decidedAt)
+        {
+            var closesAt = await _workingDays.AddWorkingDaysAsync(
+                tenantId, decidedAt, DisciplineProcessDeadlines.AppealFilingWorkingDays, cancellationToken);
+
+            if (DateTime.UtcNow > closesAt)
+                throw new InvalidOperationException(
+                    $"The window to appeal this decision closed on {closesAt:dd MMM yyyy}. "
+                    + $"FR-HR-180 allows {DisciplineProcessDeadlines.AppealFilingWorkingDays} working days from the decision.");
+        }
+
+        // The duplicate check runs BEFORE the status check, and the order is load-bearing. Filing an
+        // appeal moves the case to UnderAppeal, so a second attempt fails the status test first and
+        // the caller is told "an appeal can only be filed where a decision has been made" — on a case
+        // that plainly has one. The status guard was firing on a condition the first filing created,
+        // and the real reason was never reachable. Same shape as the decision-gate ordering in slice 4:
+        // answer with the thing that is actually wrong.
+        var existing = await _appealRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
+        if (existing != null && existing.TenantId == tenantId)
+            throw new InvalidOperationException("An appeal has already been filed for this case.");
 
         if (disciplinaryCase.Status != DisciplinaryStatus.DecisionMade
             && disciplinaryCase.Status != DisciplinaryStatus.AwaitingDecision)
             throw new InvalidOperationException("An appeal can only be filed for a case where a decision has been made or is awaiting confirmation.");
 
-        var existing = await _appealRepository.GetByCaseIdAsync(dto.CaseId);
-        if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("An appeal has already been filed for this case.");
-
         var entity = new StaffDisciplineAppeal
         {
             TenantId             = tenantId,
             DisciplinaryActionId = dto.CaseId,
-            EmployeeId           = dto.EmployeeId,
-            FiledDate            = dto.FiledDate,
+            EmployeeId           = appellantEmployeeId,
+            FiledDate            = DateTime.UtcNow,
             Reason               = dto.Reason,
             AppealStatus         = DisciplineAppealStatus.Filed,
-            CreatedBy            = userId.ToString(),
+            CreatedBy            = appellantEmployeeId.ToString(),
         };
 
         await _appealRepository.AddAsync(entity);
 
         disciplinaryCase.Status    = DisciplinaryStatus.UnderAppeal;
         disciplinaryCase.UpdatedAt = DateTime.UtcNow;
-        disciplinaryCase.UpdatedBy = userId.ToString();
+        disciplinaryCase.UpdatedBy = appellantEmployeeId.ToString();
         await _caseRepository.UpdateAsync(disciplinaryCase);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -991,7 +1161,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
         entity.AppealOutcome      = dto.AppealOutcome;
         entity.AppealOutcomeNotes = dto.AppealOutcomeNotes;
         entity.AppealOutcomeDate  = dto.AppealOutcomeDate;
-        entity.AppealOutcomeById  = dto.AppealOutcomeById;
+        entity.AppealOutcomeById  = userId;
         entity.HearingNotes       = dto.HearingNotes ?? entity.HearingNotes;
         entity.AppealStatus       = DisciplineAppealStatus.DecisionMade;
         entity.UpdatedAt          = DateTime.UtcNow;
@@ -1043,7 +1213,7 @@ public class StaffDisciplineCorrectiveActionService : IStaffDisciplineCorrective
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -1057,16 +1227,18 @@ public class StaffDisciplineCorrectiveActionService : IStaffDisciplineCorrective
 
     private async Task<StaffDisciplineCorrectiveAction> GetOwnedPlanAsync(Guid id)
     {
+        var tenantId = GetTenantId();
         var entity = await _correctiveActionRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Corrective action plan with ID '{id}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineCorrectiveActionItem> GetOwnedItemAsync(Guid itemId)
     {
+        var tenantId = GetTenantId();
         var entity = await _itemRepository.GetByIdAsync(itemId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Corrective action item with ID '{itemId}' not found.");
         return entity;
     }
@@ -1074,7 +1246,7 @@ public class StaffDisciplineCorrectiveActionService : IStaffDisciplineCorrective
     public async Task<StaffDisciplineCorrectiveActionDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _correctiveActionRepository.GetByCaseIdAsync(caseId);
+        var entity = await _correctiveActionRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -1083,7 +1255,7 @@ public class StaffDisciplineCorrectiveActionService : IStaffDisciplineCorrective
     public async Task<StaffDisciplineCorrectiveActionDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _correctiveActionRepository.GetWithItemsAsync(id);
+        var entity = await _correctiveActionRepository.GetWithItemsAsync(tenantId, id);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -1092,36 +1264,36 @@ public class StaffDisciplineCorrectiveActionService : IStaffDisciplineCorrective
     public async Task<IEnumerable<StaffDisciplineCorrectiveActionDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _correctiveActionRepository.GetByEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _correctiveActionRepository.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineCorrectiveActionDto>> GetBySupervisorAsync(Guid supervisorId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _correctiveActionRepository.GetBySupervisorAsync(supervisorId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _correctiveActionRepository.GetBySupervisorAsync(tenantId, supervisorId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineCorrectiveActionDto>> GetByStatusAsync(DisciplineCorrectiveActionStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _correctiveActionRepository.GetByStatusAsync(status);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _correctiveActionRepository.GetByStatusAsync(tenantId, status);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineCorrectiveActionDto>> GetOverdueAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _correctiveActionRepository.GetOverdueAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _correctiveActionRepository.GetOverdueAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineCorrectiveActionDto>> GetDueForReviewAsync(int daysAhead = 14, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _correctiveActionRepository.GetDueForReviewAsync(daysAhead);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _correctiveActionRepository.GetDueForReviewAsync(tenantId, daysAhead);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineCorrectiveActionDto> CreateAsync(CreateStaffDisciplineCorrectiveActionDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -1254,25 +1426,51 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     private readonly IStaffDisciplineTerminationRepository _terminationRepository;
     private readonly IStaffDisciplineSeparationRepository _separationRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    // Area 9b: the disciplinary route raises the same exit record every other route does (D1).
+    private readonly ISeparationService _separationService;
     private readonly ILogger<StaffDisciplineTerminationService> _logger;
 
     public StaffDisciplineTerminationService(
         IStaffDisciplineTerminationRepository terminationRepository,
         IStaffDisciplineSeparationRepository separationRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        ISeparationService separationService,
         ILogger<StaffDisciplineTerminationService> logger)
     {
         _terminationRepository = terminationRepository;
         _separationRepository = separationRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _separationService = separationService;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Validates a body-supplied employee id and returns the row.
+    /// </summary>
+    /// <remarks>
+    /// Two jobs in one call, as elsewhere in HR. It stops an unknown or another tenant's id reaching
+    /// the database as an FK violation (SQL 547, surfacing as an unexplained 500 rather than "that
+    /// employee was not found"), and because the row ends up tracked, EF fixes up the navigation on
+    /// the entity being written — so the separation write response carries the exit interviewer's
+    /// name instead of null, with no second read. The harness caught the null.
+    /// </remarks>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The {role} employee with ID '{employeeId}' was not found.");
+        return employee;
+    }
+
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -1281,7 +1479,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -1295,24 +1493,27 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
 
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid caseId)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
         return entity;
     }
 
     private async Task<StaffDisciplineTermination> GetOwnedTerminationByCaseAsync(Guid caseId)
     {
-        var entity = await _terminationRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _terminationRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No termination record found for case '{caseId}'.");
         return entity;
     }
 
     private async Task<StaffDisciplineSeparation> GetOwnedSeparationByCaseAsync(Guid caseId)
     {
-        var entity = await _separationRepository.GetByCaseIdAsync(caseId);
-        if (entity == null || entity.TenantId != GetTenantId())
+        var tenantId = GetTenantId();
+        var entity = await _separationRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"No separation record found for case '{caseId}'.");
         return entity;
     }
@@ -1320,7 +1521,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     public async Task<StaffDisciplineTerminationDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _terminationRepository.GetByCaseIdAsync(caseId);
+        var entity = await _terminationRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -1329,22 +1530,22 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     public async Task<IEnumerable<StaffDisciplineTerminationDto>> GetByTypeAsync(EmployeeTerminationType type, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _terminationRepository.GetByTypeAsync(type);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _terminationRepository.GetByTypeAsync(tenantId, type);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineTerminationDto>> GetEligibleForRehireAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _terminationRepository.GetEligibleForRehireAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _terminationRepository.GetEligibleForRehireAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineTerminationDto>> GetPendingPaycheckProcessingAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _terminationRepository.GetPendingPaycheckProcessingAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _terminationRepository.GetPendingPaycheckProcessingAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineTerminationDto> RecordAsync(RecordTerminationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -1352,9 +1553,13 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
-        var existing = await _terminationRepository.GetByCaseIdAsync(dto.CaseId);
+        // Duplicate first, then the state rules — the slice-5 ordering lesson: a second attempt must
+        // be told it is a duplicate, not handed a state message about a condition the first one made.
+        var existing = await _terminationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A termination record already exists for this case. Use Update instead.");
+
+        await DisciplineSanctionGuard.EnsureFoundedAsync(disciplinaryCase, _appealRepository, tenantId, "termination");
 
         var entity = new StaffDisciplineTermination
         {
@@ -1381,6 +1586,23 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Termination recorded for case {CaseId}, Type: {Type}", dto.CaseId, dto.Type);
+
+        // ⚠ Area 9b, decision D1: the disciplinary route does NOT keep a parallel exit store — it
+        // raises the same EmployeeSeparation every other route does. Before this, a termination was
+        // recorded here and nothing carried it any further: measured 2026-08-20, 29 disciplinary
+        // terminations whose employees were ALL still StaffStatus = Active. Area 9 still owns the
+        // decision and the hearing; the exit itself now lives in one register.
+        //
+        // Deliberately after SaveChangesAsync and deliberately not fatal. The decision has been
+        // recorded and must not be rolled back because the exit could not be opened — the service
+        // returns null in that case and the orphan repair picks it up.
+        await _separationService.CreateFromDisciplinaryOutcomeAsync(
+            disciplinaryCase.Id,
+            disciplinaryCase.EmployeeId,
+            dto.Type,
+            dto.SeparationNotes,
+            actorEmployeeId: null,
+            cancellationToken);
 
         return entity.ToDto();
     }
@@ -1411,7 +1633,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     public async Task<StaffDisciplineSeparationDto?> GetSeparationByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _separationRepository.GetByCaseIdAsync(caseId);
+        var entity = await _separationRepository.GetByCaseIdAsync(tenantId, caseId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -1420,8 +1642,8 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     public async Task<IEnumerable<StaffDisciplineSeparationDto>> GetIncompleteSeparationsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _separationRepository.GetIncompleteAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _separationRepository.GetIncompleteAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineSeparationDto> InitiateSeparationAsync(InitiateSeparationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -1429,13 +1651,23 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
-        var termination = await _terminationRepository.GetByCaseIdAsync(dto.CaseId);
+        // ⚠ SCOPE BOUNDARY, recorded here because it is easy to mistake this checklist for more than
+        // it is. What this area owns is the DECISION to end the employment and a record of the exit
+        // steps as they are ticked off. It does NOT compute what the leaver is owed, does not block
+        // anything on a clearance form (FR-HR-091), and does not handle resignation, retirement or
+        // contract expiry — none of which involve a disciplinary case at all. Those belong to a
+        // separation module that does not exist yet; this store becomes its data when it is built,
+        // so it is deliberately kept honest rather than extended into a half-built exit process.
+        var termination = await _terminationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (termination == null || termination.TenantId != tenantId)
             throw new InvalidOperationException("A termination record must be created before initiating the separation process.");
 
-        var existing = await _separationRepository.GetByCaseIdAsync(dto.CaseId);
+        var existing = await _separationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A separation record has already been initiated for this case.");
+
+        if (dto.ExitInterviewerId is Guid interviewerId)
+            await GetOwnedEmployeeAsync(interviewerId, "exit interviewer");
 
         var entity = new StaffDisciplineSeparation
         {
@@ -1456,6 +1688,16 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     public async Task<StaffDisciplineSeparationDto> UpdateSeparationAsync(UpdateSeparationDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSeparationByCaseAsync(dto.CaseId);
+
+        // The same guard as on initiate. A guard on one endpoint is worthless if another endpoint
+        // writes the same column — the area-8 slice-3 lesson, where a demotion's employee response
+        // could be written straight round the subject-only guard via a plain HR edit.
+        if (dto.ExitInterviewerId is Guid interviewerId)
+            await GetOwnedEmployeeAsync(interviewerId, "exit interviewer");
+
+        // AccessRevokedById is set here too and is an Employee FK, so it gets the same treatment.
+        if (dto.AccessRevokedById is Guid revokedById)
+            await GetOwnedEmployeeAsync(revokedById, "access-revoking");
 
         entity.ExitInterviewCompleted     = dto.ExitInterviewCompleted;
         entity.ExitInterviewDate          = dto.ExitInterviewDate;

@@ -11,6 +11,7 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
 {
     private readonly IInterviewQuestionPresetRepository _presetRepository;
     private readonly IInterviewQuestionPresetItemRepository _itemRepository;
+    private readonly IJobInterviewQuestionTypeRepository _questionTypeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<InterviewQuestionPresetService> _logger;
@@ -18,15 +19,40 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
     public InterviewQuestionPresetService(
         IInterviewQuestionPresetRepository presetRepository,
         IInterviewQuestionPresetItemRepository itemRepository,
+        IJobInterviewQuestionTypeRepository questionTypeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<InterviewQuestionPresetService> logger)
     {
         _presetRepository = presetRepository;
         _itemRepository = itemRepository;
+        _questionTypeRepository = questionTypeRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// A preset item points at a question type; nothing validated that it existed or belonged to this
+    /// tenant, so a preset could reference another tenant's type and then silently contribute an empty
+    /// question plan to every interview scheduled from it.
+    /// </summary>
+    private async Task EnsureQuestionTypesOwnedAsync(IEnumerable<Guid> questionTypeIds, Guid tenantId)
+    {
+        foreach (var id in questionTypeIds.Distinct())
+        {
+            var type = await _questionTypeRepository.GetByIdAsync(id);
+            if (type == null || type.TenantId != tenantId || type.IsDeleted)
+                throw new ArgumentException($"Interview question type with ID '{id}' not found.");
+        }
+    }
+
+    /// <summary>A preset that names the same question type twice would draw two plans for one section.</summary>
+    private static void EnsureNoDuplicateTypes(IEnumerable<Guid> questionTypeIds)
+    {
+        var ids = questionTypeIds.ToList();
+        if (ids.Distinct().Count() != ids.Count)
+            throw new InvalidOperationException("A preset cannot list the same question type twice.");
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -83,6 +109,9 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        EnsureNoDuplicateTypes(createDto.Items.Select(i => i.QuestionTypeId));
+        await EnsureQuestionTypesOwnedAsync(createDto.Items.Select(i => i.QuestionTypeId), current);
+
         var entity = createDto.ToEntity(current, createdByUserId);
 
         foreach (var itemDto in createDto.Items)
@@ -107,9 +136,12 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
-        // Sync items when provided
+        // Sync items when provided. ⚠ This is a replace-set payload: omitting an item deletes it.
         if (updateDto.Items is not null)
         {
+            EnsureNoDuplicateTypes(updateDto.Items.Select(i => i.QuestionTypeId));
+            await EnsureQuestionTypesOwnedAsync(updateDto.Items.Select(i => i.QuestionTypeId), entity.TenantId);
+
             var existingItems = (await _itemRepository.GetByPresetIdAsync(entity.Id))
                 .Where(i => i.TenantId == entity.TenantId)
                 .ToList();
@@ -183,6 +215,13 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedPresetAsync(createDto.PresetId);
+        await EnsureQuestionTypesOwnedAsync(new[] { createDto.QuestionTypeId }, current);
+
+        var siblings = (await _itemRepository.GetByPresetIdAsync(createDto.PresetId))
+            .Where(i => i.TenantId == current)
+            .ToList();
+        if (siblings.Any(i => i.QuestionTypeId == createDto.QuestionTypeId))
+            throw new InvalidOperationException("That question type is already in this preset.");
 
         var item = createDto.ToEntity(current, createdByUserId);
         await _itemRepository.AddAsync(item);
@@ -199,6 +238,13 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
         CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedItemAsync(updateDto.Id);
+        await EnsureQuestionTypesOwnedAsync(new[] { updateDto.QuestionTypeId }, entity.TenantId);
+
+        var siblings = (await _itemRepository.GetByPresetIdAsync(entity.PresetId))
+            .Where(i => i.TenantId == entity.TenantId && i.Id != entity.Id)
+            .ToList();
+        if (siblings.Any(i => i.QuestionTypeId == updateDto.QuestionTypeId))
+            throw new InvalidOperationException("That question type is already in this preset.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _unitOfWork.SaveChangesAsync();

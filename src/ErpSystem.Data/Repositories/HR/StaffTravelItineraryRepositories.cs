@@ -22,17 +22,36 @@ public class StaffTravelItineraryRepository : GenericRepository<StaffTravelItine
             .ToListAsync();
     }
 
+    /// <summary>
+    /// The legs of an itinerary, with their activities and the country names the timeline prints.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The two country includes were missing from both itinerary reads while
+    /// <c>StaffTravelItineraryLegRepository</c>'s own reads had them — so the same leg came back
+    /// with a resolved <c>DestinationCountryName</c> when fetched as a leg and a null one when
+    /// fetched as part of its itinerary. The nested read is the one a screen renders a timeline
+    /// from, so every leg printed a blank country; the row just added looked right only until the
+    /// page was refreshed. The uneven-siblings shape from slice 0, in a nested read this time.
+    ///
+    /// <para><c>AsSplitQuery</c> because this fans out over two nested collections and this area
+    /// has already been killed once by the 8060-byte worktable limit (F-01).</para>
+    /// </remarks>
+    private static IQueryable<StaffTravelItinerary> WithLegDetail(IQueryable<StaffTravelItinerary> query)
+        => query
+            .AsSplitQuery()
+            .Include(i => i.Legs.OrderBy(l => l.SequenceOrder)).ThenInclude(l => l.Activities)
+            .Include(i => i.Legs).ThenInclude(l => l.OriginCountry)
+            .Include(i => i.Legs).ThenInclude(l => l.DestinationCountry);
+
     public async Task<StaffTravelItinerary?> GetCurrentVersionAsync(Guid requestId)
     {
-        return await _dbSet
-            .Include(i => i.Legs.OrderBy(l => l.SequenceOrder)).ThenInclude(l => l.Activities)
+        return await WithLegDetail(_dbSet)
             .FirstOrDefaultAsync(i => i.StaffTravelRequestId == requestId && i.IsCurrentVersion && !i.IsDeleted);
     }
 
     public async Task<StaffTravelItinerary?> GetWithLegsAsync(Guid id)
     {
-        return await _dbSet
-            .Include(i => i.Legs.OrderBy(l => l.SequenceOrder)).ThenInclude(l => l.Activities)
+        return await WithLegDetail(_dbSet)
             .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
     }
 

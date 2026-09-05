@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/remote-work-requests")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class RemoteWorkRequestsController : AttendanceControllerBase
 {
     private readonly IRemoteWorkRequestService _service;
@@ -22,37 +23,59 @@ public class RemoteWorkRequestsController : AttendanceControllerBase
     }
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<RemoteWorkRequestSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
+    // W3: self-or-permission — ownership is only knowable after the fetch.
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<RemoteWorkRequestDto>> GetById(Guid id, CancellationToken ct = default)
-        => Ok(await _service.GetByIdAsync(id, ct));
+    {
+        var dto = await _service.GetByIdAsync(id, ct);
+        if (!await SelfOrPolicyAsync(dto.EmployeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(dto);
+    }
 
+    // W3: self-or-permission — the number is not a capability.
     [HttpGet("number/{requestNumber}")]
     public async Task<ActionResult<RemoteWorkRequestDto?>> GetByRequestNumber(
         string requestNumber, CancellationToken ct = default)
-        => Ok(await _service.GetByRequestNumberAsync(requestNumber, ct));
+    {
+        var dto = await _service.GetByRequestNumberAsync(requestNumber, ct);
+        if (dto is null) return Ok(dto);
+        if (!await SelfOrPolicyAsync(dto.EmployeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(dto);
+    }
 
+    // W3: self-or-permission — an employee reads their own requests.
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<RemoteWorkRequestSummaryDto>>> GetByEmployeeId(
         Guid employeeId, CancellationToken ct = default)
-        => Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
+    }
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<RemoteWorkRequestSummaryDto>>> GetByStatus(
         RemoteWorkRequestStatus status, CancellationToken ct = default)
         => Ok(await _service.GetByStatusAsync(status, ct));
 
     [HttpGet("pending-approval")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<RemoteWorkRequestSummaryDto>>> GetPendingApproval(
         CancellationToken ct = default)
         => Ok(await _service.GetPendingApprovalAsync(ct));
 
     [HttpGet("range")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<RemoteWorkRequestSummaryDto>>> GetByDateRange(
         [FromQuery] DateOnly from,
         [FromQuery] DateOnly to,
@@ -78,9 +101,15 @@ public class RemoteWorkRequestsController : AttendanceControllerBase
         if (!ModelState.IsValid) return BadRequest(ModelState);
         if (TryGetEmployee(out var employeeId) is { } error) return error;
 
+        // W3: the request's owner amends their pending request; otherwise the desk.
+        var existing = await _service.GetByIdAsync(id, ct);
+        if (!await SelfOrPolicyAsync(existing.EmployeeId, HrPermissions.AttendanceWritePolicy))
+            return Forbid();
+
         return Ok(await _service.UpdateAsync(dto, employeeId, ct));
     }
 
+    // W3: approve/reject deliberately NOT permission-gated - the workflow assignee's act, validated per request by the service.
     [HttpPost("{id:guid}/approve")]
     public async Task<ActionResult<RemoteWorkRequestDto>> Approve(
         Guid id, [FromBody] ApproveRemoteWorkRequestDto dto, CancellationToken ct = default)
@@ -101,9 +130,14 @@ public class RemoteWorkRequestsController : AttendanceControllerBase
         return Ok(await _service.RejectAsync(id, dto.RejectionReason, employeeId, ct));
     }
 
+    // W3: withdrawal-shaped — the owner removes their own request, the desk anyone's.
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
+        var existing = await _service.GetByIdAsync(id, ct);
+        if (!await SelfOrPolicyAsync(existing.EmployeeId, HrPermissions.AttendanceWritePolicy))
+            return Forbid();
+
         await _service.DeleteAsync(id, ct);
         return NoContent();
     }

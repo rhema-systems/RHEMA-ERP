@@ -26,12 +26,17 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<HealthcareFacilityService> _logger;
 
+    // Shared reference data. A facility says which administrative area it stands in; this resolves
+    // that into the City text its address prints, so the two cannot disagree.
+    private readonly ErpSystem.Core.Services.Reference.IGeographyService _geography;
+
     public HealthcareFacilityService(
         IHealthcareFacilityRepository facilityRepository,
         IPhysicianRepository physicianRepository,
         IFacilityServiceRepository facilityServiceRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ErpSystem.Core.Services.Reference.IGeographyService geography,
         ILogger<HealthcareFacilityService> logger)
     {
         _facilityRepository = facilityRepository;
@@ -39,7 +44,28 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         _facilityServiceRepository = facilityServiceRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _geography = geography;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Rewrites <c>City</c> from the facility's administrative area. A null area leaves the text as
+    /// it was — most of the register predates the tree.
+    /// </summary>
+    private async Task ApplyGeoAreaSnapshotAsync(HealthcareFacility entity, CancellationToken ct)
+    {
+        if (entity.GeoAreaId is not { } areaId) return;
+
+        var (_, city) = await _geography.GetAddressSnapshotAsync(areaId, ct);
+        if (city is null)
+        {
+            _logger.LogWarning(
+                "Healthcare facility references geo area {GeoAreaId}, which could not be resolved to a "
+                + "city; the address was left unchanged.", areaId);
+            return;
+        }
+
+        entity.City = city;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
@@ -157,6 +183,7 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _facilityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -174,6 +201,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        // ⚠ after UpdateEntity — the tree wins over whatever City the caller sent.
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _facilityRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -183,12 +212,29 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         return entity.ToDto();
     }
 
+    /// <remarks>
+    /// ⚠ Refused while the facility still lists services. The delete is a <b>soft</b> delete, so
+    /// nothing cascades and no foreign key objects — the services simply stopped being listable,
+    /// because their read joined the facility on a required navigation. Measured in areas 19-23
+    /// slice 9: <c>services before: 1 → services after: 0</c>, with the row still readable by id
+    /// throughout. Deactivating the facility is the operation this refusal points at; it keeps every
+    /// claim, exam and service that names the facility intact.
+    /// </remarks>
     public async Task<bool> DeleteFacilityAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _facilityRepository.GetByIdAsync(id);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{id}' not found.");
+
+        var services = (await _facilityServiceRepository.GetByFacilityIdAsync(id))
+            .Count(svc => svc.TenantId == entity.TenantId);
+        if (services > 0)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"{entity.FacilityName} lists {services} {(services == 1 ? "service" : "services")} and cannot be deleted. " +
+                "Remove them first, or deactivate the facility instead — it will stop appearing in the pickers " +
+                "while every claim and exam that names it keeps its record.");
 
         await _facilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -211,7 +257,9 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     public async Task<IEnumerable<PhysicianSummaryDto>> GetAllPhysiciansAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _physicianRepository.GetAllAsync();
+        // PhysicianSummaryDto promises FacilityName; the parameterless GetAllAsync loads no
+        // navigations, so it came back blank on every row.
+        var entities = await _physicianRepository.GetAllAsync(e => e.Facility!);
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
@@ -257,14 +305,14 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         return entity.ToDto();
     }
 
-    public async Task<bool> VerifyPhysicianAsync(VerifyPhysicianDto verifyDto, CancellationToken cancellationToken = default)
+    public async Task<bool> VerifyPhysicianAsync(VerifyPhysicianDto verifyDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _physicianRepository.GetByIdAsync(verifyDto.PhysicianId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Physician with ID '{verifyDto.PhysicianId}' not found.");
 
-        verifyDto.ApplyTo(entity);
+        verifyDto.ApplyTo(entity, updatedByUserId);
 
         await _physicianRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -287,6 +335,71 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         return true;
     }
 
+    /// <summary>
+    /// Resolves the facility name for a service, tenant-scoped.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The repository reads no longer <c>.Include</c> the facility, because the navigation is
+    /// required and the include was an INNER JOIN that deleted rows from the answer. The name is
+    /// resolved here instead — which is also what fixes the half of this that was always broken:
+    /// <c>GetFacilityServiceByIdAsync</c>, the create response and the update response every one
+    /// returned <c>facilityName: ""</c>, because none of them had the navigation loaded. Only the
+    /// by-facility list ever populated it, by accident of its include. Measured in slice 9.
+    /// </remarks>
+    private async Task<string> ResolveFacilityNameAsync(Guid facilityId, Guid tenantId)
+    {
+        var facility = await _facilityRepository.GetByIdAsync(facilityId);
+        return facility is not null && facility.TenantId == tenantId ? facility.FacilityName : string.Empty;
+    }
+
+    private async Task<FacilityServiceDto> ToDtoWithFacilityAsync(FacilityService entity)
+    {
+        var dto = entity.ToDto();
+        dto.FacilityName = await ResolveFacilityNameAsync(entity.FacilityId, entity.TenantId);
+        return dto;
+    }
+
+    /// <summary>
+    /// The facility a service is being hung on must exist and be the caller's own.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ There was no check at all. A <c>facilityId</c> naming nobody reached the database and came
+    /// back as a bare <b>500</b> — measured in slice 9 — and a facility belonging to another tenant
+    /// would have satisfied the foreign key perfectly, because <c>HealthcareFacilities</c> is one
+    /// table for every tenant. Same shape as slice 7's D-60: the constraint cannot see a tenant.
+    /// </remarks>
+    private async Task<HealthcareFacility> GetOwnedFacilityAsync(Guid facilityId, Guid tenantId)
+    {
+        var facility = await _facilityRepository.GetByIdAsync(facilityId);
+        if (facility is null || facility.IsDeleted || facility.TenantId != tenantId)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.NotFound,
+                $"Healthcare facility with ID '{facilityId}' not found.");
+        return facility;
+    }
+
+    /// <summary>
+    /// One facility cannot list the same service twice.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Duplicates were accepted, measured by posting the identical payload twice. A picker then
+    /// offers the same service under two ids with two different estimated costs, and a claim naming
+    /// one of them is telling you nothing about which was meant. Compared case-insensitively and on
+    /// the trimmed name, because "X-ray" and "X-Ray " are the same service to everyone but SQL.
+    /// </remarks>
+    private async Task EnsureServiceNameIsFreeAsync(Guid facilityId, Guid tenantId, string name, Guid? excludeId)
+    {
+        var trimmed = (name ?? string.Empty).Trim();
+        var clash = (await _facilityServiceRepository.GetByFacilityIdAsync(facilityId))
+            .Any(svc => svc.TenantId == tenantId
+                     && (excludeId is null || svc.Id != excludeId.Value)
+                     && string.Equals(svc.Name.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+        if (clash)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"This facility already lists a service called '{trimmed}'.");
+    }
+
     public async Task<FacilityServiceDto> GetFacilityServiceByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _facilityServiceRepository.GetByIdAsync(id);
@@ -294,25 +407,39 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{id}' not found.");
 
-        return entity.ToDto();
+        return await ToDtoWithFacilityAsync(entity);
     }
 
     public async Task<IEnumerable<FacilityServiceDto>> GetFacilityServicesAsync(Guid facilityId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _facilityServiceRepository.GetByFacilityIdAsync(facilityId);
-        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+        var entities = (await _facilityServiceRepository.GetByFacilityIdAsync(facilityId))
+            .Where(e => e.TenantId == tenantId)
+            .ToList();
+
+        // One lookup for the whole list rather than one per row: every service here is on the same
+        // facility by construction.
+        var facilityName = entities.Count == 0
+            ? string.Empty
+            : await ResolveFacilityNameAsync(facilityId, tenantId);
+
+        var dtos = entities.ToDtoList().ToList();
+        foreach (var dto in dtos) dto.FacilityName = facilityName;
+        return dtos;
     }
 
     public async Task<FacilityServiceDto> CreateFacilityServiceAsync(CreateFacilityServiceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         EnsureTenant(tenantId);
+        await GetOwnedFacilityAsync(createDto.FacilityId, tenantId);
+        await EnsureServiceNameIsFreeAsync(createDto.FacilityId, tenantId, createDto.Name, null);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _facilityServiceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithFacilityAsync(entity);
     }
 
     public async Task<FacilityServiceDto> UpdateFacilityServiceAsync(UpdateFacilityServiceDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -322,12 +449,16 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{updateDto.Id}' not found.");
 
+        // ⚠ The update path used to hold none of the create path's rules. A rename onto an existing
+        // service was accepted; slice 7's D-62 in a second place.
+        await EnsureServiceNameIsFreeAsync(entity.FacilityId, entity.TenantId, updateDto.Name, entity.Id);
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _facilityServiceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithFacilityAsync(entity);
     }
 
     public async Task<bool> DeleteFacilityServiceAsync(Guid id, CancellationToken cancellationToken = default)
@@ -523,9 +654,36 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
+    /// <summary>
+    /// Refuses a premium split that adds up to more than the premium.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <c>[Range(0, 100)]</c> sits on each percentage <b>independently</b>, so nothing
+    /// stopped a plan being saved with employer 90% and employee 90% — probed 2026-09-01, it
+    /// returned a 201.</para>
+    ///
+    /// <para><b>Only the over-100 case is refused, deliberately.</b> Whether a split must total
+    /// exactly 100 is a policy question — a scheme can be part-funded by a third party, so
+    /// rejecting 80/10 would invent a rule TDC has not asked for. Totalling more than 100 is not a
+    /// policy question: it is arithmetic, and no arrangement charges 180% of a premium.</para>
+    ///
+    /// <para>This lives in the service rather than the form because a screen-side check protects
+    /// one caller. An import, another screen or a direct call would still write it.</para>
+    /// </remarks>
+    private static void RequireCoherentContributionSplit(decimal? employerPercent, decimal? employeePercent)
+    {
+        var total = (employerPercent ?? 0m) + (employeePercent ?? 0m);
+        if (total > 100m)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"The employer and employee contributions add up to {total:0.##}% of the premium. "
+                + "They may total less than 100% when someone else funds the balance, but not more.");
+    }
+
     public async Task<MedicalInsurancePlanDto> CreatePlanAsync(CreateMedicalInsurancePlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         EnsureTenant(tenantId);
+        RequireCoherentContributionSplit(createDto.EmployerContributionPercent, createDto.EmployeeContributionPercent);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _planRepository.AddAsync(entity);
@@ -540,6 +698,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance plan with ID '{updateDto.Id}' not found.");
+
+        RequireCoherentContributionSplit(updateDto.EmployerContributionPercent, updateDto.EmployeeContributionPercent);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -564,7 +724,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<EmployeeMedicalInsurancePolicyDto> GetPolicyByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _policyRepository.GetByIdAsync(id);
+        // Resolved names on the DTO need their navigations loaded. The list reads on this service
+        // already include them; the by-id read did not, so a detail screen showed blanks where a
+        // list showed values — the uneven-.Include shape.
+        var entity = await _policyRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.MedicalInsuranceProvider,
+            e => e.MedicalInsurancePlan);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{id}' not found.");
@@ -643,14 +810,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<bool> CancelPolicyAsync(CancelEmployeeMedicalInsurancePolicyDto cancelDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelPolicyAsync(CancelEmployeeMedicalInsurancePolicyDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _policyRepository.GetByIdAsync(cancelDto.PolicyId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{cancelDto.PolicyId}' not found.");
 
-        cancelDto.ApplyTo(entity);
+        cancelDto.ApplyTo(entity, updatedByUserId);
 
         await _policyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -759,14 +926,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<MedicalInsuranceClaimDto> UpdateInsuranceClaimStatusAsync(UpdateMedicalInsuranceClaimStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<MedicalInsuranceClaimDto> UpdateInsuranceClaimStatusAsync(UpdateMedicalInsuranceClaimStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(statusDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{statusDto.ClaimId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _insuranceClaimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -776,14 +943,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(RecordMedicalInsuranceClaimPaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(RecordMedicalInsuranceClaimPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(paymentDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _insuranceClaimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -885,11 +1052,16 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
+    // Returns the FULL record, not a summary. A per-provider read feeds a panel that has to SHOW
+    // the contributions, the covered lives, the due date and how it was paid — the summary carries
+    // only the total and the status, so a table built on it renders blank columns. The overdue read
+    // below stays on summaries: that feeds a list, not a form. Same rule as the discipline case
+    // file (ledger D-09); network facilities and provider documents already returned full DTOs.
+    public async Task<IEnumerable<MedicalInsurancePremiumRecordDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _premiumRecordRepository.GetByProviderIdAsync(providerId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<MedicalInsurancePremiumRecordDto> CreatePremiumRecordAsync(CreateMedicalInsurancePremiumRecordDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -903,14 +1075,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _premiumRecordRepository.GetByIdAsync(paymentDto.PremiumRecordId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Premium record with ID '{paymentDto.PremiumRecordId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _premiumRecordRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1188,7 +1360,11 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeHealthProfileDto> GetProfileByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _profileRepository.GetByIdAsync(id);
+        var entity = await _profileRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.PreferredFacility!,
+            e => e.PreferredPhysician!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health profile with ID '{id}' not found.");
@@ -1354,7 +1530,7 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeMedicalExamDto> GetExamByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _examRepository.GetByIdAsync(id);
+        var entity = await _examRepository.GetByIdAsync(id, e => e.Facility!, e => e.Physician!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam with ID '{id}' not found.");
@@ -1612,14 +1788,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return entity.ToDto();
     }
 
-    public async Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(approveDto.PreAuthorizationId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{approveDto.PreAuthorizationId}' not found.");
 
-        approveDto.ApplyTo(entity);
+        approveDto.ApplyTo(entity, updatedByUserId);
 
         await _preAuthorizationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1629,14 +1805,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, CancellationToken cancellationToken = default)
+    public async Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(rejectDto.PreAuthorizationId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{rejectDto.PreAuthorizationId}' not found.");
 
-        rejectDto.ApplyTo(entity);
+        rejectDto.ApplyTo(entity, updatedByUserId);
 
         await _preAuthorizationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1729,14 +1905,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return entity.ToDto();
     }
 
-    public async Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _referralRepository.GetByIdAsync(statusDto.ReferralId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{statusDto.ReferralId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _referralRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1744,14 +1920,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _referralRepository.GetByIdAsync(completeDto.ReferralId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{completeDto.ReferralId}' not found.");
 
-        completeDto.ApplyTo(entity);
+        completeDto.ApplyTo(entity, updatedByUserId);
 
         await _referralRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1776,7 +1952,17 @@ public class MedicalClinicalService : IMedicalClinicalService
 
     public async Task<MedicalAppointmentDto> GetAppointmentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _appointmentRepository.GetByIdAsync(id);
+        // Resolved names on the DTO need their navigations loaded. The list reads on this service
+        // already include them; the by-id read did not, so a detail screen showed blanks where a
+        // list showed values — the uneven-.Include shape (measured live in area 25 slice 8).
+        var entity = await _appointmentRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.Dependent!,
+            e => e.Facility,
+            e => e.Physician!,
+            e => e.LinkedReferral!,
+            e => e.LinkedClaim!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{id}' not found.");
@@ -1845,14 +2031,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return entity.ToDto();
     }
 
-    public async Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(statusDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{statusDto.AppointmentId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1860,14 +2046,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(cancelDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{cancelDto.AppointmentId}' not found.");
 
-        cancelDto.ApplyTo(entity);
+        cancelDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1877,14 +2063,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(checkInDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{checkInDto.AppointmentId}' not found.");
 
-        checkInDto.ApplyTo(entity);
+        checkInDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1892,14 +2078,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(checkOutDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{checkOutDto.AppointmentId}' not found.");
 
-        checkOutDto.ApplyTo(entity);
+        checkOutDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1972,7 +2158,12 @@ public class NHISService : INHISService
 
     public async Task<NHISClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(id);
+        var entity = await _claimRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.Facility,
+            e => e.Physician!,
+            e => e.LinkedMedicalClaim!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{id}' not found.");
@@ -2042,6 +2233,22 @@ public class NHISService : INHISService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{updateDto.Id}' not found.");
 
+        // ⚠ There was NO state guard here. A claim already submitted to the scheme — or approved,
+        // or paid — could have its amounts, service date and facility rewritten, silently, leaving
+        // the record disagreeing with what was actually claimed and settled. Found 2026-09-01 while
+        // building the screen's first edit path; the same shape as D-03, where probation dates
+        // stayed editable after confirmation and was closed with a service-level guard.
+        //
+        // Draft is editable because nothing has been asserted to anyone yet. Rejected is editable
+        // because correcting and resubmitting is exactly what a rejection is for. Everything from
+        // Submitted onward is a statement already made to NHIS, and is amended through the status
+        // and payment paths rather than by rewriting the claim.
+        if (entity.Status is not (NHISClaimStatus.Draft or NHISClaimStatus.Rejected))
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"This claim is {entity.Status} and can no longer be edited — it has already been put to the scheme. "
+                + "Record the scheme's decision or its payment instead; only a draft or a rejected claim can be changed.");
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
@@ -2050,14 +2257,14 @@ public class NHISService : INHISService
         return entity.ToDto();
     }
 
-    public async Task<bool> UpdateClaimStatusAsync(UpdateNHISClaimStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateClaimStatusAsync(UpdateNHISClaimStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(statusDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{statusDto.ClaimId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2067,14 +2274,14 @@ public class NHISService : INHISService
         return true;
     }
 
-    public async Task<bool> SubmitClaimAsync(SubmitNHISClaimDto submitDto, CancellationToken cancellationToken = default)
+    public async Task<bool> SubmitClaimAsync(SubmitNHISClaimDto submitDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(submitDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{submitDto.ClaimId}' not found.");
 
-        submitDto.ApplyTo(entity);
+        submitDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2084,14 +2291,14 @@ public class NHISService : INHISService
         return true;
     }
 
-    public async Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2212,7 +2419,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<MedicalExpenseClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(id);
+        var entity = await LoadClaimWithNamesAsync(id);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
@@ -2243,6 +2450,26 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// Loads a claim with every navigation its DTO resolves a name from.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the by-id read and the write paths, which both return a DTO promising
+    /// <c>EmployeeName</c>, <c>FacilityName</c>, <c>PhysicianName</c> and the linked record
+    /// numbers. Without it those come back as empty strings — the read succeeds, the screen is
+    /// blank, and nothing fails. Keep new resolved names on the DTO and this list in step.
+    /// </remarks>
+    private Task<MedicalExpenseClaim?> LoadClaimWithNamesAsync(Guid id)
+        => _claimRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.Facility,
+            e => e.Physician!,
+            e => e.Dependent!,
+            e => e.InsurancePolicy!,
+            e => e.PreAuthorization!,
+            e => e.Referral!);
+
     public async Task<PagedResult<MedicalExpenseClaimSummaryDto>> GetClaimsPagedAsync(int pageNumber, int pageSize, ClaimStatus? status = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -2253,7 +2480,13 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // The summary DTO resolves employee, facility and dependent names. The pending and
+        // flagged queues already included them; this one did not, so the same claim rendered
+        // with names in one queue and blanks in another.
         var items = await query
+            .Include(c => c.Employee)
+            .Include(c => c.Facility)
+            .Include(c => c.Dependent)
             .OrderByDescending(c => c.ClaimDate)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
@@ -2290,11 +2523,30 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         entity.ClaimNumber = $"MC-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
         await _claimRepository.AddAsync(entity);
+
+        // Lines submitted alongside the claim. The DTO has always accepted an Items collection and
+        // the mapping never read it, so a claim form that posted its lines with the claim appeared
+        // to succeed and stored nothing. Added in the same unit of work, so a claim and its lines
+        // commit together or not at all.
+        foreach (var itemDto in createDto.Items ?? Enumerable.Empty<CreateMedicalExpenseItemDto>())
+        {
+            var item = itemDto.ToEntity(tenantId, createdByUserId);
+            item.ClaimId = entity.Id; // the parent owns the link; a client-supplied ClaimId here
+                                      // would let a line be attached to somebody else's claim
+            await _itemRepository.AddAsync(item);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId}", entity.ClaimNumber, employeeId);
+        _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId} with {ItemCount} item(s)",
+            entity.ClaimNumber, employeeId, createDto.Items?.Count ?? 0);
 
-        return entity.ToDto();
+        // Re-read so the response carries resolved names. A freshly-constructed entity has no
+        // navigations loaded, so returning it directly answered the caller with blank employee and
+        // facility names — and the screen that just filed the claim is the one most likely to
+        // display them.
+        var created = await LoadClaimWithNamesAsync(entity.Id);
+        return (created ?? entity).ToDto();
     }
 
     public async Task<MedicalExpenseClaimDto> UpdateClaimAsync(UpdateMedicalExpenseClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -2314,9 +2566,17 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<bool> ProcessApprovalAsync(ProcessMedicalExpenseClaimDto processDto, Guid tenantId, Guid approverEmployeeId, Guid processedByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
+
         var claim = await _claimRepository.GetByIdAsync(processDto.ClaimId);
 
-        if (claim == null)
+        // Tenant before state. Every sibling method on this service checks the tenant on the row it
+        // loaded; this one only checked for null, so a claim belonging to another tenant could be
+        // approved, and the approval row was then stamped with the caller's tenant. The ORDER
+        // matters as much as the check: answering "already processed" for a claim the caller may
+        // not see turns the endpoint into an oracle for which ids exist elsewhere. A foreign claim
+        // must be indistinguishable from one that does not exist.
+        if (claim == null || claim.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{processDto.ClaimId}' not found.");
 
         // A claim is adjudicated exactly once; this keeps insurance utilization consistent.
@@ -2325,7 +2585,6 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
                 MedicalWorkflowFailureReason.InvalidState,
                 $"Claim '{claim.ClaimNumber}' has already been processed ({claim.Status}) and cannot be re-adjudicated.");
 
-        EnsureTenant(tenantId);
         var approval = processDto.ToEntity(tenantId, processedByUserId, approverEmployeeId);
 
         if (processDto.Status == MedicalExpenseApprovalStatus.Approved)
@@ -2356,14 +2615,14 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return true;
     }
 
-    public async Task<bool> ProcessPaymentAsync(ProcessMedicalExpensePaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ProcessPaymentAsync(ProcessMedicalExpensePaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2373,14 +2632,14 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return true;
     }
 
-    public async Task<bool> FlagClaimAsync(FlagMedicalExpenseClaimDto flagDto, CancellationToken cancellationToken = default)
+    public async Task<bool> FlagClaimAsync(FlagMedicalExpenseClaimDto flagDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(flagDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{flagDto.ClaimId}' not found.");
 
-        flagDto.ApplyTo(entity);
+        flagDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2388,14 +2647,14 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return true;
     }
 
-    public async Task<bool> UnflagClaimAsync(UnflagMedicalExpenseClaimDto unflagDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UnflagClaimAsync(UnflagMedicalExpenseClaimDto unflagDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(unflagDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{unflagDto.ClaimId}' not found.");
 
-        unflagDto.ApplyTo(entity);
+        unflagDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2436,6 +2695,15 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
             throw new MedicalWorkflowException(
                 MedicalWorkflowFailureReason.NotFound,
                 "The insurance policy linked to this claim no longer exists.");
+
+        // A claim may only draw down the claimant's OWN policy. Without this, a claim naming
+        // somebody else's policy consumed THEIR annual limit on approval — the tenant and status
+        // checks above both pass for a colleague's policy. It also anchors the dependent lookup
+        // below: once the policy is known to be the claimant's, its dependants are theirs too.
+        if (policy.EmployeeId != claim.EmployeeId)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.NotFound,
+                "The insurance policy linked to this claim does not belong to the claimant.");
 
         if (policy.Status != MedicalInsurancePolicyStatus.Active || !policy.IsActive)
             throw new MedicalWorkflowException(

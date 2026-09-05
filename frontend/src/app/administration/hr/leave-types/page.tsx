@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, CalendarDays } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Search, CalendarDays, PowerOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -20,11 +20,37 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useToast } from '@/hooks/use-toast';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
+import type { LeaveType } from '@/types/hr/leave';
 
 export default function LeaveTypesPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [search, setSearch] = useState('');
+  const [retiring, setRetiring] = useState<LeaveType | null>(null);
+
+  /**
+   * ⚠ Retiring is the ONLY way a leave type leaves the pickers: the controller has no delete
+   * (405), deliberately, because a type is referenced by every request ever made against it. Until
+   * this action existed a type added in error stayed in the picker for good.
+   */
+  const retire = useMutation({
+    mutationFn: (id: string) => leaveTypeService.deactivate(id),
+    onSuccess: () => {
+      toast({ title: 'Retired', description: 'It stays on existing requests and leaves the pickers.' });
+      setRetiring(null);
+      queryClient.invalidateQueries({ queryKey: ['leave-types'] });
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'It could not be retired',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
+  });
 
   // Include inactive so the list is the full picture; status shows on each row.
   const { data, isLoading } = useQuery({
@@ -79,6 +105,7 @@ export default function LeaveTypesPage() {
                   <TableHead className="text-right">Max days</TableHead>
                   <TableHead>Rules</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -150,6 +177,22 @@ export default function LeaveTypesPage() {
                       <TableCell>
                         <StatusBadge active={t.isActive} />
                       </TableCell>
+                      <TableCell className="text-right">
+                        {t.isActive && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Retire this leave type"
+                            onClick={(e) => {
+                              // The row itself navigates; retiring must not.
+                              e.stopPropagation();
+                              setRetiring(t);
+                            }}
+                          >
+                            <PowerOff className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -158,6 +201,16 @@ export default function LeaveTypesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={Boolean(retiring)}
+        onOpenChange={(o) => !o && setRetiring(null)}
+        title={`Retire ${retiring?.name ?? 'this leave type'}?`}
+        description="It stays on every request already made against it and disappears from the pickers. There is no delete: a leave type is referenced by its history."
+        confirmText="Retire"
+        onConfirm={() => { if (retiring) retire.mutate(retiring.id); }}
+        isLoading={retire.isPending}
+      />
     </div>
   );
 }

@@ -15,6 +15,17 @@ public class UnionDto : BaseDto
     public string? ContactPhone { get; set; }
     public bool IsActive { get; set; }
     public int AgreementCount { get; set; }
+
+    /// <summary>
+    /// How many of this union's agreements are actually in force today.
+    /// </summary>
+    /// <remarks>
+    /// Added in areas 19-23 slice 6, and distinct from <see cref="AgreementCount"/> on purpose:
+    /// a register that reports "3 agreements" against a union whose last one lapsed in 2021 is
+    /// reporting filing-cabinet depth, not industrial relations. Derived, never stored.
+    /// </remarks>
+    public int InForceAgreementCount { get; set; }
+
     public List<CollectiveBargainingAgreementDto> Agreements { get; set; } = new();
 }
 
@@ -82,6 +93,24 @@ public class CollectiveBargainingAgreementDto : BaseDto
     public string? Summary { get; set; }
     public string? DocumentReference { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Where this agreement stands today: <c>Inactive</c>, <c>Pending</c>, <c>Active</c> or <c>Expired</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added in areas 19-23 slice 6. <c>IsActive</c> is a flag somebody sets and nothing ever
+    /// clears, so it says whether the record was switched on — not whether the agreement is in force.
+    /// Slice 6's probe measured the gap directly: an agreement running 2019-2021 came back
+    /// <c>isActive: true</c> five years after it lapsed, and with nothing else on the payload every
+    /// screen would have had to re-derive "in force" from two dates, each in its own way.</para>
+    ///
+    /// <para>Derived, never stored, from <c>CollectiveBargainingAgreementStatuses.Classify</c> — the
+    /// one definition <see cref="IsInForce"/> and the union's in-force count also read.</para>
+    /// </remarks>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>Switched on, already started, and not yet expired.</summary>
+    public bool IsInForce { get; set; }
 }
 
 public class CreateCollectiveBargainingAgreementDto : CreateDtoBase

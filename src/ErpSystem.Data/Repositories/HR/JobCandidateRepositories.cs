@@ -37,25 +37,29 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 
     public async Task<JobCandidate?> GetWithFullDetailsAsync(Guid id)
     {
+        // Every child include filters IsDeleted, matching the per-collection reads. Unfiltered,
+        // this read echoed soft-deleted children — found when the candidate profile's
+        // replace-set save deleted an interest and the response served it straight back.
         return await _dbSet
             .Include(c => c.Country)
-            .Include(c => c.Qualifications)
-            .Include(c => c.WorkHistories)
-            .Include(c => c.Referees)
-            .Include(c => c.Skills)
-            .Include(c => c.Languages)
-            .Include(c => c.Interests)
-            .Include(c => c.Documents)
-            .Include(c => c.Notes)
-            .Include(c => c.Applications).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted))
+            .Include(c => c.WorkHistories.Where(w => !w.IsDeleted))
+            .Include(c => c.Referees.Where(r => !r.IsDeleted))
+            .Include(c => c.Skills.Where(s => !s.IsDeleted))
+            .Include(c => c.Languages.Where(l => !l.IsDeleted))
+            .Include(c => c.Interests.Where(i => !i.IsDeleted))
+            .Include(c => c.Documents.Where(d => !d.IsDeleted))
+            .Include(c => c.Notes.Where(n => !n.IsDeleted))
+            .Include(c => c.Applications.Where(a => !a.IsDeleted)).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 
-    public async Task<IEnumerable<JobCandidate>> GetTalentPoolCandidatesAsync()
+    public async Task<IEnumerable<JobCandidate>> GetTalentPoolCandidatesAsync(Guid tenantId)
     {
         return await _dbSet
             .Include(c => c.Country)
-            .Where(c => c.IsInTalentPool && !c.IsDeleted)
+            .Include(c => c.SegmentMemberships).ThenInclude(m => m.Segment)
+            .Where(c => c.TenantId == tenantId && c.IsInTalentPool && !c.IsDeleted)
             .OrderBy(c => c.LastName)
             .ThenBy(c => c.FirstName)
             .ToListAsync();
@@ -89,13 +93,14 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 
     public async Task<(List<JobCandidate> Items, int TotalCount)> GetTalentPoolFilteredAsync(
         TalentPoolFilterDto filter,
+        Guid tenantId,
         CancellationToken cancellationToken = default)
     {
         var query = _dbSet
             .Include(c => c.Country)
             .Include(c => c.SegmentMemberships).ThenInclude(m => m.Segment)
             .Include(c => c.EngagementEvents)
-            .Where(c => c.IsInTalentPool && !c.IsDeleted);
+            .Where(c => c.TenantId == tenantId && c.IsInTalentPool && !c.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
@@ -267,7 +272,10 @@ public class CandidateSegmentMembershipRepository
 
     public async Task<CandidateSegmentMembership?> GetByCandidateAndSegmentAsync(Guid candidateId, Guid segmentId)
     {
+        // Segment is included so the write paths can map SegmentName on the row they just
+        // created — without it the add-to-segment response returned a nameless membership.
         return await _dbSet
+            .Include(m => m.Segment)
             .FirstOrDefaultAsync(m =>
                 m.JobCandidateId == candidateId &&
                 m.SegmentId == segmentId &&

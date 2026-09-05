@@ -27,6 +27,12 @@ public interface ISheReferenceDataService
     Task<SheIncidentTypeDto> UpdateIncidentTypeAsync(UpdateSheIncidentTypeDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> DeleteIncidentTypeAsync(Guid id, CancellationToken cancellationToken = default);
 
+    // Default corrective actions on an incident type — these are what auto-populate onto a new
+    // incident of that type (FR-INC-004).
+    Task<SheIncidentTypeCorrectiveActionDto> AddIncidentTypeCorrectiveActionAsync(CreateSheIncidentTypeCorrectiveActionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheIncidentTypeCorrectiveActionDto> UpdateIncidentTypeCorrectiveActionAsync(UpdateSheIncidentTypeCorrectiveActionDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> RemoveIncidentTypeCorrectiveActionAsync(Guid linkId, CancellationToken cancellationToken = default);
+
     // Injury types
     Task<IEnumerable<SheInjuryTypeDto>> GetInjuryTypesAsync(bool activeOnly = false, CancellationToken cancellationToken = default);
     Task<SheInjuryTypeDto> CreateInjuryTypeAsync(CreateSheInjuryTypeDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
@@ -86,6 +92,11 @@ public interface ISafetyIncidentService
     Task<bool> FileClaimAsync(FileSafetyIncidentClaimDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> ReviewAsync(ReviewSafetyIncidentDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> CloseAsync(CloseSafetyIncidentDto dto, Guid userId, CancellationToken cancellationToken = default);
+
+    // Statutory submissions (slice 15, FR-SHE-103)
+    Task<SheStatutoryIncidentSubmissionDto> AddStatutorySubmissionAsync(CreateSheStatutoryIncidentSubmissionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheStatutoryIncidentSubmissionDto> UpdateStatutorySubmissionAsync(UpdateSheStatutoryIncidentSubmissionDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<SheStatutoryIncidentSubmissionDto>> GetStatutorySubmissionsAsync(Guid incidentId, CancellationToken cancellationToken = default);
 
     // Involved persons (+ injured body parts)
     Task<SafetyIncidentInvolvedPersonDto> AddInvolvedPersonAsync(CreateSafetyIncidentInvolvedPersonDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);

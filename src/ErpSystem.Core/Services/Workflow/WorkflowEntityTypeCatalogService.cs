@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces.Workflow;
+﻿using ErpSystem.Core.Interfaces.Workflow;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -38,6 +38,26 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("StaffOvertimeRequest", "Human Resources", "HR overtime pre-approval requests", "Timer", "#EF4444", 79),
             new("RemoteWorkRequest", "Human Resources", "HR remote and work-from-home requests", "House", "#8B5CF6", 79),
             new("ConsultantTimesheet", "Human Resources", "Consultant timesheet submission and approval", "FileClock", "#0D9488", 79),
+            new("AppraisalTemplate", "Human Resources", "HR appraisal form templates submitted for HR sign-off", "ClipboardCheck", "#7C3AED", 79),
+            new("SalaryReviewProposal", "Human Resources", "Merit increase and bonus proposals raised from appraisal outcomes", "BadgeDollarSign", "#16A34A", 79),
+            new("EmploymentActionProposal", "Human Resources", "Promotion, demotion, renewal, termination and recognition proposals from appraisal outcomes", "UserCog", "#DC2626", 79),
+            new("PerformanceImprovementPlan", "Human Resources", "Performance improvement plans approved before they are served on the employee", "ClipboardList", "#EA580C", 79),
+            new("StaffRequisition", "Human Resources", "Headcount requisitions approved before a vacancy is opened for recruitment", "UserPlus", "#0891B2", 79),
+            new("JobOffer", "Human Resources", "Employment offers approved before they are issued to a candidate", "FileSignature", "#0284C7", 79),
+            new("StaffMovement", "Human Resources", "Promotions, transfers, demotions, secondments and acting appointments approved before they take effect", "ArrowRightLeft", "#9333EA", 79),
+            new("StaffDisciplinaryAction", "Human Resources", "Disciplinary decisions confirmed before the sanction takes effect", "Gavel", "#DC2626", 79),
+            new("EmployeeSeparation", "Human Resources", "Exits signed before clearance begins — resignation, retirement, contract expiry, redundancy, dismissal or death (FR-HR-092)", "DoorOpen", "#B45309", 79),
+            new("StaffTravelRequest", "Human Resources", "Staff travel requests approved before flights, hotels or advances are committed", "Plane", "#0EA5E9", 79),
+            new("SuccessionPlan", "Human Resources", "Succession plans approved before anyone is named as the intended successor to a post", "Network", "#7C3AED", 79),
+            new("ProbationPeriod", "Human Resources", "Probation confirmed by the named confirming authority before HR issues the confirmation letter", "UserCheck", "#059669", 79),
+            new("JobDescription", "Human Resources", "Job descriptions approved against a position before they take effect (FR-HR-134)", "FileText", "#0D9488", 79),
+            new("ManpowerBudget", "Human Resources", "Manpower budgets approved Department Head to HR to Managing Director before headcount is authorised (FR-HR-135)", "Users", "#B45309", 79),
+            // ⚠ Prefixed `Hr`, and deliberately. `AssetTransfer` already means Finance's fixed-asset
+            // transfer to WorkflowEntityDisplayService, and `Asset` above is the Inventory one. HR's
+            // staff-asset records are a third thing with the same names — see the build plan §3.3.
+            new("HrAssetRequisition", "Human Resources", "Staff requests for a company asset, approved before HR issues one (AST-6)", "ClipboardList", "#0891B2", 79),
+            new("HrAssetTransfer", "Human Resources", "Company assets moved between employees, locations or units, approved before the move (AST-2)", "ArrowRightLeft", "#7C3AED", 79),
+            new("HrAssetSurcharge", "Human Resources", "Charges raised against an employee for a company asset damaged, lost or not returned (AST-3)", "Receipt", "#B45309", 79),
             new("Project", "Projects", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Projects", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Projects", "Project closure approval and close-out governance", "Flag", "#15803D", 84),

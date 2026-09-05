@@ -281,7 +281,8 @@ public enum ShePermitType
     ChemicalHandling = 6,
     CriticalLift = 7,
     Demolition = 8,
-    General = 9
+    General = 9,
+    RoadClosure = 10 // FRD §6.2 — the one spec permit type the port lacked
 }
 
 public enum ShePermitStatus
@@ -531,7 +532,10 @@ public enum SheEnvironmentalMonitoringType
     Vibration = 5,
     Emissions = 6,
     SoilQuality = 7,
-    Lighting = 8
+    Lighting = 8,
+    // Slice 17 — the two FR-ENV-023 schedule subjects the original list lacked.
+    WasteStorageInspection = 9,
+    AnnualPerformanceReview = 10
 }
 
 // ── Occupational Health ───────────────────────────────────
@@ -683,4 +687,187 @@ public enum SheReturnToWorkStatus
     OnHold = 3,
     Completed = 4,
     Discontinued = 5
+}
+
+// ── SHE Audits (slice 15, FRD §12 / FR-SHE-229) ──────────
+public enum SheAuditType
+{
+    Internal = 1,
+    External = 2,
+    Regulatory = 3,
+    Certification = 4
+}
+
+public enum SheAuditStatus
+{
+    Planned = 1,
+    InProgress = 2,
+    ReportIssued = 3,
+    Closed = 4,
+    Cancelled = 5
+}
+
+public enum SheAuditFindingClassification
+{
+    MajorNonConformity = 1,
+    MinorNonConformity = 2,
+    Observation = 3,
+    OpportunityForImprovement = 4
+}
+
+public enum SheAuditFindingStatus
+{
+    Open = 1,
+    Resolved = 2,
+    Verified = 3,
+    Closed = 4
+}
+
+// ── Stop-Work Authority (slice 15, FR-SHE-200) ───────────
+public enum SheStopWorkStatus
+{
+    Raised = 1,
+    UnderReview = 2,
+    Resolved = 3,
+    Cleared = 4,
+    Cancelled = 5
+}
+
+// ── Statutory incident submissions (slice 15, FR-SHE-103) ─
+public enum SheStatutorySubmissionType
+{
+    InitialNotification = 1,
+    FollowUpReport = 2,
+    FinalReport = 3,
+    AdditionalInformation = 4
+}
+
+public enum SheStatutorySubmissionMethod
+{
+    OnlinePortal = 1,
+    Email = 2,
+    Letter = 3,
+    InPerson = 4,
+    Phone = 5
+}
+
+// ── SHE controlled document register (slice 16, FR-SHE-246/170) ─
+/// <summary>
+/// The SRS §14 document-library families plus the SoW Module-14 additions
+/// (SWP, JSA, HIRA). Structured records (incident registers, training rows,
+/// contractor files) stay in their own tables; these categories classify the
+/// controlled DOCUMENTS about them.
+/// </summary>
+public enum SheControlledDocumentCategory
+{
+    Policy = 1,
+    Procedure = 2,
+    SafeWorkProcedure = 3,
+    JobSafetyAnalysis = 4,
+    RiskAssessment = 5,
+    EmergencyPlan = 6,
+    TrainingRecord = 7,
+    Permit = 8,
+    InspectionReport = 9,
+    AuditReport = 10,
+    IncidentReport = 11,
+    InvestigationReport = 12,
+    ContractorDocument = 13,
+    Form = 14,
+    Other = 15
+}
+
+public enum SheControlledDocumentStatus
+{
+    Draft = 1,
+    Active = 2,
+    UnderReview = 3,
+    Archived = 4
+}
+
+// ── Part D environmental core (slice 17) ──────────────────
+
+/// <summary>FR-ENV-017 — what kind of authorisation the register row is.</summary>
+public enum SheEnvironmentalPermitType
+{
+    EnvironmentalPermit = 1,
+    EpaRegistration = 2,
+    OperatingLicence = 3,
+    Certificate = 4,
+    Consent = 5,
+    Other = 6
+}
+
+public enum SheEnvironmentalPermitStatus
+{
+    Active = 1,
+    RenewalInProgress = 2,
+    /// <summary>Assigned by the reminder engine when the expiry date passes (FR-ENV-019 red status).</summary>
+    Expired = 3,
+    Suspended = 4,
+    Archived = 5
+}
+
+// FR-ENV-030–032 / FR-SHE-182 — regulatory updates register.
+public enum SheRegulatoryUpdateRiskLevel
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4
+}
+
+public enum SheRegulatoryUpdateStatus
+{
+    Recorded = 1,
+    ActionsInProgress = 2,
+    Closed = 3
+}
+
+// FR-ENV-028 — the spec's eight sustainability initiative families.
+public enum SheSustainabilityCategory
+{
+    EnergySavings = 1,
+    WaterSavings = 2,
+    PaperReduction = 3,
+    TreePlanting = 4,
+    Recycling = 5,
+    WasteRecycled = 6,
+    CarbonReduction = 7,
+    CostSavings = 8,
+    Other = 9
+}
+
+public enum SheSustainabilityStatus
+{
+    Planned = 1,
+    InProgress = 2,
+    Completed = 3,
+    Cancelled = 4
+}
+
+/// <summary>FR-ENV-012's mandatory work-classification taxonomy at project creation.</summary>
+public enum SheEnvironmentalWorkClassification
+{
+    PlannedProject = 1,
+    Upgrade = 2,
+    Maintenance = 3,
+    Construction = 4,
+    Demolition = 5,
+    InfrastructureModification = 6,
+    Other = 7
+}
+
+/// <summary>
+/// FR-ENV-001–016 review lifecycle. Clearance (FR-ENV-016) is a step past
+/// approval: an approved review still needs its clearance issued (and, where
+/// flagged, management approval first) before FR-ENV-010's gate would open.
+/// </summary>
+public enum SheEnvironmentalReviewStatus
+{
+    Submitted = 1,
+    CorrectionsRequested = 2,
+    Approved = 3,
+    Rejected = 4,
+    ClearanceIssued = 5
 }

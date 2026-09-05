@@ -110,7 +110,9 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
         _logger.LogInformation("Compliance training requirement created: {RequirementName}", dto.RequirementName);
 
-        return entity.ToDto();
+        // Freshly written: no Program/scope/EmployeeRecords loaded, so the response would show a
+        // blank programme and a 0% compliance rate on a requirement just created.
+        return await GetRequirementByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<ComplianceTrainingRequirementDto> UpdateRequirementAsync(UpdateComplianceTrainingRequirementDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -124,7 +126,8 @@ public class ComplianceTrainingService : IComplianceTrainingService
         await _requirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // A changed ProgramId or scope does not refresh the loaded navigations — re-read.
+        return await GetRequirementByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteRequirementAsync(Guid id, CancellationToken cancellationToken = default)
@@ -207,7 +210,10 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
         _logger.LogInformation("Compliance requirement {RequirementId} assigned to employee {EmployeeId}", requirementId, employeeId);
 
-        return entity.ToDto();
+        // Freshly written: nothing loaded, so the response would name neither the employee nor the
+        // requirement it was just assigned against.
+        var savedAssignment = await _recordRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (savedAssignment ?? entity).ToDto();
     }
 
     public async Task<EmployeeComplianceRecordDto> ExemptEmployeeAsync(ExemptEmployeeComplianceDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -228,7 +234,10 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
         _logger.LogInformation("Employee compliance record {RecordId} marked as exempt", dto.RecordId);
 
-        return entity.ToDto();
+        // ExemptedById was just set, so the tracked instance still maps a null exempter — an
+        // untracked re-read is the only way to get ExemptedByName onto this response.
+        var savedExemption = await _recordRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (savedExemption ?? entity).ToDto();
     }
 
     public async Task<EmployeeComplianceRecordDto> MarkFulfilledAsync(Guid recordId, Guid nominationId, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -259,7 +268,10 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
         _logger.LogInformation("Employee compliance record {RecordId} marked as fulfilled via nomination {NominationId}; next due {NextDue}", recordId, nominationId, entity.NextDueDate);
 
-        return entity.ToDto();
+        // FulfillingNominationId was just set, so its navigation is still null — without this the
+        // response omits the very nomination that satisfied the requirement.
+        var savedFulfilment = await _recordRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (savedFulfilment ?? entity).ToDto();
     }
 
     /// <summary>

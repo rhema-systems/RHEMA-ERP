@@ -198,7 +198,10 @@ public class TrainingProgramService : ITrainingProgramService
 
         _logger.LogInformation("Training program created: {ProgramCode} — {Name}", entity.ProgramCode, entity.ProgramName);
 
-        return entity.ToDto();
+        // CategoryOption/ProgramGroup navs are unloaded on the just-created tracked instance, so a
+        // direct entity.ToDto() would blank CategoryName/GroupName even when those FKs are set.
+        // Reload through GetByIdAsync (GetWithFullDetailsAsync) instead.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingProgramDto> UpdateAsync(UpdateTrainingProgramDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -212,7 +215,7 @@ public class TrainingProgramService : ITrainingProgramService
 
         _logger.LogInformation("Training program updated: {ProgramCode}", entity.ProgramCode);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -291,7 +294,12 @@ public class TrainingProgramService : ITrainingProgramService
         await _competencyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // Competency nav is unloaded on the just-created tracked instance, so entity.ToDto() would
+        // blank CompetencyCode/CompetencyName. Reload with the include instead.
+        var reloaded = await _competencyRepository.GetQueryable()
+            .Include(c => c.Competency)
+            .FirstAsync(c => c.Id == entity.Id, cancellationToken);
+        return reloaded.ToDto();
     }
 
     public async Task<IEnumerable<TrainingProgramCompetencyDto>> GetCompetenciesAsync(Guid programId, CancellationToken cancellationToken = default)
@@ -326,7 +334,12 @@ public class TrainingProgramService : ITrainingProgramService
         await _programSkillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // Skill nav is unloaded on the just-created tracked instance, so entity.ToDto() would blank
+        // SkillName. Reload with the include instead.
+        var reloaded = await _programSkillRepository.GetQueryable()
+            .Include(s => s.Skill)
+            .FirstAsync(s => s.Id == entity.Id, cancellationToken);
+        return reloaded.ToDto();
     }
 
     public async Task<IEnumerable<TrainingProgramSkillDto>> GetSkillsAsync(Guid programId, CancellationToken cancellationToken = default)

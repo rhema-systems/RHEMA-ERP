@@ -155,6 +155,13 @@ public interface IJobInterviewService
 
     // Panelist / interviewee cross-queries
     Task<IEnumerable<JobInterviewPanelistDto>> GetInterviewsByPanelistAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The caller's own panel assignments, taken from the token. The id-bearing twin above is HR's;
+    /// without this a panelist would have to fetch and pass their own employee id, which is the shape
+    /// behind most of the authorization holes this module has had.
+    /// </summary>
+    Task<IEnumerable<JobInterviewPanelistDto>> GetMyPanelistSlotsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<JobIntervieweeDto>> GetInterviewsByApplicationAsync(Guid applicationId, CancellationToken cancellationToken = default);
 
     // Score summaries

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class CompanyGoalsController : ControllerBase
 {
     private readonly ICompanyGoalService _companyGoalService;
@@ -98,6 +99,7 @@ public class CompanyGoalsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(CompanyGoalDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateCompanyGoalDto createDto, CancellationToken cancellationToken = default)
     {
         try
@@ -121,8 +123,13 @@ public class CompanyGoalsController : ControllerBase
     [ProducesResponseType(typeof(CompanyGoalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCompanyGoalDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
         try
         {
             var result = await _companyGoalService.UpdateAsync(updateDto, cancellationToken);
@@ -143,6 +150,7 @@ public class CompanyGoalsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -166,6 +174,7 @@ public class CompanyGoalsController : ControllerBase
     [HttpPatch("{id:guid}/visibility")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SetVisibility(Guid id, [FromBody] bool isVisible, CancellationToken cancellationToken = default)
     {
         try
@@ -212,7 +221,7 @@ public class CompanyGoalsController : ControllerBase
     /// Requires cycleId. Supports search, priority, visibility and due-date filters.
     /// </summary>
     [HttpGet("dashboard/paged")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<CompanyGoalListItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDashboardPaged(
         [FromQuery] Guid cycleId,
@@ -243,7 +252,7 @@ public class CompanyGoalsController : ControllerBase
     /// Single projection query — does not load navigation collections.
     /// </summary>
     [HttpGet("dashboard/metrics")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(CompanyGoalDashboardMetricsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDashboardMetrics(
         [FromQuery] Guid cycleId,

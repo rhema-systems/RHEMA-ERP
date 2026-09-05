@@ -1,4 +1,5 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 
@@ -189,6 +190,16 @@ public static class AssetsMappingExtensions
             DisposalDate = entity.DisposalDate,
             DisposalMethod = entity.DisposalMethod,
             DisposalNotes = entity.DisposalNotes,
+            AdditionalRemarks = entity.AdditionalRemarks,
+            Source = entity.Source,
+            FixedAssetId = entity.FixedAssetId,
+            MaintenanceAssetId = entity.MaintenanceAssetId,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            InsuranceExpiryDate = entity.InsuranceExpiryDate,
+            IsRentable = entity.IsRentable,
+            StandardRentalAmount = entity.StandardRentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -215,7 +226,11 @@ public static class AssetsMappingExtensions
             CurrentAssignedToName = entity.CurrentAssignedTo != null 
                 ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}" 
                 : null,
-            CurrentValue = entity.PurchaseCost
+            // D-jj. It was called CurrentValue and mapped from PurchaseCost, so every register
+            // list answered the acquisition cost under a name promising a depreciated one.
+            PurchaseCost = entity.PurchaseCost,
+            IsRentable = entity.IsRentable,
+            Source = entity.Source
         };
     }
 
@@ -266,6 +281,16 @@ public static class AssetsMappingExtensions
             DisposalDate = entity.DisposalDate,
             DisposalMethod = entity.DisposalMethod,
             DisposalNotes = entity.DisposalNotes,
+            AdditionalRemarks = entity.AdditionalRemarks,
+            Source = entity.Source,
+            FixedAssetId = entity.FixedAssetId,
+            MaintenanceAssetId = entity.MaintenanceAssetId,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            InsuranceExpiryDate = entity.InsuranceExpiryDate,
+            IsRentable = entity.IsRentable,
+            StandardRentalAmount = entity.StandardRentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -307,11 +332,18 @@ public static class AssetsMappingExtensions
             LocationId = dto.LocationId,
             LocationDetails = dto.LocationDetails,
             IsAssignable = dto.IsAssignable,
+            MaintenanceAssetId = dto.MaintenanceAssetId,
             RequiresRegularMaintenance = dto.RequiresRegularMaintenance,
             MaintenanceIntervalDays = dto.MaintenanceIntervalDays,
             IsInsured = dto.IsInsured,
             InsurancePolicyNumber = dto.InsurancePolicyNumber,
             InsuredValue = dto.InsuredValue,
+            InsuranceExpiryDate = dto.InsuranceExpiryDate,
+            IsRentable = dto.IsRentable,
+            StandardRentalAmount = dto.StandardRentalAmount,
+            RentalCurrencyCode = dto.RentalCurrencyCode,
+            AdditionalRemarks = dto.AdditionalRemarks,
+            UnitId = dto.UnitId,
             CreatedBy = userId.ToString()
         };
     }
@@ -342,6 +374,7 @@ public static class AssetsMappingExtensions
         entity.LocationId = dto.LocationId;
         entity.LocationDetails = dto.LocationDetails;
         entity.IsAssignable = dto.IsAssignable;
+        entity.MaintenanceAssetId = dto.MaintenanceAssetId;
         entity.RequiresRegularMaintenance = dto.RequiresRegularMaintenance;
         entity.MaintenanceIntervalDays = dto.MaintenanceIntervalDays;
         entity.LastMaintenanceDate = dto.LastMaintenanceDate;
@@ -349,6 +382,12 @@ public static class AssetsMappingExtensions
         entity.IsInsured = dto.IsInsured;
         entity.InsurancePolicyNumber = dto.InsurancePolicyNumber;
         entity.InsuredValue = dto.InsuredValue;
+        entity.InsuranceExpiryDate = dto.InsuranceExpiryDate;
+        entity.IsRentable = dto.IsRentable;
+        entity.StandardRentalAmount = dto.StandardRentalAmount;
+        entity.RentalCurrencyCode = dto.RentalCurrencyCode;
+        entity.AdditionalRemarks = dto.AdditionalRemarks;
+        entity.UnitId = dto.UnitId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -418,7 +457,19 @@ public static class AssetsMappingExtensions
             AssetId = entity.AssetId,
             AssetName = entity.Asset?.AssetName ?? string.Empty,
             AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
+            // D-ll. Both halves land together: the `.Include` for `Asset.AssetType` was already on
+            // `GetWithDetailsAsync`, so this line is the whole fix and the field was blank without it.
+            AssetTypeName = entity.Asset?.AssetType?.Name ?? string.Empty,
             EmployeeId = entity.EmployeeId,
+            RequisitionId = entity.RequisitionId,
+            RequisitionNumber = entity.Requisition?.RequisitionNumber,
+            TransferId = entity.TransferId,
+            TransferNumber = entity.Transfer?.TransferNumber,
+            TermsDocumentSentAt = entity.TermsDocumentSentAt,
+            TermsDocumentSentTo = entity.TermsDocumentSentTo,
+            TermsDocumentSentByName = entity.TermsDocumentSentBy != null
+                ? $"{entity.TermsDocumentSentBy.FirstName} {entity.TermsDocumentSentBy.LastName}"
+                : null,
             EmployeeName = entity.Employee != null 
                 ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
                 : string.Empty,
@@ -455,6 +506,13 @@ public static class AssetsMappingExtensions
             EmployeeLiable = entity.EmployeeLiable,
             RepairCost = entity.RepairCost,
             ReplacementCost = entity.ReplacementCost,
+            RentalAmount = entity.RentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
+            RentalFrequency = entity.RentalFrequency,
+            RentalEffectiveFrom = entity.RentalEffectiveFrom,
+            RentalEffectiveTo = entity.RentalEffectiveTo,
+            IsBenefitInKind = entity.IsBenefitInKind,
+            BenefitInKindValue = entity.BenefitInKindValue,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -468,7 +526,11 @@ public static class AssetsMappingExtensions
         {
             Id = entity.Id,
             AssignmentNumber = entity.AssignmentNumber,
+            AssetId = entity.AssetId,
             AssetName = entity.Asset?.AssetName ?? string.Empty,
+            AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
+            AssetTypeName = entity.Asset?.AssetType?.Name ?? string.Empty,
+            EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee != null 
                 ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
                 : string.Empty,
@@ -476,7 +538,13 @@ public static class AssetsMappingExtensions
             ExpectedReturnDate = entity.ExpectedReturnDate,
             Type = entity.Type,
             Status = entity.Status,
-            ReturnDate = entity.ReturnDate
+            ReturnDate = entity.ReturnDate,
+            EmployeeAcknowledged = entity.EmployeeAcknowledged,
+            AcknowledgementDate = entity.AcknowledgementDate,
+            RentalAmount = entity.RentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
+            RentalFrequencyName = entity.RentalFrequency?.ToString(),
+            IsBenefitInKind = entity.IsBenefitInKind
         };
     }
 
@@ -553,6 +621,9 @@ public static class AssetsMappingExtensions
             NextMaintenanceDate = entity.NextMaintenanceDate,
             Status = entity.Status,
             Notes = entity.Notes,
+            MaintenanceAdmissionId = entity.MaintenanceAdmissionId,
+            MaintenanceAdmissionNumber = entity.MaintenanceAdmissionNumber,
+            MaintenanceDischargeId = entity.MaintenanceDischargeId,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -566,12 +637,20 @@ public static class AssetsMappingExtensions
         {
             Id = entity.Id,
             MaintenanceNumber = entity.MaintenanceNumber,
+            // D-ee. Kept next to the name so a future edit cannot take one and leave the other —
+            // the by-id read carries all three and the two reads are asserted to agree.
+            AssetId = entity.AssetId,
+            AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
             AssetName = entity.Asset?.AssetName ?? string.Empty,
             MaintenanceDate = entity.MaintenanceDate,
             Type = entity.Type,
             Status = entity.Status,
             Cost = entity.Cost,
-            NextMaintenanceDate = entity.NextMaintenanceDate
+            NextMaintenanceDate = entity.NextMaintenanceDate,
+            MaintenanceAdmissionNumber = entity.MaintenanceAdmissionNumber,
+            // Computed the same way the detail DTO computes it, from the same two columns, so the
+            // list and the by-id read cannot disagree about whether an asset is off site.
+            IsAtWorkshop = entity.MaintenanceAdmissionId.HasValue && !entity.MaintenanceDischargeId.HasValue
         };
     }
 
@@ -618,6 +697,104 @@ public static class AssetsMappingExtensions
         entity.UpdatedBy = userId.ToString();
     }
 
+    /// <summary>
+    /// Projects an asset onto the maintenance watchlist row — area 16 slice 9, AST-1, D-ff.
+    /// </summary>
+    /// <remarks>
+    /// One projection for all three reads on purpose. Due, overdue and unscheduled differ only in
+    /// which assets they select; if each computed its own <c>daysRemaining</c> the three lists could
+    /// disagree about the same asset on the same day, and a schedule that contradicts itself is
+    /// worse than no schedule.
+    /// </remarks>
+    public static AssetMaintenanceDueDto ToMaintenanceDueDto(this CompanyAsset entity, DateOnly asOf)
+    {
+        var next = entity.NextMaintenanceDate;
+        var days = next.HasValue ? next.Value.DayNumber - asOf.DayNumber : 0;
+
+        return new AssetMaintenanceDueDto
+        {
+            Id = entity.Id,
+            AssetNumber = entity.AssetNumber,
+            AssetTag = entity.AssetTag,
+            AssetName = entity.AssetName,
+            AssetTypeName = entity.AssetType?.Name ?? string.Empty,
+            Status = entity.Status,
+            Condition = entity.Condition,
+            LocationId = entity.LocationId,
+            LocationName = entity.Location?.Name,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            IsCurrentlyAssigned = entity.IsCurrentlyAssigned,
+            CurrentAssignedToId = entity.CurrentAssignedToId,
+            CurrentAssignedToName = entity.CurrentAssignedTo != null
+                ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}"
+                : null,
+            RequiresRegularMaintenance = entity.RequiresRegularMaintenance,
+            MaintenanceIntervalDays = entity.MaintenanceIntervalDays,
+            LastMaintenanceDate = entity.LastMaintenanceDate,
+            NextMaintenanceDate = next,
+            IsScheduled = next.HasValue,
+            DaysRemaining = days,
+            IsOverdue = next.HasValue && days < 0,
+            AsOf = asOf,
+        };
+    }
+
+    public static List<AssetMaintenanceDueDto> ToMaintenanceDueDtoList(
+        this IEnumerable<CompanyAsset> entities, DateOnly asOf)
+    {
+        return entities.Select(e => e.ToMaintenanceDueDto(asOf)).ToList();
+    }
+
+    /// <summary>
+    /// An asset as an insurance watchlist row — area 16 slice 11.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the same shape as <see cref="ToMaintenanceDueDto"/>: the same identity, the
+    /// same placement, the same holder, and a signed day count with a flag beside it. Two
+    /// watchlists over one register that disagreed about how to describe a row would make every
+    /// screen that shows both write the difference out twice.
+    /// </remarks>
+    public static AssetInsuranceWatchItemDto ToInsuranceWatchItemDto(this CompanyAsset entity, DateOnly asOf)
+    {
+        var expiry = entity.InsuranceExpiryDate;
+        var days = expiry.HasValue ? expiry.Value.DayNumber - asOf.DayNumber : 0;
+
+        return new AssetInsuranceWatchItemDto
+        {
+            Id = entity.Id,
+            AssetNumber = entity.AssetNumber,
+            AssetTag = entity.AssetTag,
+            AssetName = entity.AssetName,
+            AssetTypeName = entity.AssetType?.Name ?? string.Empty,
+            Status = entity.Status,
+            Condition = entity.Condition,
+            LocationId = entity.LocationId,
+            LocationName = entity.Location?.Name,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            IsCurrentlyAssigned = entity.IsCurrentlyAssigned,
+            CurrentAssignedToId = entity.CurrentAssignedToId,
+            CurrentAssignedToName = entity.CurrentAssignedTo != null
+                ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}"
+                : null,
+            IsInsured = entity.IsInsured,
+            InsurancePolicyNumber = entity.InsurancePolicyNumber,
+            InsuredValue = entity.InsuredValue,
+            InsuranceExpiryDate = expiry,
+            IsDated = expiry.HasValue,
+            DaysRemaining = days,
+            IsExpired = expiry.HasValue && days < 0,
+            AsOf = asOf,
+        };
+    }
+
+    public static List<AssetInsuranceWatchItemDto> ToInsuranceWatchItemDtoList(
+        this IEnumerable<CompanyAsset> entities, DateOnly asOf)
+    {
+        return entities.Select(e => e.ToInsuranceWatchItemDto(asOf)).ToList();
+    }
+
     public static List<AssetMaintenanceSummaryDto> ToSummaryDtoList(this IEnumerable<AssetMaintenance> entities)
     {
         return entities.Select(e => e.ToSummaryDto()).ToList();
@@ -636,20 +813,51 @@ public static class AssetsMappingExtensions
             AssetId = entity.AssetId,
             FileName = entity.FileName,
             FilePath = entity.FilePath,
+            Caption = entity.Caption,
             UploadDate = entity.UploadDate,
-            UploadedBy = entity.CreatedBy
+            UploadedBy = entity.CreatedBy,
+            UploadedById = entity.UploadedById,
+            FileSizeBytes = entity.FileSizeBytes,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId
         };
     }
 
-    public static AssetImage ToEntity(this CreateAssetImageDto dto, Guid tenantId, Guid assetId, Guid userId)
+    /// <summary>
+    /// Builds an image row from a file that has ALREADY been through the controlled upload gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The file name and the stored location come from <paramref name="storedFileName"/> and
+    /// <paramref name="filePath"/> — the gate's, not the caller's. That is the whole difference
+    /// between this and what it replaced.
+    /// </remarks>
+    public static AssetImage ToUploadedEntity(
+        this CreateAssetImageDto dto,
+        Guid tenantId,
+        Guid assetId,
+        Guid userId,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AssetImage
         {
             TenantId = tenantId,
             AssetId = assetId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = storedFileName,
+            FilePath = filePath,
+            Caption = dto.Caption,
             UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             CreatedBy = userId.ToString()
         };
     }
@@ -674,6 +882,11 @@ public static class AssetsMappingExtensions
             FilePath = entity.FilePath,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            UploadedById = entity.UploadedById,
+            FileSizeBytes = entity.FileSizeBytes,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -681,16 +894,33 @@ public static class AssetsMappingExtensions
         };
     }
 
-    public static AssetAttachment ToEntity(this CreateAssetAttachmentDto dto, Guid tenantId, Guid assetId, Guid userId)
+    /// <summary>Builds an attachment row from a file already through the controlled upload gate.</summary>
+    public static AssetAttachment ToUploadedEntity(
+        this CreateAssetAttachmentDto dto,
+        Guid tenantId,
+        Guid assetId,
+        Guid userId,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AssetAttachment
         {
             TenantId = tenantId,
             AssetId = assetId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = storedFileName,
+            FilePath = filePath,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             CreatedBy = userId.ToString()
         };
     }
@@ -712,6 +942,10 @@ public static class AssetsMappingExtensions
             TenantId = entity.TenantId,
             RequisitionNumber = entity.RequisitionNumber,
             RequestedById = entity.RequestedById,
+            BeneficiaryEmployeeId = entity.BeneficiaryEmployeeId,
+            BeneficiaryEmployeeName = entity.BeneficiaryEmployee != null
+                ? $"{entity.BeneficiaryEmployee.FirstName} {entity.BeneficiaryEmployee.LastName}"
+                : null,
             RequestedByName = entity.RequestedBy != null 
                 ? $"{entity.RequestedBy.FirstName} {entity.RequestedBy.LastName}" 
                 : string.Empty,
@@ -738,8 +972,6 @@ public static class AssetsMappingExtensions
             FulfilledByName = entity.FulfilledBy != null 
                 ? $"{entity.FulfilledBy.FirstName} {entity.FulfilledBy.LastName}" 
                 : null,
-            AssignedAssetId = entity.AssignedAssetId,
-            AssignedAssetName = entity.AssignedAsset?.AssetName,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -753,9 +985,19 @@ public static class AssetsMappingExtensions
         {
             Id = entity.Id,
             RequisitionNumber = entity.RequisitionNumber,
+            RequestedById = entity.RequestedById,
             RequestedByName = entity.RequestedBy != null 
                 ? $"{entity.RequestedBy.FirstName} {entity.RequestedBy.LastName}" 
                 : string.Empty,
+            // AST-6b. The field, the doc comment and the .Include on every query that feeds this
+            // mapping all existed; the assignment did not, so every requisition LIST answered with
+            // a blank beneficiary while the by-id read resolved it in full. The rule that catches
+            // this shape - and this is now its sixth appearance in the area - is that a by-id read
+            // and its list read must be asserted to agree.
+            BeneficiaryEmployeeId = entity.BeneficiaryEmployeeId,
+            BeneficiaryEmployeeName = entity.BeneficiaryEmployee != null
+                ? $"{entity.BeneficiaryEmployee.FirstName} {entity.BeneficiaryEmployee.LastName}"
+                : null,
             RequestDate = entity.RequestDate,
             AssetTypeName = entity.AssetType?.Name ?? string.Empty,
             Quantity = entity.Quantity,
@@ -779,7 +1021,9 @@ public static class AssetsMappingExtensions
             Priority = dto.Priority,
             Justification = dto.Justification,
             RequiredByDate = dto.RequiredByDate,
-            Status = dto.Status,
+            // Status is not mapped from the payload — the service sets Draft. See the note on
+            // CreateAssetRequisitionDto for what a client-settable status let through.
+            Status = AssetRequisitionStatus.Draft,
             CreatedBy = userId.ToString()
         };
     }
@@ -792,13 +1036,10 @@ public static class AssetsMappingExtensions
         entity.Priority = dto.Priority;
         entity.Justification = dto.Justification;
         entity.RequiredByDate = dto.RequiredByDate;
-        
-        // Update status only if provided
-        if (dto.Status.HasValue)
-        {
-            entity.Status = dto.Status.Value;
-        }
-        
+
+        // The status is NOT taken from the payload. It used to be — see UpdateAssetRequisitionDto.
+        // BeneficiaryEmployeeId is not set here either: it needs the on-behalf authorization check,
+        // so the service assigns it after calling this.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -915,7 +1156,9 @@ public static class AssetsMappingExtensions
             ToUnitId = dto.ToUnitId,
             TransferReason = dto.TransferReason,
             InitiatedById = initiatedById,
-            Status = HRAssetTransferStatus.Pending,
+            // Draft, not Pending. A transfer is out for approval only once somebody submits it —
+            // slice 3b split the two states apart so a recall has somewhere to land.
+            Status = HRAssetTransferStatus.Draft,
             Notes = dto.Notes,
             CreatedBy = userId.ToString()
         };
@@ -933,6 +1176,132 @@ public static class AssetsMappingExtensions
     public static List<AssetTransferSummaryDto> ToSummaryDtoList(this IEnumerable<AssetTransfer> entities)
     {
         return entities.Select(e => e.ToSummaryDto()).ToList();
+    }
+
+    #endregion
+
+
+    #region Asset Surcharges — area 16 slice 7
+
+    private static string PersonName(Employee? e)
+        => e is null ? string.Empty : $"{e.FirstName} {e.LastName}";
+
+    public static AssetSurchargeDto ToDto(this AssetSurcharge entity)
+    {
+        return new AssetSurchargeDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            SurchargeNumber = entity.SurchargeNumber,
+
+            AssignmentId = entity.AssignmentId,
+            AssignmentNumber = entity.Assignment?.AssignmentNumber ?? string.Empty,
+            AssetId = entity.Assignment?.AssetId ?? Guid.Empty,
+            AssetName = entity.Assignment?.Asset?.AssetName ?? string.Empty,
+            AssetNumber = entity.Assignment?.Asset?.AssetNumber ?? string.Empty,
+
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = PersonName(entity.Employee),
+
+            Reason = entity.Reason,
+            Description = entity.Description,
+
+            AssessedAmount = entity.AssessedAmount,
+            CurrencyCode = entity.CurrencyCode,
+            BasisRepairCost = entity.BasisRepairCost,
+            BasisReplacementCost = entity.BasisReplacementCost,
+            AmountRecovered = entity.AmountRecovered,
+
+            Status = entity.Status,
+            RaisedById = entity.RaisedById,
+            RaisedByName = entity.RaisedBy is null ? null : PersonName(entity.RaisedBy),
+            RaisedAt = entity.RaisedAt,
+
+            NotifiedAt = entity.NotifiedAt,
+            EmployeeResponse = entity.EmployeeResponse,
+            EmployeeRespondedAt = entity.EmployeeRespondedAt,
+            EmployeeResponseComments = entity.EmployeeResponseComments,
+            ProceededWithoutResponseReason = entity.ProceededWithoutResponseReason,
+
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy is null ? null : PersonName(entity.ApprovedBy),
+            ApprovalDate = entity.ApprovalDate,
+            ApprovalComments = entity.ApprovalComments,
+            RejectedDate = entity.RejectedDate,
+            RejectionReason = entity.RejectionReason,
+
+            RecoveryMethod = entity.RecoveryMethod,
+            InstalmentCount = entity.InstalmentCount,
+            RecoveryStartDate = entity.RecoveryStartDate,
+            Recoveries = entity.Recoveries?
+                .Where(r => !r.IsDeleted)
+                .OrderBy(r => r.RecoveredOn)
+                .Select(r => r.ToDto())
+                .ToList() ?? [],
+
+            WaivedById = entity.WaivedById,
+            WaivedByName = entity.WaivedBy is null ? null : PersonName(entity.WaivedBy),
+            WaivedAt = entity.WaivedAt,
+            WaiverReason = entity.WaiverReason,
+            CancelledAt = entity.CancelledAt,
+            CancellationReason = entity.CancellationReason,
+
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    /// <summary>
+    /// The list row. ⚠ Every field it carries is one the by-id read carries identically — the rule
+    /// this area has been bitten by six times is that the two must be asserted to agree.
+    /// </summary>
+    public static AssetSurchargeSummaryDto ToSummaryDto(this AssetSurcharge entity)
+    {
+        return new AssetSurchargeSummaryDto
+        {
+            Id = entity.Id,
+            SurchargeNumber = entity.SurchargeNumber,
+            AssignmentId = entity.AssignmentId,
+            AssignmentNumber = entity.Assignment?.AssignmentNumber ?? string.Empty,
+            AssetId = entity.Assignment?.AssetId ?? Guid.Empty,
+            AssetName = entity.Assignment?.Asset?.AssetName ?? string.Empty,
+            AssetNumber = entity.Assignment?.Asset?.AssetNumber ?? string.Empty,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = PersonName(entity.Employee),
+            Reason = entity.Reason,
+            AssessedAmount = entity.AssessedAmount,
+            CurrencyCode = entity.CurrencyCode,
+            AmountRecovered = entity.AmountRecovered,
+            Status = entity.Status,
+            EmployeeResponse = entity.EmployeeResponse,
+            RaisedAt = entity.RaisedAt,
+            RecoveryStartDate = entity.RecoveryStartDate
+        };
+    }
+
+    public static List<AssetSurchargeSummaryDto> ToSummaryDtoList(this IEnumerable<AssetSurcharge> entities)
+        => entities.Select(e => e.ToSummaryDto()).ToList();
+
+    public static AssetSurchargeRecoveryDto ToDto(this AssetSurchargeRecovery entity)
+    {
+        return new AssetSurchargeRecoveryDto
+        {
+            Id = entity.Id,
+            SurchargeId = entity.SurchargeId,
+            Amount = entity.Amount,
+            RecoveredOn = entity.RecoveredOn,
+            Method = entity.Method,
+            Reference = entity.Reference,
+            Notes = entity.Notes,
+            RecordedById = entity.RecordedById,
+            RecordedByName = entity.RecordedBy is null ? null : PersonName(entity.RecordedBy),
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
     }
 
     #endregion

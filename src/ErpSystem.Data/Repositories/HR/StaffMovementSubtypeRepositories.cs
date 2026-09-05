@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.PromotionTransfer;
+﻿using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -185,6 +185,19 @@ public class StaffDemotionRepository : GenericRepository<StaffDemotion>, IStaffD
             .Include(d => d.Movement).ThenInclude(m => m.NewPosition)
             .Where(d => d.IsPerformanceRelated && !d.IsDeleted)
             .OrderByDescending(d => d.Movement.EffectiveDate)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<StaffDemotion>> GetWithFiledAppealsAsync()
+    {
+        return await _dbSet
+            .Include(d => d.Movement).ThenInclude(m => m.Employee)
+            .Include(d => d.Movement).ThenInclude(m => m.CurrentPosition)
+            .Include(d => d.Movement).ThenInclude(m => m.NewPosition)
+            .Where(d => !d.IsDeleted
+                     && d.RightToAppeal
+                     && d.EmployeeResponse != null)
+            .OrderByDescending(d => d.EmployeeResponseDate)
             .ToListAsync();
     }
 
@@ -423,6 +436,10 @@ public class EmployeeCareerPathRepository
             .Include(cp => cp.Position)
             .Include(cp => cp.OrganizationUnit)
             .Include(cp => cp.OrganizationLevel)
+            .Include(cp => cp.Location)
+            // The summary reports which movement caused the step and what kind it was; without this
+            // include both read as null on every row, which is the whole point of a career step.
+            .Include(cp => cp.Movement)
             .Include(cp => cp.SalaryGrade)
             .Include(cp => cp.SalaryLevel)
             .Include(cp => cp.SalaryNotch)

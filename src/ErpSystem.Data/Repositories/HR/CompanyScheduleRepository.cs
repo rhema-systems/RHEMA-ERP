@@ -18,7 +18,7 @@ public class CompanyEventRepository : GenericRepository<CompanyEvent>, ICompanyE
         return await _dbSet
             .Include(e => e.Organizer)
             .Include(e => e.Department)
-            .Include(e => e.Station)
+            .Include(e => e.SiteLocation)
             .Include(e => e.ApprovedBy)
             .FirstOrDefaultAsync(e => e.EventNumber == eventNumber);
     }
@@ -308,15 +308,15 @@ public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoo
     public async Task<MeetingRoom?> GetByRoomCodeAsync(string roomCode)
     {
         return await _dbSet
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .FirstOrDefaultAsync(r => r.RoomCode == roomCode);
     }
 
-    public async Task<IEnumerable<MeetingRoom>> GetByStationAsync(Guid stationId)
+    public async Task<IEnumerable<MeetingRoom>> GetByLocationAsync(Guid locationId)
     {
         return await _dbSet
-            .Include(r => r.Station)
-            .Where(r => r.StationId == stationId)
+            .Include(r => r.SiteLocation)
+            .Where(r => r.LocationId == locationId)
             .OrderBy(r => r.RoomName)
             .ToListAsync();
     }
@@ -332,7 +332,7 @@ public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoo
             .ToListAsync();
 
         var query = _dbSet
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .Where(r => r.IsActive && r.IsBookable && !bookedRoomIds.Contains(r.Id));
 
         if (minCapacity.HasValue)
@@ -346,7 +346,7 @@ public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoo
     public async Task<IEnumerable<MeetingRoom>> GetActiveRoomsAsync()
     {
         return await _dbSet
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .Where(r => r.IsActive)
             .OrderBy(r => r.RoomName)
             .ToListAsync();
@@ -355,7 +355,7 @@ public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoo
     public async Task<IEnumerable<MeetingRoom>> GetBookableRoomsAsync()
     {
         return await _dbSet
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .Where(r => r.IsActive && r.IsBookable)
             .OrderBy(r => r.RoomName)
             .ToListAsync();
@@ -508,7 +508,7 @@ public class BusinessClosureRepository : GenericRepository<BusinessClosure>, IBu
     public async Task<IEnumerable<BusinessClosure>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         return await _dbSet
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Include(c => c.AnnouncedBy)
             .Where(c => c.StartDate >= startDate && c.EndDate <= endDate)
@@ -519,19 +519,19 @@ public class BusinessClosureRepository : GenericRepository<BusinessClosure>, IBu
     public async Task<IEnumerable<BusinessClosure>> GetByTypeAsync(ClosureType type)
     {
         return await _dbSet
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Where(c => c.Type == type)
             .OrderBy(c => c.StartDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<BusinessClosure>> GetByStationAsync(Guid stationId)
+    public async Task<IEnumerable<BusinessClosure>> GetByLocationAsync(Guid locationId)
     {
         return await _dbSet
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
-            .Where(c => c.AffectsAllStations || c.StationId == stationId)
+            .Where(c => c.AffectsAllStations || c.LocationId == locationId)
             .OrderBy(c => c.StartDate)
             .ToListAsync();
     }
@@ -539,7 +539,7 @@ public class BusinessClosureRepository : GenericRepository<BusinessClosure>, IBu
     public async Task<IEnumerable<BusinessClosure>> GetByDepartmentAsync(Guid departmentId)
     {
         return await _dbSet
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Where(c => c.AffectsAllStations || c.DepartmentId == departmentId)
             .OrderBy(c => c.StartDate)
@@ -552,20 +552,20 @@ public class BusinessClosureRepository : GenericRepository<BusinessClosure>, IBu
         var futureDate = today.AddDays(daysAhead);
 
         return await _dbSet
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Where(c => c.StartDate >= today && c.StartDate <= futureDate)
             .OrderBy(c => c.StartDate)
             .ToListAsync();
     }
 
-    public async Task<bool> IsClosureDateAsync(DateTime date, Guid? stationId = null, Guid? departmentId = null)
+    public async Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null)
     {
         var query = _dbSet.Where(c => c.StartDate <= date && c.EndDate >= date);
 
-        if (stationId.HasValue)
+        if (locationId.HasValue)
         {
-            query = query.Where(c => c.AffectsAllStations || c.StationId == stationId.Value);
+            query = query.Where(c => c.AffectsAllStations || c.LocationId == locationId.Value);
         }
 
         if (departmentId.HasValue)

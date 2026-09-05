@@ -1,14 +1,23 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The services a healthcare facility offers, and what they cost.
+/// </summary>
+/// <remarks>
+/// Reads are open to any authenticated user for the same reason as
+/// <see cref="HealthcareFacilitiesController"/> — this is facility reference data, and an employee
+/// filing their own claim needs it. Writes and deletes are HR work.
+/// </remarks>
 [ApiController]
 [Route("api/facility-services")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class FacilityServicesController : MedicalControllerBase
 {
     private readonly IHealthcareFacilityService _service;
@@ -27,6 +36,7 @@ public class FacilityServicesController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<FacilityServiceDto>>> GetByFacility(Guid facilityId, CancellationToken ct)
         => Ok(await _service.GetFacilityServicesAsync(facilityId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<FacilityServiceDto>> Create([FromBody] CreateFacilityServiceDto dto, CancellationToken ct)
     {
@@ -37,6 +47,7 @@ public class FacilityServicesController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<FacilityServiceDto>> Update(Guid id, [FromBody] UpdateFacilityServiceDto dto, CancellationToken ct)
     {
@@ -47,6 +58,7 @@ public class FacilityServicesController : MedicalControllerBase
         return Ok(await _service.UpdateFacilityServiceAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {

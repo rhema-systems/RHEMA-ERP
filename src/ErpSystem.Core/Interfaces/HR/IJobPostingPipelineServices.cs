@@ -36,7 +36,21 @@ public interface IJobPostingService
     Task<JobPostingDto> PublishAsync(Guid postingId, DateTime? actualPublishDate, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     // Attachments (newspaper artwork, agency brief, proof of publication)
-    Task<JobPostingAttachmentDto> AddAttachmentAsync(CreateJobPostingAttachmentDto createDto, Guid tenantId, Guid uploadedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records an attachment against a posting, from a file the controlled-upload gate has already
+    /// scanned and registered. The old <c>CreateJobPostingAttachmentDto</c> overload took a
+    /// caller-supplied <c>filePath</c> and stored no file; it is deleted, not deprecated.
+    /// </summary>
+    Task<JobPostingAttachmentDto> AddAttachmentAsync(
+        Guid jobPostingId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null);
     Task<IEnumerable<JobPostingAttachmentDto>> GetAttachmentsAsync(Guid postingId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 }

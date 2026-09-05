@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
@@ -81,16 +82,22 @@ public class ShePermitToWorkService : IShePermitToWorkService
     {
         var year = DateTime.UtcNow.Year;
         var prefix = $"PTW-{year}-";
-        var last = await _permitRepository.GetQueryable()
-            .Where(p => p.TenantId == tenantId && p.PermitNumber.StartsWith(prefix))
-            .OrderByDescending(p => p.PermitNumber)
-            .Select(p => p.PermitNumber)
-            .FirstOrDefaultAsync(cancellationToken);
 
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
+        // Numeric max, not string ordering: the seeder wrote 3-digit suffixes while this generator
+        // emits 4-digit ones, and across mixed widths string ordering picks the wrong "latest"
+        // ("002" sorts above "0003"), silently re-issuing taken numbers. Soft-deleted permits keep
+        // their number, so they count toward the max too.
+        var numbers = await _permitRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.PermitNumber.StartsWith(prefix))
+            .Select(p => p.PermitNumber)
+            .ToListAsync(cancellationToken);
+
+        var max = numbers
+            .Select(n => int.TryParse(n[prefix.Length..], out var v) ? v : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{max + 1:D4}";
     }
 
     public async Task<ShePermitToWorkDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -165,7 +172,9 @@ public class ShePermitToWorkService : IShePermitToWorkService
         await _permitRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Permit-to-work created: {PermitNumber}", entity.PermitNumber);
-        return entity.ToDto();
+        // Write responses re-read through the include-bearing path — the tracked entity's navs
+        // (location, requestor, contractor) are unloaded and would map blank.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<ShePermitToWorkDto> UpdateAsync(UpdateShePermitToWorkDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -177,7 +186,7 @@ public class ShePermitToWorkService : IShePermitToWorkService
         entity.UpdateEntity(dto, userId);
         await _permitRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -193,6 +202,17 @@ public class ShePermitToWorkService : IShePermitToWorkService
         var entity = await GetOwnedPermitAsync(dto.PermitId);
         if (entity.Status is not (ShePermitStatus.Draft or ShePermitStatus.PendingApproval))
             throw new InvalidOperationException("Only draft or pending permits can be approved.");
+
+        // FR-PTW-002 — approval is blocked until the mandatory safety sections are complete. Gas
+        // testing is mandatory only where an atmosphere can kill: hot work and confined spaces.
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(entity.HazardsIdentified)) missing.Add("hazards identified");
+        if (string.IsNullOrWhiteSpace(entity.ControlMeasures)) missing.Add("control measures");
+        if (entity.PermitType is ShePermitType.HotWork or ShePermitType.ConfinedSpaceEntry
+            && string.IsNullOrWhiteSpace(entity.GasTestResults))
+            missing.Add("gas test results");
+        if (missing.Count > 0)
+            throw new InvalidOperationException($"Permit cannot be approved until mandatory fields are completed: {string.Join(", ", missing)}.");
 
         entity.ApprovedById = dto.ApprovedById;
         entity.ApprovedDate = dto.ApprovedDate;
@@ -243,6 +263,11 @@ public class ShePermitToWorkService : IShePermitToWorkService
     {
         var entity = await GetOwnedPermitAsync(dto.PermitId);
 
+        // Only work that was authorised to start can be closed out — a draft is deleted, not
+        // closed, and a completed/cancelled permit does not close twice.
+        if (entity.Status is not (ShePermitStatus.Active or ShePermitStatus.Suspended))
+            throw new InvalidOperationException("Only an active or suspended permit can be closed.");
+
         entity.Status = ShePermitStatus.Completed;
         entity.ClosedById = dto.ClosedById;
         entity.ClosedDate = dto.ClosedDate;
@@ -290,7 +315,15 @@ public class ShePermitToWorkService : IShePermitToWorkService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var permit = await GetOwnedPermitAsync(dto.PermitToWorkId);
+
+        // An extension prolongs live authorisation — nothing else has a window to extend.
+        if (permit.Status != ShePermitStatus.Active)
+            throw new InvalidOperationException("Only an active permit can be extended.");
+
         var entity = dto.ToEntity(tenantId, userId);
+        // Numbered server-side in sequence; the client does not control it.
+        entity.ExtensionNumber = await _unitOfWork.Repository<ShePermitToWorkExtension>().GetQueryable()
+            .CountAsync(x => x.PermitToWorkId == permit.Id && !x.IsDeleted, cancellationToken) + 1;
         await _unitOfWork.Repository<ShePermitToWorkExtension>().AddAsync(entity);
 
         permit.PlannedEndDate = dto.NewEndDate;
@@ -298,7 +331,9 @@ public class ShePermitToWorkService : IShePermitToWorkService
         await _permitRepository.UpdateAsync(permit);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Re-read for the approver name — the tracked entity's nav is unloaded and maps blank.
+        var full = await GetByIdAsync(permit.Id, cancellationToken);
+        return full.Extensions.First(x => x.Id == entity.Id);
     }
 
     public async Task<ShePermitToWorkDocumentDto> AddDocumentAsync(CreateShePermitToWorkDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -308,7 +343,9 @@ public class ShePermitToWorkService : IShePermitToWorkService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<ShePermitToWorkDocument>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Re-read for the uploader name — the tracked entity's nav is unloaded and maps blank.
+        var full = await GetByIdAsync(dto.PermitToWorkId, cancellationToken);
+        return full.Documents.First(d => d.Id == entity.Id);
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
@@ -387,7 +424,9 @@ public class PpeManagementService : IPpeManagementService
 
     private async Task<PpeInventory> GetOwnedInventoryAsync(Guid id)
     {
-        var entity = await _inventoryRepository.GetByIdAsync(id);
+        // Loaded with its navigations so single reads and write responses resolve the type and
+        // restocker names — the bare GetByIdAsync left them blank on the mapped DTO.
+        var entity = await _inventoryRepository.GetByIdAsync(id, i => i.PpeType, i => i.LastRestockedBy!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"PPE inventory item with ID '{id}' not found.");
         return entity;
@@ -403,10 +442,20 @@ public class PpeManagementService : IPpeManagementService
 
     private async Task<JobRolePpeRequirement> GetOwnedRequirementAsync(Guid id)
     {
-        var entity = await _requirementRepository.GetByIdAsync(id);
+        var entity = await _requirementRepository.GetByIdAsync(id, r => r.PpeType);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Job-role PPE requirement with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied Employee FKs (issued-to, issued-by, returned-to,
+    /// restocked-by) — without it a bad id surfaces as an SQL 547 / HTTP 500 instead of a 404.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
     }
 
     // ── Types ──
@@ -456,6 +505,15 @@ public class PpeManagementService : IPpeManagementService
     }
 
     // ── Inventory ──
+    public async Task<IEnumerable<PpeInventoryDto>> GetInventoryAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        return (await _inventoryRepository.GetAllAsync(i => i.PpeType, i => i.LastRestockedBy!))
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.ItemCode)
+            .Select(e => e.ToDto());
+    }
+
     public async Task<PpeInventoryDto> GetInventoryItemAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInventoryAsync(id);
@@ -506,6 +564,7 @@ public class PpeManagementService : IPpeManagementService
     public async Task<bool> RestockAsync(RestockPpeInventoryDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInventoryAsync(dto.PpeInventoryId);
+        await GetOwnedEmployeeAsync(dto.RestockedById);
 
         entity.QuantityInStock += dto.Quantity;
         entity.LastRestockDate = dto.RestockDate;
@@ -555,6 +614,10 @@ public class PpeManagementService : IPpeManagementService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedTypeAsync(dto.PpeTypeId);
+        // Guarded loads double as change-tracker fixup: with the employees tracked, the saved
+        // entity's navigations resolve and the write response carries the names, not blanks.
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        await GetOwnedEmployeeAsync(dto.IssuedById);
         var entity = dto.ToEntity(tenantId, userId);
         await _issuanceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -566,6 +629,7 @@ public class PpeManagementService : IPpeManagementService
         var entity = await GetOwnedIssuanceAsync(dto.IssuanceId);
         if (entity.IsReturned)
             throw new InvalidOperationException("This PPE issuance has already been returned.");
+        await GetOwnedEmployeeAsync(dto.ReturnedToId);
 
         entity.IsReturned = true;
         entity.ActualReturnDate = dto.ActualReturnDate;
@@ -581,6 +645,15 @@ public class PpeManagementService : IPpeManagementService
     }
 
     // ── Job-role requirements ──
+    public async Task<IEnumerable<JobRolePpeRequirementDto>> GetRequirementsAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        return (await _requirementRepository.GetAllAsync(r => r.PpeType))
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.JobRoleName).ThenBy(e => e.PpeType?.Name)
+            .Select(e => e.ToDto());
+    }
+
     public async Task<IEnumerable<JobRolePpeRequirementDto>> GetRequirementsByJobRoleAsync(string jobRoleCode, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -592,7 +665,14 @@ public class PpeManagementService : IPpeManagementService
     public async Task<JobRolePpeRequirementDto> AddRequirementAsync(CreateJobRolePpeRequirementDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedTypeAsync(dto.PpeTypeId);
+        var ppeType = await GetOwnedTypeAsync(dto.PpeTypeId);
+        var roleCode = dto.JobRoleCode.Trim();
+        // Deleted rows don't block: removing a requirement and re-adding it later is a normal flow.
+        var exists = await _requirementRepository.GetQueryable()
+            .AnyAsync(r => r.TenantId == tenantId && r.JobRoleCode == roleCode && r.PpeTypeId == dto.PpeTypeId && !r.IsDeleted, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"'{ppeType.Name}' is already required for job role '{roleCode}'.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _requirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -662,9 +742,12 @@ public class SafetyEquipmentService : ISafetyEquipmentService
         return current;
     }
 
+    // Loaded with navigations so single reads and write responses resolve the mapped names —
+    // the bare GetByIdAsync left them blank on the DTO.
     private async Task<SafetyEquipment> GetOwnedEquipmentAsync(Guid id)
     {
-        var entity = await _equipmentRepository.GetByIdAsync(id);
+        var entity = await _equipmentRepository.GetByIdAsync(id,
+            e => e.Location, e => e.OrganizationUnit!, e => e.ResponsiblePerson!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Safety equipment with ID '{id}' not found.");
         return entity;
@@ -672,7 +755,7 @@ public class SafetyEquipmentService : ISafetyEquipmentService
 
     private async Task<SafetyEquipmentInspection> GetOwnedInspectionAsync(Guid id)
     {
-        var entity = await _inspectionRepository.GetByIdAsync(id);
+        var entity = await _inspectionRepository.GetByIdAsync(id, i => i.InspectedBy);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Equipment inspection with ID '{id}' not found.");
         return entity;
@@ -680,10 +763,53 @@ public class SafetyEquipmentService : ISafetyEquipmentService
 
     private async Task<SafetyEquipmentInspectionAction> GetOwnedInspectionActionAsync(Guid id)
     {
-        var entity = await _unitOfWork.Repository<SafetyEquipmentInspectionAction>().GetByIdAsync(id);
+        var entity = await _unitOfWork.Repository<SafetyEquipmentInspectionAction>()
+            .GetByIdAsync(id, a => a.CorrectiveActionTemplate, a => a.AssignedTo!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Equipment inspection action with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied FKs — without these a bad id surfaces as an SQL 547 /
+    /// HTTP 500 instead of a 404. The guarded loads double as change-tracker fixup, so write
+    /// responses resolve the related names.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task<Location> GetOwnedLocationAsync(Guid id)
+    {
+        var location = await _unitOfWork.Repository<Location>().GetByIdAsync(id);
+        if (location == null || location.TenantId != GetTenantId())
+            throw new ArgumentException($"Location with ID '{id}' not found.");
+        return location;
+    }
+
+    private async Task<OrganizationUnit> GetOwnedOrganizationUnitAsync(Guid id)
+    {
+        var unit = await _unitOfWork.Repository<OrganizationUnit>().GetByIdAsync(id);
+        if (unit == null || unit.TenantId != GetTenantId())
+            throw new ArgumentException($"Organization unit with ID '{id}' not found.");
+        return unit;
+    }
+
+    private async Task<SheCorrectiveActionTemplate> GetOwnedTemplateAsync(Guid id)
+    {
+        var template = await _unitOfWork.Repository<SheCorrectiveActionTemplate>().GetByIdAsync(id);
+        if (template == null || template.TenantId != GetTenantId())
+            throw new ArgumentException($"Corrective action template with ID '{id}' not found.");
+        return template;
+    }
+
+    private async Task GuardEquipmentReferencesAsync(Guid locationId, Guid? organizationUnitId, Guid? responsiblePersonId)
+    {
+        await GetOwnedLocationAsync(locationId);
+        if (organizationUnitId.HasValue) await GetOwnedOrganizationUnitAsync(organizationUnitId.Value);
+        if (responsiblePersonId.HasValue) await GetOwnedEmployeeAsync(responsiblePersonId.Value);
     }
 
     private async Task<SafetyEquipmentMaintenance> GetOwnedMaintenanceAsync(Guid id)
@@ -698,16 +824,22 @@ public class SafetyEquipmentService : ISafetyEquipmentService
     {
         var year = DateTime.UtcNow.Year;
         var prefix = $"SEQ-{year}-";
-        var last = await _equipmentRepository.GetQueryable()
-            .Where(e => e.TenantId == tenantId && e.EquipmentNumber.StartsWith(prefix))
-            .OrderByDescending(e => e.EquipmentNumber)
-            .Select(e => e.EquipmentNumber)
-            .FirstOrDefaultAsync(cancellationToken);
 
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
+        // Numeric max, not string ordering: across mixed-width suffixes string ordering picks the
+        // wrong "latest" ("002" sorts above "0003") and silently re-issues taken numbers — the same
+        // generator bug fixed for INC/RA/INSP/PTW. Soft-deleted equipment keeps its number, so it
+        // counts toward the max too. (The seeder's rows use an `EQ-` prefix and never collide.)
+        var numbers = await _equipmentRepository
+            .GetQueryableIncludingDeleted(e => e.TenantId == tenantId && e.EquipmentNumber.StartsWith(prefix))
+            .Select(e => e.EquipmentNumber)
+            .ToListAsync(cancellationToken);
+
+        var max = numbers
+            .Select(n => int.TryParse(n[prefix.Length..], out var v) ? v : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{max + 1:D4}";
     }
 
     public async Task<SafetyEquipmentDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -777,6 +909,7 @@ public class SafetyEquipmentService : ISafetyEquipmentService
     public async Task<SafetyEquipmentDto> CreateAsync(CreateSafetyEquipmentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GuardEquipmentReferencesAsync(dto.LocationId, dto.OrganizationUnitId, dto.ResponsiblePersonId);
         var entity = dto.ToEntity(tenantId, userId);
         entity.EquipmentNumber = await GenerateEquipmentNumberAsync(tenantId, cancellationToken);
         await _equipmentRepository.AddAsync(entity);
@@ -788,6 +921,7 @@ public class SafetyEquipmentService : ISafetyEquipmentService
     public async Task<SafetyEquipmentDto> UpdateAsync(UpdateSafetyEquipmentDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEquipmentAsync(dto.Id);
+        await GuardEquipmentReferencesAsync(dto.LocationId, dto.OrganizationUnitId, dto.ResponsiblePersonId);
         entity.UpdateEntity(dto, userId);
         await _equipmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -807,6 +941,7 @@ public class SafetyEquipmentService : ISafetyEquipmentService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var equipment = await GetOwnedEquipmentAsync(dto.EquipmentId);
+        await GetOwnedEmployeeAsync(dto.InspectedById);
         var entity = dto.ToEntity(tenantId, userId);
         await _inspectionRepository.AddAsync(entity);
 
@@ -840,6 +975,8 @@ public class SafetyEquipmentService : ISafetyEquipmentService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedInspectionAsync(dto.SafetyEquipmentInspectionId);
+        await GetOwnedTemplateAsync(dto.CorrectiveActionTemplateId);
+        if (dto.AssignedToId.HasValue) await GetOwnedEmployeeAsync(dto.AssignedToId.Value);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyEquipmentInspectionAction>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -849,6 +986,7 @@ public class SafetyEquipmentService : ISafetyEquipmentService
     public async Task<SafetyEquipmentInspectionActionDto> UpdateInspectionActionAsync(UpdateSafetyEquipmentInspectionActionDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInspectionActionAsync(dto.Id);
+        if (dto.AssignedToId.HasValue) await GetOwnedEmployeeAsync(dto.AssignedToId.Value);
         entity.UpdateEntity(dto, userId);
         await _unitOfWork.Repository<SafetyEquipmentInspectionAction>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -115,6 +115,126 @@ public class GlobalExceptionHandlingMiddleware
                 response.Detail = medicalEx.Message;   // safe to display by design
                 break;
 
+            // Succession raises this when a request collides with an existing record — a position
+            // that already has an active plan, or a plan number already taken. Both were enforced
+            // only by unique indexes before, so they arrived as unhandled DbUpdateExceptions.
+            case SuccessionConflictException successionEx:
+                response.Title = "Conflict";
+                response.Status = (int)HttpStatusCode.Conflict;
+                response.Detail = successionEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+                break;
+
+            // Succession domain rules the caller can act on. ArgumentException would have replaced
+            // the message with "Invalid argument provided.", which tells the user nothing.
+            case SuccessionValidationException successionValidationEx:
+                response.Title = "Bad Request";
+                response.Status = (int)HttpStatusCode.BadRequest;
+                response.Detail = successionValidationEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                break;
+
+            // Probation & confirmation. One exception, four outcomes — the medical shape, for the
+            // same reason: without this case every rule in the area was flattened to one of two
+            // fixed strings and said nothing. See ProbationWorkflowException.
+            case ProbationWorkflowException probationEx:
+                var probationStatus = probationEx.Reason switch
+                {
+                    ProbationFailureReason.NotFound => HttpStatusCode.NotFound,
+                    ProbationFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    ProbationFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = probationStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)probationStatus;
+                response.Detail = probationEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)probationStatus;
+                break;
+
+            // Job architecture, competency and manpower budget. Same shape again —
+            // without this case, all 76 rules in those three services were flattened to one of two
+            // fixed strings. See JobArchitectureException.
+            case JobArchitectureException jobArchEx:
+                var jobArchStatus = jobArchEx.Reason switch
+                {
+                    JobArchitectureFailureReason.NotFound => HttpStatusCode.NotFound,
+                    JobArchitectureFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    JobArchitectureFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = jobArchStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)jobArchStatus;
+                response.Detail = jobArchEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)jobArchStatus;
+                break;
+
+            // Staff awards. Without this case its 38
+            // service rules were flattened to one fixed string, and — worse — every "not found"
+            // among them answered 400, so no caller could tell a deleted award from a bad payload.
+            // See AwardsWorkflowException.
+            case AwardsWorkflowException awardsEx:
+                var awardsStatus = awardsEx.Reason switch
+                {
+                    AwardsFailureReason.NotFound => HttpStatusCode.NotFound,
+                    AwardsFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    AwardsFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = awardsStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)awardsStatus;
+                response.Detail = awardsEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)awardsStatus;
+                break;
+
+            // Staff / company assets. Without this
+            // case its 28 service rules were flattened to two fixed strings, and — worse — the
+            // eighteen "not found" among them all answered 400, so no caller could tell a disposed
+            // asset from a bad payload. See AssetsWorkflowException.
+            case AssetsWorkflowException assetsEx:
+                var assetsStatus = assetsEx.Reason switch
+                {
+                    AssetsFailureReason.NotFound => HttpStatusCode.NotFound,
+                    AssetsFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    AssetsFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = assetsStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)assetsStatus;
+                response.Detail = assetsEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)assetsStatus;
+                break;
+
+            // A punch refused by hard geofence enforcement. Until 2026-09-03 this fell through to the
+            // 500 branch, so a correctly refused punch read as "Something went wrong". The message is
+            // composed by GeofenceVerificationService and names the zone, so it is safe to display.
+            case GeofenceVerificationRejectedException geofenceEx:
+                response.Title = "Outside Work Zone";
+                response.Code = "GEOFENCE_REJECTED";
+                response.Status = (int)HttpStatusCode.UnprocessableEntity;
+                response.Detail = geofenceEx.Message;
+                context.Response.StatusCode = (int)HttpStatusCode.UnprocessableEntity;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Code = "RESOURCE_CONFLICT";
@@ -202,7 +322,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or BusinessRuleException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException => "Warning",
+                ValidationException or BusinessRuleException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException or ProbationWorkflowException or AssetsWorkflowException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
@@ -311,6 +431,9 @@ public class GlobalExceptionHandlingMiddleware
             case ConflictException:
             case ArgumentException:
             case MedicalWorkflowException:
+            case AssetsWorkflowException:
+            case SuccessionConflictException:
+            case SuccessionValidationException:
                 // These are expected exceptions - log as warnings
                 _logger.LogWarning(exception,
                     "Client error occurred for {RequestMethod} {RequestPath}. Context: {@LogContext}",

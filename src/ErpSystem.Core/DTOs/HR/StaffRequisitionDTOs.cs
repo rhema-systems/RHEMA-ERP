@@ -316,6 +316,17 @@ public class CancelStaffRequisitionDto
     public string CancellationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Body for withdrawing a requisition that is awaiting approval. The reason is optional — a
+/// requester taking back their own request before anyone has ruled on it does not owe an
+/// explanation, unlike a cancellation, which retires the request for good.
+/// </summary>
+public class RecallStaffRequisitionDto
+{
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
+}
+
 public class FulfillStaffRequisitionDto
 {
     [Required]
@@ -443,22 +454,10 @@ public class StaffRequisitionAttachmentDto : BaseDto
     public string UploadedByName { get; set; } = string.Empty;
 }
 
-public class CreateStaffRequisitionAttachmentDto : CreateDtoBase
-{
-    [Required]
-    public Guid RequisitionId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-}
+// CreateStaffRequisitionAttachmentDto was deleted deliberately, not left unused. It carried a
+// caller-supplied FilePath, so the endpoint recorded a path to a file it had never received or
+// scanned. Attachments now arrive as multipart through the controlled-upload gate and the row is
+// written from the stored document's own metadata — see IStaffRequisitionService.AddAttachmentAsync.
 
 #endregion
 

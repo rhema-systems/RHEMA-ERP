@@ -44,23 +44,33 @@ public class StaffRequisitionRepository : GenericRepository<StaffRequisition>, I
             .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
     }
 
-    public async Task<StaffRequisition?> GetWithSummaryNavAsync(Guid id)
-    {
-        return await _dbSet
+    /// <summary>
+    /// Backs <c>GET /{id}</c> and every write response, so it must cover everything
+    /// <c>StaffRequisitionDto</c> reads through a navigation — not just the columns the list shows.
+    ///
+    /// <para><c>JobDescription</c> and <c>JobVacancy</c> were missing, so <c>jobDescriptionTitle</c>
+    /// and <c>jobVacancyNumber</c> came back null on every single read even when both were set. The
+    /// second one matters most: <c>link-vacancy</c> exists to tie a requisition to its vacancy, and
+    /// the detail screen could never show that it had worked.</para>
+    /// </summary>
+    private IQueryable<StaffRequisition> WithSummaryNavigations() =>
+        _dbSet
             .Include(r => r.Position)
             .Include(r => r.OrganizationUnit)
             .Include(r => r.Location)
             .Include(r => r.RequestedBy)
+            .Include(r => r.JobDescription)
+            .Include(r => r.JobVacancy);
+
+    public async Task<StaffRequisition?> GetWithSummaryNavAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
     }
 
     public async Task<StaffRequisition?> GetByRequisitionNumberAsync(string requisitionNumber)
     {
-        return await _dbSet
-            .Include(r => r.Position)
-            .Include(r => r.OrganizationUnit)
-            .Include(r => r.Location)
-            .Include(r => r.RequestedBy)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(r => r.RequisitionNumber == requisitionNumber && !r.IsDeleted);
     }
 

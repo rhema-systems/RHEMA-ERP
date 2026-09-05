@@ -173,7 +173,27 @@ public static class JobAnalysisMappingExtensions
             ExpiryDate = dto.ExpiryDate,
             RevisionReason = dto.RevisionReason,
             JobSummary = dto.JobSummary,
-            ReviewCycleMonths = dto.ReviewCycleMonths
+            ReviewCycleMonths = dto.ReviewCycleMonths,
+            // Classification, valuation and authority — see CreateJobDescriptionDto for why these
+            // arrived late. Without them a create form had to save twice.
+            JobFamilyId = dto.JobFamilyId,
+            JobSubFamilyId = dto.JobSubFamilyId,
+            JobLevelId = dto.JobLevelId,
+            StaffLevelId = dto.StaffLevelId,
+            SuggestedSalaryGradeId = dto.SuggestedSalaryGradeId,
+            UnionId = dto.UnionId,
+            IsBargainingUnitRole = dto.IsBargainingUnitRole,
+            OccupationCode = dto.OccupationCode,
+            EssentialFunctionsSummary = dto.EssentialFunctionsSummary,
+            IntendedEmploymentType = dto.IntendedEmploymentType,
+            RoleCriticality = dto.RoleCriticality,
+            RoleIntrinsicValue = dto.RoleIntrinsicValue,
+            IndustryBenchmarkSalary = dto.IndustryBenchmarkSalary,
+            ValuationNotes = dto.ValuationNotes,
+            AutonomyLevel = dto.AutonomyLevel,
+            DecisionMakingScope = dto.DecisionMakingScope,
+            FinancialAuthorityLimit = dto.FinancialAuthorityLimit,
+            ApprovalAuthorityNotes = dto.ApprovalAuthorityNotes
         };
     }
 
@@ -425,6 +445,7 @@ public static class JobAnalysisMappingExtensions
             ActualSpent = entity.ActualSpent,
             Variance = entity.Variance,
             BusinessJustification = entity.BusinessJustification,
+            RejectionReason = entity.RejectionReason,
             ApprovedById = entity.ApprovedById,
             ApprovedByName = entity.ApprovedBy?.FullName,
             ApprovalDate = entity.ApprovalDate,
@@ -483,6 +504,7 @@ public static class JobAnalysisMappingExtensions
             ActualSpent = entity.ActualSpent,
             Variance = entity.Variance,
             BusinessJustification = entity.BusinessJustification,
+            RejectionReason = entity.RejectionReason,
             ApprovedById = entity.ApprovedById,
             ApprovedByName = entity.ApprovedBy?.FullName,
             ApprovalDate = entity.ApprovalDate,

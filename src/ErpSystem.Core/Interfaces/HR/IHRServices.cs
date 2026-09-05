@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
@@ -14,6 +14,23 @@ public interface IEmployeeService
     #region 1) Core Employee Lifecycle (writes - transactional)
 
     Task<EmployeeDetailDto> CreateEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records an employee who already exists elsewhere, keeping the staff number they already have.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Loading an existing employee is not the same act as hiring one.</b> A hire is given
+    /// a number by whichever rule governs their register; a loaded employee arrives with one, and it
+    /// is not ours to reissue — it is printed on their ID card and referenced by payroll. So this
+    /// path REQUIRES the number and honours it, where <see cref="CreateEmployeeAsync"/> refuses one
+    /// on an auto-numbered register.</para>
+    ///
+    /// <para>It also teaches the counter what it just took in. Without that, a register loaded with
+    /// eight thousand staff leaves the counter at zero and the first real hire is handed a number
+    /// somebody already has — a failure that surfaces as a unique-index violation on an unrelated
+    /// screen, with nothing pointing back at the load that caused it.</para>
+    /// </remarks>
+    Task<EmployeeDetailDto> ImportEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeDetailDto> UpdateEmployeeAsync(Guid employeeId, UpdateEmployeeDto dto, CancellationToken cancellationToken = default);
 
     Task<EmployeeDetailDto> ActivateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -126,6 +143,12 @@ public interface IEmployeeService
 
     // Expatriate assignments
     Task<IEnumerable<ExpatriateAssignmentListDto>> GetExpatriateAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    // Expatriate family members — who actually accompanied the assignee, and on whose permits.
+    Task<IEnumerable<ExpatriateFamilyMemberDto>> GetExpatriateFamilyMembersAsync(Guid assignmentId, CancellationToken cancellationToken = default);
+    Task<ExpatriateFamilyMemberDto> AddExpatriateFamilyMemberAsync(CreateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default);
+    Task<ExpatriateFamilyMemberDto> UpdateExpatriateFamilyMemberAsync(UpdateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveExpatriateFamilyMemberAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ExpatriateAssignmentDetailDto?> GetExpatriateAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ExpatriateAssignmentDetailDto> AddExpatriateAssignmentAsync(CreateExpatriateAssignmentDto dto, CancellationToken cancellationToken = default);
     Task<ExpatriateAssignmentDetailDto> UpdateExpatriateAssignmentAsync(UpdateExpatriateAssignmentDto dto, CancellationToken cancellationToken = default);
@@ -200,7 +223,7 @@ public interface IEmployeeService
     #region 6) Validation & Business Rules
 
     Task<bool> IsEmployeeNumberUniqueAsync(string employeeNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
-    Task<bool> IsEmailUniqueAsync(string email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsEmailUniqueAsync(string? email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsBadgeNumberUniqueAsync(string badgeNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsTaxNumberUniqueAsync(string taxNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsSocialSecurityNumberUniqueAsync(string socialSecurityNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
@@ -211,6 +234,23 @@ public interface IEmployeeService
     Task<bool> HasActiveGuarantorsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<bool> IsEligibleForExpatriateAssignmentAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<bool> CanTerminateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies a completed separation (area 9b) to the employee's master record: staff status,
+    /// termination date and reason, active contracts, and the open position-history row.
+    /// </summary>
+    /// <remarks>
+    /// The step that did not exist before area 9b, and whose absence left 29 disciplinary
+    /// terminations sitting against employees who were all still Active. Distinct from
+    /// <c>TerminateEmployeeAsync</c>, which now refuses while a separation is in flight.
+    /// </remarks>
+    Task<EmployeeDetailDto> ApplySeparationOutcomeAsync(
+        Guid employeeId,
+        Guid separationId,
+        DateTime effectiveDate,
+        TerminationReason? reason,
+        string? notes,
+        CancellationToken cancellationToken = default);
 
     #endregion
 
@@ -244,7 +284,8 @@ public interface IEmployeeService
     Task<int> GetTotalEmployeeCountAsync();
     Task<int> GetActiveEmployeeCountAsync();
     Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync();
-    Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync();
+    // GetEmployeeCountByDepartmentAsync removed in slice 10 — Department is the deprecated
+    // dimension and nothing called it. Headcount by organisation unit is `api/Organogram/units`.
 
     #endregion
 }

@@ -23,6 +23,9 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 //    Fires when: actual + tolerance < linearlyExpectedProgress
 //    Only evaluated when there is positive elapsed time (avoids division issues)
 //
+//  Rule 3 (severity 50): Flagged by hand in a progress update
+//    Fires when: Status == AtRisk and neither threshold rule already did
+//
 //  ── DateOnly arithmetic ───────────────────────────────────────────────────
 //  DateOnly.DayNumber subtraction is used instead of (DateOnly - DateOnly).Days
 //  because it avoids constructing a TimeSpan and is marginally faster in a
@@ -87,6 +90,31 @@ public sealed class GoalRiskEvaluator : IGoalRiskEvaluator
                     };
                 }
             }
+        }
+
+        // ── Rule 3: Flagged by hand ───────────────────────────────────────
+        // Someone recorded a progress update saying this goal is at risk. Neither threshold
+        // rule may fire — a goal can be in trouble months before its deadline and still be
+        // ahead of the straight line — but a human judgement is not something the evaluator
+        // gets to overrule.
+        //
+        // This ran last, and was missing entirely, which made the two at-risk endpoints
+        // disagree on identical data: /performance/team-goals/at-risk returns pre-filter
+        // matches directly and so honoured the status, while /performance/goals-at-risk runs
+        // every candidate through this evaluator and silently dropped them. Both controllers
+        // document "Status == AtRisk" as qualifying; only one behaved that way.
+        //
+        // Scored below both threshold rules on purpose: those carry a specific, automated
+        // reason, and results are sorted by severity, so a measured problem still outranks a
+        // flagged one.
+        if (goal.Status == GoalStatus.AtRisk)
+        {
+            return new RiskEvaluationResult
+            {
+                IsAtRisk      = true,
+                SeverityScore = 50,
+                Reason        = "Flagged at risk in a progress update"
+            };
         }
 
         return RiskEvaluationResult.NotAtRisk;

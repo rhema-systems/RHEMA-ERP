@@ -21,6 +21,7 @@ public class LeaveYearEndService : ILeaveYearEndService
     private readonly ILeaveBalanceRecalculationService _recalculationService;
     private readonly ILeaveEntitlementService _entitlementService;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<LeaveYearEndService> _logger;
@@ -32,6 +33,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         ILeaveBalanceRecalculationService recalculationService,
         ILeaveEntitlementService entitlementService,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
         ILogger<LeaveYearEndService> logger)
@@ -42,6 +44,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         _recalculationService = recalculationService;
         _entitlementService = entitlementService;
         _currentUserProvider = currentUserProvider;
+        _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
         _clock = clock;
         _logger = logger;
@@ -126,6 +129,10 @@ public class LeaveYearEndService : ILeaveYearEndService
 
     public async Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, CancellationToken ct = default)
     {
+        var performedBy = _currentUserService.EmployeeId is Guid actor && actor != Guid.Empty
+            ? actor
+            : throw new InvalidOperationException(
+                "Posting a leave forfeiture requires your user account to be linked to an employee record. Please contact your administrator.");
         var tenantId = GetTenantId();
         var result = new LeaveYearEndResult();
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
@@ -182,7 +189,13 @@ public class LeaveYearEndService : ILeaveYearEndService
                             Days           = -unused,
                             Reason         = ForfeitureReason,
                             AdjustmentDate = _clock.UtcNow,
-                            PerformedBy    = Guid.Empty // system-posted
+                            // ⚠ Finish-plan lane 4 (2026-09-01): this was Guid.Empty ("system-posted").
+                            // PerformedBy is a REQUIRED Employee foreign key and no employee has the
+                            // empty id, so every forfeiture ever posted would have failed on the
+                            // constraint — the endpoint's only harness evidence was a 403 check, so
+                            // the insert had never run. The forfeiture is raised by the HR admin who
+                            // calls the endpoint; they are its actor.
+                            PerformedBy    = performedBy
                         };
                         await _adjustmentRepository.AddAsync(adjustment);
                         await _unitOfWork.SaveChangesAsync(innerCt);

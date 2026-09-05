@@ -207,10 +207,13 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             AppraisalNumber = entity.AppraisalNumber,
             EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee.FullName,
-            EmployeeNumber = entity.Employee.EmployeeNumber,
-            DepartmentName = entity.Employee.Department?.Name,
-            PositionTitle = entity.Employee.Position?.Title,
+            // Null-guarded for the same reason as the PIP mapper: a caller that maps a freshly
+            // written appraisal has no navigations loaded, and `POST api/PerformanceAppraisals`
+            // did exactly that — the create endpoint 500'd on a record it had just saved.
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
+            DepartmentName = entity.Employee?.Department?.Name,
+            PositionTitle = entity.Employee?.Position?.Title,
             Year = entity.Year,
             AppraisalCycleId = entity.AppraisalCycleId,
             AppraisalCycleCode = entity.AppraisalCycle?.CycleCode,
@@ -270,14 +273,41 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>
+    /// Applies a header correction. <b>Three fields on the DTO are deliberately ignored.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ This mapper used to copy <c>EmployeeId</c>, <c>AppraisalCycleId</c> and
+    /// <c>Status</c> straight onto the entity, and all three are <c>[Required]</c> on the DTO — so
+    /// "correct the header" was, in fact, a route that could <b>re-point an appraisal at a different
+    /// person</b>, carrying its goals, self-evaluation, peer reviews and scores with it; move it into
+    /// a different cycle; and walk it from Draft to Completed. Proven against the running API by
+    /// <c>hr-performance/probe-lane3-appraisals.mjs</c>, which did all three before this changed.</para>
+    ///
+    /// <para>The employee and the cycle are what the appraisal IS, not attributes of it: an appraisal
+    /// raised against the wrong person is deleted (the Admin-tier route exists for exactly that) and
+    /// regenerated, not edited onto someone else. And <c>UpdateStatusAsync</c> already implements a
+    /// forward-only state machine with per-transition preconditions — a plain edit that assigns
+    /// Status walks around the whole of it.</para>
+    ///
+    /// <para>They stay on the DTO rather than being removed, because the update is a REPLACE and a
+    /// caller sending the record back unchanged must not be rejected for including them. Ignoring
+    /// them is the behaviour; the DTO shape is unchanged.</para>
+    ///
+    /// <para>⚠ Not changed here, and recorded rather than assumed: this mapper also assigns
+    /// <c>OverallScore</c>, while <c>UpdateAppraisalHRReviewDto</c> carries an
+    /// <c>AdjustedOverallScore</c> WITH an <c>AdjustmentReason</c> — which looks like the intended
+    /// path for changing a computed score. That was not probed, so it is left alone; see the closure
+    /// ledger.</para>
+    /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
-        entity.EmployeeId = dto.EmployeeId;
+        // entity.EmployeeId       — NOT assigned. See the remarks above.
+        // entity.AppraisalCycleId — NOT assigned.
+        // entity.Status           — NOT assigned; use UpdateStatusAsync, which enforces the transitions.
         entity.Year = dto.Year;
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
-        entity.Status = dto.Status;
         entity.PeerEvaluatorsCount = dto.PeerEvaluatorsCount;
         entity.OverallScore = dto.OverallScore;
         entity.RankInPosition = dto.RankInPosition;
@@ -476,6 +506,10 @@ public static class AppraisalMappingExtensions
             FilePath = entity.FilePath,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            FileSizeBytes = entity.FileSizeBytes,
+            UploadedById = entity.UploadedById,
+            UploadedByName = entity.UploadedBy?.FullName ?? string.Empty,
+            ReviewEventId = entity.ReviewEventId,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -520,7 +554,10 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             PipNumber = entity.PipNumber,
             EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee.FullName,
+            // Null-guarded: a caller that maps a freshly written plan has no navigations loaded,
+            // and a blank name beats a NullReferenceException surfacing as a 500 on a save that
+            // in fact succeeded.
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
             AppraisalId = entity.AppraisalId,
             AppraisalNumber = entity.Appraisal?.AppraisalNumber,
             StartDate = entity.StartDate,
@@ -532,7 +569,7 @@ public static class AppraisalMappingExtensions
             SupportProvided = entity.SupportProvided ?? string.Empty,
             MeasurementCriteria = entity.MeasurementCriteria ?? string.Empty,
             SupervisorId = entity.SupervisorId,
-            SupervisorName = entity.Supervisor.FullName,
+            SupervisorName = entity.Supervisor?.FullName ?? string.Empty,
             HROwnerId = entity.HROwnerId,
             HROwnerName = entity.HROwner?.FullName,
             ReviewSchedule = entity.ReviewSchedule,
@@ -554,7 +591,10 @@ public static class AppraisalMappingExtensions
             AppraisalId = dto.AppraisalId,
             StartDate = dto.StartDate,
             EndDate = dto.EndDate,
-            Status = PipStatus.Active,
+            // Draft, not Active: a plan is approved through the workflow engine before it is in
+            // force. The service sets this too; keeping the mapper honest means no future caller
+            // can create a live plan by accident.
+            Status = PipStatus.Draft,
             PerformanceIssues = dto.PerformanceIssues,
             ExpectedStandards = dto.ExpectedStandards,
             ImprovementActions = dto.ImprovementActions,
@@ -641,7 +681,6 @@ public static class AppraisalMappingExtensions
         entity.IssuesDiscussed = dto.IssuesDiscussed;
         entity.ActionsAgreed = dto.ActionsAgreed;
         entity.EmployeeComments = dto.EmployeeComments;
-        entity.ConductedById = dto.ConductedById;
         entity.ConductedById = dto.ConductedById;
     }
 
@@ -934,7 +973,7 @@ public static class AppraisalMappingExtensions
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
         entity.AppraisalSettingsId = dto.AppraisalSettingsId;
-        entity.Status = dto.Status;
+        // Status is not copied — see UpdateAppraisalCycleDto. Open/close own it.
         entity.GoalSettingOpenDate = dto.GoalSettingOpenDate;
         entity.GoalSettingDeadline = dto.GoalSettingDeadline;
         entity.Q1ReviewOpenDate = dto.Q1ReviewOpenDate;
@@ -1791,7 +1830,6 @@ public static class AppraisalMappingExtensions
         entity.SuccessCriteria = dto.SuccessCriteria;
         entity.Weight = dto.Weight;
         entity.Priority = dto.Priority;
-        entity.Status = dto.Status;
         entity.MeasurementType = dto.MeasurementType;
         entity.Period = dto.Period;
         entity.TargetValue = dto.TargetValue;
@@ -1801,8 +1839,13 @@ public static class AppraisalMappingExtensions
         entity.StartDate = dto.StartDate;
         entity.DueDate = dto.DueDate;
         entity.ProgressPercent = dto.ProgressPercent;
-        entity.SubmittedToManagerId = dto.SubmittedToManagerId;
-        entity.ManagerFeedback = dto.ManagerFeedback;
+
+        // Status, SubmittedToManagerId and ManagerFeedback are deliberately NOT copied from the
+        // update payload. They belong to the approval lifecycle, which IGoalWorkflowCommandService
+        // owns: it enforces the transition table, derives the target manager from the employee's HR
+        // record, and only lets the employee's direct manager approve or reject. Assigning them here
+        // let any caller PUT `status: "Approved"` onto their own draft and skip all of that.
+        // Everything above is goal content, which the owner may edit until the goal is locked.
     }
 
     public static List<EmployeeGoalDto> ToDtoList(this IEnumerable<EmployeeGoal> entities)
@@ -1848,7 +1891,7 @@ public static class AppraisalMappingExtensions
             Status = dto.Status,
             Challenges = dto.Challenges,
             Notes = dto.Notes,
-            RecordedById = dto.RecordedById,
+            // RecordedById is stamped by the service from the caller's token, not mapped here.
             EntryDate = DateTime.UtcNow,
             ReviewEventId = dto.ReviewEventId
         };
@@ -2025,7 +2068,7 @@ public static class AppraisalMappingExtensions
         return new PerformanceJournalEntry
         {
             AppraisalCycleId = dto.AppraisalCycleId,
-            OwnerId = dto.OwnerId,
+            // OwnerId is stamped by the service from the caller's token, not mapped from the payload.
             SubjectEmployeeId = dto.SubjectEmployeeId,
             RelatedGoalId = dto.RelatedGoalId,
             Title = dto.Title,
@@ -2042,7 +2085,11 @@ public static class AppraisalMappingExtensions
         entity.RelatedGoalId = dto.RelatedGoalId;
         entity.Title = dto.Title;
         entity.Body = dto.Body;
-        entity.EntryDate = dto.EntryDate;
+        // The client's update payload has never carried EntryDate, so an unguarded copy
+        // stamped default(DateTime) over the real date on every edit — sinking the entry to
+        // year 0001 in the date-ordered lists and outside every date-range filter.
+        if (dto.EntryDate != default)
+            entity.EntryDate = dto.EntryDate;
         entity.IsPrivate = dto.IsPrivate;
     }
 
@@ -2057,8 +2104,19 @@ public static class AppraisalMappingExtensions
 
     public static EmployeeDevelopmentPlanDto ToDto(this EmployeeDevelopmentPlan entity)
     {
+        // Objectives are eagerly loaded by every read in DevelopmentPlanService and were then
+        // thrown away. The rollup is what a plan list is actually asking about.
+        var objectives = (entity.Objectives ?? new List<EmployeeDevelopmentObjective>())
+            .Where(o => !o.IsDeleted)
+            .ToList();
+
         return new EmployeeDevelopmentPlanDto
         {
+            ObjectiveCount = objectives.Count,
+            CompletedObjectiveCount = objectives.Count(o => o.ObjectiveStatus == DevelopmentObjectiveStatus.Completed),
+            AverageProgressPercent = objectives.Count == 0
+                ? 0m
+                : Math.Round(objectives.Average(o => o.ProgressPercent), 2),
             Id = entity.Id,
             TenantId = entity.TenantId,
             EmployeeId = entity.EmployeeId,
@@ -2179,6 +2237,8 @@ public static class AppraisalMappingExtensions
             CycleCode = entity.Cycle?.CycleCode,
             PerformanceAppraisalId = entity.PerformanceAppraisalId,
             AppraisalNumber = entity.Appraisal?.AppraisalNumber,
+            EmployeeId = entity.Appraisal?.EmployeeId ?? Guid.Empty,
+            EmployeeName = entity.Appraisal?.Employee?.FullName,
             Type = entity.Type,
             EventDate = entity.EventDate,
             Status = entity.Status,
@@ -2213,14 +2273,15 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalReviewEventDto dto, AppraisalReviewEvent entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
+        // AppraisalCycleId, PerformanceAppraisalId, Status and OverallPeriodScore are deliberately
+        // NOT copied from the payload. The first two would re-point the event at a different
+        // employee's appraisal; the last two are owned by submit / complete / finalize, and a plain
+        // PUT carrying them was a way to mark a review Completed — or award a period score — without
+        // passing any of the gates those operations enforce.
         entity.Type = dto.Type;
         entity.EventDate = dto.EventDate;
-        entity.Status = dto.Status;
         entity.IsLightTouch = dto.IsLightTouch;
         entity.IsFullAppraisal = dto.IsFullAppraisal;
-        entity.OverallPeriodScore = dto.OverallPeriodScore;
         // Use null-coalescing so only non-null values overwrite — prevents one role from
         // accidentally clearing fields owned by the other role on a full-PUT save.
         entity.AchievementsSummary = dto.AchievementsSummary ?? entity.AchievementsSummary;
@@ -2409,14 +2470,17 @@ public static class AppraisalMappingExtensions
         entity.SessionName = dto.SessionName;
         entity.OrganizationLevelId = dto.OrganizationLevelId;
         entity.OrganizationUnitId = dto.OrganizationUnitId;
-        entity.Status = dto.Status;
         entity.ScheduledDate = dto.ScheduledDate;
-        entity.StartedDate = dto.StartedDate;
-        entity.CompletedDate = dto.CompletedDate;
-        entity.FacilitatedById = dto.FacilitatedById;
-        entity.CompletedById = dto.CompletedById;
         entity.Agenda = dto.Agenda;
         entity.MeetingNotes = dto.MeetingNotes;
+
+        // ⚠ Only reassign the facilitator when one is actually named. Opening a session records
+        // who opened it, and a later edit of the session's name or agenda does not mention the
+        // facilitator — so overwriting unconditionally silently blanked the record of who ran it.
+        if (dto.FacilitatedById.HasValue)
+            entity.FacilitatedById = dto.FacilitatedById;
+
+        // Status and the started/completed stamps are set only by the lifecycle endpoints.
     }
 
     public static List<CalibrationSessionDto> ToDtoList(this IEnumerable<CalibrationSession> entities)
@@ -2501,16 +2565,15 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>The session id and the adjuster are supplied by the service, from the route and the token.</summary>
     public static CalibrationRatingAdjustment ToEntity(this CreateCalibrationRatingAdjustmentDto dto)
     {
         return new CalibrationRatingAdjustment
         {
-            CalibrationSessionId = dto.CalibrationSessionId,
             PerformanceAppraisalId = dto.PerformanceAppraisalId,
             TemplateItemId = dto.TemplateItemId,
             OriginalScore = dto.OriginalScore,
             AdjustedScore = dto.AdjustedScore,
-            AdjustedById = dto.AdjustedById,
             AdjustmentDate = DateTime.UtcNow,
             Rationale = dto.Rationale
         };
@@ -2518,12 +2581,10 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateCalibrationRatingAdjustmentDto dto, CalibrationRatingAdjustment entity)
     {
-        entity.CalibrationSessionId = dto.CalibrationSessionId;
         entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
         entity.TemplateItemId = dto.TemplateItemId;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
-        entity.AdjustedById = dto.AdjustedById;
         entity.Rationale = dto.Rationale;
     }
 

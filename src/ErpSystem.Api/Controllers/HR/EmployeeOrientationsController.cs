@@ -1,16 +1,27 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Enrollment and participation. Two audiences share this controller: participants working through
+/// their own orientation, and HR administering everyone's.
+///
+/// Actions carrying <see cref="HrRoles"/> are administrative. Everything else is open to any
+/// authenticated user, but the service enforces record-level entitlement — non-HR callers can only
+/// reach their own enrollment — so an open action is not an open record.
+/// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/employee-orientations")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeOrientationsController : ControllerBase
 {
     private readonly IEmployeeOrientationService _service;
@@ -43,28 +54,36 @@ public class EmployeeOrientationsController : ControllerBase
         return Ok(await _service.GetByEmployeeIdAsync(employeeId));
     }
 
+    // Cohort-wide reads: these span other people's records by definition, so they are HR-only.
+
     [HttpGet("program/{programId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetByProgram(Guid programId)
         => Ok(await _service.GetByProgramIdAsync(programId));
 
     [HttpGet("program/{programId:guid}/paged")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<PagedResult<EmployeeOrientationSummaryDto>>> GetPagedByProgram(
         Guid programId, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
         => Ok(await _service.GetPagedByProgramAsync(programId, pageNumber, pageSize));
 
     [HttpGet("session/{sessionId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetBySession(Guid sessionId)
         => Ok(await _service.GetBySessionIdAsync(sessionId));
 
     [HttpGet("completion-status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetByCompletionStatus(OrientationCompletionStatus status)
         => Ok(await _service.GetByCompletionStatusAsync(status));
 
     [HttpGet("overdue")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetOverdue()
         => Ok(await _service.GetOverdueAsync());
 
     [HttpGet("due-soon")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetDueSoon([FromQuery] int daysAhead = 7)
         => Ok(await _service.GetDueSoonAsync(daysAhead));
 
@@ -72,7 +91,11 @@ public class EmployeeOrientationsController : ControllerBase
     // ENROLLMENT
     // =========================================================================
 
+    // Enrolling, amending and withdrawing someone is an administrative act — self-enrolment onto an
+    // open session is a separate feature, not a side effect of leaving these ungated.
+
     [HttpPost]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<EmployeeOrientationDto>> Enroll([FromBody] CreateEmployeeOrientationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -84,6 +107,7 @@ public class EmployeeOrientationsController : ControllerBase
     }
 
     [HttpPost("bulk-enroll")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationDto>>> BulkEnroll([FromBody] BulkEnrollOrientationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -94,6 +118,7 @@ public class EmployeeOrientationsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<EmployeeOrientationDto>> Update(Guid id, [FromBody] UpdateEmployeeOrientationDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -104,6 +129,7 @@ public class EmployeeOrientationsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/withdraw")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<IActionResult> Withdraw(Guid id, [FromBody] WithdrawOrientationDto dto)
     {
         if (id != dto.EnrollmentId) return BadRequest("ID mismatch.");
@@ -115,6 +141,7 @@ public class EmployeeOrientationsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -124,6 +151,20 @@ public class EmployeeOrientationsController : ControllerBase
     // =========================================================================
     // CONTENT PROGRESS
     // =========================================================================
+
+    /// <summary>
+    /// The modules and content items of the program behind this enrollment.
+    /// </summary>
+    /// <remarks>
+    /// Participant-safe by design: the equivalent catalogue reads on
+    /// <c>orientation-programs</c> are HR-only, so this is how the person actually working through a
+    /// program discovers what is in it — and the content item ids that
+    /// <c>POST {id}/content-progress</c> needs. Entitlement is enforced on the enrollment, so a
+    /// non-HR caller can only reach their own.
+    /// </remarks>
+    [HttpGet("{id:guid}/content")]
+    public async Task<ActionResult<IEnumerable<OrientationModuleDto>>> GetProgramContent(Guid id)
+        => Ok(await _service.GetProgramContentAsync(id));
 
     [HttpGet("{id:guid}/content-progress")]
     public async Task<ActionResult<IEnumerable<OrientationContentProgressDto>>> GetContentProgress(Guid id)
@@ -171,7 +212,10 @@ public class EmployeeOrientationsController : ControllerBase
     public async Task<ActionResult<IEnumerable<OrientationAcknowledgementDto>>> GetAcknowledgements(Guid id)
         => Ok(await _service.GetAcknowledgementsAsync(id));
 
+    // HR authors the declaration the participant is asked to sign; the participant signs it.
+
     [HttpPost("{id:guid}/acknowledgements")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationAcknowledgementDto>> AddAcknowledgement(Guid id, [FromBody] CreateOrientationAcknowledgementDto dto)
     {
         if (id != dto.EmployeeOrientationId) return BadRequest("ID mismatch.");
@@ -196,6 +240,14 @@ public class EmployeeOrientationsController : ControllerBase
     // FEEDBACK
     // =========================================================================
 
+    /// <summary>The caller's own orientation feedback -- what the portal form shows back.</summary>
+    [HttpGet("feedback/mine")]
+    public async Task<ActionResult<IEnumerable<OrientationFeedbackDto>>> GetMyFeedback(CancellationToken ct)
+    {
+        try { return Ok(await _service.GetMyFeedbackAsync(ct)); }
+        catch (UnauthorizedAccessException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpGet("{id:guid}/feedback")]
     public async Task<ActionResult<IEnumerable<OrientationFeedbackDto>>> GetFeedback(Guid id)
         => Ok(await _service.GetFeedbackAsync(id));
@@ -208,7 +260,9 @@ public class EmployeeOrientationsController : ControllerBase
         var ctx = ResolveContext(out var bad);
         if (bad != null) return bad;
 
-        return Ok(await _service.SubmitFeedbackAsync(dto, ctx.TenantId, ctx.UserId));
+        try { return Ok(await _service.SubmitFeedbackAsync(dto, ctx.TenantId, ctx.UserId)); }
+        // Surfaces the dedupe's own sentence; the middleware would map this to a fixed string.
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
     // =========================================================================
@@ -223,15 +277,26 @@ public class EmployeeOrientationsController : ControllerBase
     public async Task<ActionResult<IEnumerable<OrientationCertificateDto>>> GetCertificatesForEmployee(Guid employeeId)
         => Ok(await _service.GetCertificatesForEmployeeAsync(employeeId));
 
+    /// <summary>
+    /// Serial lookup — HR only. Serials are sequential (OCERT-2026-00001…), so an open lookup would let
+    /// anyone walk the range and harvest holder names and programmes. If a public verification page is
+    /// ever built it needs an unguessable token, not this endpoint made anonymous.
+    /// </summary>
     [HttpGet("certificates/number/{certificateNumber}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OrientationCertificateDto?>> GetCertificateByNumber(string certificateNumber)
         => Ok(await _service.GetCertificateByNumberAsync(certificateNumber));
 
     [HttpGet("certificates/expiring")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationCertificateDto>>> GetExpiringCertificates([FromQuery] int daysAhead = 30)
         => Ok(await _service.GetExpiringCertificatesAsync(daysAhead));
 
+    // The holder may read their certificate; only HR may award or withdraw one. The service's
+    // record-level check grants access to the enrollment, not the right to certify it.
+
     [HttpPost("{id:guid}/certificates")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationCertificateDto>> IssueCertificate(Guid id, [FromBody] IssueOrientationCertificateDto dto)
     {
         if (id != dto.EmployeeOrientationId) return BadRequest("ID mismatch.");
@@ -243,6 +308,7 @@ public class EmployeeOrientationsController : ControllerBase
     }
 
     [HttpPost("certificates/revoke")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<IActionResult> RevokeCertificate([FromBody] RevokeOrientationCertificateDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

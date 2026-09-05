@@ -22,10 +22,77 @@ public sealed record HrPermissionDefinition(
 /// </remarks>
 public static class HrPermissions
 {
+    public const string CategoryLeave = "HR - Leave";
+    public const string CategoryAttendance = "HR - Attendance & Time";
+    public const string CategoryCompensation = "HR - Compensation & Benefits";
+    public const string CategoryTraining = "HR - Training & Learning";
+    public const string CategoryRecruitment = "HR - Recruitment";
     public const string CategoryMedical = "HR - Occupational Health";
+    public const string CategoryTravel = "HR - Staff Travel";
+    public const string CategorySuccession = "HR - Succession & Talent";
+    public const string CategoryProbation = "HR - Probation & Confirmation";
+    public const string CategoryJobArchitecture = "HR - Job Architecture";
+    public const string CategoryCompetency = "HR - Competency";
+    public const string CategoryManpowerBudget = "HR - Manpower Budget & Establishment";
+    public const string CategorySeparation = "HR - Separation, Clearance & Exit";
+    public const string CategoryAwards = "HR - Staff Awards & Recognition";
+    public const string CategoryPerformance = "HR - Performance";
+    public const string CategoryEmployee = "HR - Employee Records & Foundation";
+    /// <summary>
+    /// Renamed 2026-09-03 from "HR - Safety, Health &amp; Environment": the roles screen groups
+    /// permissions by this label, and SHE is its own function with its own roles (DR-10). The
+    /// permission NAMES stay <c>HR.She.*</c> — 314 attributes, seeded rows and the harness ride
+    /// on them. The seeder re-labels existing rows in place.
+    /// </summary>
+    public const string CategoryShe = "Safety (SHE)";
+    public const string CategoryOrientation = "HR - Orientation & Onboarding";
+    public const string CategoryAssets = "HR - Staff Assets";
+    public const string CategoryMovements = "HR - Staff Movements";
+    public const string CategoryDiscipline = "HR - Discipline & Grievance";
+    public const string CategoryCompany = "HR - Company & Administration";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
+
+    public const string ViewLeave = "HR.Leave.Read";
+    public const string MaintainLeave = "HR.Leave.Write";
+    public const string AdministerLeave = "HR.Leave.Admin";
+
+    public const string LeaveReadPolicy = "HR.Policy.LeaveRead";
+    public const string LeaveWritePolicy = "HR.Policy.LeaveWrite";
+    public const string LeaveAdminPolicy = "HR.Policy.LeaveAdmin";
+
+    public const string ViewAttendance = "HR.Attendance.Read";
+    public const string MaintainAttendance = "HR.Attendance.Write";
+    public const string AdministerAttendance = "HR.Attendance.Admin";
+
+    public const string AttendanceReadPolicy = "HR.Policy.AttendanceRead";
+    public const string AttendanceWritePolicy = "HR.Policy.AttendanceWrite";
+    public const string AttendanceAdminPolicy = "HR.Policy.AttendanceAdmin";
+
+    public const string ViewCompensation = "HR.Compensation.Read";
+    public const string MaintainCompensation = "HR.Compensation.Write";
+    public const string AdministerCompensation = "HR.Compensation.Admin";
+
+    public const string CompensationReadPolicy = "HR.Policy.CompensationRead";
+    public const string CompensationWritePolicy = "HR.Policy.CompensationWrite";
+    public const string CompensationAdminPolicy = "HR.Policy.CompensationAdmin";
+
+    public const string ViewTraining = "HR.Training.Read";
+    public const string MaintainTraining = "HR.Training.Write";
+    public const string AdministerTraining = "HR.Training.Admin";
+
+    public const string TrainingReadPolicy = "HR.Policy.TrainingRead";
+    public const string TrainingWritePolicy = "HR.Policy.TrainingWrite";
+    public const string TrainingAdminPolicy = "HR.Policy.TrainingAdmin";
+
+    public const string ViewRecruitment = "HR.Recruitment.Read";
+    public const string MaintainRecruitment = "HR.Recruitment.Write";
+    public const string AdministerRecruitment = "HR.Recruitment.Admin";
+
+    public const string RecruitmentReadPolicy = "HR.Policy.RecruitmentRead";
+    public const string RecruitmentWritePolicy = "HR.Policy.RecruitmentWrite";
+    public const string RecruitmentAdminPolicy = "HR.Policy.RecruitmentAdmin";
 
     public const string ViewMedicalRecords = "HR.Medical.Read";
     public const string MaintainMedicalRecords = "HR.Medical.Write";
@@ -35,30 +102,186 @@ public static class HrPermissions
     public const string MedicalWritePolicy = "HR.Policy.MedicalWrite";
     public const string MedicalAdminPolicy = "HR.Policy.MedicalAdmin";
 
-    /// <summary>
-    /// Roles that retain medical access when a tenant predates the permission seed.
-    /// </summary>
-    /// <remarks>
-    /// Permissions resolve from the database, so without this every medical endpoint would 403
-    /// for everyone but SuperAdmin on any tenant provisioned before the seeder ran. See
-    /// <c>HrPermissionRoleFallbackAuthorizationHandler</c>.
-    /// </remarks>
-    /// <remarks>
-    /// Both "HR" and "HR User" are listed deliberately: the seeder creates "HR User", while the
-    /// existing <c>[Authorize(Roles = "HR")]</c> attributes across the HR controllers reference a
-    /// bare "HR". Whichever a tenant actually assigned, medical access survives this change.
-    /// </remarks>
-    public static readonly string[] MedicalFallbackRoles =
-    {
-        "SuperAdmin",
-        "TenantAdmin",
-        "Admin",
-        "HR",
-        "HR User"
-    };
+    public const string ViewTravel = "HR.Travel.Read";
+    public const string MaintainTravel = "HR.Travel.Write";
+    public const string AdministerTravel = "HR.Travel.Admin";
+
+    public const string TravelReadPolicy = "HR.Policy.TravelRead";
+    public const string TravelWritePolicy = "HR.Policy.TravelWrite";
+    public const string TravelAdminPolicy = "HR.Policy.TravelAdmin";
+
+    public const string ViewSuccession = "HR.Succession.Read";
+    public const string MaintainSuccession = "HR.Succession.Write";
+    public const string AdministerSuccession = "HR.Succession.Admin";
+
+    public const string SuccessionReadPolicy = "HR.Policy.SuccessionRead";
+    public const string SuccessionWritePolicy = "HR.Policy.SuccessionWrite";
+    public const string SuccessionAdminPolicy = "HR.Policy.SuccessionAdmin";
+
+    public const string ViewProbation = "HR.Probation.Read";
+    public const string MaintainProbation = "HR.Probation.Write";
+    public const string AdministerProbation = "HR.Probation.Admin";
+
+    public const string ProbationReadPolicy = "HR.Policy.ProbationRead";
+    public const string ProbationWritePolicy = "HR.Policy.ProbationWrite";
+    public const string ProbationAdminPolicy = "HR.Policy.ProbationAdmin";
+
+    public const string ViewJobArchitecture = "HR.JobArchitecture.Read";
+    public const string MaintainJobArchitecture = "HR.JobArchitecture.Write";
+    public const string AdministerJobArchitecture = "HR.JobArchitecture.Admin";
+
+    public const string JobArchitectureReadPolicy = "HR.Policy.JobArchitectureRead";
+    public const string JobArchitectureWritePolicy = "HR.Policy.JobArchitectureWrite";
+    public const string JobArchitectureAdminPolicy = "HR.Policy.JobArchitectureAdmin";
+
+    public const string ViewCompetency = "HR.Competency.Read";
+    public const string MaintainCompetency = "HR.Competency.Write";
+    public const string AdministerCompetency = "HR.Competency.Admin";
+
+    public const string CompetencyReadPolicy = "HR.Policy.CompetencyRead";
+    public const string CompetencyWritePolicy = "HR.Policy.CompetencyWrite";
+    public const string CompetencyAdminPolicy = "HR.Policy.CompetencyAdmin";
+
+    public const string ViewManpowerBudget = "HR.ManpowerBudget.Read";
+    public const string MaintainManpowerBudget = "HR.ManpowerBudget.Write";
+    public const string AdministerManpowerBudget = "HR.ManpowerBudget.Admin";
+
+    public const string ManpowerBudgetReadPolicy = "HR.Policy.ManpowerBudgetRead";
+    public const string ManpowerBudgetWritePolicy = "HR.Policy.ManpowerBudgetWrite";
+    public const string ManpowerBudgetAdminPolicy = "HR.Policy.ManpowerBudgetAdmin";
+
+    public const string ViewSeparation = "HR.Separation.Read";
+    public const string MaintainSeparation = "HR.Separation.Write";
+    public const string AdministerSeparation = "HR.Separation.Admin";
+
+    public const string SeparationReadPolicy = "HR.Policy.SeparationRead";
+    public const string SeparationWritePolicy = "HR.Policy.SeparationWrite";
+    public const string SeparationAdminPolicy = "HR.Policy.SeparationAdmin";
+
+    public const string ViewPerformance = "HR.Performance.Read";
+    public const string MaintainPerformance = "HR.Performance.Write";
+    public const string AdministerPerformance = "HR.Performance.Admin";
+
+    public const string PerformanceReadPolicy = "HR.Policy.PerformanceRead";
+    public const string PerformanceWritePolicy = "HR.Policy.PerformanceWrite";
+    public const string PerformanceAdminPolicy = "HR.Policy.PerformanceAdmin";
+
+    public const string ViewEmployees = "HR.Employee.Read";
+    public const string MaintainEmployees = "HR.Employee.Write";
+    public const string AdministerEmployees = "HR.Employee.Admin";
+
+    public const string EmployeeReadPolicy = "HR.Policy.EmployeeRead";
+    public const string EmployeeWritePolicy = "HR.Policy.EmployeeWrite";
+    public const string EmployeeAdminPolicy = "HR.Policy.EmployeeAdmin";
+
+    public const string ViewShe = "HR.She.Read";
+    public const string MaintainShe = "HR.She.Write";
+    public const string AdministerShe = "HR.She.Admin";
+
+    public const string SheReadPolicy = "HR.Policy.SheRead";
+    public const string SheWritePolicy = "HR.Policy.SheWrite";
+    public const string SheAdminPolicy = "HR.Policy.SheAdmin";
+
+    public const string ViewOrientation = "HR.Orientation.Read";
+    public const string MaintainOrientation = "HR.Orientation.Write";
+    public const string AdministerOrientation = "HR.Orientation.Admin";
+
+    public const string OrientationReadPolicy = "HR.Policy.OrientationRead";
+    public const string OrientationWritePolicy = "HR.Policy.OrientationWrite";
+    public const string OrientationAdminPolicy = "HR.Policy.OrientationAdmin";
+
+    public const string ViewAssets = "HR.Assets.Read";
+    public const string MaintainAssets = "HR.Assets.Write";
+    public const string AdministerAssets = "HR.Assets.Admin";
+
+    public const string AssetsReadPolicy = "HR.Policy.AssetsRead";
+    public const string AssetsWritePolicy = "HR.Policy.AssetsWrite";
+    public const string AssetsAdminPolicy = "HR.Policy.AssetsAdmin";
+
+    public const string ViewMovements = "HR.Movements.Read";
+    public const string MaintainMovements = "HR.Movements.Write";
+    public const string AdministerMovements = "HR.Movements.Admin";
+
+    public const string MovementsReadPolicy = "HR.Policy.MovementsRead";
+    public const string MovementsWritePolicy = "HR.Policy.MovementsWrite";
+    public const string MovementsAdminPolicy = "HR.Policy.MovementsAdmin";
+
+    public const string ViewDiscipline = "HR.Discipline.Read";
+    public const string MaintainDiscipline = "HR.Discipline.Write";
+    public const string AdministerDiscipline = "HR.Discipline.Admin";
+
+    public const string DisciplineReadPolicy = "HR.Policy.DisciplineRead";
+    public const string DisciplineWritePolicy = "HR.Policy.DisciplineWrite";
+    public const string DisciplineAdminPolicy = "HR.Policy.DisciplineAdmin";
+
+    public const string ViewAwards = "HR.Awards.Read";
+    public const string MaintainAwards = "HR.Awards.Write";
+    public const string AdministerAwards = "HR.Awards.Admin";
+
+    public const string AwardsReadPolicy = "HR.Policy.AwardsRead";
+    public const string AwardsWritePolicy = "HR.Policy.AwardsWrite";
+    public const string AwardsAdminPolicy = "HR.Policy.AwardsAdmin";
+
+    public const string ViewCompany = "HR.Company.Read";
+    public const string MaintainCompany = "HR.Company.Write";
+    public const string AdministerCompany = "HR.Company.Admin";
+
+    public const string CompanyReadPolicy = "HR.Policy.CompanyRead";
+    public const string CompanyWritePolicy = "HR.Policy.CompanyWrite";
+    public const string CompanyAdminPolicy = "HR.Policy.CompanyAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
+        new(ViewLeave, "View Leave",
+            "View all leave requests, balances and their adjustments, leave plans, encashments and mandatory-leave compliance across the organisation. Employees do not need this to see their own leave — self access is an ownership check on the endpoint, not a permission.",
+            CategoryLeave),
+        new(MaintainLeave, "Maintain Leave",
+            "Raise and amend leave on behalf of staff, record balance adjustments, close completed leave, recalculate balances, process encashment payments, and maintain the leave-type catalogue (sub-types, allocations, eligibility, accrual policies).",
+            CategoryLeave),
+        new(AdministerLeave, "Administer Leave",
+            "Run the year-end carry-over and forfeiture jobs, deactivate leave types, and delete adjustments and leave-type configuration. Approving leave is NOT this permission — approval belongs to the workflow assignee and is validated per request by the workflow engine.",
+            CategoryLeave),
+
+        new(ViewAttendance, "View Attendance & Time",
+            "View everyone's attendance records, raw device logs, regularizations, remote-work requests, alerts, biometric enrolment, payroll exports, and the consultant/timesheet/invoicing registers. Employees do not need this for their own records — self access is an ownership check on the endpoint.",
+            CategoryAttendance),
+        new(MaintainAttendance, "Maintain Attendance & Time",
+            "Correct attendance records, capture and process device logs, apply approved regularizations, maintain shift/schedule/holiday/pay-period/geofence/device configuration, manage alerts, generate payroll exports, and run consultant, engagement and timesheet-invoice administration.",
+            CategoryAttendance),
+        new(AdministerAttendance, "Administer Attendance & Time",
+            "Delete attendance data — records, logs, alerts, biometric enrolment, configuration rows, engagements and invoices. Approving a regularization, remote-work request or consultant timesheet is NOT this permission — approval belongs to the workflow assignee, validated per request by the workflow engine.",
+            CategoryAttendance),
+
+        new(ViewCompensation, "View Compensation & Benefits",
+            "View position and employee emoluments, the pay-component master and its HR attributes, the salary grade/level/notch structure, benefit grade-values, enrollment registers and payroll lines. Employees do not need this for their own pay makeup, benefits or beneficiaries — self access is an ownership check on the endpoint.",
+            CategoryCompensation),
+        new(MaintainCompensation, "Maintain Compensation & Benefits",
+            "Assign and amend position/employee pay components, maintain the benefit-policy catalogue and its grade values, enroll employees and manage enrollment status, decide utilization claims, reconcile, sync the pay-component and salary-structure mirrors from payroll, and maintain HR pay attributes.",
+            CategoryCompensation),
+        new(AdministerCompensation, "Administer Compensation & Benefits",
+            "Delete emolument assignments, benefit policies and their grade values, and salary grades/levels/notches, and deactivate pay components and benefit policies.",
+            CategoryCompensation),
+
+        new(ViewTraining, "View Training & Learning",
+            "View the organisation-wide training surface: the nomination and request registers, completions, needs assessments, budgets, plans, vendors, trainers, enrollments, mentoring pairs, service bonds and the dashboard. Employees do not need this for their own training record — self access is an ownership check on the endpoint.",
+            CategoryTraining),
+        new(MaintainTraining, "Maintain Training & Learning",
+            "Run the training desk: maintain programs, plans, schedules, nominate and enroll on behalf of staff, decide training requests, record and verify completions, issue certificates, mark attendance, and maintain needs assessments, budgets, vendors, trainers, learning paths, mentoring and compliance assignments. Employee self-acts (self-nomination, requests, waitlist, bond acceptance, mentoring sessions, learning-path steps) are ownership checks on the endpoint, not this permission.",
+            CategoryTraining),
+        new(AdministerTraining, "Administer Training & Learning",
+            "Approve training budgets and annual training plans, revoke certificates, blacklist vendors, waive service bonds, and delete training records and catalogue configuration. Approving a nomination is NOT this permission — that belongs to the workflow assignee, validated per request by the workflow engine.",
+            CategoryTraining),
+
+        new(ViewRecruitment, "View Recruitment",
+            "View the recruitment surface: requisitions, vacancies, adverts and postings, the candidate register and applications with their documents, interview schedules and scores, offers, hires and pre-employment checks. A panelist does not need this for their own panel — panel access is a membership check on the endpoint.",
+            CategoryRecruitment),
+        new(MaintainRecruitment, "Maintain Recruitment",
+            "Run the recruitment desk: hold, cancel and fulfill requisitions, maintain vacancies, adverts and postings, register candidates, progress applications through the pipeline, extend and issue offers, record hires and start dates, run pre-employment checks, and maintain the question bank, presets, pipeline definitions and check templates. Raising a requisition and approving one are NOT this permission — any manager raises their own, and approval belongs to the workflow assignee.",
+            CategoryRecruitment),
+        new(AdministerRecruitment, "Administer Recruitment",
+            "Delete recruitment records — requisitions, vacancies, candidates and their documents, applications and test results, offers and their benefits, question-bank entries, pipeline stages and check templates — and reconcile the establishment vacancy register.",
+            CategoryRecruitment),
+
         new(ViewMedicalRecords, "View Medical Records",
             "View employee health profiles, conditions, allergies, exams, claims, and medical documents.",
             CategoryMedical),
@@ -67,8 +290,384 @@ public static class HrPermissions
             CategoryMedical),
         new(AdministerMedical, "Administer Medical Records",
             "Delete medical records and administer occupational-health configuration.",
-            CategoryMedical)
+            CategoryMedical),
+
+        new(ViewTravel, "View Staff Travel",
+            "View travel requests, itineraries, bookings, advances, expense claims, travel documents and policies.",
+            CategoryTravel),
+        new(MaintainTravel, "Maintain Staff Travel",
+            "Raise and amend travel requests on behalf of staff, make bookings, and process advances and expense claims.",
+            CategoryTravel),
+        new(AdministerTravel, "Administer Staff Travel",
+            "Delete travel records and administer travel policies, per-diem rates, vendors and approval templates.",
+            CategoryTravel),
+
+        new(ViewSuccession, "View Succession & Talent",
+            "View succession plans, candidate readiness and retention risk, talent pools, talent reviews and nine-box placements.",
+            CategorySuccession),
+        new(MaintainSuccession, "Maintain Succession & Talent",
+            "Author succession plans, nominate and assess candidates, record development activities, and run talent reviews.",
+            CategorySuccession),
+        new(AdministerSuccession, "Administer Succession & Talent",
+            "Approve succession plans, finalize calibration, read confidential succession documents, delete records, and administer talent pool types.",
+            CategorySuccession),
+
+        new(ViewProbation, "View Probation & Confirmation",
+            "View probation periods, review schedules and ratings, extension history and confirmation outcomes.",
+            CategoryProbation),
+        new(MaintainProbation, "Maintain Probation & Confirmation",
+            "Open probation periods, schedule and record probation reviews, and issue confirmation letters.",
+            CategoryProbation),
+        new(AdministerProbation, "Administer Probation & Confirmation",
+            "Decide the probation outcome — confirm, extend or terminate — and delete probation records.",
+            CategoryProbation),
+
+        new(ViewJobArchitecture, "View Job Architecture",
+            "View job descriptions and their responsibilities, qualifications, competencies, working conditions and valuation, plus job families, sub-families and levels.",
+            CategoryJobArchitecture),
+        new(MaintainJobArchitecture, "Maintain Job Architecture",
+            "Author job descriptions and their content, raise new versions, submit and review them, and maintain the job family, sub-family and level taxonomy.",
+            CategoryJobArchitecture),
+        new(AdministerJobArchitecture, "Administer Job Architecture",
+            "Approve job descriptions against positions (FR-HR-134), set the job valuation and suggested salary grade, and delete job descriptions.",
+            CategoryJobArchitecture),
+
+        new(ViewCompetency, "View Competency",
+            "View the competency framework and skill indicators, position competency requirements, employee competency profiles and gap analysis.",
+            CategoryCompetency),
+        new(MaintainCompetency, "Maintain Competency",
+            "Define competencies and their skill indicators, set position competency requirements, and record employee competency assessments.",
+            CategoryCompetency),
+        new(AdministerCompetency, "Administer Competency",
+            "Delete competencies, position requirements and employee assessments, and administer the framework taxonomy.",
+            CategoryCompetency),
+
+        new(ViewManpowerBudget, "View Manpower Budget & Establishment",
+            "View manpower budgets, budget lines, critical positions, budget variance and the approved establishment.",
+            CategoryManpowerBudget),
+        new(MaintainManpowerBudget, "Maintain Manpower Budget & Establishment",
+            "Draft manpower budgets and their lines and submit them for approval.",
+            CategoryManpowerBudget),
+        new(AdministerManpowerBudget, "Administer Manpower Budget & Establishment",
+            "Approve or reject a manpower budget — which sets the approved establishment that gates vacancy approval (FR-HR-136) — and delete budgets.",
+            CategoryManpowerBudget),
+
+        new(ViewSeparation, "View Separation, Clearance & Exit",
+            "View the exit register, separation records of every type, clearance progress, exit interviews and final settlement statements.",
+            CategorySeparation),
+        new(MaintainSeparation, "Maintain Separation, Clearance & Exit",
+            "Raise separations of any type, record resignations and notice, run the clearance checklist, conduct exit interviews and prepare final settlement statements.",
+            CategorySeparation),
+        new(AdministerSeparation, "Administer Separation, Clearance & Exit",
+            "Delete separation records and administer the clearance-item catalogue and separation authorities. Signing a termination (FR-HR-092) and reviewing a settlement (FR-HR-185) are NOT this permission — those are read off the record, see the remarks on RoleGrants.",
+            CategorySeparation),
+
+        new(ViewAwards, "View Staff Awards & Recognition",
+            "View the award catalogue and its levels, budgets and eligibility rules, the nomination register, award committees and their scoring, conferred awards and long-service milestones.",
+            CategoryAwards),
+        new(MaintainAwards, "Maintain Staff Awards & Recognition",
+            "Raise and submit nominations, score nominations as a committee member, confer awards, schedule presentations, record award payments and process long-service milestones.",
+            CategoryAwards),
+        new(AdministerAwards, "Administer Staff Awards & Recognition",
+            "Administer the award-type catalogue, levels, eligibility targets, budgets and committees, and delete award records. Nominating and voting are NOT this permission — every employee may do both from their own self-service surface.",
+            CategoryAwards),
+
+        new(ViewEmployees, "View Employee Records",
+            "View any employee's full record — personal details, home address, tax and social-security numbers, salary, contacts, dependents, qualifications, skills, identification, work and position history, contracts, referees, guarantors and bank details. The lean directory reads (the shared name picker, org lookups) stay open to internal staff and do not need this.",
+            CategoryEmployee),
+        new(MaintainEmployees, "Maintain Employee Records",
+            "Create and amend employee records and every sub-record, verify qualifications, skills, identification, guarantors and bank details, and maintain the foundation registers — organization and location structures, positions, teams, unions, staff levels, banks, and the skill, qualification, identification-type, reason-code and country catalogues.",
+            CategoryEmployee),
+        new(AdministerEmployees, "Administer Employee Records",
+            "Delete employees and their sub-records, decide the legacy lifecycle acts (activate, deactivate, terminate, reinstate — the separation module is the governed exit path), and delete foundation reference data — organization and location nodes, positions, teams, unions and lookup entries.",
+            CategoryEmployee),
+
+        new(ViewOrientation, "View Orientation & Onboarding",
+            "View the orientation surface: programs and their content, categories, session schedules and attendance, employee orientation records and progress, notifications and the dashboard. A new joiner does not need this for their own orientation — self access is an ownership check on the endpoint.",
+            CategoryOrientation),
+        new(MaintainOrientation, "Maintain Orientation & Onboarding",
+            "Run the orientation desk: maintain programs, categories and sessions, enroll and progress employees through orientation, record attendance and completion, and send notifications.",
+            CategoryOrientation),
+        new(AdministerOrientation, "Administer Orientation & Onboarding",
+            "Delete orientation records, programs, categories and sessions.",
+            CategoryOrientation),
+
+        new(ViewAssets, "View Staff Assets",
+            "View the staff asset surface: the asset register and assignments, requisitions, returns, surcharges, maintenance and disposal records, asset types and the reminders queue. Employees do not need this for their own assets — the employee portal is token-scoped.",
+            CategoryAssets),
+        new(MaintainAssets, "Maintain Staff Assets",
+            "Run the asset desk: register and assign assets, process requisitions, returns, transfers, maintenance, surcharges and disposals, and maintain asset types and configuration.",
+            CategoryAssets),
+        new(AdministerAssets, "Administer Staff Assets",
+            "Delete asset records, assignments, requisitions and configuration.",
+            CategoryAssets),
+
+        new(ViewMovements, "View Staff Movements",
+            "View the staff movement surface: movements of every type, promotions, transfers, secondments, acting appointments, demotions, career paths and the reminders queue. An employee does not need this for their own movements — the employee portal is token-scoped.",
+            CategoryMovements),
+        new(MaintainMovements, "Maintain Staff Movements",
+            "Run the movements desk: raise and progress movements of every type, implement approved movements, maintain career paths, and process promotions, transfers, secondments, acting appointments and demotions.",
+            CategoryMovements),
+        new(AdministerMovements, "Administer Staff Movements",
+            "Delete movement records and career paths. Approving a movement is NOT this permission — approval belongs to the workflow assignee, validated per movement by the workflow engine.",
+            CategoryMovements),
+
+        new(ViewDiscipline, "View Discipline & Grievance",
+            "View the discipline surface: cases and their charges, hearings, evidence and outcomes, appeals, suspensions, the grievance register, the offense and action-type catalogues and the reminders queue. An accused or aggrieved employee does not need this for their own case — self access is an ownership check on the endpoint.",
+            CategoryDiscipline),
+        new(MaintainDiscipline, "Maintain Discipline & Grievance",
+            "Run the discipline desk: open and progress cases, record charges, hearings, evidence and outcomes, process appeals and suspensions, handle grievances, and maintain the offense and disciplinary-action catalogues.",
+            CategoryDiscipline),
+        new(AdministerDiscipline, "Administer Discipline & Grievance",
+            "Delete discipline and grievance records and catalogue entries. The natural-justice rules (who may decide a case) are enforced on the record by the service, not granted here.",
+            CategoryDiscipline),
+
+        new(ViewShe, "View Safety, Health & Environment",
+            "View the SHE surface: incident, hazard, stop-work and risk-assessment registers, audits, inspections, committees, safety equipment and signage, PPE, permits to work, contractors, emergency preparedness, environmental compliance and reviews, waste, controlled documents, reference data and the dashboard. Reporting an incident or hazard, raising a stop-work order and reading one's own reports never need this — every internal employee may do those by design.",
+            CategoryShe),
+        new(MaintainShe, "Maintain Safety, Health & Environment",
+            "Run the SHE desk: maintain every SHE register, investigate and close incidents, decide permits to work, resolve and clear stop-work orders, run audits, inspections and environmental reviews (including clearance and commencement approvals), record statutory submissions, and maintain PPE, contractors, emergency plans, waste, controlled documents and reference data.",
+            CategoryShe),
+        new(AdministerShe, "Administer Safety, Health & Environment",
+            "Delete SHE records — incidents and their sub-records, hazards, assessments, audits, permits, contractors, equipment, documents and reference data. Deletion is the only act above the desk: every SHE decision (close, approve, clear) is desk work and stays with Maintain.",
+            CategoryShe),
+
+        new(ViewPerformance, "View Performance",
+            "View the org-wide performance surface: appraisal and appeal registers, cycle progress and coverage, the HR cycle dashboard, org-wide at-risk goals, development-plan and improvement-plan registers, review-event and check-in registers, rating analytics and goal-library usage. Employees, managers and peers do not need this for their own appraisal work — self access is an ownership check on the endpoint.",
+            CategoryPerformance),
+        new(MaintainPerformance, "Maintain Performance",
+            "Run the performance desk: maintain cycles, templates, criteria, grades, settings and targets, generate appraisals, run HR review and appeals, run calibration sessions, decide outcome recommendations, enforce deadlines, and maintain goals, check-ins, development plans and improvement plans on behalf of staff. Employee, manager and peer self-acts stay ownership checks on the endpoint, not this permission.",
+            CategoryPerformance),
+        new(AdministerPerformance, "Administer Performance",
+            "Delete performance records — appraisals, cycles, templates, grade and KPI definitions, goal-library items, calibration sessions, review events and improvement plans — and reset goal-risk thresholds. Approving a goal is NOT this permission — that belongs to the goal's direct manager, validated per goal by the goal workflow.",
+            CategoryPerformance),
+
+        new(ViewCompany, "View Company & Administration",
+            "View the company-level administration surface: the company profile with its statutory numbers, the HR policy settings, the external-associate register with its contact details, and the company schedule — events, meeting rooms and bookings, milestones, business closures and fiscal years.",
+            CategoryCompany),
+        new(MaintainCompany, "Maintain Company & Administration",
+            "Maintain the company profile, keep the external-associate register, and run the company schedule — events with their participants, attendance and tasks, meeting rooms and bookings, milestones, business closures, and fiscal years with their periods. Changing the HR policy settings is NOT this permission — those knobs move trust boundaries (FR-HR-092, FR-HR-136) and sit with Administer.",
+            CategoryCompany),
+        new(AdministerCompany, "Administer Company & Administration",
+            "Change the HR policy settings — the procedural-absence threshold (FR-HR-092) and the budget and establishment enforcement modes (FR-HR-136) among them — and delete company-schedule records, meeting rooms, milestones, closures, fiscal years and external associates.",
+            CategoryCompany)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
+
+    /// <summary>
+    /// What HR staff hold: they maintain records but do not administer them, so deleting a
+    /// medical record or a paid travel claim stays with tenant administrators.
+    /// </summary>
+    /// <remarks>
+    /// <para>Travel follows medical deliberately. HR raises travel on behalf of staff and processes
+    /// advances and claims (Write), but deleting travel records and setting the policies,
+    /// per-diem rates and approval templates that govern their own spending authority is
+    /// administration (Admin) — the same separation that stopped an HR-role user deleting a paid
+    /// medical claim.</para>
+    ///
+    /// <para>Succession follows the same ladder for a different reason. HR runs succession
+    /// planning — authoring plans, nominating candidates, recording development, facilitating
+    /// talent reviews — so Read and Write are theirs. But <b>approving</b> a plan names a person as
+    /// the intended successor to a post, and finalizing calibration fixes a nine-box placement that
+    /// then feeds promotion and movement decisions. Those are management acts, not record-keeping,
+    /// so they sit with Admin alongside deletion and the confidential document tier.</para>
+    ///
+    /// <para>Probation splits on the same line, and here the requirement draws it for us. FRD
+    /// FR-HR-032 and the notification matrix state the chain as <i>system (month 5) → head
+    /// confirms → HR issues the confirmation letter</i>. So opening a probation period, scheduling
+    /// reviews, recording their ratings and issuing the letter are HR record-keeping (Write),
+    /// while the three <b>outcomes</b> — confirm, extend, terminate — decide whether someone's
+    /// employment becomes permanent and are management acts (Admin), alongside deletion.</para>
+    ///
+    /// <para>⚠ Admin is the <i>interim</i> home for those three. Slice 8 of
+    /// <c>plans/HR-Area-15b-Probation-Confirmation-Build-Plan.md</c> moves the real check onto the
+    /// workflow engine, where the approver is the confirming authority named for the employee's
+    /// organisation unit (decision D-2, taken 2026-08-18 because 0 of 41 units carry a
+    /// <c>HeadEmployeeId</c> and only 7% of employees a <c>ManagerId</c>). When that lands, these
+    /// three may relax to Write with the instance-level authority check doing the real work — do
+    /// not relax them before it, or the outcome becomes reachable by anyone HR-shaped.</para>
+    ///
+    /// <para>Area 17/18 adds three families at once, because one area spans three audiences.
+    /// <b>Job architecture</b> follows succession's line: HR authors job descriptions, adds their
+    /// responsibilities, qualifications and competencies, raises versions and submits them for
+    /// review (Write), but <b>approving</b> one is the act FR-HR-134 actually asks for — an
+    /// approved job description is what a position is measured against, and it carries the job
+    /// valuation and the suggested salary grade — so approval and deletion are Admin.
+    /// <b>Competency</b> keeps the framework, the position requirements and the assessments in
+    /// Write, because assessing is record-keeping, with deletion at Admin.
+    /// <b>Manpower budget</b> draws the sharpest line: drafting a budget and its lines is Write,
+    /// but <b>approving</b> one sets the approved establishment (decision D-2), and the
+    /// establishment is what gates whether a vacancy may be approved at all under FR-HR-136. An
+    /// approver there is authorising headcount, not filing a record, so approve, reject and
+    /// delete are Admin.</para>
+    ///
+    /// <para>⚠ Admin is again the <i>interim</i> home for the two approvals. Slices 3 and 7 of
+    /// <c>plans/HR-Area-17-Job-Architecture-Competency-Establishment-Build-Plan.md</c> move both
+    /// onto the workflow engine — the manpower budget onto FR-HR-135's named chain, Department
+    /// Head → HR → Managing Director. As with probation, they may relax to Write once the
+    /// instance-level check does the real work, and not before.</para>
+    ///
+    /// <para>⚠ Note what is <b>absent</b>: no grant reaches the <c>Employee</c> role. Succession
+    /// deliberately inverts the self-service rule the rest of HR follows. A candidate's readiness
+    /// level, retention-risk flag and nine-box placement are assessments made about them, not
+    /// records belonging to them, so there is no self tier here at all — see decision D-2 in
+    /// <c>plans/HR-Area-13-Succession-Build-Plan.md</c>. Any future "my development plan" screen
+    /// must be fed by a separate, deliberately narrowed projection, never by relaxing this map.</para>
+    ///
+    /// <para>Probation does not contradict that. It needs one employee-facing action — signing
+    /// "I have seen this review" (<c>ProbationReview.EmployeeAcknowledged</c>) — and that arrives
+    /// as a self-or-HR check on the ownership helper, the way discipline's acknowledgement does,
+    /// <b>not</b> as a grant here. The rule holds: this map never reaches <c>Employee</c>.</para>
+    /// </remarks>
+    private static readonly string[] HrStaffGrants =
+    {
+        ViewLeave, MaintainLeave,
+        ViewAttendance, MaintainAttendance,
+        ViewCompensation, MaintainCompensation,
+        ViewTraining, MaintainTraining,
+        ViewRecruitment, MaintainRecruitment,
+        ViewMedicalRecords, MaintainMedicalRecords,
+        ViewTravel, MaintainTravel,
+        ViewSuccession, MaintainSuccession,
+        ViewProbation, MaintainProbation,
+        ViewJobArchitecture, MaintainJobArchitecture,
+        ViewCompetency, MaintainCompetency,
+        ViewManpowerBudget, MaintainManpowerBudget,
+        ViewSeparation, MaintainSeparation,
+        ViewAwards, MaintainAwards,
+        ViewPerformance, MaintainPerformance,
+        ViewEmployees, MaintainEmployees,
+        // SHE: READ ONLY since 2026-09-03 (DR-10). The safety function has its own roles below;
+        // HR sees the registers but no longer investigates, closes, decides or edits in them.
+        // RoleRevocations removes the Write grant from tenants seeded before this change.
+        ViewShe,
+        ViewOrientation, MaintainOrientation,
+        ViewAssets, MaintainAssets,
+        ViewMovements, MaintainMovements,
+        ViewDiscipline, MaintainDiscipline,
+        ViewCompany, MaintainCompany
+    };
+
+    /// <summary>
+    /// The Safety, Health &amp; Environment desk (DR-10). Every SHE register at Read + Write, plus
+    /// the occupational-health pair because the surveillance, first-aid, wellness and
+    /// return-to-work registers SHE owns are gated on <c>HR.Medical.*</c> (area-11 boundary
+    /// decision, 2026-08-14). No employee-master PII, no other HR family: the lean directory and
+    /// the employee picker are open reads, which is all the SHE screens need.
+    /// </summary>
+    private static readonly string[] SafetyOfficerGrants =
+    {
+        ViewShe, MaintainShe,
+        ViewMedicalRecords, MaintainMedicalRecords
+    };
+
+    /// <summary>Everything the officer holds, plus deletion — the one act above the SHE desk.</summary>
+    private static readonly string[] SheManagerGrants =
+    {
+        ViewShe, MaintainShe, AdministerShe,
+        ViewMedicalRecords, MaintainMedicalRecords
+    };
+
+    /// <summary>
+    /// Grants a role must NOT hold, applied by the seeder AFTER <see cref="RoleGrants"/>. The
+    /// grant loop is add-only (it never removes a row it did not just add), so shrinking a role in
+    /// <see cref="RoleGrants"/> alone changes nothing on a tenant seeded before the shrink. List
+    /// the revocation here and the seeder deletes the row on every startup. The fallback handler
+    /// reads <see cref="RoleGrants"/>, which no longer contains the grant, so both sides agree.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> RoleRevocations =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            // 2026-09-03: HR drops SHE Write; the safety function is its own desk (DR-10).
+            [Constants.Roles.Hr] = new[] { MaintainShe },
+            [Constants.Roles.LegacyHrUser] = new[] { MaintainShe }
+        };
+
+    /// <summary>
+    /// What the two approval authorities hold: the ability to <b>see</b> a separation, and nothing
+    /// else. The Managing Director signs one (FR-HR-092) and Internal Audit reviews its settlement
+    /// (FR-HR-185); neither raises, edits or administers separations, and their authority to decide
+    /// is read off the record rather than granted here.
+    /// </summary>
+    private static readonly string[] ApprovalReaderGrants =
+    {
+        ViewSeparation
+    };
+
+    /// <summary>
+    /// Per-role HR permission grants. This is the single source for both the database seed
+    /// (<c>DatabaseSeedingService</c>) and the role fallback
+    /// (<c>HrPermissionRoleFallbackAuthorizationHandler</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The fallback exists to stand in for the seed, so it must grant exactly what the
+    /// seed grants.</b> Both read this map for that reason. The previous implementation matched
+    /// on the <c>HR.</c> prefix alone and never inspected the verb, so an HR-role user — seeded
+    /// with Read and Write only — satisfied <c>MedicalAdminPolicy</c> as well and could delete
+    /// medical records, including paid expense claims. Verb-blind fallback is a privilege
+    /// escalation; keep the two sides reading one map so they cannot drift apart again.</para>
+    ///
+    /// <para>Permissions resolve from the database, so without a fallback every HR endpoint would
+    /// 403 for everyone but SuperAdmin on a tenant provisioned before the seeder ran.</para>
+    ///
+    /// <para>"HR User" was the seeded name before the rename to "HR"
+    /// (<c>DatabaseSeedingService.MigrateLegacyHrRoleNameAsync</c>). It is listed so a tenant that
+    /// has not yet run the renaming startup keeps access; the seeder does not seed it, which is
+    /// precisely what the fallback is for. Drop it once every environment is known to be migrated.</para>
+    ///
+    /// <para>⚠ "Admin" is a bare literal with no <c>Constants.Roles</c> member, and no such role
+    /// exists in the reference database (checked 2026-08-17). It is retained because removing it
+    /// would silently revoke medical access in any environment that does have one. Confirm whether
+    /// any environment uses it, then either promote it to a constant or delete it.</para>
+    ///
+    /// <para>Separation (area 9b) follows the same ladder, and deliberately stops short of two
+    /// things this map cannot express. FR-HR-092 puts the <b>MD's signature</b> on every
+    /// non-procedural termination and FR-HR-185 puts <b>Internal Audit's review</b> before the
+    /// settlement is paid. Neither is an HR permission: the entitled party is named on the record
+    /// and anchored on the <c>Managing Director</c> / <c>TDC_MANAGING_DIRECTOR</c> and
+    /// <c>TDC_INTERNAL_AUDIT</c> roles, so granting <c>HR.Separation.Admin</c> must never confer
+    /// them. Gating those two actions on a permission family HR holds would let HR sign off its
+    /// own terminations and release its own payments — and gating them on a permission nobody
+    /// holds would make them reachable by nobody, the area-15b mistake.</para>
+    ///
+    /// <para>When extending this to other HR areas (the W3 permission sweep), add the area's
+    /// permissions here per role rather than widening the match — the whole point of this map is
+    /// that a role's grants are stated, not inferred from a name.</para>
+    /// </remarks>
+    public static readonly IReadOnlyDictionary<string, string[]> RoleGrants =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Constants.Roles.SuperAdmin] = AllNames,
+            [Constants.Roles.TenantAdmin] = AllNames,
+            ["Admin"] = AllNames,
+            [Constants.Roles.Hr] = HrStaffGrants,
+            [Constants.Roles.LegacyHrUser] = HrStaffGrants,
+
+            // DR-10 (2026-09-03): the safety function's own roles. Neither holds the HR role, and
+            // the HR role no longer holds SHE Write — see RoleRevocations.
+            [Constants.Roles.SafetyOfficer] = SafetyOfficerGrants,
+            [Constants.Roles.SheManager] = SheManagerGrants,
+
+            // The Managing Director signs separations (FR-HR-092) and Internal Audit reviews their
+            // settlements (FR-HR-185). Both need to READ the record they are deciding on — and
+            // nothing more. Without this the approve endpoint would admit the MD while every read
+            // endpoint refused them, which is a signature on something they cannot see.
+            //
+            // Deliberately Read only: the authority to decide is not a permission at all, it is
+            // read off the record by SeparationService. Granting Write here would let the MD edit
+            // what they are about to sign.
+            [Constants.Roles.ManagingDirector] = ApprovalReaderGrants,
+            [Constants.Roles.TdcManagingDirector] = ApprovalReaderGrants,
+            [Constants.Roles.InternalAudit] = ApprovalReaderGrants
+        };
+
+    /// <summary>
+    /// The HR permissions granted to <paramref name="roleName"/>, or an empty array when the role
+    /// receives none. Callers can concatenate this with their own module's grants.
+    /// </summary>
+    public static string[] GrantsFor(string roleName)
+        => RoleGrants.TryGetValue(roleName, out var permissions)
+            ? permissions
+            : Array.Empty<string>();
 }

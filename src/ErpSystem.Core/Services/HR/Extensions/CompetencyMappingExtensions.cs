@@ -334,7 +334,7 @@ public static class CompetencyMappingExtensions
     }
 
     /// <summary>Maps a <see cref="CreateEmployeeCompetencyDto"/> to a new entity.</summary>
-    public static EmployeeCompetency ToEntity(this CreateEmployeeCompetencyDto dto, Guid tenantId, Guid userId)
+    public static EmployeeCompetency ToEntity(this CreateEmployeeCompetencyDto dto, Guid tenantId, Guid userId, Guid assessedByEmployeeId)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -345,7 +345,14 @@ public static class CompetencyMappingExtensions
             CompetencyId = dto.CompetencyId,
             CurrentProficiencyLevel = dto.CurrentProficiencyLevel,
             AssessmentDate = dto.AssessmentDate,
-            AssessedById = dto.AssessedById,
+            // ⚠ Defaults to the caller. Assessing someone is an act performed at the moment of the
+            // call, so the actor comes from the token unless the caller deliberately names another
+            // — which is a real case here, unlike an approver: HR keying in a line manager's
+            // assessment from a paper form is recording a fact about someone else, and that is the
+            // line the area-13 actor rule draws. What is NOT acceptable is the field being purely
+            // caller-declared, so an assessment could be attributed to anyone with nothing to fall
+            // back on. See hr-succession-area-survey for the rule in full.
+            AssessedById = dto.AssessedById ?? assessedByEmployeeId,
             AssessmentMethod = dto.AssessmentMethod,
             EvidenceNotes = dto.EvidenceNotes,
             CreatedBy = userId.ToString(),
@@ -357,14 +364,19 @@ public static class CompetencyMappingExtensions
     /// The caller is responsible for snapshotting the current values to
     /// <see cref="EmployeeCompetencyHistory"/> BEFORE calling this method.
     /// </summary>
-    public static void UpdateEntity(this EmployeeCompetency entity, UpdateEmployeeCompetencyDto dto, Guid userId)
+    public static void UpdateEntity(this EmployeeCompetency entity, UpdateEmployeeCompetencyDto dto, Guid userId, Guid? assessedByEmployeeId = null)
     {
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(dto);
 
         entity.CurrentProficiencyLevel = dto.CurrentProficiencyLevel;
         entity.AssessmentDate = dto.AssessmentDate;
-        entity.AssessedById = dto.AssessedById;
+        // ⚠ Defaults to the caller, exactly as the create path does. Assigning dto.AssessedById
+        // unconditionally meant a re-assessment with no assessor named WIPED the assessor already on
+        // the record: the level changed, the date changed, and nobody was accountable for either.
+        // Found by the content audit, after every slice harness had passed — the create defaulting
+        // (slice 6) was only half the fix, and the half that was missing is the one people use more.
+        entity.AssessedById = dto.AssessedById ?? assessedByEmployeeId ?? entity.AssessedById;
         entity.AssessmentMethod = dto.AssessmentMethod;
         entity.EvidenceNotes = dto.EvidenceNotes;
         entity.UpdatedAt = DateTime.UtcNow;

@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
@@ -22,30 +23,92 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
             .Include(p => p.AppliesToLevelFrom)
             .Include(p => p.AppliesToLevelTo)
             .Include(p => p.AppliesToOrganizationUnit)
+            // The fourth read feeding a policy DTO. Without this the approve endpoint returns its
+            // own response with a null approver — the one field the caller just created.
+            .Include(p => p.ApprovedBy)
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
 
     public async Task<IEnumerable<StaffTravelPolicy>> GetCurrentVersionsAsync()
     {
         return await _dbSet
+            // Same includes as the other two reads that feed StaffTravelPolicySummaryDto: without
+            // Rules the RuleCount is always 0, and without ApprovedBy the approver never resolves —
+            // so "which policies are in force" showed no rules and no approver. Uneven siblings.
+            .Include(p => p.Rules)
+            .Include(p => p.ApprovedBy)
             .Where(p => p.IsCurrentVersion && !p.IsDeleted)
             .OrderBy(p => p.PolicyName)
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Current policies covering a staff level, organisation unit and date, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <paramref name="staffLevelId"/> was previously accepted and <b>never used</b> — the method
+    /// took the parameter, filtered on unit and date only, and then ordered by whether a level
+    /// range happened to be set. So a policy written for senior management applied to everyone.
+    /// It matters now that bookings are refused against these caps.
+    ///
+    /// <para>The range is compared on <see cref="StaffLevel.Rank"/>, not on the level ids: the
+    /// policy names the two ends of a band, and the traveller sits inside it or does not. A
+    /// traveller with no staff level (no position, or a position with no level) matches only
+    /// unbanded policies — the organisation-wide default — rather than being excluded entirely.</para>
+    ///
+    /// <para>Tenant scoping is the caller's, per this area's convention (the DbContext's global
+    /// filter is inert — see <c>ApplicationDbContext</c>). <c>StaffTravelPolicyGuard</c> filters
+    /// the result before any cap is applied.</para>
+    /// </remarks>
     public async Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate)
     {
         var candidates = await _dbSet
+            .Include(p => p.Rules)
+            .Include(p => p.ApprovedBy)
             .Where(p => p.IsCurrentVersion && !p.IsDeleted
                      && p.EffectiveFrom <= onDate
                      && (p.EffectiveTo == null || p.EffectiveTo >= onDate)
                      && (p.AppliesToOrganizationUnitId == null || p.AppliesToOrganizationUnitId == organizationUnitId))
             .ToListAsync();
 
-        // Most-specific first (policies scoped to a unit / level rank above org-wide defaults).
+        if (candidates.Count == 0) return candidates;
+
+        int? travellerRank = staffLevelId is Guid levelId
+            ? await _context.Set<StaffLevel>()
+                .Where(l => l.Id == levelId && !l.IsDeleted)
+                .Select(l => (int?)l.Rank)
+                .FirstOrDefaultAsync()
+            : null;
+
+        var bandIds = candidates
+            .SelectMany(p => new[] { p.AppliesToLevelFromId, p.AppliesToLevelToId })
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+
+        var ranks = bandIds.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await _context.Set<StaffLevel>()
+                .Where(l => bandIds.Contains(l.Id))
+                .ToDictionaryAsync(l => l.Id, l => l.Rank);
+
+        bool Covers(StaffTravelPolicy p)
+        {
+            if (p.AppliesToLevelFromId is null && p.AppliesToLevelToId is null) return true;
+            if (travellerRank is not int rank) return false; // banded policy, unplaced traveller
+
+            if (p.AppliesToLevelFromId is Guid from && ranks.TryGetValue(from, out var fromRank)
+                && rank < fromRank) return false;
+            if (p.AppliesToLevelToId is Guid to && ranks.TryGetValue(to, out var toRank)
+                && rank > toRank) return false;
+            return true;
+        }
+
+        // Most-specific first (policies scoped to a unit / level band rank above org-wide defaults).
         return candidates
+            .Where(Covers)
             .OrderByDescending(p => p.AppliesToOrganizationUnitId != null ? 1 : 0)
-            .ThenByDescending(p => p.AppliesToLevelFromId != null ? 1 : 0)
+            .ThenByDescending(p => p.AppliesToLevelFromId != null || p.AppliesToLevelToId != null ? 1 : 0)
             .ThenByDescending(p => p.EffectiveFrom)
             .ToList();
     }
@@ -114,47 +177,6 @@ public class StaffTravelPolicyExceptionRepository : GenericRepository<StaffTrave
             .Include(e => e.PolicyRule)
             .Where(e => e.Status == TravelPolicyExceptionStatus.Pending && !e.IsDeleted)
             .OrderBy(e => e.CreatedAt)
-            .ToListAsync();
-    }
-}
-
-#endregion
-
-#region Staff Travel Vendor Repository
-
-public class StaffTravelVendorRepository : GenericRepository<StaffTravelVendor>, IStaffTravelVendorRepository
-{
-    public StaffTravelVendorRepository(ApplicationDbContext context) : base(context) { }
-
-    public async Task<StaffTravelVendor?> GetByVendorCodeAsync(string vendorCode)
-    {
-        return await _dbSet
-            .Include(v => v.Country)
-            .FirstOrDefaultAsync(v => v.VendorCode == vendorCode && !v.IsDeleted);
-    }
-
-    public async Task<IEnumerable<StaffTravelVendor>> GetByTypeAsync(TravelVendorType vendorType)
-    {
-        return await _dbSet
-            .Where(v => v.VendorType == vendorType && !v.IsDeleted)
-            .OrderBy(v => v.VendorName)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<StaffTravelVendor>> GetPreferredVendorsAsync(TravelVendorType? vendorType = null)
-    {
-        return await _dbSet
-            .Where(v => v.IsPreferred && v.IsActive && !v.IsDeleted
-                     && (vendorType == null || v.VendorType == vendorType))
-            .OrderBy(v => v.VendorName)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<StaffTravelVendor>> GetActiveVendorsAsync()
-    {
-        return await _dbSet
-            .Where(v => v.IsActive && !v.IsDeleted)
-            .OrderBy(v => v.VendorName)
             .ToListAsync();
     }
 }

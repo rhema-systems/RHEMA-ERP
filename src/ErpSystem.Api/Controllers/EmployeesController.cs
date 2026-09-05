@@ -6,12 +6,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public class EmployeesController : ControllerBase
     {
         private readonly IEmployeeRepository _employeeRepository;
@@ -94,6 +95,7 @@ namespace ErpSystem.Api.Controllers
         /// Get employee by ID
         /// </summary>
         [HttpGet("{id}")]
+        [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
         [ProducesResponseType(typeof(EmployeeDetailDto), 200)]
         [ProducesResponseType(404)]
         public async Task<ActionResult<EmployeeDetailDto>> GetEmployee(Guid id)
@@ -128,6 +130,7 @@ namespace ErpSystem.Api.Controllers
         /// Get employee by employee number
         /// </summary>
         [HttpGet("by-number/{employeeNumber}")]
+        [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
         [ProducesResponseType(typeof(EmployeeDetailDto), 200)]
         [ProducesResponseType(404)]
         public async Task<ActionResult<EmployeeDetailDto>> GetEmployeeByNumber(string employeeNumber)
@@ -185,6 +188,7 @@ namespace ErpSystem.Api.Controllers
         /// Create new employee
         /// </summary>
         [HttpPost]
+        [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
         [ProducesResponseType(typeof(EmployeeDetailDto), 201)]
         [ProducesResponseType(400)]
         public async Task<ActionResult<EmployeeDetailDto>> CreateEmployee([FromBody] CreateEmployeeDto createEmployeeDto)
@@ -197,8 +201,9 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest("Employee number already exists");
                 }
 
-                // Validate email uniqueness
-                if (await _employeeRepository.EmailExistsAsync(createEmployeeDto.EmailAddress))
+                // Validate email uniqueness (email is optional since 2026-09-03)
+                if (!string.IsNullOrWhiteSpace(createEmployeeDto.EmailAddress) &&
+                    await _employeeRepository.EmailExistsAsync(createEmployeeDto.EmailAddress))
                 {
                     return BadRequest("Email address already exists");
                 }
@@ -244,6 +249,7 @@ namespace ErpSystem.Api.Controllers
         /// Update employee
         /// </summary>
         [HttpPut("{id}")]
+        [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
         [ProducesResponseType(typeof(EmployeeDetailDto), 200)]
         [ProducesResponseType(404)]
         [ProducesResponseType(400)]
@@ -289,6 +295,7 @@ namespace ErpSystem.Api.Controllers
         /// Delete employee (soft delete)
         /// </summary>
         [HttpDelete("{id}")]
+        [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
         [ProducesResponseType(204)]
         [ProducesResponseType(404)]
         public async Task<ActionResult> DeleteEmployee(Guid id)
@@ -344,6 +351,7 @@ namespace ErpSystem.Api.Controllers
         /// <response code="400">Invalid request</response>
         /// <response code="404">Employee not found</response>
         [HttpPost("{id}/terminate")]
+        [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> TerminateEmployee(Guid id, [FromBody] TerminateEmployeeDto dto)

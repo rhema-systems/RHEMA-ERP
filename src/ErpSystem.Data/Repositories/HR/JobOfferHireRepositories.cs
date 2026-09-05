@@ -15,11 +15,29 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
 {
     public JobOfferRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<JobOffer?> GetByOfferNumberAsync(string offerNumber)
-    {
-        return await _dbSet
+    /// <summary>
+    /// Everything <c>ToDto</c> and <c>ToSummaryDto</c> read through a navigation.
+    ///
+    /// <para>⚠ Most reads here already included the candidate, but <b>there was no
+    /// <c>GetByIdAsync</c> override</b> — so <c>GET /{id}</c> and every write response that goes
+    /// through <c>GetOwnedOfferAsync</c> (update, approve, issue, revoke, record-response) came back
+    /// with an empty <c>candidateName</c>: the one field that says whose offer it is.
+    /// <c>GetByApplicationIdAsync</c> was missing the chain too. Same shape as the interview and
+    /// hire repositories.</para>
+    /// </summary>
+    private IQueryable<JobOffer> WithSummaryNavigations() =>
+        _dbSet
             .Include(o => o.Application).ThenInclude(a => a.JobCandidate)
             .Include(o => o.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(o => o.PreparedBy)
+            .Include(o => o.ApprovedBy);
+
+    public override async Task<JobOffer?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
+
+    public async Task<JobOffer?> GetByOfferNumberAsync(string offerNumber)
+    {
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(o => o.OfferNumber == offerNumber && !o.IsDeleted);
     }
 
@@ -37,8 +55,7 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
 
     public async Task<IEnumerable<JobOffer>> GetByApplicationIdAsync(Guid applicationId)
     {
-        return await _dbSet
-            .Include(o => o.PreparedBy)
+        return await WithSummaryNavigations()
             .Include(o => o.Location)
             .Include(o => o.Benefits)
             .Where(o => o.JobApplicationId == applicationId && !o.IsDeleted)
@@ -48,9 +65,7 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
 
     public async Task<IEnumerable<JobOffer>> GetByStatusAsync(JobOfferStatus status)
     {
-        return await _dbSet
-            .Include(o => o.Application).ThenInclude(a => a.JobCandidate)
-            .Include(o => o.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(o => o.OfferStatus == status && !o.IsDeleted)
             .OrderByDescending(o => o.OfferDate)
             .ToListAsync();
@@ -58,9 +73,7 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
 
     public async Task<IEnumerable<JobOffer>> GetByPreparedByAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(o => o.Application).ThenInclude(a => a.JobCandidate)
-            .Include(o => o.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(o => o.PreparedById == employeeId && !o.IsDeleted)
             .OrderByDescending(o => o.OfferDate)
             .ToListAsync();
@@ -69,8 +82,7 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
     public async Task<IEnumerable<JobOffer>> GetExpiringOffersAsync(int daysAhead = 3)
     {
         var threshold = DateTime.UtcNow.AddDays(daysAhead);
-        return await _dbSet
-            .Include(o => o.Application).ThenInclude(a => a.JobCandidate)
+        return await WithSummaryNavigations()
             .Where(o => o.OfferStatus == JobOfferStatus.Sent
                      && o.ExpiryDate != null
                      && o.ExpiryDate <= threshold
@@ -81,8 +93,7 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
 
     public async Task<IEnumerable<JobOffer>> GetAllForSummaryAsync()
     {
-        return await _dbSet
-            .Include(o => o.Application).ThenInclude(a => a.JobCandidate)
+        return await WithSummaryNavigations()
             .Where(o => !o.IsDeleted)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
@@ -116,28 +127,41 @@ public class JobHireRecordRepository : GenericRepository<JobHireRecord>, IJobHir
 {
     public JobHireRecordRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<JobHireRecord?> GetByHireNumberAsync(string hireNumber)
-    {
-        return await _dbSet
+    /// <summary>
+    /// Everything <c>ToDto</c> and <c>ToSummaryDto</c> read through a navigation.
+    ///
+    /// <para>⚠ <c>Employee</c> and <c>ConfirmedBy</c> were included by <b>no</b> read, while the DTO
+    /// reads <c>Employee.EmployeeNumber</c>, <c>Employee.FullName</c> and
+    /// <c>ConfirmedBy.FullName</c>. A hire record exists to record that a candidate became an
+    /// employee, and that link came back empty on every endpoint — including immediately after
+    /// <c>ConfirmStartAsync</c> had just created the employee.</para>
+    /// </summary>
+    private IQueryable<JobHireRecord> WithSummaryNavigations() =>
+        _dbSet
             .Include(h => h.Application).ThenInclude(a => a.JobCandidate)
             .Include(h => h.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(h => h.Offer)
+            .Include(h => h.Employee)
+            .Include(h => h.ConfirmedBy);
+
+    public override async Task<JobHireRecord?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(h => h.Id == id && !h.IsDeleted);
+
+    public async Task<JobHireRecord?> GetByHireNumberAsync(string hireNumber)
+    {
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(h => h.HireNumber == hireNumber && !h.IsDeleted);
     }
 
     public async Task<JobHireRecord?> GetByApplicationIdAsync(Guid applicationId)
     {
-        return await _dbSet
-            .Include(h => h.Application).ThenInclude(a => a.JobCandidate)
-            .Include(h => h.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
-            .Include(h => h.Offer)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(h => h.ApplicationId == applicationId && !h.IsDeleted);
     }
 
     public async Task<IEnumerable<JobHireRecord>> GetByStatusAsync(JobHireStatus status)
     {
-        return await _dbSet
-            .Include(h => h.Application).ThenInclude(a => a.JobCandidate)
-            .Include(h => h.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(h => h.Status == status && !h.IsDeleted)
             .OrderByDescending(h => h.CreatedAt)
             .ToListAsync();
@@ -145,18 +169,14 @@ public class JobHireRecordRepository : GenericRepository<JobHireRecord>, IJobHir
 
     public async Task<JobHireRecord?> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(h => h.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
-            .Include(h => h.Offer)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(h => h.EmployeeId == employeeId && !h.IsDeleted);
     }
 
     public async Task<IEnumerable<JobHireRecord>> GetWithStartDateApproachingAsync(int daysAhead = 14)
     {
         var threshold = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(daysAhead));
-        return await _dbSet
-            .Include(h => h.Application).ThenInclude(a => a.JobCandidate)
-            .Include(h => h.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(h => h.ExpectedStartDate != null
                      && h.ExpectedStartDate <= threshold
                      && h.Status == JobHireStatus.PendingOnboarding

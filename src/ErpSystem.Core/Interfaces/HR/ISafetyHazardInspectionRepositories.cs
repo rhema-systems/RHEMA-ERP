@@ -16,6 +16,8 @@ public interface ISheHazardRepository : IGenericRepository<SheHazard>
     Task<SheHazard?> GetByCodeAsync(string code);
     /// <summary>Returns the hazard with its controls and corrective actions loaded.</summary>
     Task<SheHazard?> GetWithControlsAsync(Guid id);
+    /// <summary>All hazards with the list navigations (location, owner) loaded — the register read.</summary>
+    Task<IEnumerable<SheHazard>> GetAllListAsync();
     Task<IEnumerable<SheHazard>> GetActiveAsync();
     Task<IEnumerable<SheHazard>> GetByStatusAsync(SheHazardStatus status);
     Task<IEnumerable<SheHazard>> GetByCategoryAsync(SheHazardCategory category);
@@ -47,8 +49,6 @@ public interface ISheRiskAssessmentRepository : IGenericRepository<SheRiskAssess
 
     /// <summary>Returns approved/active assessments (with their acknowledgements loaded) for employee sign-off.</summary>
     Task<IEnumerable<SheRiskAssessment>> GetActiveForAcknowledgementAsync();
-
-    Task<string> GetNextAssessmentNumberAsync();
 }
 
 // ============================================================================
@@ -81,6 +81,4 @@ public interface ISafetyInspectionRepository : IGenericRepository<SafetyInspecti
 
     /// <summary>Returns inspections that are still open and have unresolved items.</summary>
     Task<IEnumerable<SafetyInspection>> GetOpenWithFindingsAsync();
-
-    Task<string> GetNextInspectionNumberAsync();
 }

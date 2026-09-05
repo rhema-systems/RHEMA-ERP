@@ -4,6 +4,22 @@ using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR.Orientation;
 
+/// <summary>
+/// The one definition of "this enrollment occupies a seat". The capacity check, the session
+/// mapper's EnrolledCount/AvailableSeats and the batched list counts all read it, so a withdrawn
+/// participant cannot count against capacity on one screen and not on another.
+/// </summary>
+public static class OrientationEnrollmentStatuses
+{
+    public static readonly OrientationEnrollmentStatus[] Occupying =
+    {
+        OrientationEnrollmentStatus.PendingConfirmation,
+        OrientationEnrollmentStatus.Confirmed,
+        OrientationEnrollmentStatus.Active,
+        OrientationEnrollmentStatus.Completed,
+    };
+}
+
 // ===========================================================
 //  SECTION 1 — CATALOG (Category, Program, Modules, Content)
 // ===========================================================

@@ -91,7 +91,9 @@ public class EmployeeCertificateService : IEmployeeCertificateService
 
         _logger.LogInformation("Employee certificate created for employee {EmployeeId}", dto.EmployeeId);
 
-        return entity.ToDto();
+        // Freshly written: no Employee loaded, so the response would name nobody.
+        var saved = await _certificateRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<EmployeeCertificateDto> UpdateAsync(UpdateEmployeeCertificateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -140,6 +142,9 @@ public class EmployeeCertificateService : IEmployeeCertificateService
 
         _logger.LogInformation("Employee certificate {CertificateId} verified by {VerifierId}", dto.CertificateId, updatedByUserId);
 
-        return entity.ToDto();
+        // VerifiedById was just set, so the tracked instance still maps a null verifier — only an
+        // untracked re-read puts VerifiedByName on this response.
+        var saved = await _certificateRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 }

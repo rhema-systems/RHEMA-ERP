@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,9 +15,12 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/applications")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ApplicationPipelineController : ControllerBase
 {
+    // HR-only for the same reason as JobApplicationController: every board column, stage list and
+    // scoring run on this controller carries candidate names and scores. The endpoints already map
+    // their own exceptions, so this controller does not take [RecruitmentBusinessRules].
     private readonly IApplicationPipelineService _pipelineService;
     private readonly IPipelineQueryService _queryService;
     private readonly IAutoScoringService _scoringService;
@@ -44,6 +48,7 @@ public class ApplicationPipelineController : ControllerBase
     /// containing the applications currently in that stage.
     /// </summary>
     [HttpGet("pipeline/{vacancyId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     [ProducesResponseType(typeof(List<PipelineStageWithApplicationsDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<List<PipelineStageWithApplicationsDto>>> GetPipeline(
@@ -71,6 +76,7 @@ public class ApplicationPipelineController : ControllerBase
     /// (StageId = Guid.Empty). Use this to render the pipeline header bar.
     /// </summary>
     [HttpGet("pipeline/{vacancyId:guid}/overview")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     [ProducesResponseType(typeof(PipelineOverviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PipelineOverviewDto>> GetPipelineOverview(
@@ -98,6 +104,7 @@ public class ApplicationPipelineController : ControllerBase
     /// (applications not yet placed in any stage).
     /// </summary>
     [HttpGet("pipeline/{vacancyId:guid}/stages/{stageId:guid}/applications")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<PipelineApplicationListItemDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PagedResult<PipelineApplicationListItemDto>>> GetStageApplications(
@@ -152,6 +159,7 @@ public class ApplicationPipelineController : ControllerBase
     /// Updates the application status, stage history, and vacancy counters atomically.
     /// </summary>
     [HttpPost("move-stage")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -204,6 +212,7 @@ public class ApplicationPipelineController : ControllerBase
     /// without aborting the remaining items.
     /// </summary>
     [HttpPost("bulk-move")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [ProducesResponseType(typeof(RecruitmentBulkOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> BulkMove(
@@ -238,6 +247,7 @@ public class ApplicationPipelineController : ControllerBase
     /// <c>Status = Rejected</c>. Individual failures do not abort the batch.
     /// </summary>
     [HttpPost("bulk-pipeline-reject")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [ProducesResponseType(typeof(RecruitmentBulkOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> BulkPipelineReject(
@@ -270,6 +280,7 @@ public class ApplicationPipelineController : ControllerBase
     /// candidate profiles.
     /// </summary>
     [HttpPost("pipeline/{vacancyId:guid}/run-scoring")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [ProducesResponseType(typeof(RecruitmentScoringRunResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RecruitmentScoringRunResultDto>> RunScoring(

@@ -67,16 +67,43 @@ public static class HrPolicyCalculations
     }
 
     /// <summary>Current age in whole years from a date of birth. Null when unknown.</summary>
-    public static int? Age(DateOnly? dateOfBirth)
+    public static int? Age(DateOnly? dateOfBirth) => CompletedYears(dateOfBirth);
+
+    /// <summary>
+    /// Whole years elapsed since <paramref name="from"/>, counting only anniversaries that have
+    /// actually come round.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The single home for this arithmetic.</b> Area 14 slice 3b found three
+    /// implementations of it in the HR module and only one of them correct. <see cref="Age"/> did
+    /// the anniversary check properly; <c>Employee.YearsOfService</c> subtracted calendar years
+    /// (<c>Today.Year - DateEmployed.Year</c>), which reports a completed year on 1 January for
+    /// someone whose anniversary is in December; and area 14's eligibility evaluator had grown a
+    /// private fourth copy while fixing the second. All of them now call this.</para>
+    ///
+    /// <para><b>Why it matters beyond tidiness.</b> The overstatement is at most one year, but it
+    /// falls on exactly the rules that turn on a threshold: length-of-service eligibility for an
+    /// award, a long-service milestone, a minimum-age gate. A rule reading "ten years" admitted
+    /// people with nine years and one month.</para>
+    ///
+    /// <param name="asOf">
+    /// The date to measure to. Defaults to today. Supplied explicitly where a rule must be
+    /// evaluated as it stood at some other moment — award eligibility does this so that an
+    /// effective-dated exclusion can be re-checked against the day it was in force.
+    /// </param>
+    /// </remarks>
+    public static int? CompletedYears(DateOnly? from, DateOnly? asOf = null)
     {
-        if (dateOfBirth is null)
+        if (from is null)
             return null;
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
-        var age = today.Year - dateOfBirth.Value.Year;
-        if (dateOfBirth.Value > today.AddYears(-age))
-            age--;
+        var to = asOf ?? DateOnly.FromDateTime(DateTime.Today);
+        var years = to.Year - from.Value.Year;
 
-        return age;
+        // Undo the year if the anniversary has not been reached yet.
+        if (from.Value > to.AddYears(-years))
+            years--;
+
+        return Math.Max(0, years);
     }
 }

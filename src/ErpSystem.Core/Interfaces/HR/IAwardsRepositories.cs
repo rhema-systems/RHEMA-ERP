@@ -26,11 +26,94 @@ public interface IAwardLevelRepository : IGenericRepository<AwardLevel>
     Task<AwardLevel?> GetByRankAsync(Guid awardTypeId, int rank);
 }
 
+/// <summary>
+/// Resolves what an award-eligibility target actually points at.
+/// </summary>
+/// <remarks>
+/// <c>AwardTypeTarget.TargetId</c> is polymorphic — an organisation unit, a position, a staff level
+/// or an employee, according to <c>TargetType</c> — so there is no navigation to load and
+/// <c>AwardTypeTargetDto.TargetName</c> had no writer anywhere in the solution. It was declared and
+/// always null, which made the eligibility list unreadable: "Employee: (blank)" for every row.
+/// Batched by kind on purpose — one query per target type, not one per row.
+/// </remarks>
+public interface IAwardTargetNameResolver
+{
+    Task<IReadOnlyDictionary<Guid, string>> ResolveAsync(IEnumerable<AwardTypeTarget> targets);
+}
+
 public interface IAwardTypeTargetRepository : IGenericRepository<AwardTypeTarget>
 {
     Task<IEnumerable<AwardTypeTarget>> GetByAwardTypeIdAsync(Guid awardTypeId);
     Task<IEnumerable<AwardTypeTarget>> GetByScopeAsync(Guid awardTypeId, AwardScope scope);
     Task<bool> IsEmployeeEligibleAsync(Guid awardTypeId, Guid employeeId);
+}
+
+/// <summary>
+/// Answers "who qualifies for this award, and why not" against the full set of criteria.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this replaces the old check.</b> <c>IAwardTypeTargetRepository.IsEmployeeEligibleAsync</c>
+/// evaluated the award's <i>targets</i> — the unit/position/level scoping — and nothing else. The
+/// award type's own eligibility vocabulary was never consulted: <c>MinServiceYears</c>,
+/// <c>MaxServiceYears</c>, <c>MinAge</c>, <c>MaxAge</c>, <c>MaxAwardsPerEmployee</c> and
+/// <c>MaxAwardsPerPeriod</c> appeared only in mappers, mapped in and mapped out and applied by
+/// nothing. Those six fields are exactly the "eligibility criteria" TDC's note has HR set up before
+/// anyone nominates, so the feature the note describes could not work.</para>
+///
+/// <para><b>Why it returns reasons.</b> TDC's note has management "set the criteria and then it
+/// will qualify some employees". An HR officer configuring that needs to see why somebody they
+/// expected is absent — a list of names alone makes a mis-set rule indistinguishable from a correct
+/// one.</para>
+/// </remarks>
+public interface IAwardEligibilityEvaluator
+{
+    /// <summary>Everyone who qualifies, with the reasons anyone excluded did not.</summary>
+    Task<AwardEligibilityResult> EvaluateAsync(Guid awardTypeId, Guid tenantId, DateTime asOf);
+
+    /// <summary>One employee's standing against the same criteria.</summary>
+    Task<AwardEligibilityVerdict> EvaluateEmployeeAsync(Guid awardTypeId, Guid employeeId, Guid tenantId, DateTime asOf);
+}
+
+/// <summary>The qualified set, plus everyone considered and rejected and why.</summary>
+public sealed class AwardEligibilityResult
+{
+    public Guid AwardTypeId { get; init; }
+    public DateTime AsOf { get; init; }
+    public int ConsideredCount { get; init; }
+    public List<AwardEligibilityVerdict> Eligible { get; init; } = new();
+    public List<AwardEligibilityVerdict> Ineligible { get; init; } = new();
+}
+
+/// <summary>One employee's standing, and the criteria they failed if any.</summary>
+public sealed class AwardEligibilityVerdict
+{
+    public Guid EmployeeId { get; init; }
+    public string EmployeeName { get; init; } = string.Empty;
+    public string? EmployeeNumber { get; init; }
+    public bool IsEligible { get; init; }
+
+    /// <summary>Empty when eligible. Each entry names one criterion and the value that failed it.</summary>
+    public List<string> Reasons { get; init; } = new();
+}
+
+/// <summary>
+/// Award cycles, queried by tenant rather than loaded whole.
+/// </summary>
+/// <remarks>
+/// The open-for-nomination and open-for-voting lists are read on every visit to the awards landing
+/// page, so they must not begin by loading every cycle that has ever run. The window comparison
+/// itself stays in the service — it depends on <c>Status</c> as well as the clock, and expressing
+/// that in the predicate would put the rule in two places.
+/// </remarks>
+public interface IAwardCycleRepository : IGenericRepository<AwardCycle>
+{
+    Task<IEnumerable<AwardCycle>> GetByTenantAsync(Guid tenantId);
+    Task<IEnumerable<AwardCycle>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId);
+
+    /// <summary>Published cycles only — the candidates for an "is it open right now" test.</summary>
+    Task<IEnumerable<AwardCycle>> GetPublishedAsync(Guid tenantId);
+
+    Task<bool> CodeExistsAsync(Guid tenantId, string cycleCode);
 }
 
 public interface IAwardBudgetRepository : IGenericRepository<AwardBudget>
@@ -87,6 +170,23 @@ public interface IAwardNominationRepository : IGenericRepository<AwardNomination
     Task<AwardNomination?> GetWithDetailsAsync(Guid id);
     Task<AwardNomination?> GetByNominationNumberAsync(Guid tenantId, string nominationNumber);
     Task<IEnumerable<AwardNomination>> GetByNomineeIdAsync(Guid nomineeId);
+
+    /// <summary>
+    /// Live nominations assigned to any of the given committees.
+    /// </summary>
+    /// <remarks>
+    /// Used to answer "what do I still have to score", which is a question about nominations rather
+    /// than about reviews. Loading every nomination in the tenant and filtering in memory is the
+    /// shape this area has been removing since slice 3.
+    /// </remarks>
+    Task<IEnumerable<AwardNomination>> GetForCommitteesAsync(Guid tenantId, IEnumerable<Guid> committeeIds);
+
+    /// <summary>
+    /// How many live nominations each cycle holds, in one query. Counting them by loading every
+    /// nomination in the tenant and grouping in memory is the shape that turns a cycle register
+    /// into a full table scan per page.
+    /// </summary>
+    Task<Dictionary<Guid, int>> GetCountsByCycleAsync(Guid tenantId);
     Task<IEnumerable<AwardNomination>> GetByNominatedByIdAsync(Guid nominatedById);
     Task<IEnumerable<AwardNomination>> GetByAwardTypeIdAsync(Guid awardTypeId);
     Task<IEnumerable<AwardNomination>> GetByYearAsync(Guid tenantId, int year);
@@ -137,12 +237,20 @@ public interface IAwardCommitteeMemberRepository : IGenericRepository<AwardCommi
 
 public interface IAwardNominationReviewRepository : IGenericRepository<AwardNominationReview>
 {
+    /// <summary>
+    /// Average score and reviewer count per nomination for a cycle, computed in the database.
+    /// </summary>
+    /// <remarks>
+    /// Replaces <c>GetApprovalCountAsync</c> and <c>GetRejectionCountAsync</c>, which counted
+    /// approvals and rejections of a <c>bool? Approved</c> that no longer exists. Those two encoded
+    /// the wrong model: TDC decides the winner on the highest average score, and a count of
+    /// approvals cannot rank two nominations everybody approved.
+    /// </remarks>
+    Task<Dictionary<Guid, (double Average, int Reviewers)>> GetScoreSummaryByCycleAsync(Guid cycleId);
+
     Task<IEnumerable<AwardNominationReview>> GetByNominationIdAsync(Guid nominationId);
     Task<IEnumerable<AwardNominationReview>> GetByReviewerIdAsync(Guid reviewerId);
-    Task<IEnumerable<AwardNominationReview>> GetPendingReviewsAsync(Guid reviewerId);
     Task<AwardNominationReview?> GetReviewAsync(Guid nominationId, Guid reviewerId);
-    Task<int> GetApprovalCountAsync(Guid nominationId);
-    Task<int> GetRejectionCountAsync(Guid nominationId);
     Task<bool> HasReviewedAsync(Guid nominationId, Guid reviewerId);
 }
 
@@ -164,4 +272,156 @@ public interface ILongServiceAwardRepository : IGenericRepository<LongServiceAwa
 #endregion
 
 
+#region Award Voting Repositories
 
+public interface IAwardVoteRepository : IGenericRepository<AwardVote>
+{
+    /// <summary>This voter's ballot in this cycle, or null. There can only ever be one.</summary>
+    Task<AwardVote?> GetByVoterAsync(Guid cycleId, Guid voterId);
+
+    Task<IEnumerable<AwardVote>> GetByCycleAsync(Guid cycleId);
+
+    /// <summary>Votes per nomination for a cycle, counted in the database rather than in memory.</summary>
+    Task<Dictionary<Guid, int>> GetCountsByNominationAsync(Guid cycleId);
+}
+
+/// <summary>
+/// Answers whether an employee may vote in an award.
+/// </summary>
+/// <remarks>
+/// TDC's note: <i>"a section of the employees or all of them can vote on the nominees"</i>. The
+/// electorate is scoped with the same targets as eligibility, distinguished by
+/// <c>AwardTargetPurpose.Electorate</c> — an award with no electorate targets is voted on by
+/// everyone, which is the "or all of them" half of the sentence and the sensible default.
+/// </remarks>
+public interface IAwardElectorateEvaluator
+{
+    Task<bool> CanVoteAsync(Guid awardTypeId, Guid employeeId, Guid tenantId, DateTime asOf);
+}
+
+#endregion
+
+
+#region Award Performance Triggers
+
+/// <summary>Finds who an award should put forward automatically, from performance records.</summary>
+public interface IAwardPerformanceTriggerEvaluator
+{
+    Task<AwardPerformanceTriggerResult> EvaluateAsync(AwardType awardType, Guid tenantId);
+}
+
+/// <summary>
+/// Who the triggers matched, and how much evidence there was to match against.
+/// </summary>
+/// <remarks>
+/// The <c>Examined</c> counts exist so a caller can tell "almost nobody qualified" from "almost
+/// nobody has been appraised". Measured 2026-08-21, the live store holds 4,328 appraisals of which
+/// 18 carry a score, so the second explanation is currently the true one and a screen that reported
+/// only "0 candidates" would be blaming the rule for the data.
+/// </remarks>
+public sealed class AwardPerformanceTriggerResult
+{
+    public decimal? MinPerformanceScore { get; init; }
+    public int? MinGoalsAchieved { get; init; }
+
+    /// <summary>Appraisals carrying a score that were considered.</summary>
+    public int AppraisalsExamined { get; set; }
+
+    /// <summary>Completed goals that were considered.</summary>
+    public int GoalsExamined { get; set; }
+
+    public List<Guid> EmployeeIds { get; set; } = new();
+
+    /// <summary>True when the award has no trigger configured, so nothing can be generated.</summary>
+    public bool NoTriggerConfigured => MinPerformanceScore == null && MinGoalsAchieved == null;
+}
+
+#endregion
+
+#region Long Service Milestones
+
+/// <summary>The rungs of a long-service ladder, as rows rather than as code.</summary>
+public interface ILongServiceMilestoneRepository : IGenericRepository<LongServiceMilestone>
+{
+    Task<IEnumerable<LongServiceMilestone>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId);
+    Task<LongServiceMilestone?> GetByYearsAsync(Guid tenantId, Guid awardTypeId, int years);
+}
+
+/// <summary>
+/// Judges every employee against a long-service ladder, once.
+/// </summary>
+/// <remarks>
+/// <para>This is the second half of AWD-14 — the ladder says what the milestones are, and this says
+/// where each employee stands against them.</para>
+///
+/// <para><b>It returns one verdict per employee rather than the qualified set, and that is the whole
+/// point.</b> Three surfaces read this: the sweep preview, the sweep run, and the FR-HR-113
+/// eligibility report. Each needs a different slice — the sweep wants who to grant, the report wants
+/// everybody with a reason — and if each computed its own slice they would drift. A report that
+/// listed somebody the button then refused to award would be worse than no report. So the
+/// calculation happens once and the callers project.</para>
+/// </remarks>
+public interface ILongServiceSweepEvaluator
+{
+    Task<IReadOnlyList<LongServiceVerdict>> EvaluateAsync(
+        AwardType awardType, IReadOnlyList<LongServiceMilestone> ladder, Guid tenantId, DateTime asOf);
+}
+
+/// <summary>Where one employee stands against a long-service ladder.</summary>
+public enum LongServiceStanding
+{
+    /// <summary>Has reached a rung not yet granted, and nothing exempts them.</summary>
+    Eligible = 1,
+
+    /// <summary>Has reached a rung, but a disciplinary record exempts them (AWD-15).</summary>
+    Exempt = 2,
+
+    /// <summary>Has not served long enough for the lowest rung.</summary>
+    NotYetAtMilestone = 3,
+
+    /// <summary>Already holds the highest rung their service has reached.</summary>
+    AlreadyGranted = 4,
+
+    /// <summary>
+    /// No employment date on record, so nothing can be computed.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not a rounding error. Measured 2026-08-21, <b>3,476 of 5,579</b> employees are in this
+    /// state. They are reported rather than dropped: a sweep that silently omitted them would
+    /// present a result about the <i>data</i> as though it were a result about the <i>staff</i>.
+    /// </remarks>
+    ServiceUnknown = 5,
+}
+
+/// <summary>One employee, one verdict, and the rung it is about.</summary>
+public sealed class LongServiceVerdict
+{
+    public Guid EmployeeId { get; init; }
+    public string EmployeeName { get; init; } = string.Empty;
+    public string? EmployeeNumber { get; init; }
+    public string? DepartmentName { get; init; }
+
+    public DateOnly? ServiceStartDate { get; init; }
+
+    /// <summary>Completed years actually served. Null when there is no employment date.</summary>
+    public int? YearsOfService { get; init; }
+
+    public LongServiceStanding Standing { get; init; }
+
+    /// <summary>The rung this verdict is about — the one reachable, or the one already held.</summary>
+    public int? MilestoneYears { get; init; }
+    public Guid? MilestoneId { get; init; }
+    public string? MilestoneName { get; init; }
+
+    /// <summary>What that rung carries. Null is an unanswered question, not a value of zero.</summary>
+    public decimal? MonetaryAmount { get; init; }
+    public int? LeaveDaysBonus { get; init; }
+
+    /// <summary>The highest rung already granted, if any.</summary>
+    public int? HighestGrantedYears { get; init; }
+
+    /// <summary>Why, in a sentence, for anything other than plain eligibility.</summary>
+    public string? Reason { get; init; }
+}
+
+#endregion

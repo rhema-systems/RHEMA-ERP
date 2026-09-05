@@ -110,6 +110,77 @@ export interface CreateOrganizationUnitRequest {
 }
 
 // Mirrors UpdateOrganizationUnitDto (adds Id; level is immutable server-side).
+/**
+ * Reparents a unit. `newParentId: null` moves it to the root, which only a root-level unit may do
+ * and only while no other root exists in its structure.
+ *
+ * ⚠ Distinct from {@link UpdateOrganizationUnitRequest} on purpose, even though the edit form can
+ * perform the same move. The edit form carries ONE reason for a save that may change both the
+ * parent and the head, and the change log records those as two independent series — so a save that
+ * did both stamped the same sentence on two unrelated rows. These two commands each carry the
+ * reason for the one act they perform.
+ */
+export interface MoveUnitRequest {
+  newParentId?: string | null;
+  changeReason: string;
+}
+
+/** Appoints, replaces or (where the level permits) removes a unit's head. */
+export interface ChangeUnitHeadRequest {
+  newHeadEmployeeId?: string | null;
+  changeReason: string;
+}
+
 export interface UpdateOrganizationUnitRequest extends CreateOrganizationUnitRequest {
   id: string;
+  /**
+   * Why the unit was reparented or given a different head, recorded on the change log.
+   *
+   * ⚠ The server has accepted this since slice 3 and this form never sent it, so every row the
+   * only working write path produced carried `changeReason: null` — an audit trail able to record
+   * what changed and when, but never why. It is ignored on a plain rename, because the server does
+   * not write a history row for one.
+   */
+  changeReason?: string | null;
+}
+
+// ── the organisation-unit change log ────────────────────────────────────────
+
+/**
+ * Derived server-side from the four nullable ids — see `OrganizationUnitChangeTypes`. A row is a
+ * `Restructure` when the unit's parent moved and a `Leadership Change` when its head did; the two
+ * are recorded as separate rows even when one edit caused both.
+ */
+export type OrganizationUnitChangeType = 'Restructure' | 'Leadership Change' | 'Other';
+
+// Mirrors OrganizationUnitHistoryDto.
+export interface OrganizationUnitHistoryEntry extends AuditFields {
+  tenantId: string;
+  organizationUnitId: string;
+  organizationUnitName?: string | null;
+  previousParentId?: string | null;
+  previousParentName?: string | null;
+  newParentId?: string | null;
+  newParentName?: string | null;
+  previousHeadEmployeeId?: string | null;
+  previousHeadEmployeeName?: string | null;
+  newHeadEmployeeId?: string | null;
+  newHeadEmployeeName?: string | null;
+  /** The day the arrangement this row describes took effect. */
+  effectiveFrom: string;
+  /** The day a later change of the SAME kind superseded it; null while it still stands. */
+  effectiveTo?: string | null;
+  changeReason?: string | null;
+  changeType: OrganizationUnitChangeType;
+}
+
+// Query for GET api/OrganizationUnitHistory/paged. An unrecognised changeType is refused with a
+// 400 rather than ignored, so never widen this to `string`.
+export interface OrganizationUnitHistoryQuery {
+  pageNumber?: number;
+  pageSize?: number;
+  unitId?: string;
+  startDate?: string;
+  endDate?: string;
+  changeType?: OrganizationUnitChangeType;
 }

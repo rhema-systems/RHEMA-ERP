@@ -42,4 +42,41 @@ public class TrainingStatusHistoryService : ITrainingStatusHistoryService
 
         return rows.ToDtoList();
     }
+
+    /// <inheritdoc />
+    public async Task RecordAsync(
+        string entityType,
+        Guid entityId,
+        string? entityReference,
+        int? fromStatus,
+        string? fromStatusName,
+        int toStatus,
+        string toStatusName,
+        Guid? changedByEmployeeId,
+        string? reason,
+        CancellationToken cancellationToken = default)
+    {
+        // TenantId is set explicitly: the DbContext is registered without a tenant, so the auto-stamp
+        // is inert and an unstamped row would fail the FK.
+        var row = new TrainingStatusHistory
+        {
+            TenantId            = GetTenantId(),
+            EntityType          = entityType,
+            EntityId            = entityId,
+            EntityReference     = entityReference,
+            FromStatus          = fromStatus,
+            FromStatusName      = fromStatusName,
+            ToStatus            = toStatus,
+            ToStatusName        = toStatusName,
+            ChangedByEmployeeId = changedByEmployeeId,
+            ChangedByName       = string.IsNullOrWhiteSpace(_currentUserProvider.FullName)
+                                    ? _currentUserProvider.Username
+                                    : _currentUserProvider.FullName,
+            ChangedAt           = DateTime.UtcNow,
+            Reason              = reason,
+        };
+
+        // Staged only — see the interface remarks. The caller commits this alongside the change it describes.
+        await _repository.AddAsync(row);
+    }
 }

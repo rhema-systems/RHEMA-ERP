@@ -14,7 +14,13 @@ public interface IStaffDisciplineInvestigationService
     Task<StaffDisciplineInvestigationDto?> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDisciplineInvestigationDto>> GetByInvestigatorAsync(Guid investigatorId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOpenInvestigationsAsync(CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int maxDays = 30, CancellationToken cancellationToken = default);
+    /// <param name="maxDays">
+    /// Defaults to the tenant's <c>CompanyHrPolicySettings.InvestigationDays</c>, which starts at
+    /// FR-HR-178's four weeks.
+    /// Pass a value only for an ad-hoc wider sweep — the queue and the case advisory must otherwise
+    /// answer "overdue" the same way.
+    /// </param>
+    Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int? maxDays = null, CancellationToken cancellationToken = default);
 
     /// <summary>Opens an investigation for a case and advances its status to UnderInvestigation.</summary>
     Task<StaffDisciplineInvestigationDto> OpenAsync(OpenInvestigationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
@@ -131,12 +137,17 @@ public interface IStaffDisciplineAppealService
     Task<IEnumerable<StaffDisciplineAppealDto>> GetAwaitingOutcomeAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Files an appeal for the case and advances the case status to UnderAppeal.</summary>
-    Task<StaffDisciplineAppealDto> FileAsync(FileAppealDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    /// <param name="appellantEmployeeId">
+    /// The caller, from their token. The appeal is refused unless this is the employee the case was
+    /// brought against — an appeal is the subject's own act, so nobody may file one for them.
+    /// </param>
+    Task<StaffDisciplineAppealDto> FileAsync(FileAppealDto dto, Guid tenantId, Guid appellantEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Schedules the appeal hearing and advances the appeal status to HearingScheduled.</summary>
     Task<bool> ScheduleHearingAsync(ScheduleAppealHearingDto dto, Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>Records the appeal outcome and advances the appeal status to DecisionMade.</summary>
+    /// <param name="userId">The deciding officer, from their token — stamped as AppealOutcomeById.</param>
     Task<bool> RecordOutcomeAsync(RecordAppealOutcomeDto dto, Guid userId, CancellationToken cancellationToken = default);
 }
 

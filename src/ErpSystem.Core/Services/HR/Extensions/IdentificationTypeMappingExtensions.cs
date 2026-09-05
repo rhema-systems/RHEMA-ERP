@@ -20,6 +20,7 @@ public static class IdentificationTypeMappingExtensions
             IssuingCountryId = entity.IssuingCountryId,
             IssuingCountryName = entity.IssuingCountry?.Name,
             HasExpiryDate = entity.HasExpiryDate,
+            ExpiryNotificationLeadDays = entity.ExpiryNotificationLeadDays,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -39,6 +40,7 @@ public static class IdentificationTypeMappingExtensions
             IssuingAuthorityName = dto.IssuingAuthorityName,
             IssuingCountryId = dto.IssuingCountryId,
             HasExpiryDate = dto.HasExpiryDate,
+            ExpiryNotificationLeadDays = dto.ExpiryNotificationLeadDays,
             IsActive = dto.IsActive
         };
     }
@@ -51,6 +53,7 @@ public static class IdentificationTypeMappingExtensions
         entity.IssuingAuthorityName = dto.IssuingAuthorityName;
         entity.IssuingCountryId = dto.IssuingCountryId;
         entity.HasExpiryDate = dto.HasExpiryDate;
+        entity.ExpiryNotificationLeadDays = dto.ExpiryNotificationLeadDays;
         entity.IsActive = dto.IsActive;
     }
 

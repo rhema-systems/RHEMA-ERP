@@ -1,6 +1,7 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -45,7 +46,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -126,6 +127,22 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// The full appointment rows for one employee — the self-service read (area 25 slice 7).
+    ///
+    /// The summary above deliberately omits the allowance and the covering-for name (it backs
+    /// org-wide register rows); the portal shows the SUBJECT their own appointment, and whether
+    /// they are paid for acting is exactly what the subject opens the page to see. The repo's
+    /// by-employee read already includes ActingPosition and ActingForEmployee, so the full
+    /// mapping resolves without a second query.
+    /// </summary>
+    public async Task<IEnumerable<StaffActingAppointmentDto>> GetDetailedByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _repo.GetByEmployeeIdAsync(employeeId);
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+    }
+
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByStatusAsync(StaffActingStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -163,9 +180,53 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     // ── CRUD & Workflow ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Validates a body-supplied employee id and returns the row.
+    ///
+    /// The guard stops an unknown or another tenant's id reaching the database as an FK violation —
+    /// which surfaced as an unexplained 500 rather than "that employee was not found" — and because
+    /// the row ends up tracked, the write response resolves the name instead of an empty string.
+    /// </summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The {role} employee with ID '{employeeId}' was not found.");
+        return employee;
+    }
+
     public async Task<StaffActingAppointmentDto> CreateAsync(CreateStaffActingAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        await GetOwnedEmployeeAsync(createDto.EmployeeId, "acting");
+        if (createDto.ActingForEmployeeId is Guid actingForId)
+            await GetOwnedEmployeeAsync(actingForId, "acted-for");
+
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetByIdAsync(createDto.ActingPositionId);
+        if (position == null || position.IsDeleted || position.TenantId != tenantId)
+            throw new ArgumentException($"The acting position with ID '{createDto.ActingPositionId}' was not found.");
+
+        if (createDto.EndDate is DateTime end && end.Date <= createDto.StartDate.Date)
+            throw new InvalidOperationException("An acting appointment must end after it starts.");
+
+        // One person cannot be acting in two posts at once. Nothing checked this, so the same
+        // employee could hold overlapping appointments — and each would independently qualify them
+        // for an acting allowance.
+        var overlapping = await _repo
+            .GetQueryable(a => a.TenantId == tenantId
+                            && a.EmployeeId == createDto.EmployeeId
+                            && (a.Status == StaffActingStatus.Active || a.Status == StaffActingStatus.Extended))
+            .ToListAsync(cancellationToken);
+
+        var clash = overlapping.FirstOrDefault(a =>
+            (a.EndDate ?? DateTime.MaxValue).Date >= createDto.StartDate.Date &&
+            a.StartDate.Date <= (createDto.EndDate ?? DateTime.MaxValue).Date);
+
+        if (clash != null)
+            throw new InvalidOperationException(
+                $"That employee is already acting under {clash.AppointmentNumber} over the same period.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AppointmentNumber = await GenerateAppointmentNumberAsync(cancellationToken);
         entity.Status            = StaffActingStatus.Active;
@@ -175,7 +236,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
         _logger.LogInformation("Acting appointment created: {AppointmentNumber}", entity.AppointmentNumber);
 
-        return entity.ToDto();
+        return (await _repo.GetWithDetailsAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<StaffActingAppointmentDto> UpdateAsync(UpdateStaffActingAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -185,12 +246,43 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         if (entity.Status == StaffActingStatus.Completed)
             throw new InvalidOperationException("A completed acting appointment cannot be edited.");
 
+        // ⚠ Both of the checks below exist on CreateAsync and existed nowhere else, so the edit
+        // was the way round them — the recurring "the guard is on the sibling, not on this one"
+        // shape (cf. D-23, where an approved travel policy could not be edited but could be
+        // deleted). Proven by hr-movements/probe-lane3-acting.mjs, which moved one appointment's
+        // end date past the start of the same employee's next one.
+        //
+        // The update accepts no StartDate, so the STORED start is the only thing to check against.
+        if (updateDto.EndDate is DateTime newEnd && newEnd.Date <= entity.StartDate.Date)
+            throw new InvalidOperationException("An acting appointment must end after it starts.");
+
+        // One person cannot be acting in two posts at once — each would independently qualify them
+        // for an acting allowance. CreateAsync says exactly this; moving an end date reaches the
+        // same state, so the same rule applies. Self is excluded, or every edit clashes with itself.
+        var overlapping = await _repo
+            .GetQueryable(a => a.TenantId == entity.TenantId
+                            && a.EmployeeId == entity.EmployeeId
+                            && a.Id != entity.Id
+                            && (a.Status == StaffActingStatus.Active || a.Status == StaffActingStatus.Extended))
+            .ToListAsync(cancellationToken);
+
+        var clash = overlapping.FirstOrDefault(a =>
+            (a.EndDate ?? DateTime.MaxValue).Date >= entity.StartDate.Date &&
+            a.StartDate.Date <= (updateDto.EndDate ?? DateTime.MaxValue).Date);
+
+        if (clash != null)
+            throw new InvalidOperationException(
+                $"That employee is already acting under {clash.AppointmentNumber} over the same period.");
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // EmployeeName, EmployeeNumber, ActingPositionTitle, ActingForEmployeeName and
+        // MovementNumber are all resolved off navigations GetOwnedAsync does not load, so the edit
+        // response named nobody and no position. GetWithDetailsAsync exists for exactly this.
+        return (await _repo.GetWithDetailsAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<bool> CompleteAsync(CompleteStaffActingAppointmentDto dto, Guid completedByUserId, CancellationToken cancellationToken = default)
@@ -210,6 +302,39 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         _logger.LogInformation("Acting appointment completed: {AppointmentNumber}", entity.AppointmentNumber);
 
         return true;
+    }
+
+    /// <summary>
+    /// Ends an acting appointment before its end date. ⚠ Mirrors CompleteAsync: it sets the status
+    /// AND the completion date, because the appointment did in fact end. Reaching this state by
+    /// assigning Status on the plain edit was what left CompletionDate null and locked the record.
+    /// </summary>
+    public async Task<StaffActingAppointmentDto> TerminateEarlyAsync(
+        TerminateStaffActingAppointmentEarlyDto dto,
+        Guid terminatedByUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(dto.AppointmentId);
+
+        if (entity.Status is not (StaffActingStatus.Active or StaffActingStatus.Extended))
+            throw new InvalidOperationException(
+                "Only an active or extended acting appointment can be ended early.");
+
+        entity.Status         = StaffActingStatus.TerminatedEarly;
+        entity.CompletionDate = DateTime.UtcNow;
+        entity.Notes          = string.IsNullOrWhiteSpace(entity.Notes)
+            ? dto.Reason
+            : $"{entity.Notes}\n\nEnded early: {dto.Reason}";
+        entity.UpdatedAt      = DateTime.UtcNow;
+        entity.UpdatedBy      = terminatedByUserId.ToString();
+
+        await _repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Acting appointment {AppointmentNumber} ended early", entity.AppointmentNumber);
+
+        return (await _repo.GetWithDetailsAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<StaffActingAppointmentDto> ExtendAsync(
@@ -296,15 +421,27 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// Highest issued suffix, over rows INCLUDING soft-deleted ones — see the note on
+    /// <c>StaffMovementService.GenerateMovementNumberAsync</c>. Counting live rows re-issues a number
+    /// as soon as one is deleted, and the unique index then rejects the next appointment.
+    /// </remarks>
     private async Task<string> GenerateAppointmentNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var prefix     = $"ACT-{DateTime.UtcNow:yyyyMMdd}";
-        var countToday = await _repo.GetQueryable()
-            .Where(a => a.TenantId == tenantId && a.AppointmentNumber.StartsWith(prefix))
-            .CountAsync(cancellationToken);
+        var prefix   = $"ACT-{DateTime.UtcNow:yyyyMMdd}-";
 
-        return $"{prefix}-{(countToday + 1):D4}";
+        var issued = await _repo
+            .GetQueryableIncludingDeleted(a => a.TenantId == tenantId && a.AppointmentNumber.StartsWith(prefix))
+            .Select(a => a.AppointmentNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D4}";
     }
 }
 
@@ -342,7 +479,7 @@ public class EmployeeCareerPathService : IEmployeeCareerPathService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 

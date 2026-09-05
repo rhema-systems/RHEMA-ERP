@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -91,6 +91,7 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
             Description = dto.Description,
             Type = dto.Type,
             IssuingAuthority = dto.IssuingAuthority,
+            QualificationLevelId = dto.QualificationLevelId,
             IsActive = dto.IsActive,
         };
 
@@ -98,7 +99,11 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
         await _repository.SaveChangesAsync();
 
         _logger.LogInformation("Qualification catalogue entry created: {Id} ({Name})", entity.Id, entity.Name);
-        return MapToDto(entity);
+
+        // ⚠ Re-read, because the level navigation is not loaded on an entity we just built by hand
+        // and the DTO reports its name. Returning the in-memory graph is how a write response ends
+        // up contradicting the list the caller refreshes a moment later.
+        return MapToDto(await _repository.GetByIdAsync(entity.Id) ?? entity);
     }
 
     public async Task<QualificationCatalogueDto> UpdateAsync(Guid id, CreateQualificationCatalogueDto dto)
@@ -118,13 +123,17 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
         entity.Description = dto.Description;
         entity.Type = dto.Type;
         entity.IssuingAuthority = dto.IssuingAuthority;
+        entity.QualificationLevelId = dto.QualificationLevelId;
         entity.IsActive = dto.IsActive;
 
         await _repository.UpdateAsync(entity);
         await _repository.SaveChangesAsync();
 
         _logger.LogInformation("Qualification catalogue entry updated: {Id} ({Name})", entity.Id, entity.Name);
-        return MapToDto(entity);
+
+        // ⚠ Re-read for the same reason as create: changing the level must change the name the
+        // response carries, and the stale navigation would keep reporting the old rung.
+        return MapToDto(await _repository.GetByIdAsync(entity.Id) ?? entity);
     }
 
     public async Task<bool> DeleteAsync(Guid id)
@@ -150,6 +159,12 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
         Description = entity.Description,
         Type = entity.Type,
         IssuingAuthority = entity.IssuingAuthority,
+        QualificationLevelId = entity.QualificationLevelId,
+        // ⚠ Resolved from the navigation, which means the READS have to Include it. A name declared
+        // on a DTO and set by nothing is the shape this module has met six times; the reads below
+        // load the level for exactly this reason.
+        QualificationLevelName = entity.QualificationLevel?.Name,
+        QualificationLevelRank = entity.QualificationLevel?.Rank,
         IsActive = entity.IsActive,
     };
 }

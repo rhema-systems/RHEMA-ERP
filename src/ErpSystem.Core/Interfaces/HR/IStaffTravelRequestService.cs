@@ -37,17 +37,30 @@ public interface IStaffTravelRequestService
     Task<bool> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default);
     Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, CancellationToken cancellationToken = default);
-    Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Cancels a request. <c>CancelledById</c> on the DTO is the <b>employee</b> who cancelled (an
+    /// Employee FK on the entity); <paramref name="cancelledByUserId"/> is the platform user, for
+    /// the audit trail. Different identifiers — the DTO field used to serve both.
+    /// </summary>
+    Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default);
     Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     // Comment operations
-    Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Adds a comment. <paramref name="authorEmployeeId"/> is the caller's employee record and
+    /// overrides any <c>AuthorId</c> on the payload — authorship is identity, not an input.
+    /// </summary>
+    Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, Guid authorEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestCommentDto>> GetCommentsAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default);
 
     // Attachment operations
-    Task<StaffTravelRequestAttachmentDto> AddAttachmentAsync(CreateStaffTravelRequestAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Adds an attachment. <paramref name="uploaderEmployeeId"/> is the caller's employee record and
+    /// overrides any <c>UploadedById</c> on the payload.
+    /// </summary>
+    Task<StaffTravelRequestAttachmentDto> AddAttachmentAsync(CreateStaffTravelRequestAttachmentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploaderEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestAttachmentDto>> GetAttachmentsAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 
@@ -60,7 +73,12 @@ public interface IStaffTravelRequestService
     Task<bool> DeleteGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>Creates a draft travel request per selected employee, linked to the group, and returns the refreshed group.</summary>
-    Task<StaffGroupTravelDto> AddGroupParticipantsAsync(AddGroupTravelParticipantsDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Adds participants to a group trip, raising a request for each.
+    /// <paramref name="initiatorEmployeeId"/> becomes each request's <c>InitiatedById</c>, which is
+    /// an Employee FK — it previously received the platform user id.
+    /// </summary>
+    Task<StaffGroupTravelDto> AddGroupParticipantsAsync(AddGroupTravelParticipantsDto dto, Guid tenantId, Guid createdByUserId, Guid initiatorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Unlinks a participant's request from the group (the request itself is retained).</summary>
     Task<bool> RemoveGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default);

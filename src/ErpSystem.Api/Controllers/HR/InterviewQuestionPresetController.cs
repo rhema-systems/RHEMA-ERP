@@ -1,14 +1,25 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Named interview templates: "which question types, how many of each". Applying one to an interview
+/// scaffolds its question plans and draws the questions.
+///
+/// <para>HR-only for the same reason as <see cref="InterviewQuestionBankController"/> — a preset names
+/// the shape of the interview, and it was previously readable and editable by any authenticated
+/// employee.</para>
+/// </summary>
 [ApiController]
 [Route("api/interview-question-presets")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules]
 public class InterviewQuestionPresetController : ControllerBase
 {
     private readonly IInterviewQuestionPresetService _service;
@@ -25,10 +36,12 @@ public class InterviewQuestionPresetController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<InterviewQuestionPresetSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<InterviewQuestionPresetDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
@@ -37,6 +50,7 @@ public class InterviewQuestionPresetController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<InterviewQuestionPresetDto>> Create([FromBody] CreateInterviewQuestionPresetDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -54,6 +68,7 @@ public class InterviewQuestionPresetController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<InterviewQuestionPresetDto>> Update(
         Guid id, [FromBody] UpdateInterviewQuestionPresetDto dto)
     {
@@ -68,6 +83,7 @@ public class InterviewQuestionPresetController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -79,10 +95,11 @@ public class InterviewQuestionPresetController : ControllerBase
     // =========================================================================
 
     [HttpPost("{presetId:guid}/items")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<InterviewQuestionPresetItemDto>> AddItem(
         Guid presetId, [FromBody] CreateInterviewQuestionPresetItemDto dto)
     {
-        if (presetId != dto.PresetId) return BadRequest("Preset ID mismatch.");
+        dto.PresetId = presetId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -97,6 +114,7 @@ public class InterviewQuestionPresetController : ControllerBase
     }
 
     [HttpPut("{presetId:guid}/items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<InterviewQuestionPresetItemDto>> UpdateItem(
         Guid presetId, Guid itemId, [FromBody] UpdateInterviewQuestionPresetItemDto dto)
     {
@@ -111,6 +129,7 @@ public class InterviewQuestionPresetController : ControllerBase
     }
 
     [HttpDelete("items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteItem(Guid itemId)
     {
         await _service.DeleteItemAsync(itemId);

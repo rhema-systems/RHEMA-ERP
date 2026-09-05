@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace ErpSystem.Core.DTOs.HR
@@ -41,8 +41,28 @@ namespace ErpSystem.Core.DTOs.HR
         /// <summary>Whether the underlying record is active.</summary>
         public bool IsActive { get; set; } = true;
 
-        /// <summary>Current headcount under / within this node, when meaningful.</summary>
+        /// <summary>
+        /// Headcount attached directly to this node, when meaningful: employees in this unit,
+        /// holders of this post, direct reports of this person. Null on the dimensions where a
+        /// headcount means nothing (locations, teams).
+        /// </summary>
+        /// <remarks>
+        /// Counts people <b>on strength</b> only — <c>IsActive &amp;&amp; StaffStatus != Terminated</c>,
+        /// the same predicate <c>EmployeeService</c> uses. Before slice 4 this counted leavers too,
+        /// so a department that had lost someone still reported them as staff.
+        /// </remarks>
         public int? EmployeeCount { get; set; }
+
+        /// <summary>
+        /// Headcount at and below this node — the subtree total. Null wherever
+        /// <see cref="EmployeeCount"/> is null for the whole dimension.
+        /// </summary>
+        /// <remarks>
+        /// The number an org chart is actually read for: a Directorate whose employees all sit in
+        /// its departments has a direct headcount of zero and a real one of several hundred.
+        /// Measured on DEFAULT 2026-08-22, nine of TDC's 41 units were in exactly that position.
+        /// </remarks>
+        public int? TotalEmployeeCount { get; set; }
 
         /// <summary>Planned headcount (positions dimension capacity planning).</summary>
         public int? ExpectedHeadcount { get; set; }

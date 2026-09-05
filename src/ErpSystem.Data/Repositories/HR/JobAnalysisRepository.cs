@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -16,10 +17,7 @@ public class JobDescriptionRepository : GenericRepository<JobDescription>, IJobD
     public async Task<JobDescription?> GetByJobDescriptionNumberAsync(string jobDescriptionNumber)
     {
         return await _dbSet
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
-            .Include(jd => jd.ReviewedBy)
-            .Include(jd => jd.ApprovedBy)
+            .WithLookups()
             .Include(jd => jd.Responsibilities)
             .FirstOrDefaultAsync(jd => jd.JobDescriptionNumber == jobDescriptionNumber);
     }
@@ -27,8 +25,7 @@ public class JobDescriptionRepository : GenericRepository<JobDescription>, IJobD
     public async Task<IEnumerable<JobDescription>> GetByPositionIdAsync(Guid positionId)
     {
         return await _dbSet
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
+            .WithLookups()
             .Where(jd => jd.PositionId == positionId)
             .OrderByDescending(jd => jd.VersionNumber)
             .ToListAsync();
@@ -37,8 +34,7 @@ public class JobDescriptionRepository : GenericRepository<JobDescription>, IJobD
     public async Task<IEnumerable<JobDescription>> GetByStatusAsync(JobDescriptionStatus status)
     {
         return await _dbSet
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
+            .WithLookups()
             .Where(jd => jd.Status == status)
             .OrderByDescending(jd => jd.EffectiveDate)
             .ToListAsync();
@@ -47,10 +43,7 @@ public class JobDescriptionRepository : GenericRepository<JobDescription>, IJobD
     public async Task<JobDescription?> GetCurrentVersionForPositionAsync(Guid positionId)
     {
         return await _dbSet
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
-            .Include(jd => jd.ReviewedBy)
-            .Include(jd => jd.ApprovedBy)
+            .WithLookups()
             .Include(jd => jd.Responsibilities)
             .Where(jd => jd.PositionId == positionId &&
                         jd.Status == JobDescriptionStatus.Approved &&
@@ -65,8 +58,7 @@ public class JobDescriptionRepository : GenericRepository<JobDescription>, IJobD
         var futureDate = DateTime.Today.AddDays(daysAhead);
 
         return await _dbSet
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
+            .WithLookups()
             .Where(jd => jd.Status == JobDescriptionStatus.Approved &&
                         jd.NextReviewDate != null &&
                         jd.NextReviewDate <= futureDate)
@@ -77,8 +69,7 @@ public class JobDescriptionRepository : GenericRepository<JobDescription>, IJobD
     public async Task<IEnumerable<JobDescription>> GetVersionHistoryAsync(Guid positionId)
     {
         return await _dbSet
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
+            .WithLookups()
             .Where(jd => jd.PositionId == positionId)
             .OrderByDescending(jd => jd.VersionNumber)
             .ToListAsync();
@@ -232,9 +223,7 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     public async Task<ManpowerBudget?> GetByBudgetNumberAsync(string budgetNumber)
     {
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
-            .Include(b => b.ApprovedBy)
+            .WithLookups()
             .Include(b => b.BudgetLines).ThenInclude(l => l.Position)
             .FirstOrDefaultAsync(b => b.BudgetNumber == budgetNumber);
     }
@@ -242,8 +231,7 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     public async Task<IEnumerable<ManpowerBudget>> GetByFiscalYearAsync(int fiscalYear)
     {
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .Where(b => b.FiscalYear == fiscalYear)
             .OrderBy(b => b.OrganizationUnit != null ? b.OrganizationUnit.Name : string.Empty)
             .ToListAsync();
@@ -252,8 +240,7 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     public async Task<IEnumerable<ManpowerBudget>> GetByOrganizationUnitIdAsync(Guid organizationUnitId)
     {
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .Where(b => b.OrganizationUnitId == organizationUnitId)
             .OrderByDescending(b => b.FiscalYear)
             .ToListAsync();
@@ -262,8 +249,7 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     public async Task<IEnumerable<ManpowerBudget>> GetByOrganizationLevelIdAsync(Guid organizationLevelId)
     {
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .Where(b => b.OrganizationLevelId == organizationLevelId)
             .OrderByDescending(b => b.FiscalYear)
             .ToListAsync();
@@ -272,8 +258,7 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     public async Task<IEnumerable<ManpowerBudget>> GetByStatusAsync(ManpowerBudgetStatus status)
     {
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .Where(b => b.Status == status)
             .OrderByDescending(b => b.FiscalYear)
             .ToListAsync();
@@ -283,21 +268,32 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     {
         var currentYear = DateTime.Today.Year;
 
+        // ⚠ Ordered, because "current" has to be a single answer. This took FirstOrDefault with no
+        // ordering, so once a unit had two approved budgets for the same year — a revision approved
+        // mid-year, or simply two submissions — the endpoint returned an arbitrary one, and could
+        // return a different one on the next call. Found by running the content audit twice.
+        //
+        // Most recently approved wins, which makes the READ agree with what the WRITE already does:
+        // approving a budget overwrites ExpectedHeadcount for every position it names (decision
+        // D-2), so the latest approval is already the establishment in force. Anything else would
+        // report one budget while a different one governs recruitment.
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .Include(b => b.BudgetLines).ThenInclude(l => l.Position)
             .Where(b => b.OrganizationUnitId == organizationUnitId &&
                        b.FiscalYear == currentYear &&
-                       b.Status == ManpowerBudgetStatus.Approved)
+                       (b.Status == ManpowerBudgetStatus.Active ||
+                        b.Status == ManpowerBudgetStatus.Approved))
+            .OrderByDescending(b => b.Status == ManpowerBudgetStatus.Active)
+            .ThenByDescending(b => b.ApprovalDate)
+            .ThenByDescending(b => b.CreatedAt)
             .FirstOrDefaultAsync();
     }
 
     public async Task<IEnumerable<ManpowerBudget>> GetPendingApprovalsAsync()
     {
         return await _dbSet
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .Where(b => b.Status == ManpowerBudgetStatus.Submitted)
             .OrderBy(b => b.CreatedAt)
             .ToListAsync();

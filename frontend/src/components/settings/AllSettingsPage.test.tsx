@@ -47,6 +47,14 @@ describe('AllSettingsPage', () => {
 
     expect(modules?.cards.map(card => card.title)).toContain('Procurement');
     expect(modules?.cards.map(card => card.title)).toContain('Inventory');
+    // SHE configuration is its own module card, ordered right after Human Resources, and
+    // its links never fall into the General Administration bucket.
+    const moduleTitles = modules?.cards.map(card => card.title) ?? [];
+    expect(moduleTitles.indexOf('Safety (SHE)')).toBe(moduleTitles.indexOf('Human Resources') + 1);
+    expect(modules?.cards.find(card => card.title === 'Safety (SHE)')?.links.map(link => link.title))
+      .toEqual(expect.arrayContaining(['Incident Types', 'PPE Types', 'Reminder Engine']));
+    const generalAdmin = administration?.cards.find(card => card.title === 'General Administration');
+    expect(generalAdmin?.links.map(link => link.title) ?? []).not.toContain('Incident Types');
     expect(modules?.cards.find(card => card.title === 'Inventory')?.links.map(link => link.title)).toEqual([
       'Units of Measure',
       'UoM Schedules',

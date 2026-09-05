@@ -44,6 +44,13 @@ export default function EditIdentificationTypePage() {
         issuingAuthorityName: values.issuingAuthorityName,
         issuingCountryId: values.issuingCountryId || null,
         hasExpiryDate: values.hasExpiryDate,
+        // Blank stays null, and a type that does not expire cannot carry a warning time at all —
+        // the sweep would ignore it, so storing one would be a setting that only looks like a
+        // feature. Both are the same instruction to the server: raise nothing.
+        expiryNotificationLeadDays:
+          values.hasExpiryDate && values.expiryNotificationLeadDays
+            ? Number(values.expiryNotificationLeadDays)
+            : null,
         isActive: values.isActive,
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'identification-types'] });
@@ -86,6 +93,10 @@ export default function EditIdentificationTypePage() {
             issuingCountryId: type.issuingCountryId ?? '',
             description: type.description ?? '',
             hasExpiryDate: type.hasExpiryDate,
+            expiryNotificationLeadDays:
+              type.expiryNotificationLeadDays == null
+                ? ''
+                : String(type.expiryNotificationLeadDays),
             isActive: type.isActive,
           }}
           countries={countries ?? []}

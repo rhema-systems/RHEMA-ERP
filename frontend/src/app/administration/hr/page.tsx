@@ -1,9 +1,12 @@
 'use client';
 
 import {
+  Gavel,
   Building2,
   MapPin,
   Users,
+  Users2,
+  UserRoundCheck,
   ListTree,
   Wrench,
   GraduationCap,
@@ -11,10 +14,18 @@ import {
   Tags,
   Globe,
   Building,
+  Boxes,
   CreditCard,
   Clock,
   CalendarDays,
   Coins,
+  Target,
+  Workflow,
+  HelpCircle,
+  LayoutList,
+  ClipboardCheck,
+  Medal,
+  Settings,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -64,6 +75,22 @@ export default function HrAdministrationPage() {
               icon: ListTree,
             },
             {
+              // Slice 6. The union a role falls under is printed on its job description and
+              // in the bargaining-unit clause of the offer letter.
+              title: 'Unions',
+              description: 'Trade unions and the collective agreements negotiated with each.',
+              href: '/administration/hr/unions',
+              icon: Users2,
+            },
+            {
+              // Slice 8. The assessors and panellists brought in from outside; the recruitment
+              // panel picker draws from the active ones here.
+              title: 'External Associates',
+              description: 'Panellists, assessors and advisers who act for you without an ERP login.',
+              href: '/administration/hr/external-associates',
+              icon: UserRoundCheck,
+            },
+            {
               title: 'Skills',
               description: 'Skills positions require and employees hold.',
               href: '/administration/hr/skills',
@@ -98,6 +125,12 @@ export default function HrAdministrationPage() {
               description: 'Read-only lookup shared with other modules.',
               href: '/administration/hr/departments',
               icon: Building,
+            },
+            {
+              title: 'Asset Types',
+              description: 'The categories the company-asset register is built on.',
+              href: '/administration/hr/asset-types',
+              icon: Boxes,
             },
           ]}
         />
@@ -140,6 +173,88 @@ export default function HrAdministrationPage() {
       </div>
 
       <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Performance</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Performance Setup',
+              description:
+                'Strategic goals, the goal library, KPI definitions and the goal risk thresholds.',
+              href: '/administration/hr/performance',
+              icon: Target,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Recruitment</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Recruitment Pipelines',
+              description:
+                'The stages applications move through, and the rules governing those moves.',
+              href: '/administration/hr/recruitment/pipelines',
+              icon: Workflow,
+            },
+            {
+              title: 'Interview Question Bank',
+              description:
+                'The questions candidates are asked, with the weight and score band each is marked against.',
+              href: '/administration/hr/recruitment/question-bank',
+              icon: HelpCircle,
+            },
+            {
+              title: 'Interview Presets',
+              description:
+                'Reusable interview shapes — which question types a panel covers, and how many of each.',
+              href: '/administration/hr/recruitment/question-presets',
+              icon: LayoutList,
+            },
+            {
+              title: 'Pre-Employment Check Templates',
+              description:
+                'Standard sets of checks — medical, police clearance, references — applied to an offer in one step.',
+              href: '/administration/hr/recruitment/check-templates',
+              icon: ClipboardCheck,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+          Orientation &amp; onboarding
+        </h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Awards',
+              description:
+                'Award catalogue, levels, budgets, committees and the long-service milestone ladder.',
+              href: '/administration/hr/awards',
+              icon: Medal,
+            },
+            {
+              title: 'Discipline Catalogue',
+              description:
+                'What counts as misconduct, the procedure each offence must follow, and the sanctions available.',
+              href: '/administration/hr/discipline/catalogue',
+              icon: Gavel,
+            },
+            {
+              title: 'Orientation & Onboarding Setup',
+              description:
+                'The induction catalogue with its modules, assessments and audience rules, plus the reusable onboarding checklists.',
+              href: '/administration/hr/orientation',
+              icon: GraduationCap,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Payroll</h2>
         <NavCardGrid
           items={[
@@ -148,6 +263,13 @@ export default function HrAdministrationPage() {
               description: 'Grades, components, tax tables and parameters.',
               href: '/administration/hr/payroll',
               icon: CreditCard,
+            },
+            {
+              title: 'HR Settings',
+              description:
+                'Company profile and the tenant-wide HR rules that letters, reminders and enforcement read.',
+              href: '/administration/hr/settings',
+              icon: Settings,
             },
           ]}
         />

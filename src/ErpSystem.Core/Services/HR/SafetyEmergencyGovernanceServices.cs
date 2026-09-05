@@ -1,9 +1,11 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -59,9 +61,11 @@ public class SheEmergencyService : ISheEmergencyService
         return current;
     }
 
+    // Owned-loads carry the navigations the mappers read, so single reads and write responses
+    // resolve names instead of mapping blanks.
     private async Task<EmergencyPlan> GetOwnedPlanAsync(Guid id)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
+        var entity = await _planRepository.GetByIdAsync(id, p => p.PlanOwner, p => p.Location!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Emergency plan with ID '{id}' not found.");
         return entity;
@@ -69,7 +73,7 @@ public class SheEmergencyService : ISheEmergencyService
 
     private async Task<SheAssemblyPoint> GetOwnedAssemblyPointAsync(Guid id)
     {
-        var entity = await _unitOfWork.Repository<SheAssemblyPoint>().GetByIdAsync(id);
+        var entity = await _unitOfWork.Repository<SheAssemblyPoint>().GetByIdAsync(id, a => a.Location!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Assembly point with ID '{id}' not found.");
         return entity;
@@ -85,7 +89,7 @@ public class SheEmergencyService : ISheEmergencyService
 
     private async Task<EmergencyDrill> GetOwnedDrillAsync(Guid id)
     {
-        var entity = await _drillRepository.GetByIdAsync(id);
+        var entity = await _drillRepository.GetByIdAsync(id, d => d.Coordinator, d => d.Location!, d => d.Department!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Emergency drill with ID '{id}' not found.");
         return entity;
@@ -93,10 +97,37 @@ public class SheEmergencyService : ISheEmergencyService
 
     private async Task<EmergencyResponseTeam> GetOwnedTeamMemberAsync(Guid id)
     {
-        var entity = await _teamRepository.GetByIdAsync(id);
+        var entity = await _teamRepository.GetByIdAsync(id, t => t.Employee, t => t.EmergencyPlan);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Emergency response team member with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied FKs — without these a bad id surfaces as an SQL 547 /
+    /// HTTP 500 instead of a 404, and a child could be attached to another tenant's plan. The
+    /// guarded loads double as change-tracker fixup, so write responses resolve names.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task GuardOptionalReferencesAsync(Guid? locationId, Guid? departmentId = null)
+    {
+        if (locationId.HasValue)
+        {
+            var location = await _unitOfWork.Repository<Location>().GetByIdAsync(locationId.Value);
+            if (location == null || location.TenantId != GetTenantId())
+                throw new ArgumentException($"Location with ID '{locationId.Value}' not found.");
+        }
+        if (departmentId.HasValue)
+        {
+            var department = await _unitOfWork.Repository<Department>().GetByIdAsync(departmentId.Value);
+            if (department == null || department.TenantId != GetTenantId())
+                throw new ArgumentException($"Department with ID '{departmentId.Value}' not found.");
+        }
     }
 
     public async Task<EmergencyPlanDto> GetPlanAsync(Guid id, CancellationToken cancellationToken = default)
@@ -152,6 +183,14 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyPlanDto> CreatePlanAsync(CreateEmergencyPlanDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        var planNumber = dto.PlanNumber.Trim();
+        var exists = await _planRepository.GetQueryable()
+            .AnyAsync(p => p.TenantId == tenantId && p.PlanNumber == planNumber, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"An emergency plan with number '{planNumber}' already exists for this tenant.");
+        await GetOwnedEmployeeAsync(dto.PlanOwnerId);
+        await GuardOptionalReferencesAsync(dto.LocationId);
+
         var entity = dto.ToEntity(tenantId, userId);
         await _planRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -161,6 +200,8 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyPlanDto> UpdatePlanAsync(UpdateEmergencyPlanDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(dto.Id);
+        await GetOwnedEmployeeAsync(dto.PlanOwnerId);
+        await GuardOptionalReferencesAsync(dto.LocationId);
         entity.UpdateEntity(dto, userId);
         await _planRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -179,6 +220,8 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<SheAssemblyPointDto> AddAssemblyPointAsync(CreateSheAssemblyPointDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        await GuardOptionalReferencesAsync(dto.LocationId);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheAssemblyPoint>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -188,6 +231,7 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<SheAssemblyPointDto> UpdateAssemblyPointAsync(UpdateSheAssemblyPointDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAssemblyPointAsync(dto.Id);
+        await GuardOptionalReferencesAsync(dto.LocationId);
         entity.UpdateEntity(dto, userId);
         await _unitOfWork.Repository<SheAssemblyPoint>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -206,6 +250,7 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyContactDto> AddContactAsync(CreateEmergencyContactDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<EmergencyContact>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -249,6 +294,15 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyDrillDto> AddDrillAsync(CreateEmergencyDrillDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        var drillNumber = dto.DrillNumber.Trim();
+        var exists = await _drillRepository.GetQueryable()
+            .AnyAsync(d => d.TenantId == tenantId && d.DrillNumber == drillNumber, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"A drill with number '{drillNumber}' already exists for this tenant.");
+        await GetOwnedEmployeeAsync(dto.CoordinatorId);
+        await GuardOptionalReferencesAsync(dto.LocationId, dto.DepartmentId);
+
         var entity = dto.ToEntity(tenantId, userId);
         await _drillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -258,6 +312,8 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyDrillDto> UpdateDrillAsync(UpdateEmergencyDrillDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedDrillAsync(dto.Id);
+        await GetOwnedEmployeeAsync(dto.CoordinatorId);
+        await GuardOptionalReferencesAsync(dto.LocationId, dto.DepartmentId);
         entity.UpdateEntity(dto, userId);
         await _drillRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -276,6 +332,15 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyResponseTeamDto> AddTeamMemberAsync(CreateEmergencyResponseTeamDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        // Deleted rows don't block: removing someone from the team and re-adding them is normal.
+        var exists = await _teamRepository.GetQueryable()
+            .AnyAsync(t => t.TenantId == tenantId && t.EmergencyPlanId == dto.EmergencyPlanId
+                        && t.EmployeeId == dto.EmployeeId && !t.IsDeleted, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException("This employee is already on the response team for this plan.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _teamRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -374,6 +439,25 @@ public class SheRegulatoryComplianceService : ISheRegulatoryComplianceService
         return entity;
     }
 
+    /// <summary>Guards the body-supplied FKs — without these a bad id surfaces as an SQL 547 /
+    /// HTTP 500 instead of a 404, and evidence could be attached to another tenant's obligation.
+    /// The guarded loads double as change-tracker fixup, so write responses resolve names.</summary>
+    private async Task<SheRegulatoryBody> GetOwnedRegulatoryBodyAsync(Guid id)
+    {
+        var body = await _unitOfWork.Repository<SheRegulatoryBody>().GetByIdAsync(id);
+        if (body == null || body.TenantId != GetTenantId())
+            throw new ArgumentException($"Regulatory body with ID '{id}' not found.");
+        return body;
+    }
+
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
     public async Task<SheRegulatoryObligationDto> GetObligationAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -385,11 +469,18 @@ public class SheRegulatoryComplianceService : ISheRegulatoryComplianceService
 
     public async Task<SheRegulatoryObligationDto?> GetObligationByCodeAsync(string obligationCode, CancellationToken cancellationToken = default)
     {
+        // Resolved inside a tenant-scoped query: the repository's FirstOrDefault-by-code can land on
+        // another tenant's row when codes collide, which would make this read answer null wrongly.
         var tenantId = GetTenantId();
-        var entity = await _obligationRepository.GetByCodeAsync(obligationCode);
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
+        var code = obligationCode.Trim();
+        var id = await _obligationRepository.GetQueryable()
+            .Where(o => o.TenantId == tenantId && o.ObligationCode == code)
+            .Select(o => (Guid?)o.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (id == null) return null;
+
+        var entity = await _obligationRepository.GetWithEvidenceAsync(id.Value);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<SheRegulatoryObligationSummaryDto>> GetAllObligationsAsync(CancellationToken cancellationToken = default)
@@ -419,6 +510,7 @@ public class SheRegulatoryComplianceService : ISheRegulatoryComplianceService
     public async Task<IEnumerable<SheRegulatoryObligationSummaryDto>> GetObligationsByOwnerAsync(Guid ownerId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedEmployeeAsync(ownerId);
         return (await _obligationRepository.GetByOwnerAsync(ownerId))
             .Where(e => e.TenantId == tenantId)
             .ToSummaryDtoList();
@@ -443,6 +535,20 @@ public class SheRegulatoryComplianceService : ISheRegulatoryComplianceService
     public async Task<SheRegulatoryObligationDto> CreateObligationAsync(CreateSheRegulatoryObligationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Obligation codes are user-entered and GetObligationByCodeAsync resolves by code — a
+        // duplicate would make that lookup answer with an arbitrary row. Guard and store trimmed,
+        // so a whitespace variant cannot slip past the check.
+        var code = dto.ObligationCode.Trim();
+        var codeTaken = await _obligationRepository.GetQueryable()
+            .AnyAsync(o => o.TenantId == tenantId && o.ObligationCode == code, cancellationToken);
+        if (codeTaken)
+            throw new InvalidOperationException($"A regulatory obligation with code '{code}' already exists.");
+
+        if (dto.RegulatoryBodyId.HasValue) await GetOwnedRegulatoryBodyAsync(dto.RegulatoryBodyId.Value);
+        if (dto.ObligationOwnerId.HasValue) await GetOwnedEmployeeAsync(dto.ObligationOwnerId.Value);
+
+        dto.ObligationCode = code;
         var entity = dto.ToEntity(tenantId, userId);
         await _obligationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -452,10 +558,17 @@ public class SheRegulatoryComplianceService : ISheRegulatoryComplianceService
     public async Task<SheRegulatoryObligationDto> UpdateObligationAsync(UpdateSheRegulatoryObligationDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedObligationAsync(dto.Id);
+        if (dto.RegulatoryBodyId.HasValue && dto.RegulatoryBodyId != entity.RegulatoryBodyId)
+            await GetOwnedRegulatoryBodyAsync(dto.RegulatoryBodyId.Value);
+        if (dto.ObligationOwnerId.HasValue && dto.ObligationOwnerId != entity.ObligationOwnerId)
+            await GetOwnedEmployeeAsync(dto.ObligationOwnerId.Value);
         entity.UpdateEntity(dto, userId);
         await _obligationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the include-bearing path: the tracked entity's navs and evidence rows
+        // are unloaded here, and mapping them straight to the DTO returns blank names / empty lists.
+        return await GetObligationAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteObligationAsync(Guid id, CancellationToken cancellationToken = default)
@@ -469,6 +582,8 @@ public class SheRegulatoryComplianceService : ISheRegulatoryComplianceService
     public async Task<SheRegulatoryComplianceEvidenceDto> AddEvidenceAsync(CreateSheRegulatoryComplianceEvidenceDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedObligationAsync(dto.ObligationId);
+        await GetOwnedEmployeeAsync(dto.RecordedById);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheRegulatoryComplianceEvidence>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -526,12 +641,24 @@ public class SafetySignageService : ISafetySignageService
         return current;
     }
 
+    // The Location include means update responses map a resolved LocationName instead of a blank.
     private async Task<SafetySign> GetOwnedSignAsync(Guid id)
     {
-        var entity = await _signRepository.GetByIdAsync(id);
+        var entity = await _signRepository.GetByIdAsync(id, s => s.Location);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Safety sign with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied Location FK — without it a bad id surfaces as an SQL 547 /
+    /// HTTP 500 instead of a 404. The guarded load doubles as change-tracker fixup, so create
+    /// responses resolve the location name.</summary>
+    private async Task<Location> GetOwnedLocationAsync(Guid id)
+    {
+        var location = await _unitOfWork.Repository<Location>().GetByIdAsync(id);
+        if (location == null || location.TenantId != GetTenantId())
+            throw new ArgumentException($"Location with ID '{id}' not found.");
+        return location;
     }
 
     public async Task<SafetySignDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -545,16 +672,24 @@ public class SafetySignageService : ISafetySignageService
 
     public async Task<SafetySignDto?> GetByCodeAsync(string signCode, CancellationToken cancellationToken = default)
     {
+        // Resolved inside a tenant-scoped query: the repository's FirstOrDefault-by-code can land on
+        // another tenant's row when codes collide, which would make this read answer null wrongly.
         var tenantId = GetTenantId();
-        var entity = await _signRepository.GetByCodeAsync(signCode);
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
+        var code = signCode.Trim();
+        var id = await _signRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId && s.SignCode == code)
+            .Select(s => (Guid?)s.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (id == null) return null;
+
+        var entity = await _signRepository.GetByIdAsync(id.Value, s => s.Location);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<SafetySignDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedLocationAsync(locationId);
         return (await _signRepository.GetByLocationAsync(locationId))
             .Where(e => e.TenantId == tenantId)
             .Select(e => e.ToDto());
@@ -603,6 +738,19 @@ public class SafetySignageService : ISafetySignageService
     public async Task<SafetySignDto> CreateAsync(CreateSafetySignDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Sign codes are user-entered and GetByCodeAsync resolves by code — a duplicate would make
+        // that lookup answer with an arbitrary row. Guard and store trimmed, so a whitespace
+        // variant cannot slip past the check.
+        var code = dto.SignCode.Trim();
+        var codeTaken = await _signRepository.GetQueryable()
+            .AnyAsync(s => s.TenantId == tenantId && s.SignCode == code, cancellationToken);
+        if (codeTaken)
+            throw new InvalidOperationException($"A safety sign with code '{code}' already exists.");
+
+        await GetOwnedLocationAsync(dto.LocationId);
+
+        dto.SignCode = code;
         var entity = dto.ToEntity(tenantId, userId);
         await _signRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -612,6 +760,8 @@ public class SafetySignageService : ISafetySignageService
     public async Task<SafetySignDto> UpdateAsync(UpdateSafetySignDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSignAsync(dto.Id);
+        if (dto.LocationId != entity.LocationId)
+            await GetOwnedLocationAsync(dto.LocationId);
         entity.UpdateEntity(dto, userId);
         await _signRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -680,7 +830,7 @@ public class ShePerformanceService : IShePerformanceService
     public async Task<ShePerformanceSnapshotDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _snapshotRepository.GetByIdAsync(id, s => s.Location, s => s.PreparedBy, s => s.ReviewedBy);
+        var entity = await _snapshotRepository.GetByIdAsync(id, s => s.Location, s => s.PreparedBy, s => s.ReviewedBy, s => s.KpisComputedBy);
         if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Performance snapshot with ID '{id}' not found.");
         return entity.ToDto();
@@ -714,19 +864,52 @@ public class ShePerformanceService : IShePerformanceService
     public async Task<ShePerformanceSnapshotDto?> GetLatestAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _snapshotRepository.GetLatestAsync();
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
+        var entity = await _snapshotRepository.GetLatestAsync(tenantId);
+        return entity?.ToDto();
     }
 
     public async Task<ShePerformanceSnapshotDto> CreateAsync(CreateShePerformanceSnapshotDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Snapshot numbers are user-entered, and GetByNumberAsync resolves by number — a duplicate
+        // would make that lookup (and the screens built on it) answer with an arbitrary row.
+        var sameNumber = await _snapshotRepository.GetByNumberAsync(dto.SnapshotNumber);
+        if (sameNumber != null && sameNumber.TenantId == tenantId)
+            throw new InvalidOperationException($"A performance snapshot with number '{dto.SnapshotNumber}' already exists.");
+
+        // One snapshot per period+location: a second row for the same period would silently fork the
+        // reported figures (these are hand-reported, not computed — see slice 14).
+        var samePeriod = await _snapshotRepository.GetByPeriodAsync(dto.PeriodType, dto.Year, dto.PeriodNumber, dto.LocationId);
+        if (samePeriod != null && samePeriod.TenantId == tenantId)
+            throw new InvalidOperationException(
+                $"A performance snapshot for {dto.PeriodType} {dto.Year}{(dto.PeriodNumber is int p ? $" period {p}" : "")} already exists ('{samePeriod.SnapshotNumber}').");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _snapshotRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the include-bearing path: the tracked entity's PreparedBy/Location navs
+        // are unloaded here, and mapping them straight to the DTO returns blank names.
+        return await GetByIdAsync(entity.Id, cancellationToken);
+    }
+
+    public async Task<ShePerformanceSnapshotDto> UpdateAsync(UpdateShePerformanceSnapshotDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedSnapshotAsync(dto.Id);
+
+        // A reviewed snapshot is the record management signed off on — corrections after that
+        // point would silently invalidate the review.
+        if (entity.ReviewedById != null)
+            throw new InvalidOperationException(
+                $"Snapshot '{entity.SnapshotNumber}' has already been reviewed and is locked. Delete and re-enter it if the figures are wrong.");
+
+        entity.UpdateEntity(dto, userId);
+        await _snapshotRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Same nav-loading reasoning as CreateAsync.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> ReviewAsync(ReviewShePerformanceSnapshotDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -812,9 +995,10 @@ public class SafetyCommitteeService : ISafetyCommitteeService
         return entity;
     }
 
+    // The Employee include means update responses map a resolved member name instead of a blank.
     private async Task<SafetyCommitteeMember> GetOwnedMemberAsync(Guid id)
     {
-        var entity = await _memberRepository.GetByIdAsync(id);
+        var entity = await _memberRepository.GetByIdAsync(id, m => m.Employee);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Committee member with ID '{id}' not found.");
         return entity;
@@ -836,9 +1020,10 @@ public class SafetyCommitteeService : ISafetyCommitteeService
         return entity;
     }
 
+    // Includes carry the navs the mapper reads (assignee name, meeting number) onto update responses.
     private async Task<SafetyMeetingActionItem> GetOwnedActionItemAsync(Guid id)
     {
-        var entity = await _actionItemRepository.GetByIdAsync(id);
+        var entity = await _actionItemRepository.GetByIdAsync(id, a => a.AssignedTo!, a => a.Meeting);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Meeting action item with ID '{id}' not found.");
         return entity;
@@ -850,6 +1035,18 @@ public class SafetyCommitteeService : ISafetyCommitteeService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Meeting document with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied FKs — without these a bad id surfaces as an SQL 547 /
+    /// HTTP 500 instead of a 404, and a child row could be attached to another tenant's committee
+    /// or meeting. The guarded loads double as change-tracker fixup, so write responses resolve
+    /// names instead of mapping blanks.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
     }
 
     // ── Committees ──
@@ -873,6 +1070,7 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyCommitteeDto> CreateCommitteeAsync(CreateSafetyCommitteeDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        if (dto.ChairPersonId.HasValue) await GetOwnedEmployeeAsync(dto.ChairPersonId.Value);
         var entity = dto.ToEntity(tenantId, userId);
         await _committeeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -882,10 +1080,16 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyCommitteeDto> UpdateCommitteeAsync(UpdateSafetyCommitteeDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCommitteeAsync(dto.Id);
+        if (dto.ChairPersonId.HasValue && dto.ChairPersonId != entity.ChairPersonId)
+            await GetOwnedEmployeeAsync(dto.ChairPersonId.Value);
         entity.UpdateEntity(dto, userId);
         await _committeeRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the include-bearing path: the tracked entity's ChairPerson nav and
+        // Members rows are unloaded here, and mapping them straight to the DTO returns a blank
+        // chair name and an empty member list.
+        return await GetCommitteeAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteCommitteeAsync(Guid id, CancellationToken cancellationToken = default)
@@ -900,6 +1104,7 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<IEnumerable<SafetyCommitteeMemberDto>> GetMembersAsync(Guid committeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedCommitteeAsync(committeeId);
         return (await _memberRepository.GetByCommitteeIdAsync(committeeId))
             .Where(e => e.TenantId == tenantId)
             .Select(e => e.ToDto());
@@ -908,6 +1113,17 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyCommitteeMemberDto> AddMemberAsync(CreateSafetyCommitteeMemberDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedCommitteeAsync(dto.CommitteeId);
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+
+        // Past memberships (ended or soft-deleted) don't block a rejoin; a second ACTIVE row for
+        // the same person would double-count them on the roster.
+        var activeExists = await _memberRepository.GetQueryable()
+            .AnyAsync(m => m.TenantId == tenantId && m.CommitteeId == dto.CommitteeId
+                        && m.EmployeeId == dto.EmployeeId && m.IsActive && !m.IsDeleted, cancellationToken);
+        if (activeExists)
+            throw new InvalidOperationException("This employee is already an active member of this committee.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _memberRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -944,6 +1160,7 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<IEnumerable<SafetyMeetingSummaryDto>> GetMeetingsByCommitteeAsync(Guid committeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedCommitteeAsync(committeeId);
         return (await _meetingRepository.GetByCommitteeIdAsync(committeeId))
             .Where(e => e.TenantId == tenantId)
             .ToSummaryDtoList();
@@ -960,6 +1177,20 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyMeetingDto> CreateMeetingAsync(CreateSafetyMeetingDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Meeting numbers are user-entered and the register is navigated by them — a duplicate
+        // would make two meetings indistinguishable. Guard and store trimmed, so a whitespace
+        // variant cannot slip past the check.
+        var number = dto.MeetingNumber.Trim();
+        var numberTaken = await _meetingRepository.GetQueryable()
+            .AnyAsync(m => m.TenantId == tenantId && m.MeetingNumber == number, cancellationToken);
+        if (numberTaken)
+            throw new InvalidOperationException($"A safety meeting with number '{number}' already exists.");
+
+        if (dto.CommitteeId.HasValue) await GetOwnedCommitteeAsync(dto.CommitteeId.Value);
+        if (dto.FacilitatorId.HasValue) await GetOwnedEmployeeAsync(dto.FacilitatorId.Value);
+
+        dto.MeetingNumber = number;
         var entity = dto.ToEntity(tenantId, userId);
         await _meetingRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -969,10 +1200,18 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyMeetingDto> UpdateMeetingAsync(UpdateSafetyMeetingDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMeetingAsync(dto.Id);
+        if (dto.CommitteeId.HasValue && dto.CommitteeId != entity.CommitteeId)
+            await GetOwnedCommitteeAsync(dto.CommitteeId.Value);
+        if (dto.FacilitatorId.HasValue && dto.FacilitatorId != entity.FacilitatorId)
+            await GetOwnedEmployeeAsync(dto.FacilitatorId.Value);
         entity.UpdateEntity(dto, userId);
         await _meetingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the include-bearing path: the tracked entity's navs and child rows
+        // (attendees, action items, documents) are unloaded here, and mapping them straight to
+        // the DTO returns blank names and empty lists.
+        return await GetMeetingAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteMeetingAsync(Guid id, CancellationToken cancellationToken = default)
@@ -987,6 +1226,17 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyMeetingAttendeeDto> AddAttendeeAsync(CreateSafetyMeetingAttendeeDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMeetingAsync(dto.MeetingId);
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+
+        // A repeat sign-in would stack duplicate rows on the attendance record. Removed
+        // (soft-deleted) attendees can be re-added.
+        var exists = await _unitOfWork.Repository<SafetyMeetingAttendee>().GetQueryable()
+            .AnyAsync(a => a.TenantId == tenantId && a.MeetingId == dto.MeetingId
+                        && a.EmployeeId == dto.EmployeeId && !a.IsDeleted, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException("This employee is already recorded as an attendee of this meeting.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyMeetingAttendee>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1021,6 +1271,7 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<IEnumerable<SafetyMeetingActionItemDto>> GetActionItemsByAssigneeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedEmployeeAsync(employeeId);
         return (await _actionItemRepository.GetByAssigneeAsync(employeeId))
             .Where(e => e.TenantId == tenantId)
             .Select(e => e.ToDto());
@@ -1029,6 +1280,8 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyMeetingActionItemDto> AddActionItemAsync(CreateSafetyMeetingActionItemDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMeetingAsync(dto.MeetingId);
+        if (dto.AssignedToId.HasValue) await GetOwnedEmployeeAsync(dto.AssignedToId.Value);
         var entity = dto.ToEntity(tenantId, userId);
         await _actionItemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1038,6 +1291,8 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyMeetingActionItemDto> UpdateActionItemAsync(UpdateSafetyMeetingActionItemDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedActionItemAsync(dto.Id);
+        if (dto.AssignedToId.HasValue && dto.AssignedToId != entity.AssignedToId)
+            await GetOwnedEmployeeAsync(dto.AssignedToId.Value);
         entity.UpdateEntity(dto, userId);
         await _actionItemRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1056,6 +1311,7 @@ public class SafetyCommitteeService : ISafetyCommitteeService
     public async Task<SafetyMeetingDocumentDto> AddMeetingDocumentAsync(CreateSafetyMeetingDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMeetingAsync(dto.MeetingId);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyMeetingDocument>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1115,7 +1371,7 @@ public class SheReturnToWorkService : ISheReturnToWorkService
 
     private async Task<SheReturnToWorkPlan> GetOwnedPlanAsync(Guid id)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
+        var entity = await _planRepository.GetByIdAsync(id, p => p.Employee, p => p.SafetyIncident!, p => p.Coordinator!, p => p.Supervisor!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Return-to-work plan with ID '{id}' not found.");
         return entity;
@@ -1123,10 +1379,28 @@ public class SheReturnToWorkService : ISheReturnToWorkService
 
     private async Task<SheReturnToWorkPhase> GetOwnedPhaseAsync(Guid id)
     {
-        var entity = await _unitOfWork.Repository<SheReturnToWorkPhase>().GetByIdAsync(id);
+        var entity = await _unitOfWork.Repository<SheReturnToWorkPhase>().GetByIdAsync(id, ph => ph.AssessedBy);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Return-to-work phase with ID '{id}' not found.");
         return entity;
+    }
+
+    // Guards body-supplied FKs so a bad id surfaces as 404 instead of SQL 547/HTTP 500; fetching on
+    // this context also lets change-tracker fixup resolve the navigation for the write response.
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task<SafetyIncident> GetOwnedIncidentAsync(Guid id)
+    {
+        var incident = await _unitOfWork.Repository<SafetyIncident>().GetByIdAsync(id);
+        if (incident == null || incident.TenantId != GetTenantId())
+            throw new ArgumentException($"Safety incident with ID '{id}' not found.");
+        return incident;
     }
 
     public async Task<SheReturnToWorkPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1141,10 +1415,15 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPlanDto?> GetByNumberAsync(string planNumber, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _planRepository.GetByNumberAsync(planNumber);
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
+        var number = planNumber.Trim();
+        var id = await _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.PlanNumber == number)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (id == null) return null;
+
+        var entity = await _planRepository.GetWithFullDetailsAsync(id.Value);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<SheReturnToWorkPlanSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -1190,6 +1469,18 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPlanDto> CreateAsync(CreateSheReturnToWorkPlanDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        var number = dto.PlanNumber.Trim();
+        var numberTaken = await _planRepository.GetQueryable()
+            .AnyAsync(p => p.TenantId == tenantId && p.PlanNumber == number, cancellationToken);
+        if (numberTaken)
+            throw new InvalidOperationException($"A return-to-work plan with number '{number}' already exists for this tenant.");
+
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        if (dto.SafetyIncidentId.HasValue) await GetOwnedIncidentAsync(dto.SafetyIncidentId.Value);
+        if (dto.CoordinatorId.HasValue) await GetOwnedEmployeeAsync(dto.CoordinatorId.Value);
+        if (dto.SupervisorId.HasValue) await GetOwnedEmployeeAsync(dto.SupervisorId.Value);
+
+        dto.PlanNumber = number;
         var entity = dto.ToEntity(tenantId, userId);
         await _planRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1199,6 +1490,12 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPlanDto> UpdateAsync(UpdateSheReturnToWorkPlanDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(dto.Id);
+        if (dto.SafetyIncidentId.HasValue && dto.SafetyIncidentId != entity.SafetyIncidentId)
+            await GetOwnedIncidentAsync(dto.SafetyIncidentId.Value);
+        if (dto.CoordinatorId.HasValue && dto.CoordinatorId != entity.CoordinatorId)
+            await GetOwnedEmployeeAsync(dto.CoordinatorId.Value);
+        if (dto.SupervisorId.HasValue && dto.SupervisorId != entity.SupervisorId)
+            await GetOwnedEmployeeAsync(dto.SupervisorId.Value);
         entity.UpdateEntity(dto, userId);
         await _planRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1216,7 +1513,17 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPhaseDto> AddPhaseAsync(CreateSheReturnToWorkPhaseDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.ReturnToWorkPlanId);
+        await GetOwnedEmployeeAsync(dto.AssessedById);
+
+        // The phase sequence is server-assigned per plan, like permit extension numbers.
+        // Soft-deleted phases keep their number so it is never re-issued.
+        var maxPhase = await _unitOfWork.Repository<SheReturnToWorkPhase>()
+            .GetQueryableIncludingDeleted(ph => ph.TenantId == tenantId && ph.ReturnToWorkPlanId == dto.ReturnToWorkPlanId)
+            .MaxAsync(ph => (int?)ph.PhaseNumber, cancellationToken) ?? 0;
+
         var entity = dto.ToEntity(tenantId, userId);
+        entity.PhaseNumber = maxPhase + 1;
         await _unitOfWork.Repository<SheReturnToWorkPhase>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -1242,6 +1549,7 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<IEnumerable<SheReturnToWorkReviewDto>> GetReviewsAsync(Guid planId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedPlanAsync(planId);
         var reviews = await _unitOfWork.Repository<SheReturnToWorkReview>()
             .FindAsync(r => r.TenantId == tenantId && r.ReturnToWorkPlanId == planId, r => r.ReviewedBy);
         return reviews.OrderBy(r => r.ReviewNumber).Select(r => r.ToDto());
@@ -1250,7 +1558,16 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkReviewDto> AddReviewAsync(CreateSheReturnToWorkReviewDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.ReturnToWorkPlanId);
+        await GetOwnedEmployeeAsync(dto.ReviewedById);
+
+        // The review sequence is server-assigned per plan; soft-deleted rows keep their number.
+        var maxReview = await _unitOfWork.Repository<SheReturnToWorkReview>()
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.ReturnToWorkPlanId == dto.ReturnToWorkPlanId)
+            .MaxAsync(r => (int?)r.ReviewNumber, cancellationToken) ?? 0;
+
         var entity = dto.ToEntity(tenantId, userId);
+        entity.ReviewNumber = maxReview + 1;
         await _unitOfWork.Repository<SheReturnToWorkReview>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();

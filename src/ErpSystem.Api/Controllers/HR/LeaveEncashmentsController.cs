@@ -1,27 +1,70 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
 /// Leave encashment processing endpoints
 /// </summary>
+/// <remarks>
+/// W3 slice 5: an employee requests and views their OWN encashment (self-or-permission), the
+/// register and the payment step are the leave read/write tiers, and approve/reject stay with
+/// the workflow assignee, validated per request by the service.
+/// </remarks>
 [ApiController]
 [Route("api/hr/leave-encashments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class LeaveEncashmentsController : ControllerBase
 {
     private readonly ILeaveEncashmentService _service;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IAuthorizationService _authorization;
     private readonly ILogger<LeaveEncashmentsController> _logger;
 
-    public LeaveEncashmentsController(ILeaveEncashmentService service, ILogger<LeaveEncashmentsController> logger)
+    public LeaveEncashmentsController(
+        ILeaveEncashmentService service,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
+        IAuthorizationService authorization,
+        ILogger<LeaveEncashmentsController> logger)
     {
         _service = service;
+        _db = db;
+        _currentUserService = currentUserService;
+        _authorization = authorization;
         _logger = logger;
     }
 
+    /// <summary>Self-or-permission, as on LeavesController — see the remarks there.</summary>
+    private async Task<bool> CanActForEmployeeAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+            return true;
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>Self-or-permission resolved through the encashment's owner.</summary>
+    private async Task<bool> CanActOnEncashmentAsync(Guid encashmentId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty &&
+            _currentUserService.TenantId is Guid tenantId)
+        {
+            var mine = await _db.Set<Core.Entities.HR.StaffLeave.LeaveEncashment>()
+                .AsNoTracking()
+                .AnyAsync(e => e.Id == encashmentId && e.TenantId == tenantId && e.EmployeeId == me);
+            if (mine) return true;
+        }
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
     [HttpGet]
+    [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<LeaveEncashmentDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<LeaveEncashmentDto>>> GetAll(
         [FromQuery] int       year        = 0,
@@ -40,6 +83,9 @@ public class LeaveEncashmentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeaveEncashmentDto>> GetById(Guid id)
     {
+        if (!await CanActOnEncashmentAsync(id, HrPermissions.LeaveReadPolicy))
+            return Forbid();
+
         try { return Ok(await _service.GetByIdAsync(id)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
     }
@@ -50,6 +96,9 @@ public class LeaveEncashmentsController : ControllerBase
         Guid employeeId,
         [FromQuery] int year = 0)
     {
+        if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
+            return Forbid();
+
         if (year == 0) year = DateTime.Today.Year;
         return Ok(await _service.GetEmployeeEncashmentsAsync(employeeId, year));
     }
@@ -60,6 +109,10 @@ public class LeaveEncashmentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeaveEncashmentDto>> Request([FromBody] CreateLeaveEncashmentDto dto)
     {
+        // W3: an employee encashes their OWN leave; raising one for someone else is the HR desk.
+        if (!await CanActForEmployeeAsync(dto.EmployeeId, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
         try
         {
             var result = await _service.RequestEncashmentAsync(dto);
@@ -74,6 +127,8 @@ public class LeaveEncashmentsController : ControllerBase
         }
     }
 
+    // W3: approve and reject are deliberately NOT permission-gated — they are the workflow
+    // assignee's acts, validated per request by the service (CanUserApproveAsync).
     [HttpPatch("{id:guid}/approve")]
     [ProducesResponseType(typeof(LeaveEncashmentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -99,6 +154,7 @@ public class LeaveEncashmentsController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/process")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveEncashmentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -22,12 +22,27 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
         _sequences = sequences;
     }
 
-    public override async Task<IEnumerable<JobVacancy>> GetAllAsync()
-    {
-        return await _dbSet
+    /// <summary>
+    /// Everything <c>ToDto</c> and <c>ToSummaryDto</c> read through a navigation.
+    ///
+    /// <para>Factored out because the reads had drifted: each one included a different subset, so
+    /// the same vacancy came back with a position title on one endpoint and an empty one on the
+    /// next. <c>Requisition.JobDescription</c> is the load-bearing one — <c>JobVacancy.JobTitle</c>
+    /// is <c>[NotMapped]</c> and resolves as
+    /// <c>CustomAdvertTitle ?? Requisition.JobDescription.JobTitle</c>, so without it every list
+    /// showed a blank job title, which is the column a vacancy list exists for.</para>
+    /// </summary>
+    private IQueryable<JobVacancy> WithSummaryNavigations() =>
+        _dbSet
+            .Include(v => v.Position)
             .Include(v => v.HiringManager)
             .Include(v => v.Recruiter)
             .Include(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
+            .Include(v => v.Requisition).ThenInclude(r => r.JobDescription);
+
+    public override async Task<IEnumerable<JobVacancy>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
             .Where(v => !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync();
@@ -35,20 +50,16 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public override async Task<JobVacancy?> GetByIdAsync(Guid id)
     {
-        return await _dbSet
-            .Include(v => v.HiringManager)
-            .Include(v => v.Recruiter)
-            .Include(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
-            .Include(v => v.Position)
+        return await WithSummaryNavigations()
             .Include(v => v.Pipeline)
+            .Include(v => v.ShortlistSubmittedBy)
+            .Include(v => v.ShortlistApprovedBy)
             .FirstOrDefaultAsync(v => v.Id == id && !v.IsDeleted);
     }
 
     public async Task<JobVacancy?> GetByVacancyNumberAsync(string vacancyNumber)
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.Requisition)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(v => v.VacancyNumber == vacancyNumber && !v.IsDeleted);
     }
 
@@ -69,10 +80,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public async Task<IEnumerable<JobVacancy>> GetByStatusAsync(JobVacancyStatus status)
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.HiringManager)
-            .Include(v => v.Recruiter)
+        return await WithSummaryNavigations()
             .Where(v => v.VacancyStatus == status && !v.IsDeleted)
             .OrderByDescending(v => v.PublishDate)
             .ToListAsync();
@@ -80,10 +88,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public async Task<IEnumerable<JobVacancy>> GetActiveVacanciesAsync()
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.HiringManager)
-            .Include(v => v.Recruiter)
+        return await WithSummaryNavigations()
             .Where(v => !v.IsDeleted
                      && (v.VacancyStatus == JobVacancyStatus.Published
                          || v.VacancyStatus == JobVacancyStatus.Approved))
@@ -93,9 +98,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public async Task<IEnumerable<JobVacancy>> GetByRequisitionAsync(Guid requisitionId)
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.Requisition)
+        return await WithSummaryNavigations()
             .Where(v => v.StaffRequisitionId == requisitionId && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync();
@@ -103,9 +106,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public async Task<IEnumerable<JobVacancy>> GetByPositionAsync(Guid positionId)
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.HiringManager)
+        return await WithSummaryNavigations()
             .Where(v => v.PositionId == positionId && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync();
@@ -113,9 +114,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public async Task<IEnumerable<JobVacancy>> GetByHiringManagerAsync(Guid hiringManagerId)
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.Recruiter)
+        return await WithSummaryNavigations()
             .Where(v => v.HiringManagerId == hiringManagerId && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync();
@@ -123,9 +122,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 
     public async Task<IEnumerable<JobVacancy>> GetByRecruiterAsync(Guid recruiterId)
     {
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.HiringManager)
+        return await WithSummaryNavigations()
             .Where(v => v.RecruiterId == recruiterId && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync();
@@ -134,9 +131,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
     public async Task<IEnumerable<JobVacancy>> GetWithDeadlineApproachingAsync(int daysAhead = 7)
     {
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
-        return await _dbSet
-            .Include(v => v.Position)
-            .Include(v => v.Recruiter)
+        return await WithSummaryNavigations()
             .Where(v => !v.IsDeleted
                      && v.ApplicationDeadline != null
                      && v.ApplicationDeadline <= cutoff

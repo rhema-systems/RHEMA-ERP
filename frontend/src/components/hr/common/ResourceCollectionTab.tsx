@@ -90,8 +90,27 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
   emptyForm: TForm;
   /** Map an existing row back into form values when editing. */
   toForm: (item: TItem) => TForm;
-  /** Render the dialog body. Receives the live react-hook-form instance. */
-  renderFields: (form: UseFormReturn<TForm>) => ReactNode;
+  /**
+   * Optional: fetch the FULL record when the edit dialog opens, for a list whose rows are
+   * summaries.
+   *
+   * ⚠ Why this exists. `toForm` receives a LIST ROW, and several HR list endpoints return a
+   * summary projection rather than the record. Any optional field absent from that projection is
+   * therefore absent from the form, and a save writes the form — so opening a row and pressing
+   * Save silently blanks it. That is the D-09/D-12 shape, and it was about to be introduced on
+   * the insurance-provider screen by three new optional fields (lane 5b, 2026-09-01).
+   *
+   * When supplied, the dialog shows a spinner, loads the record, and resets the form from it;
+   * `toForm` still runs first so the dialog is populated immediately and stays usable if the
+   * fetch fails. Callers whose list already returns full records should leave it unset.
+   */
+  loadForEdit?: (item: TItem) => Promise<TForm>;
+  /**
+   * Render the dialog body. Receives the live react-hook-form instance and whether an
+   * existing row is being edited — needed when a field is create-only (present on the
+   * create DTO but absent from update), so it can be hidden or disabled once editing.
+   */
+  renderFields: (form: UseFormReturn<TForm>, editing: boolean) => ReactNode;
 
   getId: (item: TItem) => string;
   dialogClassName?: string;
@@ -125,6 +144,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   schema,
   emptyForm,
   toForm,
+  loadForEdit,
   renderFields,
   getId,
   dialogClassName = 'sm:max-w-[560px]',
@@ -136,6 +156,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TItem | null>(null);
+  const [hydrating, setHydrating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TItem | null>(null);
   const [pendingAction, setPendingAction] = useState<{
     action: CollectionAction<TItem>;
@@ -210,8 +231,21 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
 
   const openEdit = (item: TItem) => {
     setEditing(item);
+    // Populate from the row first, so the dialog is never empty, then upgrade to the full record.
     form.reset(toForm(item) as DefaultValues<TForm>);
     setDialogOpen(true);
+    if (!loadForEdit) return;
+    setHydrating(true);
+    loadForEdit(item)
+      .then((full) => form.reset(full as DefaultValues<TForm>))
+      .catch((e: any) =>
+        toast({
+          title: 'Could not load the full record',
+          description: `${e?.data?.message ?? e?.message ?? 'Unknown error'} — saving now may blank fields the list does not carry.`,
+          variant: 'destructive',
+        }),
+      )
+      .finally(() => setHydrating(false));
   };
 
   const runAction = (action: CollectionAction<TItem>, item: TItem) => {
@@ -353,7 +387,15 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4">{renderFields(form)}</div>
+            <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4">
+              {hydrating ? (
+                <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading the full record…
+                </div>
+              ) : (
+                renderFields(form, editing !== null)
+              )}
+            </div>
 
             <DialogFooter>
               <Button
@@ -364,7 +406,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={saveMutation.isPending}>
+              <Button type="submit" disabled={saveMutation.isPending || hydrating}>
                 {saveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {editing ? 'Save changes' : `Add ${singular}`}
               </Button>

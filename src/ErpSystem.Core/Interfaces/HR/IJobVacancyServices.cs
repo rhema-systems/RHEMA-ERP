@@ -20,7 +20,12 @@ public interface IJobVacancyService
     Task<PagedResult<JobVacancySummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByStatusAsync(JobVacancyStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetActiveVacanciesAsync(CancellationToken cancellationToken = default);
-    Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The internal job board. Returns the same LEAN projection the public portal gets — see the
+    /// implementation for why the full vacancy record was the wrong thing to hand an applicant —
+    /// and honours <c>AllowInternalCandidates</c>.
+    /// </summary>
+    Task<IEnumerable<PublicVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByHiringManagerAsync(Guid hiringManagerId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByRecruiterAsync(Guid recruiterId, CancellationToken cancellationToken = default);
@@ -39,7 +44,21 @@ public interface IJobVacancyService
     Task<bool> CloseForApplicationsAsync(CloseForApplicationsDto dto, Guid closedByUserId, CancellationToken cancellationToken = default);
 
     // Attachment operations
-    Task<JobVacancyAttachmentDto> AddAttachmentAsync(CreateJobVacancyAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records an attachment against a vacancy, from a file the controlled-upload gate has already
+    /// scanned and registered. The old <c>CreateJobVacancyAttachmentDto</c> overload took a
+    /// caller-supplied <c>filePath</c> and stored no file; it is deleted, not deprecated.
+    /// </summary>
+    Task<JobVacancyAttachmentDto> AddAttachmentAsync(
+        Guid jobVacancyId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null);
     Task<IEnumerable<JobVacancyAttachmentDto>> GetAttachmentsAsync(Guid vacancyId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 
@@ -54,9 +73,11 @@ public interface IJobVacancyService
     Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteCriteriaAsync(Guid criteriaId, CancellationToken cancellationToken = default);
 
-    // Shortlist approval workflow
-    Task<bool> SubmitShortlistForApprovalAsync(SubmitShortlistForApprovalDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ReviewShortlistApprovalAsync(ReviewShortlistApprovalDto dto, Guid reviewedByUserId, CancellationToken cancellationToken = default);
+    // Shortlist approval lives on IJobApplicationService, not here. This interface used to declare its
+    // own Submit/Review pair; JobApplicationController — the only caller — went to the application
+    // service's identical pair, so these two never executed. Removed rather than left as a second
+    // implementation of the same rules for someone to wire up by mistake: the surviving pair also
+    // refuses an empty shortlist and refuses to let the submitter approve their own.
 
     // ── Public career portal ──────────────────────────────────────────────────
 

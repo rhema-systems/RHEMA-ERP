@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -8,9 +9,27 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Interview sessions — scheduling, the panel, the question plan, and the panel's scorecards.
+///
+/// <para><b>Authorization is enforced in the service, not by role attributes here.</b> That is the
+/// difference between this controller and <see cref="JobApplicationController"/>. An interview cannot be
+/// HR-only: the people who have to open it, read the questions and file a scorecard are ordinary
+/// employees who happen to sit on that panel. Nor can it be open to any authenticated employee — which
+/// is what the bare <c>[Authorize]</c> here used to mean — because it carries the candidate's contact
+/// details, the panel's private comments and the hire recommendation. The rule is therefore per record
+/// ("HR, or a panelist on <i>this</i> interview") and lives in <c>JobInterviewService</c>, where it
+/// holds no matter which route reaches it. <see cref="RecruitmentBusinessRulesAttribute"/> turns the
+/// service's refusals into 403s with their own message.</para>
+///
+/// <para>The two anonymous confirmation endpoints at the bottom are reached from an emailed link by
+/// candidates and external panelists, who have no login at all; they are authorised by a single-use
+/// token and rate-limited.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-interviews")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules]
 public class JobInterviewController : ControllerBase
 {
     private readonly IJobInterviewService _service;
@@ -120,6 +139,8 @@ public class JobInterviewController : ControllerBase
     [HttpPost("{id:guid}/reschedule")]
     public async Task<IActionResult> Reschedule(Guid id, [FromBody] RescheduleJobInterviewDto dto)
     {
+        // The service keys off the body's id, so a mismatch silently rescheduled a different interview.
+        dto.InterviewId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -133,6 +154,7 @@ public class JobInterviewController : ControllerBase
     [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelJobInterviewDto dto)
     {
+        dto.InterviewId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -166,6 +188,7 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<JobInterviewPanelistDto>> AddPanelist(
         Guid interviewId, [FromBody] AddJobInterviewPanelistDto dto)
     {
+        dto.JobInterviewId = interviewId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -229,6 +252,15 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<IEnumerable<JobInterviewPanelistDto>>> GetInterviewsByPanelist(Guid employeeId)
         => Ok(await _service.GetInterviewsByPanelistAsync(employeeId));
 
+    /// <summary>
+    /// The caller's own panel assignments. The id-bearing route above is HR's; a panelist reaching their
+    /// own diary through it would have to fetch and pass their own employee id, which is exactly the
+    /// shape that produced this module's authorization holes.
+    /// </summary>
+    [HttpGet("me/panelist-slots")]
+    public async Task<ActionResult<IEnumerable<JobInterviewPanelistDto>>> GetMyPanelistSlots()
+        => Ok(await _service.GetMyPanelistSlotsAsync());
+
     // =========================================================================
     // EXTERNAL PANELISTS
     // =========================================================================
@@ -255,6 +287,7 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<JobInterviewExternalPanelistDto>> AddExternalPanelist(
         Guid interviewId, [FromBody] AddJobInterviewExternalPanelistDto dto)
     {
+        dto.JobInterviewId = interviewId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -301,6 +334,7 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<JobIntervieweeDto>> AddInterviewee(
         Guid interviewId, [FromBody] AddJobIntervieweeDto dto)
     {
+        dto.JobInterviewId = interviewId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -398,6 +432,7 @@ public class JobInterviewController : ControllerBase
     public async Task<IActionResult> RecordIntervieweeOutcome(
         Guid intervieweeId, [FromBody] RecordIntervieweeOutcomeDto dto)
     {
+        dto.IntervieweeId = intervieweeId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -424,6 +459,7 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<JobInterviewQuestionDto>> AddQuestionPlan(
         Guid interviewId, [FromBody] CreateJobInterviewQuestionDto dto)
     {
+        dto.JobInterviewId = interviewId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -520,6 +556,7 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<JobInterviewScoreSummaryDto>> CreateScoreSummary(
         Guid intervieweeId, [FromBody] CreateJobInterviewScoreSummaryDto dto)
     {
+        dto.JobIntervieweeId = intervieweeId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;

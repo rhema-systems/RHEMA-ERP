@@ -142,6 +142,7 @@ public static class StaffDisciplineMappingExtensions
             IsActive = entity.IsActive,
             DefaultSuspensionDays = entity.DefaultSuspensionDays,
             DefaultFineAmount = entity.DefaultFineAmount,
+            MinimumAuthority = entity.MinimumAuthority,
         };
     }
 
@@ -153,6 +154,7 @@ public static class StaffDisciplineMappingExtensions
             Code = entity.Code,
             Name = entity.Name,
             IsActive = entity.IsActive,
+            MinimumAuthority = entity.MinimumAuthority,
         };
     }
 
@@ -167,6 +169,7 @@ public static class StaffDisciplineMappingExtensions
             IsActive = dto.IsActive,
             DefaultSuspensionDays = dto.DefaultSuspensionDays,
             DefaultFineAmount = dto.DefaultFineAmount,
+            MinimumAuthority = dto.MinimumAuthority,
             CreatedBy = userId.ToString(),
         };
     }
@@ -179,6 +182,7 @@ public static class StaffDisciplineMappingExtensions
         entity.IsActive = dto.IsActive;
         entity.DefaultSuspensionDays = dto.DefaultSuspensionDays;
         entity.DefaultFineAmount = dto.DefaultFineAmount;
+        entity.MinimumAuthority = dto.MinimumAuthority;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -787,7 +791,10 @@ public static class StaffDisciplineMappingExtensions
             Category = dto.Category,
             Description = dto.Description,
             UploadDate = dto.UploadDate,
-            UploadedById = dto.UploadedById,
+            // The actor, not a claim in the body. The upload endpoint already passed its own
+            // token-derived id here, so this changes nothing for it — but the metadata-only route
+            // took whatever the caller named. See the note on the DTO.
+            UploadedById = userId,
             CreatedBy = userId.ToString(),
         };
     }
@@ -841,7 +848,9 @@ public static class StaffDisciplineMappingExtensions
         {
             TenantId = tenantId,
             DisciplinaryActionId = dto.DisciplinaryActionId,
-            CreatedByEmployeeId = dto.CreatedByEmployeeId,
+            // The author, not a claim in the body. A case note is evidence of what HR knew and
+            // when; its authorship must not be assertable by whoever posts it.
+            CreatedByEmployeeId = userId,
             Note = dto.Note,
             IsConfidential = dto.IsConfidential,
             NoteDate = dto.NoteDate,
@@ -900,11 +909,17 @@ public static class StaffDisciplineMappingExtensions
             Id = entity.Id,
             NotificationType = entity.NotificationType,
             SentDate = entity.SentDate,
+            Content = entity.Content,
             IsAcknowledged = entity.AcknowledgedDate.HasValue,
+            AcknowledgedDate = entity.AcknowledgedDate,
             IsFollowupSent = entity.IsFollowupSent,
         };
     }
 
+    /// <param name="userId">
+    /// The sender, from the caller's token. Whoever issues a show-cause or hearing notice is its
+    /// sender; there is no on-behalf case for it, unlike reporting an allegation.
+    /// </param>
     public static StaffDisciplineNotification ToEntity(this CreateStaffDisciplineNotificationDto dto, Guid tenantId, Guid userId)
     {
         return new StaffDisciplineNotification
@@ -914,7 +929,7 @@ public static class StaffDisciplineMappingExtensions
             NotificationType = dto.NotificationType,
             SentDate = dto.SentDate,
             Content = dto.Content,
-            SentById = dto.SentById,
+            SentById = userId,
             CreatedBy = userId.ToString(),
         };
     }
@@ -961,17 +976,22 @@ public static class StaffDisciplineMappingExtensions
         };
     }
 
-    public static StaffDisciplineAppeal ToEntity(this FileAppealDto dto, Guid tenantId, Guid userId)
+    /// <param name="appellantEmployeeId">
+    /// The appellant, from the caller's token — an appeal is the subject's own act, so it is never
+    /// taken from the payload. <c>FiledDate</c> is server-stamped for the same reason: the
+    /// FR-HR-180 filing window is measured against it.
+    /// </param>
+    public static StaffDisciplineAppeal ToEntity(this FileAppealDto dto, Guid tenantId, Guid appellantEmployeeId)
     {
         return new StaffDisciplineAppeal
         {
             TenantId = tenantId,
             DisciplinaryActionId = dto.CaseId,
-            EmployeeId = dto.EmployeeId,
-            FiledDate = dto.FiledDate,
+            EmployeeId = appellantEmployeeId,
+            FiledDate = DateTime.UtcNow,
             Reason = dto.Reason,
             AppealStatus = DisciplineAppealStatus.Filed,
-            CreatedBy = userId.ToString(),
+            CreatedBy = appellantEmployeeId.ToString(),
         };
     }
 
@@ -980,7 +1000,7 @@ public static class StaffDisciplineMappingExtensions
         entity.AppealOutcome = dto.AppealOutcome;
         entity.AppealOutcomeNotes = dto.AppealOutcomeNotes;
         entity.AppealOutcomeDate = dto.AppealOutcomeDate;
-        entity.AppealOutcomeById = dto.AppealOutcomeById;
+        entity.AppealOutcomeById = userId;
         entity.HearingNotes = dto.HearingNotes;
         entity.AppealStatus = DisciplineAppealStatus.AwaitingDecision;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -1163,7 +1183,8 @@ public static class StaffDisciplineMappingExtensions
             TenantId = tenantId,
             DisciplinaryActionId = dto.DisciplinaryActionId,
             ReferredToLegalDate = dto.ReferredToLegalDate,
-            ReferredById = dto.ReferredById,
+            // The actor, not a claim in the body. See the note on CreateStaffDisciplineLegalReviewDto.
+            ReferredById = userId,
             LegalRiskLevel = dto.LegalRiskLevel,
             RequiresExternalCounsel = dto.RequiresExternalCounsel,
             ExternalCounselId = dto.ExternalCounselId,

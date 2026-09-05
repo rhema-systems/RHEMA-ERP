@@ -100,8 +100,12 @@ public class SafetyIncidentRepository : GenericRepository<SafetyIncident>, ISafe
     public async Task<SafetyIncident?> GetByIncidentNumberAsync(string incidentNumber) =>
         await WithListNavigations().FirstOrDefaultAsync(i => i.IncidentNumber == incidentNumber && !i.IsDeleted);
 
+    // AsSplitQuery: the wide SafetyIncident row joined against seven child collections exceeds
+    // SQL Server's 8060-byte worktable row limit as a single query ("Cannot create a row of
+    // size …"), and the single-query form is a cartesian explosion anyway.
     public async Task<SafetyIncident?> GetWithFullDetailsAsync(Guid id) =>
         await _dbSet
+            .AsSplitQuery()
             .Include(i => i.IncidentType)
             .Include(i => i.Location)
             .Include(i => i.OrganizationUnit)
@@ -121,6 +125,8 @@ public class SafetyIncidentRepository : GenericRepository<SafetyIncident>, ISafe
             .Include(i => i.CorrectiveActions).ThenInclude(c => c.ResponsiblePerson)
             .Include(i => i.FollowUps).ThenInclude(f => f.ConductedBy)
             .Include(i => i.Documents).ThenInclude(d => d.UploadedBy)
+            .Include(i => i.StatutorySubmissions).ThenInclude(s => s.RegulatoryBody)
+            .Include(i => i.StatutorySubmissions).ThenInclude(s => s.SubmittedBy)
             .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
 
     public async Task<IEnumerable<SafetyIncident>> GetByStatusAsync(SheIncidentStatus status) =>
@@ -193,21 +199,10 @@ public class SafetyIncidentRepository : GenericRepository<SafetyIncident>, ISafe
         return (items, total);
     }
 
-    public async Task<string> GetNextIncidentNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"INC-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(i => i.IncidentNumber.StartsWith(prefix))
-            .OrderByDescending(i => i.IncidentNumber)
-            .Select(i => i.IncidentNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
+    // Number generation lives in SafetyIncidentService.GenerateNextIncidentNumberAsync — the
+    // repository-level variant that used to sit here had no callers, ignored the tenant, and
+    // string-ordered mixed-width suffixes (re-issuing taken numbers). Removed rather than left
+    // as a trap.
 }
 
 public class SafetyIncidentCorrectiveActionRepository : GenericRepository<SafetyIncidentCorrectiveAction>, ISafetyIncidentCorrectiveActionRepository

@@ -24,9 +24,14 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .FirstOrDefaultAsync(r => r.RequestNumber == requestNumber && !r.IsDeleted);
     }
 
-    public async Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid id)
+    // ApprovalInstances -> Decisions -> Approver was removed in slice 2: travel approval moved to
+    // the generic workflow engine, so the live approval state is the workflow record's, not this
+    // graph's. That is three of the includes behind the 8060 failure gone with it.
+    public async Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid tenantId, Guid id)
     {
         return await _dbSet
+            .AsSplitQuery()
+            .Where(r => r.TenantId == tenantId)
             .Include(r => r.Employee)
             .Include(r => r.InitiatedBy)
             .Include(r => r.CancelledBy)
@@ -40,7 +45,6 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .Include(r => r.Comments).ThenInclude(c => c.Author)
             .Include(r => r.Attachments).ThenInclude(a => a.UploadedBy)
             .Include(r => r.Itineraries).ThenInclude(i => i.Legs).ThenInclude(l => l.Activities)
-            .Include(r => r.ApprovalInstances).ThenInclude(a => a.Decisions).ThenInclude(d => d.Approver)
             .Include(r => r.FlightBookings).ThenInclude(f => f.Segments)
             .Include(r => r.FlightBookings).ThenInclude(f => f.Vendor)
             .Include(r => r.HotelBookings).ThenInclude(h => h.Vendor)
@@ -58,6 +62,7 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     public async Task<IEnumerable<StaffTravelRequest>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
+            .Include(r => r.Employee)
             .Include(r => r.DestinationCountry)
             .Where(r => r.EmployeeId == employeeId && !r.IsDeleted)
             .OrderByDescending(r => r.TravelStartDate)
@@ -67,6 +72,7 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     public async Task<IEnumerable<StaffTravelRequest>> GetByEmployeeAndStatusAsync(Guid employeeId, StaffTravelRequestStatus status)
     {
         return await _dbSet
+            .Include(r => r.Employee)
             .Include(r => r.DestinationCountry)
             .Where(r => r.EmployeeId == employeeId && r.Status == status && !r.IsDeleted)
             .OrderByDescending(r => r.TravelStartDate)
@@ -97,6 +103,7 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     {
         return await _dbSet
             .Include(r => r.Employee)
+            .Include(r => r.DestinationCountry)
             .Where(r => r.GroupTravelId == groupTravelId && !r.IsDeleted)
             .OrderBy(r => r.Employee.FirstName)
             .ToListAsync();
@@ -105,6 +112,8 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     public async Task<IEnumerable<StaffTravelRequest>> GetChildRequestsAsync(Guid parentRequestId)
     {
         return await _dbSet
+            .Include(r => r.Employee)
+            .Include(r => r.DestinationCountry)
             .Where(r => r.ParentRequestId == parentRequestId && !r.IsDeleted)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync();
@@ -217,6 +226,14 @@ public class StaffTravelRequestCommentRepository : GenericRepository<StaffTravel
             .ToListAsync();
     }
 
+    public async Task<StaffTravelRequestComment?> GetWithAuthorAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(c => c.Author)
+            .Include(c => c.Replies).ThenInclude(r => r.Author)
+            .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId && !c.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelRequestComment>> GetThreadAsync(Guid parentCommentId)
     {
         return await _dbSet
@@ -251,6 +268,13 @@ public class StaffTravelRequestAttachmentRepository : GenericRepository<StaffTra
             .Where(a => a.StaffTravelRequestId == requestId && !a.IsDeleted)
             .OrderByDescending(a => a.UploadedAt)
             .ToListAsync();
+    }
+
+    public async Task<StaffTravelRequestAttachment?> GetWithUploaderAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
     }
 
     public async Task<IEnumerable<StaffTravelRequestAttachment>> GetByTypeAsync(Guid requestId, TravelAttachmentType attachmentType)

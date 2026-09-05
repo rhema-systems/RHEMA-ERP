@@ -57,22 +57,3 @@ public interface IStaffTravelPolicyExceptionRepository : IGenericRepository<Staf
 }
 
 #endregion
-
-#region Staff Travel Vendor
-
-public interface IStaffTravelVendorRepository : IGenericRepository<StaffTravelVendor>
-{
-    /// <summary>Returns the vendor matching the unique vendor code.</summary>
-    Task<StaffTravelVendor?> GetByVendorCodeAsync(string vendorCode);
-
-    /// <summary>Returns vendors filtered by type.</summary>
-    Task<IEnumerable<StaffTravelVendor>> GetByTypeAsync(TravelVendorType vendorType);
-
-    /// <summary>Returns preferred vendors, optionally narrowed to a vendor type.</summary>
-    Task<IEnumerable<StaffTravelVendor>> GetPreferredVendorsAsync(TravelVendorType? vendorType = null);
-
-    /// <summary>Returns all active vendors.</summary>
-    Task<IEnumerable<StaffTravelVendor>> GetActiveVendorsAsync();
-}
-
-#endregion

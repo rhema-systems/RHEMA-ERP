@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Interfaces;
 
@@ -73,6 +73,173 @@ public static class ControlledFileUploadCategories
     public const string HrStaffMovementAttachments = "hr-staff-movement-attachments";
     public const string HrOfferLetters = "hr-offer-letters";
     public const string HrMedicalExamDocuments = "hr-medical-exam-documents";
+    public const string HrMedicalClaimDocuments = "hr-medical-claim-documents";
+    public const string HrMedicalInsuranceProviderDocuments = "hr-medical-insurance-provider-documents";
+    public const string HrAppraisalAttachments = "hr-appraisal-attachments";
+
+    /// <summary>
+    /// Files on an award or on a nomination for one — the citation, the supporting letter, the
+    /// photograph taken at the presentation.
+    /// </summary>
+    public const string HrAwardAttachments = "hr-award-attachments";
+    public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
+
+    /// <summary>
+    /// Documents on a succession plan, a plan candidate or a talent-pool member — assessment
+    /// reports, development plans, signed readiness reviews.
+    /// </summary>
+    /// <remarks>
+    /// One category for all three owners because one table and one DTO serve all three, and
+    /// because they are read by one permission family (<c>HrPermissions.Succession*</c>) rather
+    /// than by the medical or discipline desks. A succession document names a person as a
+    /// candidate to replace someone — frequently someone still in the post — so it is exactly the
+    /// kind of HR file that must not be servable from a path a caller chose.
+    /// </remarks>
+    public const string HrSuccessionDocuments = "hr-succession-documents";
+
+    /// <summary>
+    /// Paperwork on an employee-relations case — the grievance statement as filed on paper, evidence
+    /// gathered during an investigation, the investigation report itself, and FR-HR-181's final
+    /// signed agreement.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than a share of the discipline pile, even though the two halves sit
+    /// behind one permission family. A grievance is raised BY an employee and is usually ABOUT a
+    /// colleague, so its documents name people who are not the subject of any case — and retention
+    /// and access rules for "somebody's complaint about their manager" should not have to be
+    /// expressed as "some of the documents in the disciplinary pile".
+    /// </remarks>
+    public const string HrGrievanceDocuments = "hr-grievance-documents";
+
+    /// <summary>
+    /// Signed oaths of secrecy (FR-HR-030). Its own category rather than a general HR bucket: an
+    /// oath is a legal instrument naming one person, kept for the life of their employment, and
+    /// retention and access rules that apply to it should not have to be expressed as "some of the
+    /// documents in the HR pile".
+    /// </summary>
+    public const string HrOathOfSecrecyDocuments = "hr-oath-of-secrecy-documents";
+
+    /// <summary>
+    /// Paperwork attached to a separation — the resignation letter, the acceptance, the signed
+    /// clearance form, the settlement statement, a medical report supporting a medical retirement,
+    /// a death certificate.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than part of the HR pile, for the same reason as the oath: these
+    /// are the evidence that someone's employment ended and that what they were owed was paid.
+    /// They outlive the employment and are the first things asked for in a dispute, so retention
+    /// and access rules for them should be stateable on their own.
+    /// </remarks>
+    public const string HrSeparationDocuments = "hr-separation-documents";
+
+    /// <summary>
+    /// Recruitment paperwork attached to a requisition, vacancy or advert — org charts, budget
+    /// approvals, signed job descriptions, agency terms. Kept apart from
+    /// <see cref="HrCandidateDocuments"/>: that is a named person's file, this is a role's, and the
+    /// two have different audiences.
+    /// </summary>
+    public const string HrRecruitmentAttachments = "hr-recruitment-attachments";
+
+    /// <summary>
+    /// Paperwork filed against a company asset — the purchase invoice, the warranty certificate,
+    /// the user manual, and photographs of its condition when issued or taken back.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than part of the HR pile because most of it is not personal data at
+    /// all — an invoice for a laptop is a procurement record — while a photograph of damage taken
+    /// at a return is evidence in a charge against a named employee. Keeping them together under
+    /// one asset-scoped category lets retention follow the ASSET, which is how anybody looking for
+    /// them would ask. The <c>hr-</c> prefix keeps the store private either way.
+    /// </remarks>
+    public const string HrAssetDocuments = "hr-asset-documents";
+
+    /// <summary>
+    /// Evidence behind a pre-employment check on a conditional offer — police clearance
+    /// certificates, medical reports, academic transcripts, written references.
+    ///
+    /// <para>Deliberately its own category rather than sharing
+    /// <see cref="HrCandidateDocuments"/>: these are third-party verification results about a named
+    /// person, frequently the most sensitive documents recruitment ever holds, and keeping them
+    /// separate means a retention or access policy can be set for them alone.</para>
+    /// </summary>
+    public const string HrPreEmploymentDocuments = "hr-pre-employment-documents";
+
+    /// <summary>
+    /// Versions of SHE controlled documents (policies, procedures, emergency
+    /// plans, …) on the area's register. Not personal data, but the register is
+    /// HR-role-gated and the <c>hr-</c> prefix keeps the files on the private
+    /// storage tree rather than the public web root.
+    /// </summary>
+    public const string HrSheControlledDocuments = "hr-she-controlled-documents";
+
+    /// <summary>
+    /// Evidence an employee attaches to a personal-data change request — a marriage
+    /// certificate behind a name change, a bank letter behind an account change, a Ghana Card
+    /// behind a date-of-birth correction.
+    /// </summary>
+    public const string HrProfileChangeEvidence = "hr-profile-change-evidence";
+
+    /// <summary>
+    /// A signed HR letter uploaded to fulfil an employee's letter request, where a generated
+    /// document will not do — a wet signature, a stamp, or an embassy's own form.
+    /// </summary>
+    public const string HrLetterDocuments = "hr-letter-documents";
+
+    /// <summary>
+    /// A file attached to a staff announcement — the notice, form or circular everybody is
+    /// being pointed at.
+    /// </summary>
+    public const string HrAnnouncementDocuments = "hr-announcement-documents";
+
+    /// <summary>
+    /// A company policy in the staff library — the document people are asked to read and, for
+    /// some of them, to sign.
+    /// </summary>
+    public const string HrPolicyDocuments = "hr-policy-documents";
+
+    /// <summary>
+    /// Files on an employee's own record — the signed contract, the ID scan, the certificate, the
+    /// residence permit.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than a share of any existing pile, and the reason is retention. These
+    /// are the documents that identify a person and evidence their right to work; they outlive every
+    /// case, claim and trip that might otherwise have carried them, and "delete the discipline
+    /// documents for a closed case" must never be able to reach somebody's passport scan.
+    /// </remarks>
+    public const string HrEmployeeDocuments = "hr-employee-documents";
+
+    /// <summary>
+    /// The workbook behind an employee bulk import — the file HR uploaded, kept as the record of
+    /// what was loaded and by whom.
+    /// </summary>
+    /// <remarks>
+    /// Its own category, not a share of <see cref="HrEmployeeDocuments"/>: one file here describes
+    /// hundreds of people rather than one, and the retention question ("how long do we keep the
+    /// load file?") is a different question from "how long do we keep somebody's passport scan".
+    /// </remarks>
+    public const string HrEmployeeImportWorkbooks = "hr-employee-import-workbooks";
+
+    /// <summary>
+    /// The photograph of an external associate — a panellist, assessor or adviser.
+    /// </summary>
+    /// <remarks>
+    /// An avatar of a third party, so it follows <see cref="HrCandidatePhotos"/> rather than
+    /// <see cref="HrEmployeeDocuments"/>: scanned and access-controlled, but not registered in the
+    /// central DMS, because a contact's photograph carries no retention value.
+    /// </remarks>
+    public const string HrExternalAssociatePhotos = "hr-external-associate-photos";
+
+    /// <summary>
+    /// The company seal and the authorised signature — the images that make a generated document
+    /// look authentic.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The opposite call from an avatar, and for the opposite reason. These ARE registered in the
+    /// central DMS: an instrument of authority is a retained document, and after a compromise the
+    /// question "which documents carry the seal that leaked?" has to stay answerable.
+    /// </remarks>
+    public const string HrCompanySealAssets = "hr-company-seal-assets";
 
     /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
@@ -105,15 +272,72 @@ public static class ControlledFileUploadCategories
                 QuantitySurveyClaimEvidence,
                 QuantitySurveyDayworkEvidence,
                 QuantitySurveySubcontractEvidence,
+                HrEmployeeDocuments,
+                HrEmployeeImportWorkbooks,
+                // ⚠ Declared above AND registered here. A category that is only declared passes the
+                // upload gate unscanned and then fails DMS registration as a 500 — the trap Medical
+                // met with SystemCleanScanRequired. The seal especially: an unscanned image that
+                // every offer letter embeds is not a risk worth a tenant policy toggle.
+                HrExternalAssociatePhotos,
+                HrCompanySealAssets,
                 HrCandidateCv,
                 HrCandidateDocuments,
                 HrCandidatePhotos,
                 HrLeaveAttachments,
                 HrPipAttachments,
                 HrDisciplineDocuments,
+                // An employee-relations file holds a complaint about a named colleague, the
+                // evidence gathered about them, and a signed agreement between the two. A tenant
+                // policy should not be able to admit any of that unscanned.
+                HrGrievanceDocuments,
                 HrStaffMovementAttachments,
                 HrOfferLetters,
-                HrMedicalExamDocuments
+                HrMedicalExamDocuments,
+                HrMedicalClaimDocuments,
+                // Registered here, not only declared above: a category absent from this set is
+                // SKIPPED by the scanner, and the DMS then refuses to register a non-clean upload
+                // — so the upload fails with an InvalidOperationException that names neither the
+                // category nor the scan. Declaring the constant is half the job.
+                HrMedicalInsuranceProviderDocuments,
+                // Same reason again, one family further on: succession documents had the identical
+                // caller-supplied-path defect and are registered here in the same commit
+                // that gives them an upload route, so the earlier half-job cannot recur.
+                HrSuccessionDocuments,
+                HrAppraisalAttachments,
+                // A nomination attachment is the CASE for giving somebody an award: a citation, a
+                // letter of support, a photograph of the work. It is circulated to a committee and
+                // read by people who did not write it, which is exactly when an unscanned file
+                // matters. Registered in the same commit that gives the family an upload route, so
+                // the earlier half-job — a category declared but not registered — cannot recur here.
+                HrAwardAttachments,
+                // A travel attachment is a passport scan, a visa letter or an invitation carrying
+                // a name, a number and an address. A tenant policy should not be able to permit
+                // one of those unscanned.
+                HrStaffTravelAttachments,
+                HrOathOfSecrecyDocuments,
+                // A separation file holds a resignation letter, a medical report or a death
+                // certificate. No tenant policy should be able to let one of those in unscanned.
+                HrSeparationDocuments,
+                HrRecruitmentAttachments,
+                // ⚠ Scan-mandatory although an asset invoice is mundane. The same category carries
+                // damage photographs taken at a return, which are evidence in a money claim against
+                // an employee, and a tenant policy should not be able to let one of those in
+                // unscanned just because most of its neighbours are receipts.
+                HrAssetDocuments,
+                HrPreEmploymentDocuments,
+                HrSheControlledDocuments,
+                // Identity documents by definition — this is the category whose whole purpose is
+                // proving who someone is and where their money goes.
+                HrProfileChangeEvidence,
+                // A signed letter on company letterhead, handed to a bank or an embassy. If any
+                // category should not be scan-optional by tenant policy, it is this one.
+                HrLetterDocuments,
+                // An announcement attachment is the one file in HR deliberately pushed at EVERY
+                // employee at once, which makes it the worst possible thing to leave unscanned.
+                HrAnnouncementDocuments,
+                // A policy document is pushed at everyone AND signed for. A signature against an
+                // unscanned file is the last thing anybody wants to have to explain.
+                HrPolicyDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

@@ -87,6 +87,9 @@ export interface EmployeePosition {
   noticePeriodMonths?: number | null;
   requiresCertification: boolean;
   requiresGuarantor: boolean;
+  /** ⚠ Null with requiresGuarantor true means "a guarantor, amount unspecified". */
+  requiredGuarantorAmount?: number | null;
+  requiredGuarantorCurrencyCode?: string | null;
   requiresLicense: boolean;
   isActive: boolean;
   employeeCount: number;
@@ -114,6 +117,9 @@ export interface CreateEmployeePositionRequest {
   noticePeriodMonths?: number | null;
   requiresCertification: boolean;
   requiresGuarantor: boolean;
+  /** ⚠ Null with requiresGuarantor true means "a guarantor, amount unspecified". */
+  requiredGuarantorAmount?: number | null;
+  requiredGuarantorCurrencyCode?: string | null;
   requiresLicense: boolean;
   skillRequirements: PositionSkillRequirementInput[];
   positionBenefits: PositionBenefitInput[];

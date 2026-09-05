@@ -87,6 +87,8 @@ public class TrainingVendorService : ITrainingVendorService
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
+            // The summary DTO counts this collection; without the include it reads 0 on every row.
+            .Include(v => v.Trainers)
             .OrderBy(v => v.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)

@@ -90,9 +90,6 @@ public interface ISafetyIncidentRepository : IGenericRepository<SafetyIncident>
 
     /// <summary>Returns a page of incidents (optionally filtered by status) plus the total count.</summary>
     Task<(IEnumerable<SafetyIncident> Items, int TotalCount)> GetPagedAsync(int page, int pageSize, SheIncidentStatus? status = null);
-
-    /// <summary>Returns the next sequential incident number for the current year.</summary>
-    Task<string> GetNextIncidentNumberAsync();
 }
 
 public interface ISafetyIncidentCorrectiveActionRepository : IGenericRepository<SafetyIncidentCorrectiveAction>

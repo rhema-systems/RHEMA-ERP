@@ -83,9 +83,11 @@ public class PerformanceJournalService : IPerformanceJournalService
     }
 
     public async Task<IEnumerable<PerformanceJournalEntryDto>> GetByOwnerIdAsync(
-        Guid ownerId, Guid? cycleId = null, CancellationToken cancellationToken = default)
+        Guid ownerId, Guid? cycleId = null, bool includePrivate = true, CancellationToken cancellationToken = default)
     {
         var query = BaseQuery.Where(j => j.OwnerId == ownerId);
+        if (!includePrivate)
+            query = query.Where(j => !j.IsPrivate);
         if (cycleId.HasValue)
             query = query.Where(j => j.AppraisalCycleId == cycleId.Value);
         var entities = await query.OrderByDescending(j => j.EntryDate).ToListAsync(cancellationToken);
@@ -95,11 +97,15 @@ public class PerformanceJournalService : IPerformanceJournalService
     public async Task<IEnumerable<PerformanceJournalEntryDto>> GetAboutSubjectAsync(
         Guid managerId, Guid subjectEmployeeId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        // Returns non-private entries authored by the manager about the given subject
+        // Entries the manager authored about the given subject.
+        //
+        // No privacy filter here, deliberately: managerId is the caller, taken from their token, so
+        // every row returned is one they wrote themselves. Filtering on !IsPrivate made sense when
+        // the manager id came from the route and someone else could ask — it now only hid a
+        // manager's own private notes from the manager.
         var query = BaseQuery.Where(j =>
             j.OwnerId == managerId &&
-            j.SubjectEmployeeId == subjectEmployeeId &&
-            !j.IsPrivate);
+            j.SubjectEmployeeId == subjectEmployeeId);
 
         if (cycleId.HasValue)
             query = query.Where(j => j.AppraisalCycleId == cycleId.Value);
@@ -120,9 +126,11 @@ public class PerformanceJournalService : IPerformanceJournalService
     }
 
     public async Task<PagedResult<PerformanceJournalEntryDto>> GetPagedAsync(
-        Guid ownerId, int pageNumber, int pageSize, Guid? cycleId = null, CancellationToken cancellationToken = default)
+        Guid ownerId, int pageNumber, int pageSize, Guid? cycleId = null, bool includePrivate = true, CancellationToken cancellationToken = default)
     {
         var query = BaseQuery.Where(j => j.OwnerId == ownerId);
+        if (!includePrivate)
+            query = query.Where(j => !j.IsPrivate);
         if (cycleId.HasValue)
             query = query.Where(j => j.AppraisalCycleId == cycleId.Value);
         query = query.OrderByDescending(j => j.EntryDate);
@@ -138,7 +146,7 @@ public class PerformanceJournalService : IPerformanceJournalService
     }
 
     public async Task<PerformanceJournalEntryDto> CreateAsync(
-        CreatePerformanceJournalEntryDto createDto, CancellationToken cancellationToken = default)
+        CreatePerformanceJournalEntryDto createDto, Guid ownerId, CancellationToken cancellationToken = default)
     {
         // Gate: private journaling must be enabled for this cycle.
         if (createDto.IsPrivate)
@@ -154,6 +162,10 @@ public class PerformanceJournalService : IPerformanceJournalService
 
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        // The author is the caller, never the payload — a journal entry is evidence about a named
+        // person and an attributable note; letting the body name its own owner would let anyone
+        // plant one in someone else's journal.
+        entity.OwnerId = ownerId;
         entity.EntryDate = DateTime.UtcNow;
 
         await _journalRepository.AddAsync(entity);

@@ -35,6 +35,15 @@ export const identificationTypeSchema = z.object({
   issuingCountryId: z.string().optional().or(z.literal('')),
   description: z.string().max(1000).optional().or(z.literal('')),
   hasExpiryDate: z.boolean(),
+  // Kept as a string so an empty box stays empty rather than coercing to 0 — 0 would mean "warn on
+  // the day it expires", which is a different instruction from "do not warn at all".
+  expiryNotificationLeadDays: z
+    .string()
+    .optional()
+    .or(z.literal(''))
+    .refine((v) => !v || (/^[0-9]+$/.test(v) && Number(v) <= 3650), {
+      message: 'Enter a whole number of days, up to 3650.',
+    }),
   isActive: z.boolean(),
 });
 
@@ -47,6 +56,7 @@ export const emptyIdentificationType: IdentificationTypeFormValues = {
   issuingCountryId: '',
   description: '',
   hasExpiryDate: true,
+  expiryNotificationLeadDays: '',
   isActive: true,
 };
 
@@ -144,6 +154,34 @@ export function IdentificationTypeForm({
               {...form.register('description')}
             />
           </div>
+
+          {/*
+            The warning time only means anything for a type that expires, so it is hidden when the
+            switch is off. Leaving an editable box on a type with no expiry date would invite a value
+            the sweep is required to ignore.
+          */}
+          {form.watch('hasExpiryDate') && (
+            <div className="space-y-2 rounded-md border border-dashed p-3">
+              <Label htmlFor="expiryNotificationLeadDays">Warn this many days ahead</Label>
+              <Input
+                id="expiryNotificationLeadDays"
+                inputMode="numeric"
+                placeholder="e.g. 90"
+                className="sm:max-w-[12rem]"
+                {...form.register('expiryNotificationLeadDays')}
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave this blank and the expiry sweep will never raise a reminder for this type,
+                however close a card is to running out. A passport usually needs more notice than a
+                site pass, which is why the setting lives here rather than on each card.
+              </p>
+              {form.formState.errors.expiryNotificationLeadDays && (
+                <p className="text-sm text-destructive">
+                  {form.formState.errors.expiryNotificationLeadDays.message}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="flex items-center justify-between rounded-md border px-3 py-2.5">

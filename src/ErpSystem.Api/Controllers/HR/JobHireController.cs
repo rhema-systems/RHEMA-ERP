@@ -1,7 +1,9 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,9 +12,22 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <summary>Request body for confirming a hire start date.</summary>
 public sealed record ConfirmStartRequest(DateTime ActualStartDate, Guid? LinkedEmployeeId);
 
+/// <summary>
+/// Hire records — the handover from recruitment to employment.
+///
+/// <para><b>HR-only, reads included:</b> a hire record carries the agreed salary, the start date and
+/// the link to the employee record it created. It previously carried a bare <c>[Authorize]</c>.</para>
+///
+/// <para>⚠ <c>confirm-start</c> is the consequential one: it creates the <c>Employee</c>, the
+/// contract, the probation period, the salary assignment, the position history and the candidate's
+/// qualifications, work history, referees and skills — and burns an employee number. It is
+/// idempotent by design (it refuses once the hire is linked to an employee), which is also why
+/// <c>Active</c> cannot be reached through the status endpoint.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-hires")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules]
 public class JobHireController : ControllerBase
 {
     private readonly IJobHireService _service;
@@ -29,26 +44,32 @@ public class JobHireController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{hireNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto?>> GetByHireNumber(string hireNumber)
         => Ok(await _service.GetByHireNumberAsync(hireNumber));
 
     [HttpGet("application/{applicationId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto?>> GetByApplication(Guid applicationId)
         => Ok(await _service.GetByApplicationIdAsync(applicationId));
 
     [HttpGet("employee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto?>> GetByEmployee(Guid employeeId)
         => Ok(await _service.GetByEmployeeIdAsync(employeeId));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobHireRecordSummaryDto>>> GetByStatus(JobHireStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("start-approaching")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobHireRecordSummaryDto>>> GetStartApproaching(
         [FromQuery] int daysAhead = 14)
         => Ok(await _service.GetWithStartDateApproachingAsync(daysAhead));
@@ -58,6 +79,7 @@ public class JobHireController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobHireRecordDto>> Create([FromBody] CreateJobHireRecordDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -75,9 +97,12 @@ public class JobHireController : ControllerBase
     }
 
     [HttpPut("{id:guid}/status")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobHireRecordDto>> UpdateStatus(
         Guid id, [FromBody] UpdateJobHireRecordStatusDto dto)
     {
+        // The service keys off the body's id, so a mismatch used to move a different hire.
+        dto.HireRecordId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -92,6 +117,7 @@ public class JobHireController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/confirm-start")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> ConfirmStart(Guid id, [FromBody] ConfirmStartRequest request)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

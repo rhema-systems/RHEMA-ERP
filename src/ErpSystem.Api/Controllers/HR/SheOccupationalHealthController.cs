@@ -1,15 +1,23 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+// Gated on the Medical permission policies rather than the SHE HR-role gate: surveillance rows
+// carry examination results and work restrictions — medical-grade data, per the agreed
+// SHE↔Medical boundary. Reads need MedicalRead; writes MedicalWrite; deletes MedicalAdmin.
+// HrPermissionRoleFallbackAuthorizationHandler keeps HR-role users working until the
+// permission seed propagates.
 [ApiController]
 [Route("api/safety/occupational-health")]
-[Authorize]
+[SafetyBusinessRules]
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class SheOccupationalHealthController : SheApiControllerBase
 {
     private readonly ISheOccupationalHealthService _service;
@@ -47,6 +55,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
         => Ok(await _service.GetSurveillanceWithRestrictionsAsync());
 
     [HttpPost("surveillance")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheOccupationalHealthSurveillanceDto>> CreateSurveillance([FromBody] CreateSheOccupationalHealthSurveillanceDto dto)
     {
         var created = await _service.CreateSurveillanceAsync(dto, TenantId, UserId);
@@ -54,6 +63,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
     }
 
     [HttpPut("surveillance/{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheOccupationalHealthSurveillanceDto>> UpdateSurveillance(Guid id, [FromBody] UpdateSheOccupationalHealthSurveillanceDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -61,6 +71,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
     }
 
     [HttpDelete("surveillance/{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     public async Task<IActionResult> DeleteSurveillance(Guid id)
     {
         await _service.DeleteSurveillanceAsync(id);
@@ -89,6 +100,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
         => Ok(await _service.GetUnderStockedStationsAsync());
 
     [HttpPost("first-aid-stations")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheFirstAidStationDto>> CreateFirstAidStation([FromBody] CreateSheFirstAidStationDto dto)
     {
         var created = await _service.CreateFirstAidStationAsync(dto, TenantId, UserId);
@@ -96,6 +108,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
     }
 
     [HttpPut("first-aid-stations/{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheFirstAidStationDto>> UpdateFirstAidStation(Guid id, [FromBody] UpdateSheFirstAidStationDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -103,6 +116,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
     }
 
     [HttpDelete("first-aid-stations/{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     public async Task<IActionResult> DeleteFirstAidStation(Guid id)
     {
         await _service.DeleteFirstAidStationAsync(id);
@@ -127,6 +141,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
         => Ok(await _service.GetWellnessProgramsByTypeAsync(type));
 
     [HttpPost("wellness-programs")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheWellnessProgramDto>> CreateWellnessProgram([FromBody] CreateSheWellnessProgramDto dto)
     {
         var created = await _service.CreateWellnessProgramAsync(dto, TenantId, UserId);
@@ -134,6 +149,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
     }
 
     [HttpPut("wellness-programs/{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheWellnessProgramDto>> UpdateWellnessProgram(Guid id, [FromBody] UpdateSheWellnessProgramDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -141,6 +157,7 @@ public class SheOccupationalHealthController : SheApiControllerBase
     }
 
     [HttpDelete("wellness-programs/{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     public async Task<IActionResult> DeleteWellnessProgram(Guid id)
     {
         await _service.DeleteWellnessProgramAsync(id);

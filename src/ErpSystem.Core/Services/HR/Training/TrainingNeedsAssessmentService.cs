@@ -18,6 +18,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
     private readonly ITrainingNeedsAssessmentSkillRepository _skillRepository;
     private readonly IGenericRepository<TrainingProgram> _trainingProgramRepository;
     private readonly IGenericRepository<Skill> _skillCatalogRepository;
+    private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingNeedsAssessmentService> _logger;
@@ -28,6 +29,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
         ITrainingNeedsAssessmentSkillRepository skillRepository,
         IGenericRepository<TrainingProgram> trainingProgramRepository,
         IGenericRepository<Skill> skillCatalogRepository,
+        IGenericRepository<Employee> employeeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingNeedsAssessmentService> logger)
@@ -37,6 +39,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
         _skillRepository = skillRepository;
         _trainingProgramRepository = trainingProgramRepository;
         _skillCatalogRepository = skillCatalogRepository;
+        _employeeRepository = employeeRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -162,20 +165,41 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     // ── Assessment CRUD ───────────────────────────────────────────────────────
 
-    public async Task<TrainingNeedsAssessmentDto> CreateAsync(CreateTrainingNeedsAssessmentDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    // Named for what the controller actually passes — ICurrentUserService.EmployeeId, not a user id.
+    public async Task<TrainingNeedsAssessmentDto> CreateAsync(CreateTrainingNeedsAssessmentDto dto, Guid tenantId, Guid createdByEmployeeId, CancellationToken cancellationToken = default)
     {
         var current = GetTenantId();
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        var entity = dto.ToEntity(current, createdByUserId);
+        // IdentifiedById is [Required] on the DTO, but that attribute is a no-op on a non-nullable
+        // Guid — an omitted value arrives as Guid.Empty and hits the Employees FK as a raw SQL 547.
+        // Default it to the caller instead (the module's actor-from-the-token convention: whoever
+        // records the need is the one who identified it), and validate an explicit id up front so a
+        // bad one reads as a business rule rather than a 500.
+        if (dto.IdentifiedById == Guid.Empty)
+        {
+            dto.IdentifiedById = createdByEmployeeId;
+        }
+        else
+        {
+            var identifier = await _employeeRepository.GetByIdAsync(dto.IdentifiedById);
+            if (identifier == null || identifier.TenantId != current)
+                throw new ArgumentException($"Employee with ID '{dto.IdentifiedById}' not found.");
+        }
+
+        var subject = await _employeeRepository.GetByIdAsync(dto.EmployeeId);
+        if (subject == null || subject.TenantId != current)
+            throw new ArgumentException($"Employee with ID '{dto.EmployeeId}' not found.");
+
+        var entity = dto.ToEntity(current, createdByEmployeeId);
 
         await _assessmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Training needs assessment created for employee {EmployeeId}", dto.EmployeeId);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<BulkNeedsAssessmentResultDto> BulkCreateAsync(BulkCreateTrainingNeedsAssessmentDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -220,7 +244,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
         await _assessmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -254,7 +278,8 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
         await _programRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var reloaded = await _programRepository.GetByAssessmentIdAsync(dto.AssessmentId);
+        return reloaded.First(p => p.Id == entity.Id).ToDto();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessmentProgramDto>> GetRecommendedProgramsAsync(Guid assessmentId, CancellationToken cancellationToken = default)
@@ -293,7 +318,8 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
         await _skillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var reloaded = await _skillRepository.GetByAssessmentIdAsync(dto.AssessmentId);
+        return reloaded.First(s => s.Id == entity.Id).ToDto();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSkillDto>> GetSkillGapsAsync(Guid assessmentId, CancellationToken cancellationToken = default)

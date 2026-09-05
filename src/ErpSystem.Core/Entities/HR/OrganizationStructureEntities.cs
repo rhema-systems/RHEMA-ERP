@@ -519,9 +519,24 @@ public class Location : TenantEntity
     
     [MaxLength(20)]
     public string? PostalCode { get; set; }
-    
+
     public Guid? CountryId { get; set; }
-    
+
+    /// <summary>
+    /// Which administrative area this site stands in — the link between the two trees.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ This is the ONE place the site tree and the geography tree meet, and it is why they
+    /// are separate. A <c>Location</c> is somewhere the company operates; a <c>GeoArea</c> is a
+    /// place on the map of the country. Keeping them apart stops "Greater Accra Region" appearing
+    /// in the incident-site picker, and this column is what still lets a report ask which district
+    /// an office is in. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.</para>
+    ///
+    /// <para><see cref="City"/> becomes a display snapshot once this is set — the service rewrites
+    /// it from the tree.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
 
@@ -569,6 +584,10 @@ public class Location : TenantEntity
     
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
+
+    /// <summary>The administrative area this site stands in. See <see cref="GeoAreaId"/>.</summary>
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [ForeignKey(nameof(GeofenceZoneId))]
     public virtual GeofenceZone? GeofenceZone { get; set; }

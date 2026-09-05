@@ -227,6 +227,7 @@ public class TrainingScheduleService : ITrainingScheduleService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        ValidateDeliveredBy(createDto.TrainerProfileId, createDto.VendorId);
         await ValidateScheduleForeignKeysAsync(
             createDto.ProgramId,
             createDto.TrainerProfileId,
@@ -244,7 +245,9 @@ public class TrainingScheduleService : ITrainingScheduleService
 
         _logger.LogInformation("Training schedule created: {ScheduleNumber}", entity.ScheduleNumber);
 
-        return entity.ToDto();
+        // Re-read through the includes chain: the freshly written entity has no Program/Trainer/Vendor
+        // loaded, so mapping it directly returns blank display names on the create response.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingScheduleDto> UpdateAsync(UpdateTrainingScheduleDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -254,6 +257,7 @@ public class TrainingScheduleService : ITrainingScheduleService
         if (entity.Status == ScheduleStatus.Completed || entity.Status == ScheduleStatus.Cancelled)
             throw new InvalidOperationException($"A {entity.Status} training schedule cannot be edited.");
 
+        ValidateDeliveredBy(updateDto.TrainerProfileId, updateDto.VendorId);
         await ValidateScheduleForeignKeysAsync(
             null,
             updateDto.TrainerProfileId,
@@ -269,7 +273,9 @@ public class TrainingScheduleService : ITrainingScheduleService
 
         _logger.LogInformation("Training schedule updated: {ScheduleNumber}", entity.ScheduleNumber);
 
-        return entity.ToDto();
+        // An FK change (trainer/vendor/budget) does not refresh the already-loaded navigation, so the
+        // update response would echo the previous trainer's name. Re-read.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -310,7 +316,7 @@ public class TrainingScheduleService : ITrainingScheduleService
         return true;
     }
 
-    public async Task<bool> CancelAsync(CancelTrainingScheduleDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelAsync(CancelTrainingScheduleDto dto, Guid cancelledById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedScheduleAsync(dto.ScheduleId);
 
@@ -320,9 +326,9 @@ public class TrainingScheduleService : ITrainingScheduleService
         entity.Status = ScheduleStatus.Cancelled;
         entity.CancellationReason = dto.CancellationReason;
         entity.CancelledDate = DateTime.UtcNow;
-        entity.CancelledById = dto.CancelledById;
+        entity.CancelledById = cancelledById;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.CancelledById.ToString();
+        entity.UpdatedBy = cancelledById.ToString();
 
         await _scheduleRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -345,11 +351,41 @@ public class TrainingScheduleService : ITrainingScheduleService
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _scheduleRepository.UpdateAsync(entity);
+        await CreditTrainerDeliveryAsync(entity, cancellationToken);
+
+        // One SaveChanges so the delivery credit is atomic with the completion — a schedule can only
+        // be completed once (guarded above), which is what keeps the counters from double-counting.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Training schedule completed: {ScheduleNumber}", entity.ScheduleNumber);
 
         return true;
+    }
+
+    /// <summary>
+    /// Credits the delivering trainer's lifetime counters when a schedule completes.
+    /// <c>TrainerProfile.TotalSessionsDelivered</c> and <c>TotalTrainingHoursDelivered</c> are read by
+    /// the trainer list and the dashboard leaderboard but nothing has ever written them, so they read
+    /// 0 for every trainer. Vendor-only schedules credit nobody — the counters belong to a person.
+    /// </summary>
+    private async Task CreditTrainerDeliveryAsync(TrainingSchedule schedule, CancellationToken ct)
+    {
+        if (!schedule.TrainerProfileId.HasValue)
+            return;
+
+        var trainer = await _trainerProfileRepository.GetByIdAsync(schedule.TrainerProfileId.Value);
+        if (trainer == null || trainer.TenantId != schedule.TenantId)
+            return;
+
+        // Hours come from the programme's declared duration rather than the calendar span: a two-day
+        // course sitting across a weekend is still 16 taught hours, not 72.
+        var program = await _programRepository.GetByIdAsync(schedule.ProgramId);
+
+        trainer.TotalSessionsDelivered += 1;
+        trainer.TotalTrainingHoursDelivered += program?.DurationHours ?? 0;
+        trainer.UpdatedAt = DateTime.UtcNow;
+
+        await _trainerProfileRepository.UpdateAsync(trainer);
     }
 
     // ── Session sub-operations ────────────────────────────────────────────────
@@ -439,6 +475,20 @@ public class TrainingScheduleService : ITrainingScheduleService
             if (budget == null || budget.TenantId != tenantId)
                 throw new ArgumentException($"Training budget with ID '{trainingBudgetId.Value}' not found.");
         }
+    }
+
+    /// <summary>
+    /// A schedule must name who is delivering it — an internal trainer or an external vendor.
+    /// <see cref="TrainingSchedule"/> documents this ("at least one of TrainerProfileId/VendorId must
+    /// be set") but nothing enforced it, so a schedule could be created with neither and the list's
+    /// Trainer/Vendor column was legitimately empty with no way to tell that from a missing include.
+    /// Both may be set (a vendor-supplied named trainer); neither may not.
+    /// </summary>
+    private static void ValidateDeliveredBy(Guid? trainerProfileId, Guid? vendorId)
+    {
+        if (!trainerProfileId.HasValue && !vendorId.HasValue)
+            throw new InvalidOperationException(
+                "A training schedule needs a trainer or a vendor — set at least one of them.");
     }
 
     private Task<string> GenerateScheduleNumberAsync(CancellationToken ct)

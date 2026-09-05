@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 
@@ -754,6 +754,10 @@ public static class PromotionTransferMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             MovementId = entity.MovementId,
             MovementNumber = entity.Movement?.MovementNumber ?? string.Empty,
+            EmployeeName = entity.Movement?.Employee is { } demotedEmployee
+                ? $"{demotedEmployee.FirstName} {demotedEmployee.LastName}".Trim()
+                : string.Empty,
+            EmployeeNumber = entity.Movement?.Employee?.EmployeeNumber,
             Reason = entity.Reason,
             GradeLevelDecrease = entity.GradeLevelDecrease,
             IsDisciplinaryAction = entity.IsDisciplinaryAction,
@@ -797,8 +801,10 @@ public static class PromotionTransferMappingExtensions
         entity.NotificationDate = dto.NotificationDate;
         entity.RightToAppeal = dto.RightToAppeal;
         entity.AppealDeadline = dto.AppealDeadline;
-        entity.EmployeeResponse = dto.EmployeeResponse;
-        entity.EmployeeResponseDate = dto.EmployeeResponseDate;
+        // EmployeeResponse and EmployeeResponseDate are deliberately NOT copied. They have one
+        // writer — the employee's own /respond endpoint, which refuses anyone but the demoted
+        // employee — and copying them here made a plain HR edit a way round that guard: someone
+        // else's appeal, in their name, through a different door.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -979,13 +985,25 @@ public static class PromotionTransferMappingExtensions
         };
     }
 
+    /// <summary>
+    /// Applies a correction to an acting appointment. <b><c>Status</c> is deliberately ignored.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This used to assign <c>entity.Status = dto.Status</c>, and the consequence was a one-way
+    /// door. <c>CompleteAsync</c> sets Status <b>and</b> <c>CompletionDate</c>; a plain edit set only
+    /// the Status — so an appointment "completed" through the edit carried no completion date, and
+    /// then neither route could repair it: <c>UpdateAsync</c> refuses to edit a Completed appointment
+    /// and <c>CompleteAsync</c> refuses one that is already Completed. Reproduced end to end by
+    /// <c>hr-movements/probe-lane3-acting.mjs</c>. Status moves through complete / extend / convert,
+    /// each of which maintains the fields that go with the transition.
+    /// </remarks>
     public static void UpdateEntity(this StaffActingAppointment entity, UpdateStaffActingAppointmentDto dto, Guid userId)
     {
         entity.EndDate = dto.EndDate;
         entity.ReceivesActingAllowance = dto.ReceivesActingAllowance;
         entity.ActingAllowance = dto.ActingAllowance;
         entity.AllowanceCalculation = dto.AllowanceCalculation;
-        entity.Status = dto.Status;
+        // entity.Status — NOT assigned. See the remarks above.
         entity.Notes = dto.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -1048,6 +1066,10 @@ public static class PromotionTransferMappingExtensions
         return new EmployeeCareerPathSummaryDto
         {
             Id = entity.Id,
+            EmployeeId = entity.EmployeeId,
+            PositionId = entity.PositionId,
+            MovementId = entity.MovementId,
+            MovementNumber = entity.Movement?.MovementNumber,
             PositionTitle = entity.Position?.Title ?? string.Empty,
             OrganizationUnitName = entity.OrganizationUnit?.Name ?? string.Empty,
             LocationName = entity.Location?.Name,

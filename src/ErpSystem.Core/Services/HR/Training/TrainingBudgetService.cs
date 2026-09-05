@@ -1,5 +1,6 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -13,6 +14,7 @@ public class TrainingBudgetService : ITrainingBudgetService
 {
     private readonly ITrainingBudgetRepository _budgetRepository;
     private readonly ITrainingBudgetTransactionRepository _transactionRepository;
+    private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingBudgetService> _logger;
@@ -20,12 +22,14 @@ public class TrainingBudgetService : ITrainingBudgetService
     public TrainingBudgetService(
         ITrainingBudgetRepository budgetRepository,
         ITrainingBudgetTransactionRepository transactionRepository,
+        IGenericRepository<Employee> employeeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
         _transactionRepository = transactionRepository;
+        _employeeRepository = employeeRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -122,7 +126,15 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<TrainingBudgetDto> CreateAsync(CreateTrainingBudgetDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(RequireCurrentTenant(tenantId), createdByUserId);
+        var current = RequireCurrentTenant(tenantId);
+
+        // Codes are unique per tenant: an unscoped check would let one tenant's codes block another's.
+        var duplicate = await _budgetRepository.GetQueryable()
+            .AnyAsync(b => b.TenantId == current && b.BudgetCode == dto.BudgetCode, cancellationToken);
+        if (duplicate)
+            throw new InvalidOperationException($"A training budget with code '{dto.BudgetCode}' already exists.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
         entity.Status = TrainingBudgetStatus.Draft;
 
         await _budgetRepository.AddAsync(entity);
@@ -130,15 +142,17 @@ public class TrainingBudgetService : ITrainingBudgetService
 
         _logger.LogInformation("Training budget created: {BudgetCode}", dto.BudgetCode);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingBudgetDto> UpdateAsync(UpdateTrainingBudgetDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(dto.Id);
 
-        if (entity.Status == TrainingBudgetStatus.Approved || entity.Status == TrainingBudgetStatus.Closed)
-            throw new InvalidOperationException("Cannot update an approved or closed training budget.");
+        // Once approved, the allocation is what spend is measured against — only a Draft can be
+        // edited directly. Matches DeleteAsync's own rule below.
+        if (entity.Status != TrainingBudgetStatus.Draft)
+            throw new InvalidOperationException($"Cannot update a training budget with status '{entity.Status}'. Only draft budgets can be edited.");
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -147,7 +161,7 @@ public class TrainingBudgetService : ITrainingBudgetService
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -190,7 +204,7 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     // ── Transaction sub-operations ────────────────────────────────────────────
 
-    public async Task<TrainingBudgetTransactionDto> RecordTransactionAsync(CreateTrainingBudgetTransactionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<TrainingBudgetTransactionDto> RecordTransactionAsync(CreateTrainingBudgetTransactionDto dto, Guid tenantId, Guid recordedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var resolvedTenantId = RequireCurrentTenant(tenantId);
         var budget = await GetOwnedBudgetAsync(dto.BudgetId);
@@ -198,7 +212,22 @@ public class TrainingBudgetService : ITrainingBudgetService
         if (budget.Status != TrainingBudgetStatus.Approved && budget.Status != TrainingBudgetStatus.Active)
             throw new InvalidOperationException("Transactions can only be recorded against approved or active budgets.");
 
-        var entity = dto.ToEntity(resolvedTenantId, createdByUserId);
+        // RecordedById is [Required] on the DTO, but that is a no-op on a non-nullable Guid — an
+        // omitted value arrives as Guid.Empty and hits the Employees FK as a raw SQL 547. Default it
+        // to the caller and validate an explicit id, so a bad one reads as a business rule not a 500.
+        // (An explicit id is still accepted: HR legitimately records a transaction on someone's behalf.)
+        if (dto.RecordedById == Guid.Empty)
+        {
+            dto.RecordedById = recordedByEmployeeId;
+        }
+        else
+        {
+            var recorder = await _employeeRepository.GetByIdAsync(dto.RecordedById);
+            if (recorder == null || recorder.TenantId != resolvedTenantId)
+                throw new ArgumentException($"Employee with ID '{dto.RecordedById}' not found.");
+        }
+
+        var entity = dto.ToEntity(resolvedTenantId, recordedByEmployeeId);
 
         // Maintain the running spend so RemainingAmount and the over-budget report stay accurate.
         // Positive Amount = debit/spend, negative = credit/refund.
@@ -210,7 +239,7 @@ public class TrainingBudgetService : ITrainingBudgetService
 
         budget.SpentAmount = prospectiveSpent;
         budget.UpdatedAt = DateTime.UtcNow;
-        budget.UpdatedBy = createdByUserId.ToString();
+        budget.UpdatedBy = recordedByEmployeeId.ToString();
 
         // Transaction insert + budget update persist together in a single SaveChanges (atomic).
         await _transactionRepository.AddAsync(entity);
@@ -219,7 +248,8 @@ public class TrainingBudgetService : ITrainingBudgetService
 
         _logger.LogInformation("Training budget transaction recorded for budget {BudgetId} — Amount: {Amount}; new SpentAmount: {Spent}", dto.BudgetId, dto.Amount, budget.SpentAmount);
 
-        return entity.ToDto();
+        var reloaded = await _transactionRepository.GetByBudgetIdAsync(dto.BudgetId, resolvedTenantId);
+        return reloaded.First(t => t.Id == entity.Id).ToDto();
     }
 
     public async Task<IEnumerable<TrainingBudgetTransactionDto>> GetTransactionsAsync(Guid budgetId, CancellationToken cancellationToken = default)

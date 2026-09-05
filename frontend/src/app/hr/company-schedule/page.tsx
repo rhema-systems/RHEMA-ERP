@@ -1,0 +1,192 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import { CalendarCheck, CalendarDays, CalendarClock, DoorOpen, Flag } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageHeader } from '@/components/hr/common/PageHeader';
+import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
+import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import {
+  businessClosureService,
+  companyEventService,
+  companyMilestoneService,
+  roomBookingService,
+} from '@/services/hr/company-schedule.service';
+
+const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
+
+/**
+ * The company schedule landing page. Operational screens live here; the things that get set up
+ * once — rooms, milestones, closures, fiscal years — live under Administration.
+ */
+export default function CompanySchedulePage() {
+  const { data: events } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'events', 'upcoming'],
+    queryFn: () => companyEventService.getUpcoming(30),
+  });
+  const { data: pending } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'bookings', 'pending'],
+    queryFn: () => roomBookingService.getPendingApprovals(),
+  });
+  const { data: closures } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'closures', 'upcoming'],
+    queryFn: () => businessClosureService.getUpcoming(60),
+  });
+  const { data: milestones } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'milestones', 'upcoming'],
+    queryFn: () => companyMilestoneService.getUpcoming(90),
+  });
+
+  return (
+    <div className="space-y-6 p-6">
+      <PageHeader
+        title="Company schedule"
+        description="Events, room bookings, closures and the milestones on the company calendar."
+      />
+
+      <NavCardGrid
+        items={[
+          {
+            title: 'Events',
+            description: 'Meetings, training days, conferences and company occasions.',
+            href: '/hr/company-schedule/events',
+            icon: CalendarDays,
+          },
+          {
+            title: 'Room bookings',
+            description: 'Who has which room, and what is waiting on approval.',
+            href: '/hr/company-schedule/bookings',
+            icon: CalendarCheck,
+          },
+          {
+            title: 'Meeting rooms',
+            description: 'The rooms people can book and the rules for booking them.',
+            href: '/administration/hr/company-schedule/rooms',
+            icon: DoorOpen,
+          },
+          {
+            title: 'Business closures',
+            description: 'Days the organisation is shut, company-wide or per site.',
+            href: '/administration/hr/company-schedule/closures',
+            icon: CalendarClock,
+          },
+          {
+            title: 'Milestones',
+            description: 'Anniversaries, achievements and dates worth marking.',
+            href: '/administration/hr/company-schedule/milestones',
+            icon: Flag,
+          },
+        ]}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Next 30 days</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(events ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing scheduled in the next month.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(events ?? []).slice(0, 6).map((e) => (
+                  <li key={e.id} className="flex items-start justify-between gap-3 text-sm">
+                    <div>
+                      <p className="font-medium">{e.eventName}</p>
+                      <p className="text-muted-foreground">
+                        {e.startDate.slice(0, 10)} · {spaced(e.category)} · {e.organizerName}
+                      </p>
+                    </div>
+                    <StatusBadge status={spaced(e.status)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Bookings awaiting approval {pending?.length ? `(${pending.length})` : ''}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(pending ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing is waiting on a decision.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(pending ?? []).slice(0, 6).map((b) => (
+                  <li key={b.id} className="flex items-start justify-between gap-3 text-sm">
+                    <div>
+                      <p className="font-medium">{b.roomName}</p>
+                      <p className="text-muted-foreground">
+                        {new Date(b.startDateTime).toLocaleString(undefined, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}{' '}
+                        · {b.bookedByName}
+                      </p>
+                    </div>
+                    <StatusBadge status={spaced(b.status)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Closures ahead</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(closures ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No closures in the next two months.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(closures ?? []).slice(0, 6).map((c) => (
+                  <li key={c.id} className="flex items-start justify-between gap-3 text-sm">
+                    <div>
+                      <p className="font-medium">{c.title}</p>
+                      <p className="text-muted-foreground">
+                        {c.startDate.slice(0, 10)}
+                        {c.endDate.slice(0, 10) !== c.startDate.slice(0, 10)
+                          ? ` → ${c.endDate.slice(0, 10)}`
+                          : ''}{' '}
+                        · {c.affectsAllStations ? 'Whole company' : c.locationName || c.departmentName || '—'}
+                      </p>
+                    </div>
+                    <StatusBadge status={c.isPaidClosure ? 'Paid' : 'Unpaid'} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Milestones ahead</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(milestones ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing coming up in the next quarter.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(milestones ?? []).slice(0, 6).map((m) => (
+                  <li key={m.id} className="text-sm">
+                    <p className="font-medium">{m.title}</p>
+                    <p className="text-muted-foreground">
+                      {m.milestoneDate.slice(0, 10)} · {spaced(m.category)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

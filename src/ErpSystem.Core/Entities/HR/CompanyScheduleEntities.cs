@@ -56,10 +56,17 @@ public class CompanyEvent : TenantEntity
     [MaxLength(100)]
     public string? MeetingPassword { get; set; }
 
-    public Guid? StationId { get; set; }
+    /// <summary>
+    /// The site this event is held at. Points at <see cref="Location"/> — the live location tree
+    /// (structure → level → location) that the rest of HR uses — not the vestigial
+    /// <c>WorkStation</c> these three FKs originally referenced, which has an empty table, no
+    /// repository implementation and no endpoint. Repointed 2026-08-28 when the schedule screens
+    /// were built, because a required FK with no lookup makes its form unfillable.
+    /// </summary>
+    public Guid? LocationId { get; set; }
 
-    [ForeignKey(nameof(StationId))]
-    public virtual WorkStation? Station { get; set; }
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? SiteLocation { get; set; }
 
     // Organizer
     public Guid OrganizerId { get; set; }
@@ -276,11 +283,18 @@ public class MeetingRoom : TenantEntity
     [MaxLength(500)]
     public string? Description { get; set; }
 
-    public Guid StationId { get; set; }
+    /// <summary>
+    /// The site this room belongs to. See the note on <see cref="CompanyEvent.LocationId"/> for why
+    /// this points at <see cref="Location"/> rather than the vestigial <c>WorkStation</c>. The
+    /// navigation is <c>SiteLocation</c> and not <c>Location</c> because <see cref="Location"/>
+    /// below is already taken by the free-text placement within that site.
+    /// </summary>
+    public Guid LocationId { get; set; }
 
-    [ForeignKey(nameof(StationId))]
-    public virtual WorkStation Station { get; set; } = null!;
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location SiteLocation { get; set; } = null!;
 
+    /// <summary>Where the room sits within the site, e.g. "East wing, past reception".</summary>
     [MaxLength(200)]
     public string Location { get; set; } = string.Empty;
 
@@ -408,12 +422,17 @@ public class BusinessClosure : TenantEntity
 
     public ClosureType Type { get; set; }
 
+    /// <summary>True when the closure applies company-wide rather than to one site.</summary>
     public bool AffectsAllStations { get; set; }
-    
-    public Guid? StationId { get; set; }
-    
-    [ForeignKey(nameof(StationId))]
-    public virtual WorkStation? Station { get; set; }
+
+    /// <summary>
+    /// The single site affected when <see cref="AffectsAllStations"/> is false. See the note on
+    /// <see cref="CompanyEvent.LocationId"/> for why this points at <see cref="Location"/>.
+    /// </summary>
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? SiteLocation { get; set; }
 
     public Guid? DepartmentId { get; set; }
 

@@ -127,6 +127,66 @@ public class AwardLevelRepository : GenericRepository<AwardLevel>, IAwardLevelRe
     }
 }
 
+/// <summary>
+/// Resolves the polymorphic <c>AwardTypeTarget.TargetId</c> to a display name, one query per kind.
+/// </summary>
+/// <remarks>
+/// See <see cref="IAwardTargetNameResolver"/> for why this is needed at all. A row whose target has
+/// since been deleted resolves to nothing rather than to a fabricated label — the caller renders
+/// the raw id, which is honest about a dangling reference instead of hiding it.
+/// </remarks>
+public class AwardTargetNameResolver : IAwardTargetNameResolver
+{
+    private readonly ApplicationDbContext _context;
+
+    public AwardTargetNameResolver(ApplicationDbContext context) => _context = context;
+
+    public async Task<IReadOnlyDictionary<Guid, string>> ResolveAsync(IEnumerable<AwardTypeTarget> targets)
+    {
+        var names = new Dictionary<Guid, string>();
+
+        var byKind = targets
+            .Where(t => t.TargetId.HasValue)
+            .GroupBy(t => t.TargetType)
+            .ToDictionary(g => g.Key, g => g.Select(t => t.TargetId!.Value).Distinct().ToList());
+
+        foreach (var (kind, ids) in byKind)
+        {
+            switch (kind)
+            {
+                case AwardTargetType.OrganizationUnit:
+                    foreach (var row in await _context.Set<OrganizationUnit>()
+                        .Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Name }).ToListAsync())
+                        names[row.Id] = row.Name;
+                    break;
+
+                case AwardTargetType.Position:
+                    foreach (var row in await _context.Set<EmployeePosition>()
+                        .Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Title }).ToListAsync())
+                        names[row.Id] = row.Title;
+                    break;
+
+                case AwardTargetType.StaffLevel:
+                    foreach (var row in await _context.Set<StaffLevel>()
+                        .Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Name }).ToListAsync())
+                        names[row.Id] = row.Name;
+                    break;
+
+                case AwardTargetType.Employee:
+                    // Employee.FullName is a computed property, so it cannot be translated to SQL —
+                    // the parts are projected and joined here instead.
+                    foreach (var row in await _context.Set<Employee>()
+                        .Where(x => ids.Contains(x.Id))
+                        .Select(x => new { x.Id, x.FirstName, x.LastName }).ToListAsync())
+                        names[row.Id] = $"{row.FirstName} {row.LastName}".Trim();
+                    break;
+            }
+        }
+
+        return names;
+    }
+}
+
 public class AwardTypeTargetRepository : GenericRepository<AwardTypeTarget>, IAwardTypeTargetRepository
 {
     public AwardTypeTargetRepository(ApplicationDbContext context) : base(context) { }
@@ -211,6 +271,50 @@ public class AwardTypeTargetRepository : GenericRepository<AwardTypeTarget>, IAw
     }
 }
 
+public class AwardCycleRepository : GenericRepository<AwardCycle>, IAwardCycleRepository
+{
+    public AwardCycleRepository(ApplicationDbContext context) : base(context) { }
+
+    public override async Task<AwardCycle?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
+    }
+
+    public async Task<IEnumerable<AwardCycle>> GetByTenantAsync(Guid tenantId)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted)
+            .OrderByDescending(c => c.Year).ThenBy(c => c.Name)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<AwardCycle>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .Where(c => c.TenantId == tenantId && c.AwardTypeId == awardTypeId && !c.IsDeleted)
+            .OrderByDescending(c => c.Year).ThenBy(c => c.Name)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<AwardCycle>> GetPublishedAsync(Guid tenantId)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.Status == AwardCycleStatus.Published)
+            .ToListAsync();
+    }
+
+    public async Task<bool> CodeExistsAsync(Guid tenantId, string cycleCode)
+    {
+        return await _context.Set<AwardCycle>()
+            .AnyAsync(c => c.TenantId == tenantId && !c.IsDeleted && c.CycleCode == cycleCode);
+    }
+}
+
 public class AwardBudgetRepository : GenericRepository<AwardBudget>, IAwardBudgetRepository
 {
     public AwardBudgetRepository(ApplicationDbContext context) : base(context) { }
@@ -277,6 +381,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Where(ea => ea.TenantId == tenantId && !ea.IsDeleted)
             .OrderByDescending(ea => ea.AwardDate)
@@ -288,6 +393,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Include(ea => ea.PresentedBy)
             .Include(ea => ea.AwardNomination)
@@ -307,6 +413,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
     {
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Where(ea => ea.EmployeeId == employeeId && !ea.IsDeleted)
             .OrderByDescending(ea => ea.AwardDate)
@@ -328,6 +435,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.AwardLevelId == awardLevelId && !ea.IsDeleted)
             .OrderByDescending(ea => ea.AwardDate)
             .ToListAsync();
@@ -338,6 +446,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.AwardNominationId == nominationId && !ea.IsDeleted)
             .ToListAsync();
     }
@@ -347,6 +456,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.AwardDate >= startDate 
@@ -361,6 +471,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.PresentationDate == null
                 && !ea.IsDeleted)
@@ -373,6 +484,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.MonetaryAmount > 0
                 && !ea.PaymentProcessed
@@ -386,6 +498,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.LeaveDaysAwarded > 0
                 && !ea.LeaveProcessed
@@ -495,12 +608,41 @@ public class TeamAwardRecipientRepository : GenericRepository<TeamAwardRecipient
 
 public class AwardNominationRepository : GenericRepository<AwardNomination>, IAwardNominationRepository
 {
+    public async Task<IEnumerable<AwardNomination>> GetForCommitteesAsync(Guid tenantId, IEnumerable<Guid> committeeIds)
+    {
+        var ids = committeeIds.ToList();
+        if (ids.Count == 0) return new List<AwardNomination>();
+
+        return await _context.Set<AwardNomination>()
+            .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
+            .Include(an => an.Nominee)
+            .Where(an => an.TenantId == tenantId && !an.IsDeleted
+                && an.CommitteeId != null && ids.Contains(an.CommitteeId.Value)
+                && (an.Status == AwardNominationStatus.Submitted
+                    || an.Status == AwardNominationStatus.UnderReview))
+            .OrderBy(an => an.NominationDate)
+            .ToListAsync();
+    }
+
+    public async Task<Dictionary<Guid, int>> GetCountsByCycleAsync(Guid tenantId)
+    {
+        return await _context.Set<AwardNomination>()
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.AwardCycleId != null)
+            .GroupBy(n => n.AwardCycleId!.Value)
+            .Select(g => new { CycleId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CycleId, x => x.Count);
+    }
+
     public AwardNominationRepository(ApplicationDbContext context) : base(context) { }
 
     public async Task<IEnumerable<AwardNomination>> GetByTenantAsync(Guid tenantId)
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -513,6 +655,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -535,6 +679,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.NominatedBy)
             .Where(an => an.NomineeId == nomineeId && !an.IsDeleted)
@@ -546,6 +692,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Where(an => an.NominatedById == nominatedById && !an.IsDeleted)
@@ -568,6 +716,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -580,6 +730,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         var query = _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -600,6 +752,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -612,6 +766,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -624,6 +780,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
             .Include(an => an.Committee)
@@ -639,6 +797,8 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.Nominee)
             .Where(an => an.TenantId == tenantId 
                 && an.Status == AwardNominationStatus.Approved
@@ -678,13 +838,34 @@ public class TeamAwardNomineeRepository : GenericRepository<TeamAwardNominee>, I
             .ToListAsync();
     }
 
+    /// <summary>
+    /// The team nominations an employee is named in.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Employee</c> was not loaded, so <c>employeeName</c> was blank - the same shape as the
+    /// committee-membership read above, in a different repository.
+    /// </remarks>
     public async Task<IEnumerable<TeamAwardNominee>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Set<TeamAwardNominee>()
+            .Include(tan => tan.Employee)
             .Include(tan => tan.Nomination)
                 .ThenInclude(n => n.AwardType)
             .Where(tan => tan.EmployeeId == employeeId && !tan.IsDeleted)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// Overridden to load <c>Employee</c>, following <see cref="AwardBudgetRepository"/>. The
+    /// inherited version loads no navigations, and <c>ToDto</c> renders an unloaded navigation as
+    /// an empty string rather than failing — so a create that mapped its own just-saved entity
+    /// returned a blank <c>EmployeeName</c> that a later read then filled in correctly.
+    /// </summary>
+    public override async Task<TeamAwardNominee?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<TeamAwardNominee>()
+            .Include(tan => tan.Employee)
+            .FirstOrDefaultAsync(tan => tan.Id == id && !tan.IsDeleted);
     }
 
     public async Task DeleteByNominationIdAsync(Guid nominationId)
@@ -809,30 +990,65 @@ public class AwardCommitteeMemberRepository : GenericRepository<AwardCommitteeMe
 {
     public AwardCommitteeMemberRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Overridden to load <c>Committee</c> and <c>Employee</c>, which <c>ToDto</c> renders as names.
+    /// See the note on <see cref="TeamAwardNomineeRepository.GetByIdAsync"/> — an unloaded
+    /// navigation maps to an empty string, so a write response came back with blank names.
+    /// </summary>
+    public override async Task<AwardCommitteeMember?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<AwardCommitteeMember>()
+            .Include(acm => acm.Committee)
+            .Include(acm => acm.Employee)
+            .FirstOrDefaultAsync(acm => acm.Id == id && !acm.IsDeleted);
+    }
+
+    /// <summary>A committee's members, ordered by role then by name.</summary>
+    /// <remarks>
+    /// ⚠ <b>This threw on every call until the slice-12 content audit.</b> It ordered by
+    /// <c>Employee.FullName</c>, which is a computed property with no column behind it, so EF could
+    /// not translate the query and raised <c>InvalidOperationException</c> - surfacing as a 400 on
+    /// the one endpoint whose entire purpose is listing a committee's members. The same mistake is
+    /// already documented at the top of this file, fixed there and left standing here.
+    /// Ordering by the two mapped columns gives the same result and can actually run.
+    /// </remarks>
     public async Task<IEnumerable<AwardCommitteeMember>> GetByCommitteeIdAsync(Guid committeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
             .Include(acm => acm.Employee)
+            .Include(acm => acm.Committee)
             .Where(acm => acm.CommitteeId == committeeId && !acm.IsDeleted)
             .OrderBy(acm => acm.Role)
-            .ThenBy(acm => acm.Employee.FullName)
+            .ThenBy(acm => acm.Employee.FirstName)
+            .ThenBy(acm => acm.Employee.LastName)
             .ToListAsync();
     }
 
+    /// <summary>The active members only. Same untranslatable ordering as its sibling above.</summary>
     public async Task<IEnumerable<AwardCommitteeMember>> GetActiveByCommitteeIdAsync(Guid committeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
             .Include(acm => acm.Employee)
+            .Include(acm => acm.Committee)
             .Where(acm => acm.CommitteeId == committeeId && acm.IsActive && !acm.IsDeleted)
             .OrderBy(acm => acm.Role)
-            .ThenBy(acm => acm.Employee.FullName)
+            .ThenBy(acm => acm.Employee.FirstName)
+            .ThenBy(acm => acm.Employee.LastName)
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Which committees an employee sits on.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Employee</c> was not loaded, so <c>employeeName</c> and <c>employeeNumber</c> came back
+    /// blank on every row - on a list whose rows are about that very employee.
+    /// </remarks>
     public async Task<IEnumerable<AwardCommitteeMember>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
             .Include(acm => acm.Committee)
+            .Include(acm => acm.Employee)
             .Where(acm => acm.EmployeeId == employeeId && !acm.IsDeleted)
             .OrderByDescending(acm => acm.StartDate)
             .ToListAsync();
@@ -856,20 +1072,62 @@ public class AwardCommitteeMemberRepository : GenericRepository<AwardCommitteeMe
 
 public class AwardNominationReviewRepository : GenericRepository<AwardNominationReview>, IAwardNominationReviewRepository
 {
+    public async Task<Dictionary<Guid, (double Average, int Reviewers)>> GetScoreSummaryByCycleAsync(Guid cycleId)
+    {
+        var rows = await (
+            from r in _context.Set<AwardNominationReview>()
+            join n in _context.Set<AwardNomination>() on r.AwardNominationId equals n.Id
+            where n.AwardCycleId == cycleId && !r.IsDeleted && !n.IsDeleted
+            group r by r.AwardNominationId into g
+            select new { NominationId = g.Key, Average = g.Average(x => (double)x.Score), Reviewers = g.Count() }
+        ).ToListAsync();
+
+        return rows.ToDictionary(x => x.NominationId, x => (x.Average, x.Reviewers));
+    }
+
     public AwardNominationReviewRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Overridden to load <c>AwardNomination</c> and <c>Reviewer</c>, which <c>ToDto</c> renders as
+    /// names. See the note on <see cref="TeamAwardNomineeRepository.GetByIdAsync"/>.
+    /// </summary>
+    public override async Task<AwardNominationReview?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<AwardNominationReview>()
+            .Include(acr => acr.AwardNomination)
+            .Include(acr => acr.Reviewer)
+            .FirstOrDefaultAsync(acr => acr.Id == id && !acr.IsDeleted);
+    }
+
+    /// <summary>
+    /// The scores given on one nomination.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>AwardNomination</c> was not loaded, so <c>nominationNumber</c> was blank on every row.
+    /// A committee reading its own scores could not tell which case each belonged to.
+    /// </remarks>
     public async Task<IEnumerable<AwardNominationReview>> GetByNominationIdAsync(Guid nominationId)
     {
         return await _context.Set<AwardNominationReview>()
             .Include(acr => acr.Reviewer)
+            .Include(acr => acr.AwardNomination)
             .Where(acr => acr.AwardNominationId == nominationId && !acr.IsDeleted)
             .OrderBy(acr => acr.ReviewDate)
             .ToListAsync();
     }
 
+    /// <summary>
+    /// The scores one reviewer has given.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Three navigations were loaded and <c>Reviewer</c> - the one the query is keyed on - was
+    /// not, so <c>reviewerName</c> was blank on every row. This backs both the desk's
+    /// <c>reviews/reviewer/{id}</c> and the member's own <c>api/awards/me/reviews</c>.
+    /// </remarks>
     public async Task<IEnumerable<AwardNominationReview>> GetByReviewerIdAsync(Guid reviewerId)
     {
         return await _context.Set<AwardNominationReview>()
+            .Include(acr => acr.Reviewer)
             .Include(acr => acr.AwardNomination)
                 .ThenInclude(an => an.AwardType)
             .Include(acr => acr.AwardNomination)
@@ -879,19 +1137,6 @@ public class AwardNominationReviewRepository : GenericRepository<AwardNomination
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<AwardNominationReview>> GetPendingReviewsAsync(Guid reviewerId)
-    {
-        return await _context.Set<AwardNominationReview>()
-            .Include(acr => acr.AwardNomination)
-                .ThenInclude(an => an.AwardType)
-            .Include(acr => acr.AwardNomination)
-                .ThenInclude(an => an.Nominee)
-            .Where(acr => acr.ReviewerId == reviewerId 
-                && acr.ReviewDate == null 
-                && !acr.IsDeleted)
-            .OrderBy(acr => acr.CreatedAt)
-            .ToListAsync();
-    }
 
     public async Task<AwardNominationReview?> GetReviewAsync(Guid nominationId, Guid reviewerId)
     {
@@ -901,21 +1146,7 @@ public class AwardNominationReviewRepository : GenericRepository<AwardNomination
                 && !acr.IsDeleted);
     }
 
-    public async Task<int> GetApprovalCountAsync(Guid nominationId)
-    {
-        return await _context.Set<AwardNominationReview>()
-            .CountAsync(acr => acr.AwardNominationId == nominationId 
-                && acr.Approved == true 
-                && !acr.IsDeleted);
-    }
 
-    public async Task<int> GetRejectionCountAsync(Guid nominationId)
-    {
-        return await _context.Set<AwardNominationReview>()
-            .CountAsync(acr => acr.AwardNominationId == nominationId 
-                && acr.Approved == false 
-                && !acr.IsDeleted);
-    }
 
     public async Task<bool> HasReviewedAsync(Guid nominationId, Guid reviewerId)
     {
@@ -944,16 +1175,35 @@ public class LongServiceAwardRepository : GenericRepository<LongServiceAward>, I
             .ToListAsync();
     }
 
+    /// <summary>
+    /// One long-service award, with everything its detail view names.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>AwardType</c> was not loaded, so <c>awardTypeName</c> was blank on the detail read -
+    /// the screen could show the milestone and the money but not which award it was.
+    /// </remarks>
     public async Task<LongServiceAward?> GetWithDetailsAsync(Guid id)
     {
         return await _context.Set<LongServiceAward>()
             .Include(lsa => lsa.Employee)
+                .ThenInclude(e => e.Department)
+            .Include(lsa => lsa.AwardType)
+            .Include(lsa => lsa.EmployeeAward)
             .FirstOrDefaultAsync(lsa => lsa.Id == id && !lsa.IsDeleted);
     }
 
+    /// <summary>
+    /// An employee's long-service milestones, highest first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ No navigation was loaded at all, so every name on every row was blank. This backs the
+    /// employee's own <c>api/awards/me/awards/long-service</c> as well as the desk's read.
+    /// </remarks>
     public async Task<IEnumerable<LongServiceAward>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Set<LongServiceAward>()
+            .Include(lsa => lsa.Employee)
+            .Include(lsa => lsa.AwardType)
             .Where(lsa => lsa.EmployeeId == employeeId && !lsa.IsDeleted)
             .OrderByDescending(lsa => lsa.YearsOfService)
             .ToListAsync();
@@ -1005,3 +1255,31 @@ public class LongServiceAwardRepository : GenericRepository<LongServiceAward>, I
 
 
 
+
+public class LongServiceMilestoneRepository : GenericRepository<LongServiceMilestone>, ILongServiceMilestoneRepository
+{
+    public LongServiceMilestoneRepository(ApplicationDbContext context) : base(context) { }
+
+    public override async Task<LongServiceMilestone?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<LongServiceMilestone>()
+            .Include(m => m.AwardType)
+            .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
+    }
+
+    public async Task<IEnumerable<LongServiceMilestone>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId)
+    {
+        return await _context.Set<LongServiceMilestone>()
+            .Include(m => m.AwardType)
+            .Where(m => m.TenantId == tenantId && m.AwardTypeId == awardTypeId && !m.IsDeleted)
+            .OrderBy(m => m.Years)
+            .ToListAsync();
+    }
+
+    public async Task<LongServiceMilestone?> GetByYearsAsync(Guid tenantId, Guid awardTypeId, int years)
+    {
+        return await _context.Set<LongServiceMilestone>()
+            .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.AwardTypeId == awardTypeId
+                && m.Years == years && !m.IsDeleted);
+    }
+}

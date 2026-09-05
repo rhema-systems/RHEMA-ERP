@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -6,15 +7,33 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Employment offers — terms, approval, issue, and the candidate's response.
+///
+/// <para><b>HR-only, reads included.</b> The controller previously carried a bare
+/// <c>[Authorize]</c>, so any authenticated employee could read every offer in the tenant — which
+/// is every new hire's salary, bonus and benefits — and create, approve, issue or revoke them.</para>
+///
+/// <para><b>Approval runs on the generic workflow engine</b>, like the two appraisal outcome
+/// proposals: an offer is a single-writer approval lifecycle that commits money, and who signs off
+/// an offer above the band midpoint is a routing policy rather than something to hard-code.
+/// ⚠ Submit/approve/reject are therefore inoperable until a <c>JobOffer</c> definition is published
+/// and <c>POST api/Workflow/entity-types/seed</c> has been re-run — authority comes from the
+/// definition, not from the role gate here. Everything from <c>Sent</c> onwards stays a direct
+/// action: issuing, the candidate responding, negotiating, revising and revoking have several
+/// writers, including the candidate through the anonymous token flow.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-offers")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules]
 public class JobOfferController : ControllerBase
 {
     private readonly IJobOfferService _service;
@@ -48,22 +67,27 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetAll()
         => Ok(await _service.GetAllSummaryAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{offerNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto?>> GetByOfferNumber(string offerNumber)
         => Ok(await _service.GetByOfferNumberAsync(offerNumber));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithFullDetailsAsync(id));
 
     [HttpGet("application/{applicationId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto?>> GetByApplication(Guid applicationId)
         => Ok(await _service.GetByApplicationIdAsync(applicationId));
 
@@ -72,8 +96,15 @@ public class JobOfferController : ControllerBase
     /// letter is rendered from the HR-editable "OfferLetter" template enriched with the offer terms,
     /// job-description summary + duties, itemised salary breakdown, benefits and pre-employment
     /// conditions.
+    ///
+    /// <para>⚠ Route renamed from <c>{id}/letter</c> to <c>{id}/letter-preview</c>. It collided
+    /// exactly with <see cref="DownloadLetter"/> below, which streams the stored PDF on the same
+    /// verb and template — so ASP.NET raised <c>AmbiguousMatchException</c> on every request and
+    /// <b>both</b> endpoints were dead. The rendered preview and the stored file are genuinely
+    /// different resources, so they get different routes rather than one being dropped.</para>
     /// </summary>
-    [HttpGet("{id:guid}/letter")]
+    [HttpGet("{id:guid}/letter-preview")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<OfferLetterDto>> GetOfferLetter(Guid id, CancellationToken ct)
     {
         try
@@ -87,15 +118,18 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetByStatus(JobOfferStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("expiring")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetExpiring(
         [FromQuery] int daysAhead = 7)
         => Ok(await _service.GetExpiringOffersAsync(daysAhead));
 
     [HttpGet("prepared-by/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetByPreparedBy(Guid employeeId)
         => Ok(await _service.GetByPreparedByAsync(employeeId));
 
@@ -104,6 +138,7 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Create([FromBody] CreateJobOfferDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -121,6 +156,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Update(Guid id, [FromBody] UpdateJobOfferDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -134,6 +170,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -145,6 +182,7 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/submit-for-approval")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> SubmitForApproval(Guid id)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -155,9 +193,24 @@ public class JobOfferController : ControllerBase
         return Ok(new { message = "Offer submitted for approval." });
     }
 
+    /// <summary>Withdraws an offer that is out for approval, returning it to Draft.</summary>
+    [HttpPost("{id:guid}/recall")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<IActionResult> Recall(Guid id)
+    {
+        await _service.RecallApprovalAsync(id);
+        return Ok(new { message = "Offer recalled." });
+    }
+
+    // W3 slice 9: approve/reject-approval deliberately carry no permission attribute — the service
+    // validates the caller against the pending workflow step (CanUserApproveAsync, no legacy
+    // fallback), and a permission here would refuse non-HR approvers the definition names. The
+    // class gate was previously Roles=SuperAdmin,HR, which could refuse the true assignee.
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveJobOfferDto dto)
     {
+        // The service keys off the body's id, so a mismatch used to act on a different offer.
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -183,8 +236,10 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/issue")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Issue(Guid id, [FromBody] IssueJobOfferDto dto)
     {
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -196,8 +251,10 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/record-response")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> RecordResponse(Guid id, [FromBody] RecordOfferResponseDto dto)
     {
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -209,8 +266,10 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/revoke")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Revoke(Guid id, [FromBody] RevokeJobOfferDto dto)
     {
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -222,6 +281,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/accept-conditionally")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> AcceptConditionally(Guid id, [FromBody] string? candidateResponseNotes = null)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -233,6 +293,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/revise")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Revise(Guid id, [FromBody] ReviseJobOfferDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -250,14 +311,79 @@ public class JobOfferController : ControllerBase
     // BENEFITS — POSITION GRADE INTEGRATION
     // =========================================================================
 
+    /// <summary>
+    /// The offer's benefit lines.
+    ///
+    /// <para>⚠ These four routes are new. <c>IJobOfferService</c> has carried
+    /// <c>AddBenefitAsync</c>, <c>GetBenefitsAsync</c>, <c>UpdateBenefitAsync</c> and
+    /// <c>DeleteBenefitAsync</c> — implemented, tenant-scoped and status-guarded — since the port,
+    /// and <b>nothing routed to any of them</b>. Only the position-grade import below was reachable,
+    /// so a negotiated line the grade cannot supply (relocation, a car allowance) could be seeded
+    /// from a position and then never corrected or removed. Another whole feature that had never
+    /// executed; see hr-dead-path-defects.</para>
+    ///
+    /// <para>Editing is confined to Draft and PendingApproval by the service, like adding and
+    /// removing — the terms stop being negotiable once an offer is approved, and a revision is the
+    /// route to changing them after that.</para>
+    /// </summary>
+    [HttpGet("{id:guid}/benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> GetBenefits(Guid id)
+        => Ok(await _service.GetBenefitsAsync(id));
+
+    [HttpPost("{id:guid}/benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobOfferBenefitDto>> AddBenefit(
+        Guid id, [FromBody] CreateJobOfferBenefitDto dto)
+    {
+        // The route owns the offer id — the body's was free to name a different one.
+        dto.JobOfferId = id;
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddBenefitAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("benefits/{benefitId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobOfferBenefitDto>> UpdateBenefit(
+        Guid benefitId, [FromBody] UpdateJobOfferBenefitDto dto)
+    {
+        if (benefitId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateBenefitAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("benefits/{benefitId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
+    public async Task<IActionResult> DeleteBenefit(Guid benefitId)
+    {
+        await _service.DeleteBenefitAsync(benefitId);
+        return NoContent();
+    }
+
     /// <summary>Preview benefits from the position grade without persisting them.</summary>
     [HttpGet("{id:guid}/suggest-benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> SuggestBenefits(
         Guid id, CancellationToken ct)
         => Ok(await _service.SuggestBenefitsFromPositionAsync(id, ct));
 
     /// <summary>Import position-grade benefits into the offer (deduped, persists to DB).</summary>
     [HttpPost("{id:guid}/import-benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> ImportBenefits(
         Guid id, CancellationToken ct)
     {
@@ -275,10 +401,11 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/notes")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferNoteDto>> AddNote(Guid id, [FromBody] CreateJobOfferNoteDto dto)
     {
+        dto.JobOfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (id != dto.JobOfferId) return BadRequest("ID mismatch.");
 
         var tenantId   = _currentUser.TenantId;
         var employeeId = _currentUser.EmployeeId;
@@ -293,6 +420,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpGet("{id:guid}/notes")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferNoteDto>>> GetNotes(Guid id)
         => Ok(await _service.GetNotesAsync(id));
 
@@ -302,12 +430,14 @@ public class JobOfferController : ControllerBase
 
     /// <summary>Upload or replace the offer letter PDF/DOCX.</summary>
     [HttpPost("{id:guid}/upload-letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [RequestSizeLimit(10 * 1024 * 1024)]
     public Task<IActionResult> UploadLetter(Guid id, IFormFile file, CancellationToken ct)
         => UploadLetterAsync(id, file, signed: false, ct);
 
     /// <summary>Upload the signed offer letter returned by the candidate.</summary>
     [HttpPost("{id:guid}/upload-signed-letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [RequestSizeLimit(10 * 1024 * 1024)]
     public Task<IActionResult> UploadSignedLetter(Guid id, IFormFile file, CancellationToken ct)
         => UploadLetterAsync(id, file, signed: true, ct);
@@ -380,12 +510,14 @@ public class JobOfferController : ControllerBase
     }
 
     /// <summary>Streams the issued offer letter.</summary>
-    [HttpGet("{id:guid}/download-letter")]
+    [HttpGet("{id:guid}/letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public Task<IActionResult> DownloadLetter(Guid id, CancellationToken ct = default)
         => DownloadLetterAsync(id, signed: false, ct);
 
     /// <summary>Streams the countersigned offer letter.</summary>
     [HttpGet("{id:guid}/signed-letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public Task<IActionResult> DownloadSignedLetter(Guid id, CancellationToken ct = default)
         => DownloadLetterAsync(id, signed: true, ct);
 

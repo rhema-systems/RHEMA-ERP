@@ -10,8 +10,13 @@ namespace ErpSystem.Core.Services.HR.Handlers;
 
 /// <summary>
 /// Production-readiness Phase B handler. On approval of a PerformanceImprovementPlan recommendation,
-/// creates a real <see cref="PerformanceImprovementPlan"/> draft (Active) anchored to the appraisal — the
-/// PIP module is fully built, so a PIP is the natural, self-contained artifact for this outcome.
+/// creates a real <see cref="PerformanceImprovementPlan"/> anchored to the appraisal — the PIP
+/// module is fully built, so a PIP is the natural, self-contained artifact for this outcome.
+///
+/// <para>The plan is raised in <see cref="PipStatus.Draft"/>, which is what this handler always
+/// meant by "draft" — its placeholder issues and standards ("to be agreed at the kick-off") are
+/// not something to serve on an employee unread. HR fills it in and puts it through the
+/// <c>PerformanceImprovementPlan</c> approval workflow, which is what makes it Active.</para>
 /// </summary>
 public class PipRecommendationHandler : IOutcomeRecommendationHandler
 {
@@ -101,7 +106,7 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
             SupervisorId = supervisorId.Value,
             StartDate = now,
             EndDate = now.AddDays(90),
-            Status = PipStatus.Active,
+            Status = PipStatus.Draft,
             PerformanceIssues = !string.IsNullOrWhiteSpace(recommendation.Notes)
                 ? recommendation.Notes!
                 : "Performance concerns identified during the appraisal review.",

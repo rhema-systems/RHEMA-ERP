@@ -24,6 +24,22 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
     requiredPermissions = ['admin.fleet-management'];
   } else if (pathname.startsWith('/administration/maintenance')) {
     requiredPermissions = ['admin.maintenance'];
+  } else if (pathname.startsWith('/administration/safety')) {
+    // The SHE settings tree has its own admin gate (SHE Manager and the
+    // administrators), separate from admin.hr — the one-admin-gate-per-module convention.
+    requiredPermissions = ['admin.she'];
+  } else if (pathname.startsWith('/administration/reference')) {
+    // Shared cross-module reference data (administrative geography). Gated on the reference-data
+    // family rather than admin.hr: the tree is not HR's, and an Estate or Sales administrator
+    // curating districts should not need an HR grant. Either tier admits — admins hold both,
+    // the HR role holds Write.
+    requiredPermissions = ['Reference.Geography.Write', 'Reference.Geography.Admin'];
+  } else if (pathname.startsWith('/administration/hr')) {
+    // Seeded to SuperAdmin/TenantAdmin/Admin and to HR (+ legacy "HR User") — HR
+    // practitioners maintain their own reference data (leave types, org structures).
+    // Previously this path had no route gate at all; the sidebar was the only thing
+    // hiding it, and any authenticated user could reach it by URL.
+    requiredPermissions = ['admin.hr'];
   }
 
   return (

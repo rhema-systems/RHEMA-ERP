@@ -70,7 +70,12 @@ export class AuthService {
 
   async getCurrentUser(): Promise<User> {
     const userInfo = await apiService.getCurrentUser();
+    // Keep everything the server sent. The explicit fields below only rename/shape what the
+    // desk shell reads; before the spread was here, every field not on that list (employeeId,
+    // the current-tenant trio, accessibleTenants, mustChangePassword) was dropped on refetch,
+    // so a linked user turned "unlinked" five minutes after login or on any page reload.
     const mappedUser = {
+      ...userInfo,
       id: userInfo.id,
       username: userInfo.username,
       email: userInfo.email,

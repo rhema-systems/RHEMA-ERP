@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Application.HR.Extensions;
@@ -95,7 +95,7 @@ public static class ExternalAssociateMappingExtensions
             PhoneNumber     = dto.PhoneNumber.Trim(),
             CompanyName     = dto.CompanyName?.Trim(),
             Role            = dto.Role?.Trim(),
-            PicturePath     = dto.PicturePath?.Trim() ?? string.Empty,
+            // ⚠ PicturePath is NOT taken from the payload — see ApplyUpdate below.
             HasFixedModule  = dto.HasFixedModule,
             ModuleId        = dto.ModuleId,
             IsActive        = dto.IsActive,
@@ -115,7 +115,10 @@ public static class ExternalAssociateMappingExtensions
         entity.PhoneNumber    = dto.PhoneNumber.Trim();
         entity.CompanyName    = dto.CompanyName?.Trim();
         entity.Role           = dto.Role?.Trim();
-        entity.PicturePath    = dto.PicturePath?.Trim() ?? entity.PicturePath;
+        // ⚠ PicturePath is the LEGACY caller-supplied file location, and the photo download still
+        // falls back to it — so accepting one here let a caller point an associate's photograph at
+        // another file. The photograph is set through the gated upload endpoint on the controller,
+        // which stores PhotoFileUploadRecordId. The column stays for ported images.
         entity.HasFixedModule = dto.HasFixedModule;
         entity.ModuleId       = dto.ModuleId;
         entity.IsActive       = dto.IsActive;

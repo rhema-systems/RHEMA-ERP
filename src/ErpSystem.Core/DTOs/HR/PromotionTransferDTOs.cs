@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -848,6 +848,16 @@ public class StaffDemotionDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid MovementId { get; set; }
     public string MovementNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Who was demoted. Read off the movement's employee, so — like <see cref="MovementNumber"/> —
+    /// it is populated by the list reads, which load the movement graph, and empty on the by-id read,
+    /// which loads the row alone. A worklist of appeals needs a name on it; a movement number is not
+    /// a person.
+    /// </summary>
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+
     public StaffDemotionReason Reason { get; set; }
     public string ReasonName => Reason.ToString();
 
@@ -907,10 +917,9 @@ public class UpdateStaffDemotionDto : UpdateDtoBase
     public bool RightToAppeal { get; set; }
     public DateTime? AppealDeadline { get; set; }
 
-    [MaxLength(1000)]
-    public string? EmployeeResponse { get; set; }
-
-    public DateTime? EmployeeResponseDate { get; set; }
+    // EmployeeResponse and EmployeeResponseDate are NOT on this DTO. The demoted employee's own
+    // words have a single writer — POST staff-demotions/{id}/respond, which refuses every caller
+    // but them — and accepting them here made an ordinary HR edit a way round that.
 }
 
 #endregion
@@ -1215,6 +1224,26 @@ public class ExtendStaffActingAppointmentDto
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// Ends an acting appointment before its end date.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>TerminatedEarly had no route at all.</b> The only way to reach it was to assign Status on
+/// the plain edit — which also reached Completed, left CompletionDate null, and locked the record
+/// out of every route that could repair it. Lane 3 stopped the edit assigning Status, so this exists
+/// to keep the state reachable through a door that maintains what goes with it. A reason is
+/// required: ending somebody's acting appointment early is a decision, not a correction.
+/// </remarks>
+public class TerminateStaffActingAppointmentEarlyDto
+{
+    [Required]
+    public Guid AppointmentId { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
 /// <summary>Convert a completed acting appointment into a permanent promotion.</summary>
 public class ConvertActingToPermanentDto
 {
@@ -1292,6 +1321,15 @@ public class EmployeeCareerPathDto : BaseDto
 public class EmployeeCareerPathSummaryDto
 {
     public Guid Id { get; set; }
+
+    // The ids the timeline actually needs: without PositionId it cannot tell which post a step is,
+    // and without MovementId it cannot link the movement that caused the change — which is the one
+    // thing a career step is for.
+    public Guid EmployeeId { get; set; }
+    public Guid PositionId { get; set; }
+    public Guid? MovementId { get; set; }
+    public string? MovementNumber { get; set; }
+
     public string PositionTitle { get; set; } = string.Empty;
     public string OrganizationUnitName { get; set; } = string.Empty;
     public string? LocationName { get; set; }
@@ -1516,6 +1554,46 @@ public class MovementPendingAlertDto
     public StaffMovementStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public string? AlertDetail { get; set; }
+}
+
+#endregion
+
+// ============================================================================
+// REMINDER ENGINE DTOs (area 8 slice 5)
+// ============================================================================
+
+#region Staff Movement Reminders
+
+public class StaffMovementReminderRunDto
+{
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+}
+
+public class StaffMovementReminderRunResultDto
+{
+    public Guid RunId { get; set; }
+    public int RemindersQueued { get; set; }
+
+    /// <summary>Per-kind breakdown, so a run-now shows what it actually found.</summary>
+    public Dictionary<string, int> ByKind { get; set; } = new();
+}
+
+public class StaffMovementReminderLogEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public DateTime DispatchedAt { get; set; }
 }
 
 #endregion

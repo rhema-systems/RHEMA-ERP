@@ -58,6 +58,8 @@ public static class RecruitmentMappingExtensions
             RequiresPracticalTest = entity.RequiresPracticalTest,
             RecruitmentPipelineId = entity.RecruitmentPipelineId,
             PipelineName = entity.Pipeline?.Name,
+            AllowInternalCandidates = entity.AllowInternalCandidates,
+            AllowExternalCandidates = entity.AllowExternalCandidates,
             ApplicationCount = entity.ApplicationCount,
             ShortlistedCount = entity.ShortlistedCount,
             InterviewCount = entity.InterviewCount,
@@ -100,6 +102,8 @@ public static class RecruitmentMappingExtensions
             NumberOfPositions = entity.NumberOfPositions,
             HiringManagerName = entity.HiringManager?.FullName,
             RecruiterName = entity.Recruiter?.FullName,
+            AllowInternalCandidates = entity.AllowInternalCandidates,
+            AllowExternalCandidates = entity.AllowExternalCandidates,
             ApplicationCount = entity.ApplicationCount,
             ShortlistedCount = entity.ShortlistedCount,
             OfferCount = entity.OfferCount,
@@ -152,6 +156,8 @@ public static class RecruitmentMappingExtensions
             RequiresPracticalTest = entity.RequiresPracticalTest,
             RecruitmentPipelineId = entity.RecruitmentPipelineId,
             PipelineName = entity.Pipeline?.Name,
+            AllowInternalCandidates = entity.AllowInternalCandidates,
+            AllowExternalCandidates = entity.AllowExternalCandidates,
             ApplicationCount = entity.ApplicationCount,
             ShortlistedCount = entity.ShortlistedCount,
             InterviewCount = entity.InterviewCount,
@@ -190,7 +196,6 @@ public static class RecruitmentMappingExtensions
             NumberOfInterviewRounds = dto.NumberOfInterviewRounds,
             TargetStartDate = dto.TargetStartDate,
             IsSalaryVisible = dto.IsSalaryVisible,
-            EmploymentType = dto.EmploymentType,
             WorkMode = dto.WorkMode,
             SalaryRangeMin = dto.SalaryRangeMin,
             SalaryRangeMax = dto.SalaryRangeMax,
@@ -199,6 +204,7 @@ public static class RecruitmentMappingExtensions
             KeyBenefitsSummary = dto.KeyBenefitsSummary,
             RequiresWrittenTest = dto.RequiresWrittenTest,
             RequiresPracticalTest = dto.RequiresPracticalTest,
+            IsBlindScreeningEnabled = dto.IsBlindScreeningEnabled,
             RecruitmentPipelineId = dto.RecruitmentPipelineId,
             AutoShortlistMinScore            = dto.AutoShortlistMinScore,
             AutoShortlistRequireAllMandatory = dto.AutoShortlistRequireAllMandatory,
@@ -335,20 +341,9 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static JobVacancyAttachment ToEntity(this CreateJobVacancyAttachmentDto dto, Guid tenantId, Guid userId)
-    {
-        return new JobVacancyAttachment
-        {
-            TenantId = tenantId,
-            JobVacancyId = dto.JobVacancyId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
-            Description = dto.Description,
-            UploadDate = DateTime.UtcNow,
-            UploadedById = userId,
-            CreatedBy = userId.ToString(),
-        };
-    }
+    // The ToEntity mapper for vacancy attachments is gone with its DTO: the row is now built in
+    // JobVacancyService.AddAttachmentAsync from the scanned document the upload gate returns, so
+    // there is no caller payload left to map.
 
     #endregion
 
@@ -745,6 +740,13 @@ public static class RecruitmentMappingExtensions
             RequiredSkillId = dto.RequiredSkillId,
             RequiredQualificationId = dto.RequiredQualificationId,
             Weight = dto.Weight,
+            // ⚠ This assignment was missing. The create DTO carries ComparisonOperator, ToDto
+            // returns it and UpdateEntity assigns it — only the create path dropped it, so a
+            // criterion could be created with an operator and come back with none, and the
+            // numeric arm of the scoring switch fell to its `?? Between` default. Found by
+            // dev-harness/hr-recruitment/probe-lane5-criteria.mjs (lane 5b), which sent
+            // "Equals" on create and read null back.
+            ComparisonOperator = dto.ComparisonOperator,
         };
     }
 
@@ -1252,19 +1254,9 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static JobCandidateDocument ToEntity(this CreateJobCandidateDocumentDto dto, Guid tenantId, Guid userId)
-    {
-        return new JobCandidateDocument
-        {
-            TenantId = tenantId,
-            JobCandidateId = dto.JobCandidateId,
-            DocumentType = dto.DocumentType,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
-            UploadDate = DateTime.UtcNow,
-            CreatedBy = userId.ToString(),
-        };
-    }
+    // No ToEntity for candidate documents: the row is written by JobCandidateService.AddDocumentAsync
+    // from what the controlled-upload gate returns, not from a payload. The Create DTO this mapped is
+    // deleted — it carried a caller-supplied FilePath.
 
     #endregion
 
@@ -1318,6 +1310,10 @@ public static class RecruitmentMappingExtensions
 
     #region Talent Pool
 
+    // Every JobCandidateDto field must be populated here, not just the ones the first screen
+    // happened to bind — this DTO *is* the per-candidate read the pool panels edit from. The
+    // first cut mapped 21 of ~40 and silently served no CV link, city, country, salary
+    // expectations or work authorisation (the D-09 per-parent-read shape).
     public static TalentPoolCandidateDto ToTalentPoolDto(this JobCandidate entity)
     {
         var now = DateTime.UtcNow;
@@ -1335,21 +1331,44 @@ public static class RecruitmentMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             CandidateNumber = entity.CandidateNumber,
             FirstName = entity.FirstName,
+            MiddleName = entity.MiddleName,
             LastName = entity.LastName,
+            DateOfBirth = entity.DateOfBirth,
+            Gender = entity.Gender,
             Email = entity.Email,
             Phone = entity.Phone,
+            AlternatePhone = entity.AlternatePhone,
+            PostalAddress = entity.PostalAddress,
+            DigitalAddress = entity.DigitalAddress,
+            City = entity.City,
+            Nationality = entity.Nationality,
+            CountryId = entity.CountryId,
+            CountryName = entity.Country?.Name ?? string.Empty,
+            LinkedInProfile = entity.LinkedInProfile,
+            PortfolioUrl = entity.PortfolioUrl,
+            GitHubUrl = entity.GitHubUrl,
             Headline = entity.Headline,
+            ProfessionalSummary = entity.ProfessionalSummary,
             CurrentJobTitle = entity.CurrentJobTitle,
             CurrentEmployer = entity.CurrentEmployer,
             TotalYearsExperience = entity.TotalYearsExperience,
+            NoticePeriodDays = entity.NoticePeriodDays,
             AvailableFrom = entity.AvailableFrom,
             PreferredWorkArrangement = entity.PreferredWorkArrangement,
+            ExpectedSalaryMin = entity.ExpectedSalaryMin,
+            ExpectedSalaryMax = entity.ExpectedSalaryMax,
+            ExpectedSalaryCurrency = entity.ExpectedSalaryCurrency,
+            WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
+            CvFilePath = entity.CvFilePath,
+            ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            ApplicationCount = entity.Applications?.Count ?? 0,
             IsInTalentPool = entity.IsInTalentPool,
             TalentPoolAddedDate = entity.TalentPoolAddedDate,
             TalentPoolSource = entity.TalentPoolSource,
             TalentPoolStatus = entity.TalentPoolStatus,
             TalentPoolNotes = entity.TalentPoolNotes,
             TalentPoolReviewDate = entity.TalentPoolReviewDate,
+            TalentPoolRemovalReason = entity.TalentPoolRemovalReason,
             LastEngagedDate = entity.LastEngagedDate,
             DaysInPool = daysInPool,
             EngagementCount = entity.EngagementEvents?.Count(e => !e.IsDeleted) ?? 0,
@@ -1388,6 +1407,7 @@ public static class RecruitmentMappingExtensions
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
             UpdatedBy = entity.UpdatedBy,
+            JobCandidateId = entity.JobCandidateId,
             SegmentId = entity.SegmentId,
             SegmentName = entity.Segment?.Name ?? string.Empty,
             SegmentColor = entity.Segment?.Color,
@@ -1396,7 +1416,11 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static CandidateEngagementEventDto ToEngagementEventDto(this CandidateEngagementEvent entity)
+    // RecordedByEmployeeId has no Employee navigation, so the names arrive as parameters the
+    // service resolves — a mapper defaulting them to blank is how the timeline shipped unable
+    // to say who logged a contact.
+    public static CandidateEngagementEventDto ToEngagementEventDto(
+        this CandidateEngagementEvent entity, string? candidateName = null, string? recordedByName = null)
     {
         return new CandidateEngagementEventDto
         {
@@ -1407,11 +1431,12 @@ public static class RecruitmentMappingExtensions
             UpdatedAt = entity.UpdatedAt,
             UpdatedBy = entity.UpdatedBy,
             JobCandidateId = entity.JobCandidateId,
+            CandidateName = candidateName ?? entity.JobCandidate?.FullName ?? string.Empty,
             EventType = entity.EventType,
             EventDate = entity.EventDate,
             Subject = entity.Subject,
             Notes = entity.Notes,
-            RecordedByName = null, // populated by service layer if needed
+            RecordedByName = recordedByName,
             IsInternal = entity.IsInternal
         };
     }
@@ -2111,10 +2136,12 @@ public static class RecruitmentMappingExtensions
             IntervieweeCount = entity.Interviewees?.Count ?? 0,
             PanelistCount = (entity.Panelists?.Count ?? 0) + (entity.ExternalPanelists?.Count ?? 0),
             QuestionPresetId = entity.QuestionPresetId,
-            Interviewees = entity.Interviewees?.Select(i => i.ToDto()).ToList() ?? new(),
+            Interviewees = entity.Interviewees?
+                .OrderBy(i => i.SlotStartTime ?? TimeSpan.MaxValue)
+                .Select(i => i.ToDto()).ToList() ?? new(),
             Panelists = entity.Panelists?.Select(p => p.ToDto()).ToList() ?? new(),
             ExternalPanelists = entity.ExternalPanelists?.Select(p => p.ToDto()).ToList() ?? new(),
-            Questions = entity.Questions.Select(q => q.ToDto()).ToList(),
+            Questions = entity.Questions.OrderBy(q => q.DisplayOrder).Select(q => q.ToDto()).ToList(),
         };
     }
 
@@ -2143,7 +2170,7 @@ public static class RecruitmentMappingExtensions
         entity.Round = dto.Round;
         entity.Type = dto.Type;
         entity.Mode = dto.Mode;
-        entity.Status = dto.Status;
+        // Status is owned by reschedule / cancel / complete — see UpdateJobInterviewDto.
         entity.ScheduledDate = dto.ScheduledDate;
         entity.StartTime = dto.StartTime;
         entity.EndTime = dto.EndTime;
@@ -2338,7 +2365,13 @@ public static class RecruitmentMappingExtensions
             RequiredQuestionCount = entity.RequiredQuestionCount,
             AllowedPoolSize = entity.AllowedPoolSize,
             DisplayOrder = entity.DisplayOrder,
-            SelectedQuestions = entity.SelectedQuestions.Select(q => q.ToDto()).ToList(),
+            // Sorted here as well as in the query: this mapper is the single choke point both the
+            // plan list and the interview detail read go through, and an unordered Include hands back
+            // whatever order the database chose. DisplayOrder is the sequence the panel committed.
+            SelectedQuestions = entity.SelectedQuestions
+                .OrderBy(q => q.DisplayOrder)
+                .Select(q => q.ToDto())
+                .ToList(),
         };
     }
 
@@ -2673,13 +2706,12 @@ public static class RecruitmentMappingExtensions
             TenantId = tenantId,
             JobApplicationId = dto.JobApplicationId,
             OfferStatus = JobOfferStatus.Draft,
-            PositionId = dto.PositionId,
-            PositionTitle = dto.PositionTitle,
-            ReportsToTitle = dto.ReportsToTitle,
-            GradeTitle = dto.GradeTitle,
+            // PositionId, PositionTitle, ReportsToTitle, GradeTitle and EmploymentType are set by
+            // CreateAsync from the application's vacancy and position — they are snapshots of the
+            // role, not negotiable terms, and are no longer on the payload at all.
+
             LocationLevelId = dto.LocationLevelId,
             LocationId = dto.LocationId,
-            EmploymentType = dto.EmploymentType,
             ContractDurationMonths = dto.ContractDurationMonths,
             ProbationPeriodMonths = dto.ProbationPeriodMonths,
             NoticePeriodMonths = dto.NoticePeriodMonths,
@@ -2706,13 +2738,11 @@ public static class RecruitmentMappingExtensions
 
     public static void UpdateEntity(this JobOffer entity, UpdateJobOfferDto dto, Guid userId)
     {
-        entity.PositionTitle = dto.PositionTitle;
-        entity.ReportsToTitle = dto.ReportsToTitle;
-        entity.GradeTitle = dto.GradeTitle;
+        // The role snapshot — position title, reporting line, grade, employment type and work mode —
+        // belongs to the position and the vacancy, and is set once at create. It used to be written
+        // from this payload, which let an edit falsify the role the offer describes.
         entity.LocationLevelId = dto.LocationLevelId;
         entity.LocationId = dto.LocationId;
-        entity.EmploymentType = dto.EmploymentType;
-        entity.WorkMode = dto.WorkMode;
         entity.ContractDurationMonths = dto.ContractDurationMonths;
         entity.ProbationPeriodMonths = dto.ProbationPeriodMonths;
         entity.NoticePeriodMonths = dto.NoticePeriodMonths;
@@ -2944,7 +2974,9 @@ public static class RecruitmentMappingExtensions
             Passed = entity.Passed,
             Instructions = entity.Instructions,
             Remarks = entity.Remarks,
-            DocumentPath = entity.DocumentPath,
+            HasDocument = entity.DocumentFileUploadRecordId.HasValue
+                          || !string.IsNullOrWhiteSpace(entity.DocumentPath),
+            DocumentFileName = entity.DocumentFileName,
             ExpectedDays = entity.ExpectedDays,
             IsMandatory = entity.IsMandatory,
             IsBlockingOnFail = entity.IsBlockingOnFail,
@@ -2988,7 +3020,7 @@ public static class RecruitmentMappingExtensions
             entity.Status = dto.Passed.Value ? CheckItemStatus.Verified : CheckItemStatus.Failed;
         entity.Instructions = dto.Instructions;
         entity.Remarks = dto.Remarks;
-        entity.DocumentPath = dto.DocumentPath;
+        // DocumentPath is no longer settable from a payload — see UpdatePreEmploymentCheckItemDto.
         entity.ExpectedDays = dto.ExpectedDays;
         entity.ReviewedById = dto.ReviewedById;
         entity.ReviewedDate = dto.ReviewedDate;
@@ -3029,7 +3061,9 @@ public static class RecruitmentMappingExtensions
             ConfirmedDatesOfEmployment = entity.ConfirmedDatesOfEmployment,
             ConfirmedPositionHeld = entity.ConfirmedPositionHeld,
             ConfirmedReasonForLeaving = entity.ConfirmedReasonForLeaving,
-            DocumentPath = entity.DocumentPath,
+            HasDocument = entity.DocumentFileUploadRecordId.HasValue
+                          || !string.IsNullOrWhiteSpace(entity.DocumentPath),
+            DocumentFileName = entity.DocumentFileName,
         };
     }
 
@@ -3053,7 +3087,7 @@ public static class RecruitmentMappingExtensions
             ConfirmedDatesOfEmployment = dto.ConfirmedDatesOfEmployment,
             ConfirmedPositionHeld = dto.ConfirmedPositionHeld,
             ConfirmedReasonForLeaving = dto.ConfirmedReasonForLeaving,
-            DocumentPath = dto.DocumentPath,
+            // DocumentPath arrives through the upload gate, not the payload.
             CreatedBy = userId.ToString(),
         };
     }
@@ -3066,7 +3100,7 @@ public static class RecruitmentMappingExtensions
         entity.ConfirmedDatesOfEmployment = dto.ConfirmedDatesOfEmployment;
         entity.ConfirmedPositionHeld = dto.ConfirmedPositionHeld;
         entity.ConfirmedReasonForLeaving = dto.ConfirmedReasonForLeaving;
-        entity.DocumentPath = dto.DocumentPath;
+        // DocumentPath arrives through the upload gate, not the payload.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -3479,6 +3513,10 @@ public static class RecruitmentMappingExtensions
             AssignedToName = entity.AssignedTo?.FullName,
             AssignedOrganizationUnitId = entity.AssignedOrganizationUnitId,
             AssignedOrganizationUnitName = entity.AssignedOrganizationUnit?.Name,
+            OwnerPositionId = entity.OwnerPositionId,
+            OwnerPositionTitle = entity.OwnerPosition?.Title,
+            CompletedById = entity.CompletedById,
+            CompletedByName = entity.CompletedBy?.FullName,
             CompletionNotes = entity.CompletionNotes,
             EvidenceFilePath = entity.EvidenceFilePath,
             RequiresVerification = entity.RequiresVerification,
@@ -3526,6 +3564,10 @@ public static class RecruitmentMappingExtensions
             AssignedToName = entity.AssignedTo?.FullName,
             AssignedOrganizationUnitId = entity.AssignedOrganizationUnitId,
             AssignedOrganizationUnitName = entity.AssignedOrganizationUnit?.Name,
+            OwnerPositionId = entity.OwnerPositionId,
+            OwnerPositionTitle = entity.OwnerPosition?.Title,
+            CompletedById = entity.CompletedById,
+            CompletedByName = entity.CompletedBy?.FullName,
             CompletionNotes = entity.CompletionNotes,
             EvidenceFilePath = entity.EvidenceFilePath,
             RequiresVerification = entity.RequiresVerification,
@@ -3760,18 +3802,22 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static ProbationPeriod ToEntity(this CreateProbationPeriodDto dto, Guid tenantId, Guid userId)
+    /// <summary>
+    /// Builds the probation row. <paramref name="durationMonths"/> is resolved by the service from
+    /// the employee's staff category (FR-HR-031), so it is passed in rather than read off the DTO,
+    /// which may legitimately omit it.
+    /// </summary>
+    public static ProbationPeriod ToEntity(this CreateProbationPeriodDto dto, Guid tenantId, Guid userId, int durationMonths)
     {
-        var endDate = DateOnly.FromDateTime(DateTime.UtcNow).AddMonths(dto.DurationMonths);
         return new ProbationPeriod
         {
             TenantId = tenantId,
             EmployeeId = dto.EmployeeId,
             ContractDetailId = dto.ContractDetailId,
             StartDate = dto.StartDate,
-            OriginalEndDate = dto.StartDate.AddMonths(dto.DurationMonths),
-            CurrentEndDate = dto.StartDate.AddMonths(dto.DurationMonths),
-            DurationMonths = dto.DurationMonths,
+            OriginalEndDate = dto.StartDate.AddMonths(durationMonths),
+            CurrentEndDate = dto.StartDate.AddMonths(durationMonths),
+            DurationMonths = durationMonths,
             Status = ProbationStatus.Active,
             OutcomeNotes = dto.OutcomeNotes,
             CreatedBy = userId.ToString(),

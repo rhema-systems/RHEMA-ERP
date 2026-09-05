@@ -47,8 +47,8 @@ public class CompanyEventDto : BaseDto
     public string? VenueAddress { get; set; }
     public string? OnlineMeetingLink { get; set; }
     public string? MeetingPassword { get; set; }
-    public Guid? StationId { get; set; }
-    public string? StationName { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     
     // Organizer
     public Guid OrganizerId { get; set; }
@@ -207,7 +207,7 @@ public class CreateCompanyEventDto : CreateDtoBase
     [MaxLength(100)]
     public string? MeetingPassword { get; set; }
 
-    public Guid? StationId { get; set; }
+    public Guid? LocationId { get; set; }
     public Guid? DepartmentId { get; set; }
 
     // Participants
@@ -302,7 +302,7 @@ public class UpdateCompanyEventDto : UpdateDtoBase
     [MaxLength(100)]
     public string? MeetingPassword { get; set; }
 
-    public Guid? StationId { get; set; }
+    public Guid? LocationId { get; set; }
     public Guid? DepartmentId { get; set; }
 
     // Participants
@@ -662,8 +662,8 @@ public class MeetingRoomDto : BaseDto
     public string RoomCode { get; set; } = string.Empty;
     public string RoomName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid StationId { get; set; }
-    public string StationName { get; set; } = string.Empty;
+    public Guid LocationId { get; set; }
+    public string LocationName { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
     public string? Floor { get; set; }
     public string? Building { get; set; }
@@ -694,7 +694,7 @@ public class MeetingRoomSummaryDto
     public Guid Id { get; set; }
     public string RoomCode { get; set; } = string.Empty;
     public string RoomName { get; set; } = string.Empty;
-    public string StationName { get; set; } = string.Empty;
+    public string LocationName { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
     public int Capacity { get; set; }
     public RoomType Type { get; set; }
@@ -719,7 +719,7 @@ public class CreateMeetingRoomDto : CreateDtoBase
     public string? Description { get; set; }
 
     [Required]
-    public Guid StationId { get; set; }
+    public Guid LocationId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -770,7 +770,7 @@ public class UpdateMeetingRoomDto : UpdateDtoBase
     public string? Description { get; set; }
 
     [Required]
-    public Guid StationId { get; set; }
+    public Guid LocationId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -1026,8 +1026,8 @@ public class BusinessClosureDto : BaseDto
     public ClosureType Type { get; set; }
     public string TypeName => Type.ToString();
     public bool AffectsAllStations { get; set; }
-    public Guid? StationId { get; set; }
-    public string? StationName { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
     public bool IsPaidClosure { get; set; }
@@ -1060,7 +1060,7 @@ public class CreateBusinessClosureDto : CreateDtoBase
     public ClosureType Type { get; set; }
 
     public bool AffectsAllStations { get; set; } = true;
-    public Guid? StationId { get; set; }
+    public Guid? LocationId { get; set; }
     public Guid? DepartmentId { get; set; }
     public bool IsPaidClosure { get; set; }
     public bool CountsAsWorkingDay { get; set; }
@@ -1091,7 +1091,7 @@ public class UpdateBusinessClosureDto : UpdateDtoBase
     public ClosureType Type { get; set; }
 
     public bool AffectsAllStations { get; set; }
-    public Guid? StationId { get; set; }
+    public Guid? LocationId { get; set; }
     public Guid? DepartmentId { get; set; }
     public bool IsPaidClosure { get; set; }
     public bool CountsAsWorkingDay { get; set; }

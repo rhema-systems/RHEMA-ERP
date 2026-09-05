@@ -17,12 +17,36 @@ public interface IJobDescriptionService
     Task<JobDescriptionDto?> GetCurrentVersionForPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobDescriptionSummaryDto>> GetDueForReviewAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<JobAnalyticsDto> GetAnalyticsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Positions with no approved job description — the work list behind FR-HR-134, ordered by how
+    /// many people are doing a job nobody has described.
+    /// </summary>
+    Task<IEnumerable<UncoveredPositionDto>> GetUncoveredPositionsAsync(
+        CancellationToken cancellationToken = default);
+
     Task<IEnumerable<JobDescriptionSummaryDto>> GetVersionHistoryAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> UpdateAsync(UpdateJobDescriptionDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> SubmitForReviewAsync(SubmitJobDescriptionForReviewDto submitDto, CancellationToken cancellationToken = default);
     Task<bool> ReviewAsync(ReviewJobDescriptionDto reviewDto, Guid reviewedById, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveJobDescriptionDto approveDto, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the current workflow step for a job description, and — when that step completes the
+    /// chain — applies the consequences of approval (area 17 slice 3, FR-HR-134).
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ApproveAsync"/> because the two answer to different authorities:
+    /// the direct route asks whether the caller holds <c>HR.JobArchitecture.Admin</c>, this one asks
+    /// the engine whether the caller is the assigned approver for the step in front of them. Once a
+    /// tenant publishes a definition the direct route refuses, so the configured chain cannot be
+    /// bypassed by a permission.
+    /// </remarks>
+    Task<bool> ApproveViaWorkflowAsync(Guid jobDescriptionId, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>Rejects the current workflow step, returning the job description to its author.</summary>
+    Task<bool> RejectViaWorkflowAsync(Guid jobDescriptionId, string? reason, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default);
     /// <summary>Deep-copies a job description (and all its child sections) into a new Draft.</summary>
     Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default);
@@ -125,6 +149,40 @@ public interface IManpowerBudgetService
     Task<ManpowerBudgetDto> UpdateAsync(UpdateManpowerBudgetDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> SubmitForApprovalAsync(Guid budgetId, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveManpowerBudgetDto approveDto, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the current workflow step for a manpower budget (FR-HR-135: Department Head → HR →
+    /// Managing Director). Stamps the approver only when the step completes the chain.
+    /// </summary>
+    Task<bool> ApproveViaWorkflowAsync(Guid budgetId, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>Rejects the current workflow step for a manpower budget, keeping the reason.</summary>
+    Task<bool> RejectViaWorkflowAsync(Guid budgetId, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets a position's approved establishment directly (FR-HR-136), for posts no manpower budget
+    /// covers. Stamps <c>EstablishmentApprovedOn</c> and leaves <c>EstablishmentSourceBudgetId</c>
+    /// null, so a screen can tell an HR-set number from a budget-derived one.
+    /// </summary>
+    Task<PositionEstablishmentResultDto> SetPositionEstablishmentAsync(
+        Guid positionId, SetPositionEstablishmentDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Withdraws a position's approved establishment, returning it to unconstrained.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Needed because an establishment can be set in error — the wrong budget approved, the wrong
+    /// number typed — and until this existed there was no way back: the position was permanently
+    /// constrained by a figure nobody meant, and every requisition and movement against it was
+    /// refused for a reason no one could undo. <c>ExpectedHeadcount</c> is left as it stands; the
+    /// authorisation is what is withdrawn, not the planning number.
+    /// </remarks>
+    Task<PositionEstablishmentResultDto> WithdrawPositionEstablishmentAsync(
+        Guid positionId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>A position's establishment, how many are actually in post, and where the number came from.</summary>
+    Task<PositionEstablishmentResultDto> GetPositionEstablishmentAsync(
+        Guid positionId, CancellationToken cancellationToken = default);
     Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 

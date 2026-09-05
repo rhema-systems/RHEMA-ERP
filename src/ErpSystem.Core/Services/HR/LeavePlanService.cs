@@ -19,6 +19,7 @@ public class LeavePlanService : ILeavePlanService
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ILeaveRepository _leaveRequestRepository;
 
     public LeavePlanService(
         ILeavePlanRepository leavePlanRepository,
@@ -26,7 +27,8 @@ public class LeavePlanService : ILeavePlanService
         ILogger<LeavePlanService> logger,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ILeaveRepository leaveRequestRepository)
     {
         _leavePlanRepository = leavePlanRepository;
         _unitOfWork = unitOfWork;
@@ -34,6 +36,24 @@ public class LeavePlanService : ILeavePlanService
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserService = currentUserService;
+        _leaveRequestRepository = leaveRequestRepository;
+    }
+
+    /// <summary>
+    /// The employee the token belongs to, for <c>PlannedBy</c> — an Employee foreign key. Not the
+    /// user id: a user id is never an employee id, and the constraint refuses it.
+    /// </summary>
+    /// <remarks>
+    /// Finish-plan lane 4 (2026-09-01). Both the desk and the self-service planner sent the LOGIN's
+    /// user id as <c>plannedBy</c>, so no plan raised from either screen had ever satisfied the
+    /// constraint. Stamped here, never read from the payload.
+    /// </remarks>
+    private Guid RequireActingEmployeeId()
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+            return me;
+        throw new InvalidOperationException(
+            "Planning leave requires your user account to be linked to an employee record. Please contact your administrator.");
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -88,7 +108,9 @@ public class LeavePlanService : ILeavePlanService
             .Where(p => p.TenantId == tenantId && p.EmployeeId == employeeId && p.Year == year)
             .OrderBy(p => p.StartDate)
             .ToListAsync();
-        return items.ToDtoList();
+        var dtos = items.ToDtoList();
+        await EnrichRelieverClashesAsync(dtos);
+        return dtos;
     }
 
     public async Task<IEnumerable<LeavePlanDto>> GetByYearAsync(int year)
@@ -105,7 +127,9 @@ public class LeavePlanService : ILeavePlanService
             .Where(p => p.TenantId == tenantId && p.Year == year)
             .OrderBy(p => p.StartDate)
             .ToListAsync();
-        return items.ToDtoList();
+        var dtos = items.ToDtoList();
+        await EnrichRelieverClashesAsync(dtos);
+        return dtos;
     }
 
     public async Task<LeavePlanDto> GetByIdAsync(Guid id)
@@ -113,7 +137,9 @@ public class LeavePlanService : ILeavePlanService
         var entity = await GetWithIncludes(id);
         if (entity == null)
             throw new ArgumentException($"Leave plan '{id}' not found.");
-        return entity.ToDto();
+        var dto = entity.ToDto();
+        await EnrichRelieverClashesAsync(new List<LeavePlanDto> { dto });
+        return dto;
     }
 
     public async Task<LeavePlanDto> CreateLeavePlanAsync(CreateLeavePlanDto dto)
@@ -127,10 +153,11 @@ public class LeavePlanService : ILeavePlanService
 
         var entity = dto.ToEntity();
         entity.TenantId = GetTenantId();
+        entity.PlannedBy = RequireActingEmployeeId();
         await _leavePlanRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Leave plan created for employee {employeeId}", dto.EmployeeId);
-        return (await GetWithIncludes(entity.Id))!.ToDto();
+        return await GetByIdAsync(entity.Id);
     }
 
     public async Task<LeavePlanDto> UpdateLeavePlanAsync(Guid id, CreateLeavePlanDto dto)
@@ -157,12 +184,12 @@ public class LeavePlanService : ILeavePlanService
         entity.RelieverId = dto.RelieverId;
         entity.SecondRelieverId = dto.SecondRelieverId;
         entity.Notes = dto.Notes;
-        entity.PlannedBy = dto.PlannedBy;
+        // PlannedBy is who raised the plan; an edit does not re-author it.
         entity.Year = dto.Year;
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return (await GetWithIncludes(id))!.ToDto();
+        return await GetByIdAsync(id);
     }
 
     public async Task<LeavePlanDto> SubmitLeavePlanAsync(Guid id)
@@ -347,6 +374,135 @@ public class LeavePlanService : ILeavePlanService
 
     private Guid GetCurrentUserId()
         => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
+
+    // ── Reliever clashes ──────────────────────────────────────────────────────────
+    //
+    // Finish-plan lane 4 (2026-09-01). TDC's demo feedback: "reliever clashes are not visible on
+    // the plan". A plan named a reliever and nothing ever asked whether that person would be there.
+    // Three ways they might not be: they have a leave PLAN of their own over the dates, they have a
+    // leave REQUEST (pending, approved or under way) over the dates, or another plan in the window
+    // already names them as reliever. Advisory, not a gate — the register and the form both show it
+    // and let the planner decide; what neither may do is stay silent.
+
+    private static readonly LeaveStatus[] LiveRequestStatuses =
+        { LeaveStatus.Pending, LeaveStatus.Approved, LeaveStatus.InProgress };
+
+    public async Task<IReadOnlyList<LeaveRelieverClashDto>> GetRelieverClashesAsync(
+        Guid relieverId, DateOnly startDate, DateOnly endDate, Guid? excludePlanId = null)
+    {
+        var probe = new LeavePlanDto
+        {
+            Id = excludePlanId ?? Guid.Empty,
+            StartDate = startDate,
+            EndDate = endDate,
+            RelieverId = relieverId,
+        };
+        await EnrichRelieverClashesAsync(new List<LeavePlanDto> { probe });
+        return probe.RelieverClashes;
+    }
+
+    /// <summary>
+    /// Fills <see cref="LeavePlanDto.RelieverClashes"/> for every plan in the list with one query per
+    /// source over the whole window, rather than three per row.
+    /// </summary>
+    private async Task EnrichRelieverClashesAsync(List<LeavePlanDto> plans)
+    {
+        var withReliever = plans.Where(p => p.RelieverId.HasValue || p.SecondRelieverId.HasValue).ToList();
+        if (withReliever.Count == 0) return;
+
+        var tenantId = GetTenantId();
+        var relieverIds = withReliever
+            .SelectMany(p => new[] { p.RelieverId, p.SecondRelieverId })
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+        var windowStart = withReliever.Min(p => p.StartDate);
+        var windowEnd = withReliever.Max(p => p.EndDate);
+
+        // (a) + (c): plans in the window where a reliever is the employee, or is named as reliever.
+        var plansInWindow = await _leavePlanRepository.GetQueryable()
+            .Include(p => p.Employee)
+            .Include(p => p.LeaveType)
+            .Where(p => p.TenantId == tenantId
+                     && p.Status != LeavePlanStatus.Cancelled
+                     && p.Status != LeavePlanStatus.Rejected
+                     && p.StartDate <= windowEnd && p.EndDate >= windowStart
+                     && (relieverIds.Contains(p.EmployeeId)
+                         || (p.RelieverId.HasValue && relieverIds.Contains(p.RelieverId.Value))
+                         || (p.SecondRelieverId.HasValue && relieverIds.Contains(p.SecondRelieverId.Value))))
+            .AsNoTracking()
+            .ToListAsync();
+
+        // (b): the reliever's own leave requests that are live over the window.
+        var requestsInWindow = await _leaveRequestRepository.GetQueryable()
+            .Include(r => r.LeaveType)
+            .Where(r => r.TenantId == tenantId
+                     && relieverIds.Contains(r.EmployeeId)
+                     && LiveRequestStatuses.Contains(r.Status)
+                     && r.StartDate <= windowEnd && r.EndDate >= windowStart)
+            .AsNoTracking()
+            .ToListAsync();
+
+        foreach (var plan in withReliever)
+        {
+            plan.RelieverClashes.Clear();
+            var slots = new (Guid? Id, string? Name, int Slot)[]
+            {
+                (plan.RelieverId, plan.RelieverName, 1),
+                (plan.SecondRelieverId, plan.SecondRelieverName, 2),
+            };
+            foreach (var (relieverId, relieverName, slot) in slots)
+            {
+                if (relieverId is not Guid rid) continue;
+
+                foreach (var other in plansInWindow.Where(o => o.Id != plan.Id
+                                                             && o.StartDate <= plan.EndDate
+                                                             && o.EndDate >= plan.StartDate))
+                {
+                    if (other.EmployeeId == rid)
+                    {
+                        plan.RelieverClashes.Add(new LeaveRelieverClashDto
+                        {
+                            RelieverId = rid,
+                            RelieverName = relieverName ?? other.Employee?.FullName ?? string.Empty,
+                            Slot = slot,
+                            Source = "LeavePlan",
+                            Description = $"has a {other.Status.ToString().ToLowerInvariant()} {other.LeaveType?.Name ?? "leave"} plan of their own over these dates",
+                            FromDate = other.StartDate,
+                            ToDate = other.EndDate,
+                        });
+                    }
+                    else if (other.RelieverId == rid || other.SecondRelieverId == rid)
+                    {
+                        plan.RelieverClashes.Add(new LeaveRelieverClashDto
+                        {
+                            RelieverId = rid,
+                            RelieverName = relieverName ?? string.Empty,
+                            Slot = slot,
+                            Source = "RelieverOnAnotherPlan",
+                            Description = $"is already named as reliever for {other.Employee?.FullName ?? "another employee"} over these dates",
+                            FromDate = other.StartDate,
+                            ToDate = other.EndDate,
+                        });
+                    }
+                }
+
+                foreach (var request in requestsInWindow.Where(r => r.EmployeeId == rid
+                                                                  && r.StartDate <= plan.EndDate
+                                                                  && r.EndDate >= plan.StartDate))
+                {
+                    plan.RelieverClashes.Add(new LeaveRelieverClashDto
+                    {
+                        RelieverId = rid,
+                        RelieverName = relieverName ?? string.Empty,
+                        Slot = slot,
+                        Source = "LeaveRequest",
+                        Description = $"has a {request.Status.ToString().ToLowerInvariant()} {request.LeaveType?.Name ?? "leave"} request {request.RequestNumber} over these dates",
+                        FromDate = request.StartDate,
+                        ToDate = request.EndDate,
+                    });
+                }
+            }
+        }
+    }
 
     private async Task<LeavePlan?> GetWithIncludes(Guid id)
     {

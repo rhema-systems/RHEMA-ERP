@@ -217,7 +217,8 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
             existing.ConfirmedDatesOfEmployment  = createDto.ConfirmedDatesOfEmployment;
             existing.ConfirmedPositionHeld       = createDto.ConfirmedPositionHeld;
             existing.ConfirmedReasonForLeaving   = createDto.ConfirmedReasonForLeaving;
-            existing.DocumentPath               = createDto.DocumentPath;
+            // The document is not touched here: it arrives through the upload gate, and re-posting
+            // the reference details must not clear evidence that has already been attached.
             existing.UpdatedAt                  = DateTime.UtcNow;
             existing.UpdatedBy                  = createdByUserId.ToString();
             await _referenceResponseRepository.UpdateAsync(existing);
@@ -258,6 +259,91 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         return true;
     }
 
+    // ── Evidence documents ────────────────────────────────────────────────────
+    //
+    // Both write paths take the ids the controlled-upload gate produced, never a path from the
+    // caller. The gate is what scans the file and registers it in the DMS; the legacy DocumentPath
+    // column is left readable so documents stored before this change still resolve.
+
+    public async Task<PreEmploymentCheckItemDto> RecordItemDocumentAsync(
+        Guid itemId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedItemAsync(itemId);
+
+        entity.DocumentFileUploadRecordId = fileUploadRecordId;
+        entity.DocumentRecordId           = documentRecordId;
+        entity.DocumentVersionId          = documentVersionId;
+        entity.DocumentFileName           = fileName;
+        entity.UpdatedAt                  = DateTime.UtcNow;
+
+        await _itemRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Evidence recorded for pre-employment check item {ItemId} ({CheckType}).",
+            entity.Id, entity.CheckType);
+
+        return entity.ToDto();
+    }
+
+    public async Task<ReferenceCheckResponseDto> RecordReferenceDocumentAsync(
+        Guid responseId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedReferenceResponseAsync(responseId);
+
+        entity.DocumentFileUploadRecordId = fileUploadRecordId;
+        entity.DocumentRecordId           = documentRecordId;
+        entity.DocumentVersionId          = documentVersionId;
+        entity.DocumentFileName           = fileName;
+        entity.UpdatedAt                  = DateTime.UtcNow;
+
+        await _referenceResponseRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    /// <summary>
+    /// The stored-document handles for a check item, for the download route. Returns null when the
+    /// item carries no evidence at all.
+    /// </summary>
+    public async Task<PreEmploymentDocumentHandleDto?> GetItemDocumentHandleAsync(
+        Guid itemId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedItemAsync(itemId);
+        if (!entity.DocumentFileUploadRecordId.HasValue && string.IsNullOrWhiteSpace(entity.DocumentPath))
+            return null;
+
+        return new PreEmploymentDocumentHandleDto
+        {
+            FileUploadRecordId = entity.DocumentFileUploadRecordId,
+            DocumentRecordId   = entity.DocumentRecordId,
+            DocumentVersionId  = entity.DocumentVersionId,
+            LegacyPath         = entity.DocumentPath,
+            FileName           = entity.DocumentFileName ?? $"check-{entity.CheckType}.pdf",
+        };
+    }
+
+    /// <summary>As above, for a written reference returned by a referee.</summary>
+    public async Task<PreEmploymentDocumentHandleDto?> GetReferenceDocumentHandleAsync(
+        Guid responseId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedReferenceResponseAsync(responseId);
+        if (!entity.DocumentFileUploadRecordId.HasValue && string.IsNullOrWhiteSpace(entity.DocumentPath))
+            return null;
+
+        return new PreEmploymentDocumentHandleDto
+        {
+            FileUploadRecordId = entity.DocumentFileUploadRecordId,
+            DocumentRecordId   = entity.DocumentRecordId,
+            DocumentVersionId  = entity.DocumentVersionId,
+            LegacyPath         = entity.DocumentPath,
+            FileName           = entity.DocumentFileName ?? "reference.pdf",
+        };
+    }
+
     // ── Workflow ──────────────────────────────────────────────────────────────
 
     public async Task<bool> CompleteCheckAsync(Guid checkId, Guid completedByUserId, CancellationToken cancellationToken = default)
@@ -266,7 +352,33 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Pre-employment check with ID '{checkId}' not found.");
 
-        var hasBlockingFailures = entity.Items.Any(i => i.IsBlockingOnFail && i.Passed != true);
+        if (entity.OverallStatus is PreEmploymentCheckStatus.Completed or PreEmploymentCheckStatus.Failed)
+            throw new InvalidOperationException("This pre-employment check has already been completed.");
+
+        var live = entity.Items.Where(i => !i.IsDeleted).ToList();
+
+        // ⚠ "Not yet done" is not "failed". The rule was `IsBlockingOnFail && Passed != true`, which
+        // treats a blocking item still sitting Pending as a failure — so completing a check while
+        // waiting on a police report marked the whole thing Failed. Failed is terminal, there is no
+        // reopen, and the offer could then never reach ChecksCleared. An outstanding item now
+        // refuses the completion instead, which is recoverable.
+        var outstanding = live
+            .Where(i => (i.IsMandatory || i.IsBlockingOnFail)
+                        && i.Status is CheckItemStatus.Pending or CheckItemStatus.Requested)
+            .ToList();
+        if (outstanding.Count > 0)
+            throw new InvalidOperationException(
+                $"{outstanding.Count} mandatory or blocking check(s) are still outstanding: " +
+                string.Join(", ", outstanding.Select(i => i.CheckType.ToString())) +
+                ". Record their results before completing.");
+
+        // ⚠ The same rule failed a check on a WAIVED or NOT-APPLICABLE blocking item, because
+        // neither sets `Passed = true`. Waiving a check is a decision to accept it, not a failure —
+        // otherwise the waiver facility guarantees the outcome it exists to avoid.
+        var hasBlockingFailures = live.Any(i =>
+            i.IsBlockingOnFail
+            && i.Status is not (CheckItemStatus.Waived or CheckItemStatus.NotApplicable)
+            && i.Passed != true);
         entity.OverallStatus = hasBlockingFailures ? PreEmploymentCheckStatus.Failed : PreEmploymentCheckStatus.Completed;
         entity.CompletedDate = DateTime.UtcNow;
 
@@ -322,16 +434,42 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         if (check == null || check.TenantId != GetTenantId())
             throw new ArgumentException($"Pre-employment check '{checkId}' not found.");
 
-        var template = await _templateRepository.GetByIdWithItemsAsync(templateId);
-        if (template == null || template.TenantId != check.TenantId)
+        var template = await _templateRepository.GetByIdWithItemsAsync(templateId, check.TenantId);
+        if (template == null)
             throw new ArgumentException($"Pre-employment check template '{templateId}' not found.");
 
-        var existingTypes = check.Items.Select(i => i.CheckType).ToHashSet();
+        var existingByType = check.Items
+            .Where(i => !i.IsDeleted)
+            .GroupBy(i => i.CheckType)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         foreach (var templateItem in template.Items)
         {
-            if (!overwriteExisting && existingTypes.Contains(templateItem.CheckType))
+            var alreadyPresent = existingByType.TryGetValue(templateItem.CheckType, out var existingItems);
+
+            if (alreadyPresent && !overwriteExisting)
                 continue;
+
+            // ⚠ `overwriteExisting` used only to skip the `continue`, so it ADDED a second item of
+            // the same check type rather than overwriting — the flag's name described behaviour it
+            // did not have, and re-applying a template quietly doubled every item on the check.
+            // A completed item is left alone whatever the flag says: overwriting it would discard a
+            // result somebody has already obtained.
+            if (alreadyPresent && overwriteExisting)
+            {
+                foreach (var stale in existingItems!.Where(i => i.Status == CheckItemStatus.Pending))
+                {
+                    stale.ServiceProviderName = templateItem.DefaultServiceProvider;
+                    stale.Instructions        = templateItem.Instructions;
+                    stale.IsMandatory         = templateItem.IsMandatory;
+                    stale.IsBlockingOnFail    = templateItem.IsBlockingOnFail;
+                    stale.ExpectedDays        = templateItem.ExpectedDays;
+                    stale.UpdatedAt           = DateTime.UtcNow;
+                    stale.UpdatedBy           = appliedByUserId.ToString();
+                    await _itemRepository.UpdateAsync(stale);
+                }
+                continue;
+            }
 
             var newItem = new PreEmploymentCheckItem
             {
@@ -362,57 +500,89 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 // PRE-EMPLOYMENT CHECK TEMPLATE SERVICE
 // ============================================================================
 
+/// <summary>
+/// Reusable pre-employment check templates — "which checks a hire of this kind needs".
+///
+/// <para>⚠ <b>This service had no tenancy of any kind.</b> It took no <c>ICurrentUserProvider</c>,
+/// and its repository's reads carried no <c>TenantId</c> predicate, so the list returned every
+/// tenant's templates and every by-id operation — read, update, delete, add/update/remove item —
+/// acted on whichever tenant happened to own that id. <c>DeleteItemAsync</c> was the clearest case:
+/// it loaded every template in the database and soft-deleted the matching item.</para>
+///
+/// <para>The <c>ApplicationDbContext</c> is registered without a tenant, so the global query filter
+/// is inert and could never have caught this. Scoping is explicit here, as everywhere else in HR.</para>
+/// </summary>
 public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateService
 {
     private readonly IPreEmploymentCheckTemplateRepository _templateRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PreEmploymentCheckTemplateService> _logger;
 
     public PreEmploymentCheckTemplateService(
         IPreEmploymentCheckTemplateRepository templateRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PreEmploymentCheckTemplateService> logger)
     {
         _templateRepository = templateRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A template owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<PreEmploymentCheckTemplate> GetOwnedTemplateAsync(Guid id)
+    {
+        var entity = await _templateRepository.GetByIdWithItemsAsync(id, GetTenantId());
+        if (entity == null)
+            throw new ArgumentException($"Pre-employment check template '{id}' not found.");
+        return entity;
+    }
+
     public async Task<IEnumerable<PreEmploymentCheckTemplateDto>> GetAllAsync(CancellationToken ct = default)
     {
-        var entities = await _templateRepository.GetAllActiveAsync();
+        var entities = await _templateRepository.GetAllActiveAsync(GetTenantId());
         return entities.Select(e => e.ToDto());
     }
 
     public async Task<PreEmploymentCheckTemplateDetailDto> GetWithItemsAsync(Guid id, CancellationToken ct = default)
-    {
-        var entity = await _templateRepository.GetByIdWithItemsAsync(id)
-            ?? throw new ArgumentException($"Pre-employment check template '{id}' not found.");
-        return entity.ToDetailDto();
-    }
+        => (await GetOwnedTemplateAsync(id)).ToDetailDto();
 
     public async Task<PreEmploymentCheckTemplateDetailDto> CreateAsync(CreatePreEmploymentCheckTemplateDto dto, Guid tenantId, Guid createdByUserId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
         await _templateRepository.AddAsync(entity);
 
         foreach (var itemDto in dto.Items)
         {
             itemDto.TemplateId = entity.Id;
-            var item = itemDto.ToEntity(tenantId, createdByUserId);
+            var item = itemDto.ToEntity(current, createdByUserId);
             entity.Items.Add(item);
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
         _logger.LogInformation("Pre-employment check template '{Name}' created", entity.Name);
 
-        return (await _templateRepository.GetByIdWithItemsAsync(entity.Id))!.ToDetailDto();
+        return (await _templateRepository.GetByIdWithItemsAsync(entity.Id, current))!.ToDetailDto();
     }
 
     public async Task<PreEmploymentCheckTemplateDto> UpdateAsync(UpdatePreEmploymentCheckTemplateDto dto, Guid updatedByUserId, CancellationToken ct = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(dto.Id)
-            ?? throw new ArgumentException($"Pre-employment check template '{dto.Id}' not found.");
+        var entity = await GetOwnedTemplateAsync(dto.Id);
 
         entity.UpdateEntity(dto, updatedByUserId);
         await _templateRepository.UpdateAsync(entity);
@@ -422,8 +592,7 @@ public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateServ
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Pre-employment check template '{id}' not found.");
+        var entity = await GetOwnedTemplateAsync(id);
 
         await _templateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -432,10 +601,18 @@ public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateServ
 
     public async Task<PreEmploymentCheckTemplateItemDto> AddItemAsync(CreatePreEmploymentCheckTemplateItemDto dto, Guid tenantId, Guid createdByUserId, CancellationToken ct = default)
     {
-        var template = await _templateRepository.GetByIdWithItemsAsync(dto.TemplateId)
-            ?? throw new ArgumentException($"Pre-employment check template '{dto.TemplateId}' not found.");
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        var item = dto.ToEntity(tenantId, createdByUserId);
+        var template = await GetOwnedTemplateAsync(dto.TemplateId);
+
+        // A template listing the same check twice would seed two identical items onto every check
+        // built from it.
+        if (template.Items.Any(i => i.CheckType == dto.CheckType))
+            throw new InvalidOperationException("That check type is already on this template.");
+
+        var item = dto.ToEntity(current, createdByUserId);
         await _templateRepository.AddTemplateItemAsync(item);
         await _unitOfWork.SaveChangesAsync(ct);
         return item.ToDto();
@@ -443,29 +620,35 @@ public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateServ
 
     public async Task<PreEmploymentCheckTemplateItemDto> UpdateItemAsync(UpdatePreEmploymentCheckTemplateItemDto dto, Guid updatedByUserId, CancellationToken ct = default)
     {
-        var template = await _templateRepository.GetByIdWithItemsAsync(dto.TemplateId)
-            ?? throw new ArgumentException($"Pre-employment check template '{dto.TemplateId}' not found.");
+        var template = await GetOwnedTemplateAsync(dto.TemplateId);
 
         var item = template.Items.FirstOrDefault(i => i.Id == dto.Id)
             ?? throw new ArgumentException($"Template item '{dto.Id}' not found on template '{dto.TemplateId}'.");
 
+        // No duplicate-check-type guard here, unlike AddItemAsync: UpdatePreEmploymentCheckTemplateItemDto
+        // deliberately omits CheckType ("delete + re-add to change it"), so an update cannot
+        // introduce a clash.
         item.UpdateEntity(dto, updatedByUserId);
         await _templateRepository.UpdateAsync(template);
         await _unitOfWork.SaveChangesAsync(ct);
         return item.ToDto();
     }
 
-    public async Task<bool> DeleteItemAsync(Guid itemId, CancellationToken ct = default)
+    /// <summary>
+    /// ⚠ Takes the owning template id as well as the item id. The previous implementation loaded
+    /// <b>every tenant's</b> templates and soft-deleted whichever item matched, which is how a
+    /// bare item id became a cross-tenant delete.
+    /// </summary>
+    public async Task<bool> DeleteItemAsync(Guid templateId, Guid itemId, CancellationToken ct = default)
     {
-        // Load all templates with items to locate the item
-        var templates = await _templateRepository.GetAllActiveAsync();
-        var item = templates.SelectMany(t => t.Items).FirstOrDefault(i => i.Id == itemId);
+        var template = await GetOwnedTemplateAsync(templateId);
 
-        if (item == null)
-            throw new ArgumentException($"Template item '{itemId}' not found.");
+        var item = template.Items.FirstOrDefault(i => i.Id == itemId)
+            ?? throw new ArgumentException($"Template item '{itemId}' not found on template '{templateId}'.");
 
         item.IsDeleted = true;
         item.UpdatedAt = DateTime.UtcNow;
+        await _templateRepository.UpdateAsync(template);
         await _unitOfWork.SaveChangesAsync(ct);
         return true;
     }

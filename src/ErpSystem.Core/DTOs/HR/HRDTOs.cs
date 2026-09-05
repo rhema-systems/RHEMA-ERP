@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Maintenance;
 
@@ -20,7 +20,7 @@ public class EmployeeDto
     public string DisplayName { get; set; } = string.Empty;
     public string? Title { get; set; }
     public Gender? Gender { get; set; }
-    public string EmailAddress { get; set; } = string.Empty;
+    public string? EmailAddress { get; set; }
     public string? MobileNumber { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public string? SectionName { get; set; }
@@ -39,6 +39,8 @@ public class EmployeeDto
     public bool IsActive { get; set; }
     public bool IsFullTime { get; set; }
     public bool IsExpatriate { get; set; }
+    /// <summary>Paid through the payroll run. False for invoice, allowance and secondee staff.</summary>
+    public bool IsOnPayroll { get; set; } = true;
     public DateOnly? DateEmployed { get; set; }
     public int? YearsOfService { get; set; }
     public bool CanBeAssignedToMaintenance { get; set; }
@@ -60,17 +62,51 @@ public class EmployeeDetailDto : EmployeeDto
     public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where the employee lives, as one reference to the geography tree — the lowest tier known.
+    /// The edit form re-opens its cascade from this by asking for the area's ancestors.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
     public Guid? ShiftId { get; set; }
 
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
+
+    /// <summary>How the employee describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// ⚠ The EMPLOYEE's own disability, added alongside — never replacing — the one on
+    /// EmployeeDependent. A dependant's disability and an employee's are different facts about
+    /// different people; the feedback read as a misplacement and was not one.
+    /// </summary>
+    public bool HasDisability { get; set; }
+    public string? DisabilityDescription { get; set; }
     public string? Address { get; set; }
+
+    /// <summary>⚠ A display snapshot resolved from <c>GeoAreaId</c> when one is set — see the entity.</summary>
     public string? City { get; set; }
+
+    /// <summary>⚠ A display snapshot resolved from <c>GeoAreaId</c> when one is set — see the entity.</summary>
     public string? State { get; set; }
+
     public string? PostalCode { get; set; }
     public string? DigitalAddress { get; set; }
     public string? CountryName { get; set; }
+
+    // ⚠ No GeoAreaName / GeoAreaFullPath here, deliberately. Either would be null on every read
+    // whose query did not Include the navigation — the always-null-field shape this module has
+    // met repeatedly — and Include depth would have to be right in a dozen places. Lists print
+    // State and City, which is exactly what the snapshot columns are kept for; the edit form
+    // resolves the display chain from GeoAreaId through the geography service's ancestors
+    // endpoint, which it has to call anyway to re-open its cascade.
+
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }
     public string? Extension { get; set; }
@@ -89,6 +125,9 @@ public class EmployeeDetailDto : EmployeeDto
     public bool GrossUp { get; set; }
     public bool Tier2Only { get; set; }
     public bool Overtime { get; set; }
+    // Payroll membership — IsOnPayroll itself is on the summary DTO.
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
     public string? BadgeNumber { get; set; }
     public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
@@ -109,6 +148,15 @@ public class EmployeeDetailDto : EmployeeDto
     public List<EmployeeQualificationDto> Qualifications { get; set; } = new();
     public List<EmployeeSkillDto> Skills { get; set; } = new();
     public List<EmployeeContractDetailDto> ContractDetails { get; set; } = new();
+    // ── The photograph, through the gate ──────────────────────────────────────
+    // ⚠ Read-side only. There is no way to SET these from a DTO: the image arrives through the
+    // upload endpoint and the gate fills them in. `PicturePath` above is the LEGACY caller-supplied
+    // location and is being retired — prefer `hasPhoto` for whether an image exists.
+    public bool HasPhoto { get; set; }
+    public string? PhotoFileName { get; set; }
+    public string? PhotoMimeType { get; set; }
+    public long? PhotoFileSizeBytes { get; set; }
+
 }
 
 /// <summary>
@@ -153,20 +201,49 @@ public class CreateEmployeeDto
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
+
+    /// <summary>How the employee describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// ⚠ The EMPLOYEE's own disability, added alongside — never replacing — the one on
+    /// EmployeeDependent. A dependant's disability and an employee's are different facts about
+    /// different people; the feedback read as a misplacement and was not one.
+    /// </summary>
+    public bool HasDisability { get; set; }
+    public string? DisabilityDescription { get; set; }
     public bool IsFullTime { get; set; } = true;
     public DateOnly? DateEmployed { get; set; }
 
     // Contact Information
     public string? Address { get; set; }
+
+    /// <summary>
+    /// ⚠ Overwritten by the resolved town or district when <see cref="GeoAreaId"/> is supplied.
+    /// Only what a caller sends with no area survives.
+    /// </summary>
     public string? City { get; set; }
+
+    /// <summary>⚠ Overwritten by the resolved region when <see cref="GeoAreaId"/> is supplied.</summary>
     public string? State { get; set; }
+
     public string? PostalCode { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
 
-    [Required]
-    [EmailAddress]
-    public string EmailAddress { get; set; } = string.Empty;
+    /// <summary>
+    /// Where the employee lives, as one reference to the geography tree — the lowest tier the
+    /// caller knows. When set, the service resolves the region and town from it and writes them
+    /// into <see cref="State"/> and <see cref="City"/>, so the two can never disagree.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <summary>Optional (2026-09-03). Format-checked and unique when supplied; blank means none.</summary>
+    [ErpSystem.Core.Validation.OptionalEmailAddress]
+    public string? EmailAddress { get; set; }
 
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }
@@ -207,8 +284,16 @@ public class CreateEmployeeDto
     public bool GrossUp { get; set; }
     public bool Tier2Only { get; set; }
     public bool Overtime { get; set; }
+    // Payroll membership. Defaults to ON so every existing caller (imports, harness fixtures, the
+    // hire path) keeps its meaning; a caller that says OFF must give a reason and must NOT send a
+    // salary or any switch above — the service refuses rather than silently dropping them.
+    public bool IsOnPayroll { get; set; } = true;
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
     public string? BadgeNumber { get; set; }
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
     public string? Notes { get; set; }
 
     public bool IsExpatriate { get; set; }
@@ -228,16 +313,54 @@ public class UpdateEmployeeDto
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
+
+    /// <summary>How the employee describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// ⚠ The EMPLOYEE's own disability, added alongside — never replacing — the one on
+    /// EmployeeDependent. A dependant's disability and an employee's are different facts about
+    /// different people; the feedback read as a misplacement and was not one.
+    /// </summary>
+    public bool HasDisability { get; set; }
+    public string? DisabilityDescription { get; set; }
     public bool IsFullTime { get; set; }
     public DateOnly? DateEmployed { get; set; }
 
     // Contact Information
     public string? Address { get; set; }
+
+    /// <summary>⚠ Overwritten by the resolved town or district when <see cref="GeoAreaId"/> is supplied.</summary>
     public string? City { get; set; }
+
+    /// <summary>⚠ Overwritten by the resolved region when <see cref="GeoAreaId"/> is supplied.</summary>
     public string? State { get; set; }
+
     public string? PostalCode { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where the employee lives. Supplying it also rewrites <see cref="State"/> and
+    /// <see cref="City"/> from the tree.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Following this DTO's convention, <c>null</c> means "not supplied" and leaves whatever the
+    /// record already had — the same limitation <c>CountryId</c> has. **To remove an area, send
+    /// <see cref="ClearGeoArea"/>**; a null on its own cannot mean both "leave it" and "clear it",
+    /// and without the flag a user who emptied the region picker would watch the save do nothing.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <summary>
+    /// Removes the employee's area. Wins over <see cref="GeoAreaId"/> if both are sent. The
+    /// snapshot columns are left as they are — the record still has to say where the person lives.
+    /// </summary>
+    public bool ClearGeoArea { get; set; }
+
     public string? EmailAddress { get; set; }
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }
@@ -269,8 +392,15 @@ public class UpdateEmployeeDto
     public bool? GrossUp { get; set; }
     public bool? Tier2Only { get; set; }
     public bool? Overtime { get; set; }
+    // Payroll membership. Omit to leave it alone; false requires a reason and clears the pay
+    // figures; true clears the reason and (when no payroll profile exists yet) enrols the person.
+    public bool? IsOnPayroll { get; set; }
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
     public string? BadgeNumber { get; set; }
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
     public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
     public DateTime? LastReviewDate { get; set; }
@@ -295,6 +425,8 @@ public class EmployeeSearchDto
     public bool? IsActive { get; set; }
     public bool? IsFullTime { get; set; }
     public bool? MaintenanceTechniciansOnly { get; set; }
+    /// <summary>True = paid through payroll only; false = off-payroll staff only.</summary>
+    public bool? IsOnPayroll { get; set; }
     public DateOnly? HiredAfter { get; set; }
     public DateOnly? HiredBefore { get; set; }
     public int? MinYearsOfService { get; set; }
@@ -508,6 +640,9 @@ public class EmployeeDependentReadDto
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
 
+
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
 
@@ -521,6 +656,15 @@ public class EmployeeDependentReadDto
 
     public string? PicturePath { get; set; }
     public string? Notes { get; set; }
+    // ── The photograph, through the gate ──────────────────────────────────────
+    // ⚠ Read-side only. There is no way to SET these from a DTO: the image arrives through the
+    // upload endpoint and the gate fills them in. `PicturePath` above is the LEGACY caller-supplied
+    // location and is being retired — prefer `hasPhoto` for whether an image exists.
+    public bool HasPhoto { get; set; }
+    public string? PhotoFileName { get; set; }
+    public string? PhotoMimeType { get; set; }
+    public long? PhotoFileSizeBytes { get; set; }
+
 }
 
 /// <summary>
@@ -550,6 +694,9 @@ public class EmployeeDependentCreateDto
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
 
+
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
     public bool HasDisability { get; set; }
 
     [MaxLength(500)]
@@ -570,8 +717,9 @@ public class EmployeeDependentCreateDto
     public bool IsEligibleForBenefits { get; set; }
     public bool IsDeceased { get; set; }
 
-    [MaxLength(500)]
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -591,6 +739,9 @@ public class EmployeeDependentUpdateDto
     public string? RelationshipDescription { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
+
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
     public bool? HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
     public string? GhanaCardNumber { get; set; }
@@ -599,7 +750,9 @@ public class EmployeeDependentUpdateDto
     public string? Occupation { get; set; }
     public bool? IsEligibleForBenefits { get; set; }
     public bool? IsDeceased { get; set; }
-    public string? PicturePath { get; set; }
+    // ⚠ No PicturePath here, deliberately. It is the LEGACY caller-supplied file location and the
+    // photo download still serves it, so accepting one on a write let a caller point a photo at
+    // any file under the legacy roots. Photos are set through the gated upload endpoint.
     public string? Notes { get; set; }
 }
 
@@ -771,7 +924,24 @@ public class EmployeeSkillDto
     public DateOnly? CertificationDate { get; set; }
     public DateOnly? CertificationExpiryDate { get; set; }
     public string? CertificationNumber { get; set; }
+
+    /// <summary>
+    /// Who certified the skill, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Kept ALONGSIDE <see cref="CertifyingBodyId"/>, not replaced. Existing rows are free text
+    /// and dropping the column would discard them, and a genuinely one-off certifier does not
+    /// deserve a catalogue row. A screen should show the catalogued name where there is one and
+    /// fall back to this.
+    /// </remarks>
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued body that certified this skill, where there is one.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
+    /// <summary>Resolved name of that body — set, not declared and forgotten.</summary>
+    public string? CertifyingBodyName { get; set; }
+
     public bool IsVerified { get; set; }
     public bool IsCertificationExpired { get; set; }
     public string? Notes { get; set; }
@@ -792,6 +962,10 @@ public class UpdateEmployeeSkillDto
     public DateOnly? CertificationExpiryDate { get; set; }
     public string? CertificationNumber { get; set; }
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
     public string? Notes { get; set; }
     public bool? IsVerified { get; set; }
 }
@@ -813,6 +987,10 @@ public class CreateEmployeeSkillDto
     public DateOnly? CertificationExpiryDate { get; set; }
     public string? CertificationNumber { get; set; }
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
     public string? Notes { get; set; }
 }
 
@@ -843,6 +1021,37 @@ public class EmployeeContractDetailDto
     public int WorkingHoursPerWeek { get; set; }
     public int VacationDaysPerYear { get; set; }
     public int SickDaysPerYear { get; set; }
+
+    /// <summary>The probation term, and the date it was passed.</summary>
+    /// <remarks>
+    /// ⚠ Both were SETTABLE on create and update and readable nowhere — measured 2026-09-01, the
+    /// contract response carried neither. A probation term could be recorded and then never seen
+    /// again, which is why nobody noticed it could also be rewritten after confirmation.
+    /// Instrument 03 cannot see this class of gap: it scans Create/Update DTOs, not read ones.
+    /// </remarks>
+    public int? ProbationPeriodDays { get; set; }
+    public DateOnly? ConfirmationDate { get; set; }
+
+    /// <summary>The currency the salary is expressed in. Defaults to GHS on the entity.</summary>
+    /// <remarks>
+    /// ⚠ A salary was exposed with NO currency at all, so every figure on every contract screen
+    /// was implicitly GHS whether or not it was. Added 2026-09-01 (lane 3d).
+    /// </remarks>
+    public string CurrencyCode { get; set; } = "GHS";
+
+    /// <summary>Full time, part time, shift, flexi, remote or hybrid.</summary>
+    /// <remarks>
+    /// ⚠ A different axis from <c>EmploymentType</c>, which says permanent vs contract. Both sit
+    /// on the entity; only the latter was reachable.
+    /// </remarks>
+    public WorkArrangementType WorkSchedule { get; set; } = WorkArrangementType.FullTime;
+
+    /// <summary>Conditions particular to this contract, longer-form than <c>Terms</c>.</summary>
+    public string? SpecialConditions { get; set; }
+
+    /// <summary>Internal remarks about the contract record itself.</summary>
+    public string? Notes { get; set; }
+
     public string? Terms { get; set; }
     public bool IsActive { get; set; }
     public string? ContractPath { get; set; }
@@ -885,6 +1094,17 @@ public class CreateEmployeeContractDetailDto
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
 
+    [MaxLength(10)]
+    public string CurrencyCode { get; set; } = "GHS";
+
+    public WorkArrangementType WorkSchedule { get; set; } = WorkArrangementType.FullTime;
+
+    [MaxLength(2000)]
+    public string? SpecialConditions { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
     [MaxLength(1000)]
     public string? Terms { get; set; }
 
@@ -926,6 +1146,17 @@ public class UpdateEmployeeContractDetailDto
     public int? SickDaysPerYear { get; set; }
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
+
+    [MaxLength(10)]
+    public string? CurrencyCode { get; set; }
+
+    public WorkArrangementType? WorkSchedule { get; set; }
+
+    [MaxLength(2000)]
+    public string? SpecialConditions { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
     public string? Terms { get; set; }
     public bool? IsActive { get; set; }
     public string? ContractPath { get; set; }
@@ -963,6 +1194,9 @@ public class IdentificationTypeDto : BaseDto
     public Guid? IssuingCountryId { get; set; }
     public string? IssuingCountryName { get; set; }
     public bool HasExpiryDate { get; set; }
+
+    /// <summary>Days before expiry that the holder is reminded. Null means no reminder.</summary>
+    public int? ExpiryNotificationLeadDays { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -988,6 +1222,16 @@ public class CreateIdentificationTypeDto
     public Guid? IssuingCountryId { get; set; }
 
     public bool HasExpiryDate { get; set; } = true;
+
+    /// <summary>
+    /// Days before expiry that the holder is reminded. Null means this type raises no reminder.
+    /// </summary>
+    /// <remarks>
+    /// Per TYPE, because the lead time belongs to the document: a Ghana Card renewal is not a
+    /// passport renewal. Read by <c>IdentificationExpiryReminderBackgroundService</c>.
+    /// </remarks>
+    [Range(1, 365)]
+    public int? ExpiryNotificationLeadDays { get; set; }
 
     public bool IsActive { get; set; } = true;
 }
@@ -1017,6 +1261,10 @@ public class UpdateIdentificationTypeDto
     public Guid? IssuingCountryId { get; set; }
 
     public bool HasExpiryDate { get; set; }
+
+    /// <summary>Days before expiry that the holder is reminded. Null means no reminder.</summary>
+    [Range(1, 365)]
+    public int? ExpiryNotificationLeadDays { get; set; }
 
     public bool IsActive { get; set; }
 }
@@ -1198,9 +1446,119 @@ public class ExpatriateAssignmentDetailDto : ExpatriateAssignmentListDto
     public DateOnly? RelocationDate { get; set; }
     public string? AssignmentObjective { get; set; }
     public string? VisaType { get; set; }
+    public DateOnly? VisaIssueDate { get; set; }
     public DateOnly? VisaExpiryDate { get; set; }
     public string? WorkPermitNumber { get; set; }
+    public DateOnly? WorkPermitIssueDate { get; set; }
     public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    /// <summary>The residence permit — a different instrument from the work permit.</summary>
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    /// <summary>
+    /// Who came with them. ⚠ On the DETAIL read only — the list read stays a summary, and a screen
+    /// that needs the members must fetch the record rather than bind to a row.
+    /// </summary>
+    public List<ExpatriateFamilyMemberDto> FamilyMembers { get; set; } = new();
+}
+
+/// <summary>A family member accompanying an expatriate assignee.</summary>
+public class ExpatriateFamilyMemberDto
+{
+    public Guid Id { get; set; }
+    public Guid ExpatriateAssignmentId { get; set; }
+    public string FullName { get; set; } = string.Empty;
+    public DependentRelationship Relationship { get; set; }
+    public string? RelationshipDescription { get; set; }
+    public Gender? Gender { get; set; }
+    public string? GenderDescription { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+    public string? PassportNumber { get; set; }
+    public DateOnly? PassportExpiryDate { get; set; }
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+    public DateOnly? ArrivalDate { get; set; }
+    public DateOnly? DepartureDate { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class CreateExpatriateFamilyMemberDto
+{
+    [Required]
+    public Guid ExpatriateAssignmentId { get; set; }
+
+    [Required]
+    [MaxLength(150)]
+    public string FullName { get; set; } = string.Empty;
+
+    public DependentRelationship Relationship { get; set; }
+
+    /// <summary>Used when Relationship is Other — the same pairing EmployeeDependent uses.</summary>
+    [MaxLength(100)]
+    public string? RelationshipDescription { get; set; }
+
+    public Gender? Gender { get; set; }
+
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
+    public DateOnly? DateOfBirth { get; set; }
+
+    [MaxLength(100)]
+    public string? PassportNumber { get; set; }
+    public DateOnly? PassportExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    public DateOnly? ArrivalDate { get; set; }
+    public DateOnly? DepartureDate { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class UpdateExpatriateFamilyMemberDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    [Required]
+    [MaxLength(150)]
+    public string FullName { get; set; } = string.Empty;
+
+    public DependentRelationship Relationship { get; set; }
+
+    /// <summary>Used when Relationship is Other — the same pairing EmployeeDependent uses.</summary>
+    [MaxLength(100)]
+    public string? RelationshipDescription { get; set; }
+
+    public Gender? Gender { get; set; }
+
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
+    public DateOnly? DateOfBirth { get; set; }
+
+    [MaxLength(100)]
+    public string? PassportNumber { get; set; }
+    public DateOnly? PassportExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    public DateOnly? ArrivalDate { get; set; }
+    public DateOnly? DepartureDate { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
 }
 
 public class CreateExpatriateAssignmentDto
@@ -1224,12 +1582,19 @@ public class CreateExpatriateAssignmentDto
     [MaxLength(100)]
     public string? VisaType { get; set; }
 
+    public DateOnly? VisaIssueDate { get; set; }
     public DateOnly? VisaExpiryDate { get; set; }
 
     [MaxLength(100)]
     public string? WorkPermitNumber { get; set; }
 
+    public DateOnly? WorkPermitIssueDate { get; set; }
     public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
 }
 
 public class UpdateExpatriateAssignmentDto
@@ -1245,9 +1610,14 @@ public class UpdateExpatriateAssignmentDto
     public bool? FamilyAccompanying { get; set; }
     public string? AssignmentObjective { get; set; }
     public string? VisaType { get; set; }
+    public DateOnly? VisaIssueDate { get; set; }
     public DateOnly? VisaExpiryDate { get; set; }
     public string? WorkPermitNumber { get; set; }
+    public DateOnly? WorkPermitIssueDate { get; set; }
     public DateOnly? WorkPermitExpiryDate { get; set; }
+    public string? ResidentPermitNumber { get; set; }
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
 }
 
 /// <summary>
@@ -1318,6 +1688,75 @@ public class UpdateEmployeePositionHistoryDto
 /// <summary>
 /// Employee salary assignment list projection.
 /// </summary>
+/// <summary>
+/// HR's payroll-membership statement for one employee, set beside payroll's own answer. The two
+/// are different facts from different owners: HR says whether the person SHOULD be paid through
+/// the run; payroll's profile says whether they ARE. This read puts both on one screen.
+/// </summary>
+public class EmployeePayrollStatusDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public bool IsOnPayroll { get; set; }
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public string? OffPayrollNote { get; set; }
+
+    /// <summary>The HR-side pay basis: the flat salary, or the current grade/notch amount.</summary>
+    public decimal? HrMonthlyBasicPay { get; set; }
+    public bool HasActiveSalaryAssignment { get; set; }
+
+    /// <summary>Payroll's side, read from its employee profile. Null fields = no profile.</summary>
+    public bool HasPayrollProfile { get; set; }
+    public bool? PayrollActive { get; set; }
+    public decimal? PayrollMonthlyBasicSalary { get; set; }
+    public string? PayrollCurrencyCode { get; set; }
+
+    /// <summary>One of the <see cref="PayrollReconciliationIssue"/> names, or null when consistent.</summary>
+    public string? Issue { get; set; }
+}
+
+/// <summary>Where HR's statement and payroll's profile disagree, or where a statement has no basis.</summary>
+public enum PayrollReconciliationIssue
+{
+    /// <summary>HR says on payroll; payroll has no profile for the person.</summary>
+    AwaitingPayrollSetup = 1,
+    /// <summary>HR says on payroll; payroll's profile is switched off.</summary>
+    InactiveInPayroll = 2,
+    /// <summary>HR says off payroll; payroll's profile is still active — the run will pay them.</summary>
+    StillActiveInPayroll = 3,
+    /// <summary>HR says on payroll but has neither a salary nor a graded notch — the run would skip them silently.</summary>
+    NoPayBasis = 4,
+}
+
+public class PayrollReconciliationRowDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string? PositionTitle { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public EmploymentType EmploymentType { get; set; }
+    public StaffStatus StaffStatus { get; set; }
+    public bool IsOnPayroll { get; set; }
+    public OffPayrollReason? OffPayrollReason { get; set; }
+    public bool HasPayrollProfile { get; set; }
+    public bool? PayrollActive { get; set; }
+    public decimal? HrMonthlyBasicPay { get; set; }
+    public PayrollReconciliationIssue Issue { get; set; }
+}
+
+public class PayrollReconciliationDto
+{
+    public DateTime GeneratedAt { get; set; }
+    public int OnPayrollCount { get; set; }
+    public int OffPayrollCount { get; set; }
+    public int AwaitingPayrollSetup { get; set; }
+    public int InactiveInPayroll { get; set; }
+    public int StillActiveInPayroll { get; set; }
+    public int NoPayBasis { get; set; }
+    public List<PayrollReconciliationRowDto> Rows { get; set; } = new();
+}
+
 public class EmployeeSalaryAssignmentListDto
 {
     public Guid Id { get; set; }
@@ -1397,6 +1836,15 @@ public class EmployeeRefereeDetailDto : EmployeeRefereeListDto
     public bool IsContacted { get; set; }
     public DateTime? ContactedDate { get; set; }
     public string? ReferenceNotes { get; set; }
+
+    // ── The written reference ─────────────────────────────────────────────────
+    // ⚠ Read-side only. There is no way to SET these from a DTO: the letter arrives through the
+    // upload endpoint and the gate fills them in. `hasLetter` exists so a screen can show the
+    // download affordance without having to reason about which of three ids means "present".
+    public bool HasLetter { get; set; }
+    public string? LetterFileName { get; set; }
+    public string? LetterMimeType { get; set; }
+    public long? LetterFileSizeBytes { get; set; }
 }
 
 public class CreateEmployeeRefereeDto
@@ -1484,6 +1932,21 @@ public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
     public string? EmployerAddress { get; set; }
     public string? EmployerPhone { get; set; }
     public decimal? MonthlyIncome { get; set; }
+
+    /// <summary>⚠ What they stand surety FOR — distinct from MonthlyIncome, which is what they earn.</summary>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>The currency that amount is stated in. Null means HR's configured default.</summary>
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    public string? GenderDescription { get; set; }
+
+    // The photograph. Read-side only; it arrives through the upload endpoint.
+    public bool HasPhoto { get; set; }
+    public string? PhotoFileName { get; set; }
+    public string? PhotoMimeType { get; set; }
+    public long? PhotoFileSizeBytes { get; set; }
 
     public string? NationalIdType { get; set; }
     public string? NationalIdNumberMasked { get; set; }
@@ -1578,6 +2041,29 @@ public class CreateEmployeeGuarantorDto
     public string? Notes { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// What the guarantor undertakes to cover, in the tenant's default currency.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The photograph is NOT here and must never be: it arrives through
+    /// <c>POST api/hr/Employees/guarantors/{id}/photo</c> and the gate sets its identifiers. A
+    /// file field on a JSON DTO is the sink D-10, D-14 and D-39 each had to remove.
+    /// </remarks>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>
+    /// The currency the surety is stated in — refused unless FINANCE holds it.
+    /// </summary>
+    /// <remarks>
+    /// Null means the tenant's configured HR default, so existing rows keep meaning what they meant.
+    /// </remarks>
+    [MaxLength(3)]
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
 }
 
 public class UpdateEmployeeGuarantorDto
@@ -1616,6 +2102,29 @@ public class UpdateEmployeeGuarantorDto
     public string? Notes { get; set; }
     public DateTime? LastContactDate { get; set; }
     public bool? IsActive { get; set; }
+
+    /// <summary>
+    /// What the guarantor undertakes to cover, in the tenant's default currency.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The photograph is NOT here and must never be: it arrives through
+    /// <c>POST api/hr/Employees/guarantors/{id}/photo</c> and the gate sets its identifiers. A
+    /// file field on a JSON DTO is the sink D-10, D-14 and D-39 each had to remove.
+    /// </remarks>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>
+    /// The currency the surety is stated in — refused unless FINANCE holds it.
+    /// </summary>
+    /// <remarks>
+    /// Null means the tenant's configured HR default, so existing rows keep meaning what they meant.
+    /// </remarks>
+    [MaxLength(3)]
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
 }
 
 // ─── Bank + Branch Reference DTOs ────────────────────────────────────────────
@@ -1957,6 +2466,15 @@ public class EmployeePositionDto
 
     public bool RequiresCertification { get; set; }
     public bool RequiresGuarantor { get; set; }
+
+    /// <summary>How much surety the post requires, where RequiresGuarantor is set.</summary>
+    /// <remarks>⚠ Null with RequiresGuarantor true means "a guarantor, amount unspecified" — a
+    /// legitimate state that the compliance read reports without judging the sum.</remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>Validated against Finance's currency master. Null means HR's default.</summary>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; }
 
     public bool IsActive { get; set; }
@@ -2013,6 +2531,15 @@ public class CreateEmployeePositionDto : IValidatableObject
 
     public bool RequiresCertification { get; set; } = false;
     public bool RequiresGuarantor { get; set; } = false;
+
+    /// <summary>How much surety the post requires, where RequiresGuarantor is set.</summary>
+    /// <remarks>⚠ Null with RequiresGuarantor true means "a guarantor, amount unspecified" — a
+    /// legitimate state that the compliance read reports without judging the sum.</remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>Validated against Finance's currency master. Null means HR's default.</summary>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
@@ -2075,6 +2602,15 @@ public class UpdateEmployeePositionDto : IValidatableObject
     public int? NoticePeriodMonths { get; set; }
     public bool RequiresCertification { get; set; } = false;
     public bool RequiresGuarantor { get; set; } = false;
+
+    /// <summary>How much surety the post requires, where RequiresGuarantor is set.</summary>
+    /// <remarks>⚠ Null with RequiresGuarantor true means "a guarantor, amount unspecified" — a
+    /// legitimate state that the compliance read reports without judging the sum.</remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>Validated against Finance's currency master. Null means HR's default.</summary>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
     public bool IsActive { get; set; } = true;
 
@@ -2226,6 +2762,20 @@ public class QualificationCatalogueDto
     public QualificationType Type { get; set; }
     public string? IssuingAuthority { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>Where this sits on the academic / professional ladder, when it sits on one.</summary>
+    /// <remarks>
+    /// ⚠ <see cref="Type"/> is a CATEGORY — Education, Certification, License, Membership — and
+    /// cannot answer "is a Master's higher than a Diploma", which is what shortlisting and
+    /// succession need. The level is the rank; the two are not substitutes.
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
+
+    /// <summary>Resolved name of the rung, so a list does not need a second call to be readable.</summary>
+    public string? QualificationLevelName { get; set; }
+
+    /// <summary>The rung's rank, so a caller can order by ladder rather than by name.</summary>
+    public int? QualificationLevelRank { get; set; }
 }
 
 public class CreateQualificationCatalogueDto
@@ -2245,6 +2795,15 @@ public class CreateQualificationCatalogueDto
 
     [MaxLength(200)]
     public string? IssuingAuthority { get; set; }
+
+    /// <summary>
+    /// Which rung of the ladder this qualification sits on. Null means unranked.
+    /// </summary>
+    /// <remarks>
+    /// Nullable on purpose: a membership or a short course has a kind but no level, and forcing one
+    /// would invent a comparison the organisation does not actually make.
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
 
     public bool IsActive { get; set; } = true;
 }
@@ -2350,7 +2909,7 @@ public class MaintenanceTechnicianDto
     public string EmployeeNumber { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string EmailAddress { get; set; } = string.Empty;
+    public string? EmailAddress { get; set; }
     public string? MobileNumber { get; set; }
     public string PositionTitle { get; set; } = string.Empty;
     public bool IsActive { get; set; }

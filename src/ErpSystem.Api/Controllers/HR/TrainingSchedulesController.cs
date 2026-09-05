@@ -1,15 +1,18 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/training-schedules")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[TrainingBusinessRulesAttribute]
 public class TrainingSchedulesController : ControllerBase
 {
     private readonly ITrainingScheduleService _service;
@@ -49,10 +52,12 @@ public class TrainingSchedulesController : ControllerBase
         => Ok(await _service.GetByProgramIdAsync(programId, ct));
 
     [HttpGet("trainer/{trainerId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingScheduleSummaryDto>>> GetByTrainerId(Guid trainerId, CancellationToken ct)
         => Ok(await _service.GetByTrainerProfileIdAsync(trainerId, ct));
 
     [HttpGet("trainer/{trainerId:guid}/availability-check")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainerAvailabilityCheckDto>> CheckTrainerAvailability(
         Guid trainerId,
         [FromQuery] DateTime from,
@@ -80,6 +85,7 @@ public class TrainingSchedulesController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingScheduleDto>> Create([FromBody] CreateTrainingScheduleDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -95,6 +101,7 @@ public class TrainingSchedulesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingScheduleDto>> Update(Guid id, [FromBody] UpdateTrainingScheduleDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -107,6 +114,7 @@ public class TrainingSchedulesController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -118,6 +126,7 @@ public class TrainingSchedulesController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/approve")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveTrainingScheduleDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -131,15 +140,21 @@ public class TrainingSchedulesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelTrainingScheduleDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.ScheduleId = id;
-        await _service.CancelAsync(dto, ct);
+        await _service.CancelAsync(dto, employeeId.Value, ct);
         return Ok(new { message = "Training schedule cancelled." });
     }
 
     [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<IActionResult> Complete(Guid id, [FromBody] CompleteTrainingScheduleDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -153,6 +168,7 @@ public class TrainingSchedulesController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/sessions")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingSessionDto>> AddSession(Guid id, [FromBody] CreateTrainingSessionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -172,6 +188,7 @@ public class TrainingSchedulesController : ControllerBase
         => Ok(await _service.GetSessionsAsync(id, ct));
 
     [HttpPut("sessions/{sessionId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingSessionDto>> UpdateSession(Guid sessionId, [FromBody] UpdateTrainingSessionDto dto, CancellationToken ct)
     {
         if (sessionId != dto.Id) return BadRequest("ID mismatch.");
@@ -184,6 +201,7 @@ public class TrainingSchedulesController : ControllerBase
     }
 
     [HttpDelete("sessions/{sessionId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteSession(Guid sessionId, CancellationToken ct)
     {
         await _service.DeleteSessionAsync(sessionId, ct);

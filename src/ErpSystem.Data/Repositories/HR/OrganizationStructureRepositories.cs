@@ -435,23 +435,8 @@ public class OrganizationUnitHistoryRepository : GenericRepository<OrganizationU
             .ToListAsync();
     }
 
-    public async Task<OrganizationUnitHistory?> GetLatestByUnitIdAsync(Guid unitId)
-    {
-        return await _context.Set<OrganizationUnitHistory>()
-            .Include(ouh => ouh.OrganizationUnit)
-            .Where(ouh => ouh.OrganizationUnitId == unitId && !ouh.IsDeleted)
-            .OrderByDescending(ouh => ouh.EffectiveFrom)
-            .FirstOrDefaultAsync();
-    }
-
-    public async Task<OrganizationUnitHistory?> GetActiveHistoryAsync(Guid unitId)
-    {
-        return await _context.Set<OrganizationUnitHistory>()
-            .Include(ouh => ouh.OrganizationUnit)
-            .FirstOrDefaultAsync(ouh => ouh.OrganizationUnitId == unitId && 
-                                       ouh.EffectiveTo == null && 
-                                       !ouh.IsDeleted);
-    }
+    // GetLatestByUnitIdAsync / GetActiveHistoryAsync deleted in areas 19–23 slice 12 with the two
+    // endpoints they served. See IOrganizationStructureRepositories for why.
 
     public async Task<IEnumerable<OrganizationUnitHistory>> GetByHeadEmployeeAsync(Guid employeeId)
     {
