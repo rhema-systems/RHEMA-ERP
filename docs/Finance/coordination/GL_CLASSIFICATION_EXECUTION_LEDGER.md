@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C2 candidate `78ab2382` is under independent Sol High re-review |
+| Review status | C2 candidate `78ab2382` remains `CHANGES_REQUIRED`; one authority-set P1 blocks integration |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -369,3 +369,14 @@ The implementer completed the deleted-header consistency correction in commit
 GPT-5.6 Sol High re-review is active over the complete five-commit range, including the prior authority,
 mapping, fingerprint, rebuild, API, migration, and concurrency corrections. Integration remains blocked until
 that review returns approval and coordinator verification passes; no database operation has been authorized.
+
+Stage C2 review cycle 3 examined clean candidate
+`78ab238234ab06498602e1d0979aee23257da56a` and returned `CHANGES_REQUIRED` for one remaining P1.
+Primary-compatibility preview, validation, drift, and fingerprinting cover only accounts present in posted
+transactions, while Apply mutates every live tenant account and can silently zero unmapped or zero-transaction
+accounts that were absent from the governed evidence. A later account change can therefore reuse the same key
+as a false no-op. The coordinator dispatched a final narrow Sol Medium correction requiring one canonical
+eligible account set across preview/fingerprint/apply, fail-closed handling for ineligible historical balances,
+and mapped/unmapped zero-transaction regression coverage. The reviewer otherwise confirmed every earlier C2
+finding closed; 185 tests passed with five guarded SQL Server skips, EF no-pending-model and diff checks passed,
+and no database was accessed. The handoff must also record all six existing linear commits accurately.
