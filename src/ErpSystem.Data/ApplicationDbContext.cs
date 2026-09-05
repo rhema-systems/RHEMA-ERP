@@ -183,6 +183,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinancePostingEvent> FinancePostingEvents { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<AccountBalance> AccountBalances { get; set; }
+    public DbSet<AccountCurrencyExposure> AccountCurrencyExposures { get; set; }
+    public DbSet<FinanceBalanceRebuildRun> FinanceBalanceRebuildRuns { get; set; }
     public DbSet<FxRealizedSettlement> FxRealizedSettlements { get; set; }
     public DbSet<FxRevaluationBatch> FxRevaluationBatches { get; set; }
     public DbSet<FxRevaluationLine> FxRevaluationLines { get; set; }
@@ -5757,6 +5759,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         });
         ConfigureSalesAllocationPrecision(builder);
         builder.ApplyConfiguration(new AccountBalanceConfiguration());
+        builder.ApplyConfiguration(new AccountCurrencyExposureConfiguration());
+        builder.Entity<FinanceBalanceRebuildRun>(entity =>
+        {
+            entity.ToTable("FinanceBalanceRebuildRuns");
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.IdempotencyKey })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.Property(item => item.AccountingBookCode).HasMaxLength(20).IsRequired();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.SourceFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.AbsoluteDrift).HasColumnType("decimal(18,2)");
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Configure all tenant relationships to avoid cascade conflicts
         ConfigureGlobalTenantRelationships(builder);

@@ -231,6 +231,7 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903190453_AddBookScopedFxRevaluationPolicy")] partial class AddBookScopedFxRevaluationPolicy { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904003118_AddGovernedAccountSegmentIdentity")] partial class AddGovernedAccountSegmentIdentity { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260905151918_AddStablePostingAccountingBookIdentity")] partial class AddStablePostingAccountingBookIdentity { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260905182403_AddBookAwareBalanceFoundation")] partial class AddBookAwareBalanceFoundation { }
 
 // 20260903120000_EnforceFinanceClassificationSystemRoleCardinality deliberately carries its
 // DbContext/Migration attributes on the executable migration class. It is therefore already

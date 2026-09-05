@@ -6,7 +6,7 @@ namespace ErpSystem.Core.Entities.Finance;
 
 /// <summary>
 /// Optional optimization table for fast balance queries without aggregating AccountTransaction records.
-/// Stores pre-calculated account balances by fiscal period, book classification, and currency.
+/// Stores pre-calculated functional-currency account balances by fiscal period and accounting book.
 /// Updated automatically when transactions are posted to maintain real-time accuracy.
 /// </summary>
 /// <remarks>
@@ -42,6 +42,13 @@ public class AccountBalance : BusinessEntity
     public Guid FiscalPeriodId { get; set; }
 
     /// <summary>
+    /// Stable tenant-owned accounting-book identity. Journal lines remain authoritative; this row is
+    /// only a rebuildable read model for the exact book.
+    /// </summary>
+    [Required]
+    public Guid AccountingBookId { get; set; }
+
+    /// <summary>
     /// Book/Classification for parallel accounting frameworks.
     /// Values: "IFRS", "LOCAL_STATUTORY", "MANAGEMENT"
     /// Separate balances maintained for each book to support multiple reporting standards.
@@ -56,7 +63,7 @@ public class AccountBalance : BusinessEntity
     /// If NULL or matches base currency, this is the base currency balance.
     /// </summary>
     [MaxLength(3)]
-    public string? Currency { get; set; }
+    public string Currency { get; set; } = string.Empty;
 
     // ========================================================================
     // BALANCE AMOUNTS (PERIOD-SPECIFIC)
@@ -355,6 +362,9 @@ public class AccountBalance : BusinessEntity
     /// </summary>
     [ForeignKey(nameof(FiscalPeriodId))]
     public virtual FiscalPeriod FiscalPeriod { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountingBookId))]
+    public virtual AccountingBook AccountingBook { get; set; } = null!;
 
     // ========================================================================
     // COMPUTED PROPERTIES (NOT MAPPED TO DATABASE)
