@@ -1,0 +1,7 @@
+{
+  "status": "CLEAN",
+  "database": "RHEMAERP_GL_REHEARSAL_CLONE_A2",
+  "databaseExists": false,
+  "targetDerivedBackupExists": false,
+  "completedAtUtc": "2026-09-05T02:42:48.5029795Z"
+}

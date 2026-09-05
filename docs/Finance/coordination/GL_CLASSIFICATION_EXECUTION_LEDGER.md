@@ -127,6 +127,20 @@ both guarded rehearsals reach their required terminal gates.
 
 ## Post-Phase-6 Stage A.1 rehearsal corrections
 
+The authoritative reviewed-candidate ancestry from exact base
+`7bc24b22c0624aec9acae580ba8049d5f5a83425` is, without omission:
+
+1. `0130ac4e02aa306010b09e59ef325bef8556131d`
+2. `18a5c8a4187b8ab0c72d19ce105d1960c4af76e5`
+3. `0fe40ac6f770beac5844c6d70773836ec9c187b9`
+4. `f911931255dd8fc400c2e0d41fc388e529c5aab9`
+5. `1fa2a86b082fc77964eef9a8523fb0d416ecb4ed`
+6. `5404a1c8fa4c018a8f51a5fda2ad1124771fd00e`
+7. `b85d88b19219e4f7c1bf3b0959057e07a03271ba`
+
+Subsequent evidence/harness correction commits must be appended to this list in handoff and integration;
+they do not replace or implicitly include the first `0130ac4e` migration/seed repair.
+
 Stage A.1 repaired the CRM clean-chain collision, SQL Server singleton-role filter, and application
 `apply-migrations` DI registration. Continuing the guarded fresh rehearsal exposed and corrected a missing
 vendor-invoice compatibility rename, two invalid AR compatibility batches, payroll accounts bypassing the
@@ -148,7 +162,7 @@ predecessor, and moves compatibility-specific SQL Server assertions into Finance
 
 Post-review rehearsal `RHEMAERP_GL_REHEARSAL_EMPTY_A5` then completed all 448 migrations, exercised the
 repaired application `apply-migrations` command, and ran two real seed passes with identical canonical
-Finance SHA-256 `35B42B901960D551CE92CDFCCA8BA69B1CE10D29FB95E79772C6C3CDFE0E69B3`.
+Finance SHA-256 `F51CEBF3ABCFD1C92BB64ACB8FCF9B2740D90D0AFB322C275A8363A3729A5549`.
 The checksum-verified COPY_ONLY clone `RHEMAERP_GL_REHEARSAL_CLONE_A2` again applied through Phase 3 and
 stopped at the intended Phase 4 historical-FX-evidence guard. The source fingerprint remained
 `446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28`; both disposable databases and

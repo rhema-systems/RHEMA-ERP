@@ -1,0 +1,10 @@
+{
+  "status": "EXPECTED_PHASE4_STOP",
+  "gitHead": "b85d88b19219e4f7c1bf3b0959057e07a03271ba",
+  "sourceDatabase": "RhemaERP",
+  "targetDatabase": "RHEMAERP_GL_REHEARSAL_CLONE_A2",
+  "sourceFingerprint": "446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28",
+  "cloneState": "449|20260903130000_AddFinancialStatementClassificationSnapshots|1|0|1",
+  "backupPolicy": "COPY_ONLY_CHECKSUM_VERIFYONLY",
+  "completedAtUtc": "2026-09-05T02:42:41.6671000Z"
+}

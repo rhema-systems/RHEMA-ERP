@@ -23,7 +23,7 @@ and protected layouts use the manifest's stable `ASSETS`, `LIABILITIES`, and `EQ
 Final post-review fresh rehearsal `RHEMAERP_GL_REHEARSAL_EMPTY_A5` completed all 448 migrations through
 `20260904003118_AddGovernedAccountSegmentIdentity`, exercised the real application `apply-migrations`
 command, and completed two real `seed-db` passes from the final committed code. Both Finance invariant snapshots had SHA-256
-`35B42B901960D551CE92CDFCCA8BA69B1CE10D29FB95E79772C6C3CDFE0E69B3`. The independent SQL Server
+`F51CEBF3ABCFD1C92BB64ACB8FCF9B2740D90D0AFB322C275A8363A3729A5549`. The independent SQL Server
 full-chain regression also passed, including downgrade from the CRM promotion to the immediate campaign
 predecessor, continued downgrade through the sales predecessor, and the Projects forward/backward boundary.
 
@@ -47,8 +47,9 @@ change a producer, remove V1, or authorize a developer to point the rehearsal to
 
 ## Database safety boundary
 
-The configured development source was inspected with `SELECT` statements only. Its resolved target was
-`RHEMA-AKWASI\EXPRESS22 / RhemaERP`; credentials were neither logged nor copied into evidence.
+The configured development source was inspected with `SELECT` statements only outside the separately
+authorized `COPY_ONLY` backup operation. Its sanitized target is `<local SQL Server instance> / RhemaERP`;
+credentials and machine identifiers are neither logged nor copied into retained evidence.
 
 All mutating rehearsal operations must use
 [`scripts/finance/Invoke-GlCutoverRehearsal.ps1`](../../scripts/finance/Invoke-GlCutoverRehearsal.ps1)
@@ -66,6 +67,27 @@ $env:RHEMA_GL_REHEARSAL_CONNECTION = '<local SQL Server connection; safe rehears
 ./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode DropRehearsal -ConfirmDrop
 Remove-Item Env:RHEMA_GL_REHEARSAL_CONNECTION
 ```
+
+The representative clone uses the same harness rather than an undocumented manual procedure. It requires
+the source to resolve exactly to `RhemaERP`, requires source and target on the same SQL Server instance,
+derives the backup/data/log paths only from the prefix-validated target, refuses existing targets/backups,
+and performs `COPY_ONLY` + `CHECKSUM`, `RESTORE VERIFYONLY`, restore, and `DBCC CHECKDB ... PHYSICAL_ONLY`.
+It builds the current HEAD before backup, records the source fingerprint before and after, and accepts only
+the documented Phase 4 historical-FX-evidence stop and exact Phase 3 history state:
+
+```powershell
+$env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<configured RhemaERP connection from a secure local source>'
+$env:RHEMA_GL_REHEARSAL_CONNECTION = '<same server; RHEMAERP_GL_REHEARSAL_CLONE_* database>'
+./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode RehearseClone -EvidenceDirectory '<new empty raw-evidence directory>'
+./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode DropRehearsal -ConfirmDrop -EvidenceDirectory '<same raw-evidence directory>'
+Remove-Item Env:RHEMA_GL_SOURCE_READONLY_CONNECTION
+Remove-Item Env:RHEMA_GL_REHEARSAL_CONNECTION
+```
+
+`DropRehearsal` deletes only the exact prefix-validated database and its target-derived COPY_ONLY backup,
+then fails unless both are absent and writes `cleanup.json`. Raw `.artifacts` output remains local and
+ignored. The sanitized, hash-validated review package is retained at
+`docs/Finance/evidence/gl-cutover-stage-a1/review-2`.
 
 The ordinary `rebuild-db` command is not a migration rehearsal: it uses `EnsureCreated`, stamps migrations,
 and bypasses migration bodies and their preflight controls. The three large SQL snapshots are reference
@@ -140,7 +162,8 @@ membership retrospectively. These findings support reset/reseed rather than weak
 The guarded empty rehearsal uses the real application seed command and normal EF migration APIs:
 
 1. materialize and stamp the supported consolidated baseline;
-2. `dotnet ef database update` for all forward migrations;
+2. `dotnet run --no-build --configuration Debug --project src/ErpSystem.Api/ErpSystem.Api.csproj -- apply-migrations`
+   for every forward migration after the supported consolidated baseline;
 3. `seed-db` (real `IDatabaseSeedingService.SeedAsync` path);
 4. Finance invariant query and canonical natural-key snapshot;
 5. the same `seed-db` command again;

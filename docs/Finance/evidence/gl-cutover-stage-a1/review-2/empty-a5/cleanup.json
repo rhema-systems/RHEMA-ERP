@@ -1,0 +1,7 @@
+{
+  "status": "CLEAN",
+  "database": "RHEMAERP_GL_REHEARSAL_EMPTY_A5",
+  "databaseExists": false,
+  "targetDerivedBackupExists": false,
+  "completedAtUtc": "2026-09-05T02:37:39.8171356Z"
+}

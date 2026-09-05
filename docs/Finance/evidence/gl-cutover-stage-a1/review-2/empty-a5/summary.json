@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "gitHead": "b85d88b19219e4f7c1bf3b0959057e07a03271ba",
+  "database": "RHEMAERP_GL_REHEARSAL_EMPTY_A5",
+  "migrationCount": 448,
+  "latestMigration": "20260904003118_AddGovernedAccountSegmentIdentity",
+  "invariantPass1Sha256": "F51CEBF3ABCFD1C92BB64ACB8FCF9B2740D90D0AFB322C275A8363A3729A5549",
+  "invariantPass2Sha256": "F51CEBF3ABCFD1C92BB64ACB8FCF9B2740D90D0AFB322C275A8363A3729A5549",
+  "applicationMigrationCommand": "dotnet run --no-build --configuration Debug --project src/ErpSystem.Api/ErpSystem.Api.csproj -- apply-migrations",
+  "seedPasses": 2,
+  "completedAtUtc": "2026-09-05T02:37:32.4815214Z"
+}

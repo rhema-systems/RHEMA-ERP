@@ -1,0 +1,5 @@
+Command:
+git diff --exit-code 5404a1c8fa4c018a8f51a5fda2ad1124771fd00e b85d88b19219e4f7c1bf3b0959057e07a03271ba^
+
+Result:
+Exit code 0; empty diff. The first evidence/harness correction commit starts from the exact reviewed-candidate tree.
