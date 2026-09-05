@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage A.1 — migration-chain and deployment correction |
-| Status | `DECISION_REQUIRED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `7bc24b22` (resolve to full hash in the implementing worktree) |
 | Branch | `codex/finance-gl-cutover-rehearsal-corrections` |
@@ -20,8 +20,8 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `7bc24b22` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Stage A.1 `CHANGES_REQUIRED`; named cross-module migration ownership requires authorization |
-| Connectivity state | Available; implementation paused at a clean reviewed checkpoint |
+| Review status | Stage A.1 `CHANGES_REQUIRED`; authorized corrections are in progress |
+| Connectivity state | Available; implementer resumed from the clean reviewed checkpoint |
 
 ## Authoritative inputs
 
@@ -140,9 +140,14 @@ files fall outside the previously named Procurement/Inventory/Sales/HR cross-mod
 `RHEMAERP` remained read only and all disposable databases were removed. The implementer is paused at the
 clean candidate pending a user decision on those named module-owned migration corrections.
 
+On 2026-09-05 the user explicitly authorized the narrowly identified CRM and Projects historical migration
+repairs and the related Quantity Survey/shared full-chain test. The authorization requires owner-facing code
+comments explaining the historical conflict, forward/data-preservation behavior, exact downgrade contract,
+and the need to retain the compatibility logic until the full migration-chain gates are rerun. It does not
+authorize broader CRM, Projects or Quantity Survey feature changes.
+
 ## Next action
 
-Obtain explicit authorization for owner-reviewed CRM and Projects historical migration corrections and the
-associated Quantity Survey migration-chain test, or revert those files and accept that the clean EF chain
-remains blocked. If authorized, require deterministic data-preserving Up/Down behavior, populated failure
-safety and downgrade tests before rerunning both rehearsals. Do not authorize Phase B or reset `RHEMAERP`.
+Complete deterministic data-preserving CRM/Projects Up/Down behavior, populated failure-safety and downgrade
+tests with the required owner-facing comments. Correct the superseded deployment documentation, then rerun
+both guarded rehearsals. Do not authorize Phase B or reset `RHEMAERP` until independently approved.
