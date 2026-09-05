@@ -156,6 +156,13 @@ temporarily to Sol High only for an unresolved material defect or unusually diff
 decision. Apply switches only between completed turns after reconciling the task checkpoint; record each
 exception or escalation here.
 
+Independent Sol High re-review of Stage A.1 candidate `0263b16a` found the migration, downgrade,
+owner-comment, guarded-rehearsal, sanitized-evidence and documentation corrections technically sound. One
+P1 integration-control correction remains: the durable handoff/evidence stops at `b85d88b1` and omits the
+three later commits required to reproduce final candidate `0263b16a`. The coordinator dispatched this
+narrow ancestry/final-tree evidence correction to the implementer on GPT-5.6 Sol Medium. No production or
+database behavior needs to change for this cycle, and `RHEMAERP` remains protected/read-only.
+
 Stage A.1 review cycle 2 examined clean candidate `5404a1c8` using an independent GPT-5.6 Sol High reviewer
 and returned `CHANGES_REQUIRED`. The code-level migration corrections, 448-migration discovery, EF model
 alignment and focused tests passed, but the declared integration list omitted ancestor commit `0130ac4e`;
