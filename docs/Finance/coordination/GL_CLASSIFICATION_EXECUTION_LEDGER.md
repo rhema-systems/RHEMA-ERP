@@ -20,7 +20,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary HEAD at activation | `7bc24b22c0624aec9acae580ba8049d5f5a83425` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Review status | Stage A.1 implementation complete; independent review pending |
+| Review status | Stage A.1 correction cycle complete; post-review stack ready for independent review |
 | Connectivity state | Available; rehearsal evidence captured and disposable targets removed |
 
 ## Authoritative inputs
@@ -138,6 +138,21 @@ checksum-verified COPY_ONLY clone `RHEMAERP_GL_REHEARSAL_CLONE_A1` applied throu
 the intended Phase 4 guard because its one historical FX batch has no truthful immutable policy evidence.
 The configured source fingerprint remained unchanged. Both databases and the temporary backup were removed;
 zero rehearsal-prefixed databases remain.
+
+Independent review then found that CRM downgrade did not restore the plural predecessor graph and the
+Projects migration did not rename `VendorInvoice` back to `VendorInvoices`. On 2026-09-05 the user
+explicitly authorized the narrowly named CRM/Projects historical-migration correction and the minimum
+shared Quantity Survey chain-test safety contract. The correction preserves rows in both directions,
+fails before destructive mutation for incomplete/populated CRM conflicts, restores each exact immediate
+predecessor, and moves compatibility-specific SQL Server assertions into Finance/data-owned tests.
+
+Post-review rehearsal `RHEMAERP_GL_REHEARSAL_EMPTY_A5` then completed all 448 migrations, exercised the
+repaired application `apply-migrations` command, and ran two real seed passes with identical canonical
+Finance SHA-256 `35B42B901960D551CE92CDFCCA8BA69B1CE10D29FB95E79772C6C3CDFE0E69B3`.
+The checksum-verified COPY_ONLY clone `RHEMAERP_GL_REHEARSAL_CLONE_A2` again applied through Phase 3 and
+stopped at the intended Phase 4 historical-FX-evidence guard. The source fingerprint remained
+`446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28`; both disposable databases and
+the exact backup were removed, and the server reported zero rehearsal-prefixed databases.
 
 ## Connectivity checkpoint
 

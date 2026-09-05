@@ -20,13 +20,14 @@ mandatory COMPANY/NATURAL_ACCOUNT identity assignment, and the protected balance
 obsolete root codes. Payroll accounts now enter the same canonical identity pass as the standard chart,
 and protected layouts use the manifest's stable `ASSETS`, `LIABILITIES`, and `EQUITY_ROOT` codes.
 
-Final fresh rehearsal `RHEMAERP_GL_REHEARSAL_EMPTY_A4` completed all 448 migrations through
+Final post-review fresh rehearsal `RHEMAERP_GL_REHEARSAL_EMPTY_A5` completed all 448 migrations through
 `20260904003118_AddGovernedAccountSegmentIdentity`, exercised the real application `apply-migrations`
 command, and completed two real `seed-db` passes from the final committed code. Both Finance invariant snapshots had SHA-256
 `35B42B901960D551CE92CDFCCA8BA69B1CE10D29FB95E79772C6C3CDFE0E69B3`. The independent SQL Server
-full-chain regression also passed.
+full-chain regression also passed, including downgrade from the CRM promotion to the immediate campaign
+predecessor, continued downgrade through the sales predecessor, and the Projects forward/backward boundary.
 
-Representative clone `RHEMAERP_GL_REHEARSAL_CLONE_A1` was created from a `COPY_ONLY`, checksum-protected
+Representative post-review clone `RHEMAERP_GL_REHEARSAL_CLONE_A2` was created from a `COPY_ONLY`, checksum-protected
 backup, verified, restored, and checked with `DBCC CHECKDB ... PHYSICAL_ONLY`. SQL Server Express rejected
 backup compression, so the successful retry deliberately omitted only `COMPRESSION`; `COPY_ONLY` and
 `CHECKSUM` remained enforced. Phase 1, Phase 2, and Phase 3 applied on the clone. Phase 4 then stopped exactly
@@ -146,10 +147,11 @@ The guarded empty rehearsal uses the real application seed command and normal EF
 6. invariant query and byte-identical semantic snapshot comparison;
 7. EF no-pending-model gate.
 
-The application `apply-migrations` entry point is itself currently unusable: its temporary service collection
-registers the audited DbContext but omits `IHttpContextAccessor`, so host validation fails before migration.
-The harness deliberately uses EF tooling and records this deployment-command defect rather than weakening
-the audited context.
+The original Stage A application-command failure is superseded. Stage A.1 added
+`IHttpContextAccessor` to the `apply-migrations` temporary service collection, retained the audited
+`ApplicationDbContext`, and exercised the repaired real command successfully in the 448-migration empty
+rehearsal. The guarded harness now uses that application command for forward migration; EF tooling remains
+responsible only for materializing the repository's supported consolidated baseline.
 
 The invariant query checks canonical books, classifications, mapping lineage, singleton roles, exact
 COMPANY/NATURAL_ACCOUNT identity, six separate transaction dimensions, protected Draft layouts, absence of
@@ -186,6 +188,29 @@ listed above.
 All disposable targets used during harness development and the clone rehearsal were explicitly dropped.
 A final `sys.databases` query confirmed that no `RHEMAERP_GL_REHEARSAL_*` database remains. `RhemaERP` was
 never used as a mutation target.
+
+## CRM and Projects migration-owner compatibility contract
+
+The historical `20260315081834_AddCrmSalesEntities` and
+`20260315150304_AddCrmCampaignEntities` migrations created a second plural CRM graph beside the singular
+graph already supplied by `InitialBaseline`. `20260317115118_AddCrmEntities` may discard that predecessor
+graph only when all seven tables are present and empty; partial or populated conflicts fail before any
+drop. Its `Down` path reconstructs the exact two predecessor migrations so downgrade to
+`20260315150304`, and then through `20260315081834`, remains valid. The authoritative singular graph is
+renamed and retained in both directions; a conflicting populated plural graph is rejected before mutation.
+
+Likewise, `20260407033921_AddProjectPackageBoqFoundation` preserves the baseline `VendorInvoices` table by
+renaming it to the runtime `VendorInvoice` identity. Its `Down` preflights the lineage before dropping any
+Project tables, then renames the same table back so rows, keys and dependent foreign keys survive. These
+migrations may already be recorded as applied on developer databases. Owners must not remove, simplify or
+replace the compatibility blocks without rerunning:
+
+- `MigrationRehearsalCorrectionTests` for generated Up/Down operation shape;
+- `MigrationCompatibilitySqlServerTests` for complete-empty, partial, populated, row-preserving and
+  immediate-predecessor downgrade behavior;
+- `QuantitySurveyArchitectureSqlServerMigrationTests` for the shared production-chain baseline plus its
+  Quantity Survey schema contract;
+- the guarded empty and representative-clone rehearsals documented above.
 
 ## Exact V1 production inventory
 
