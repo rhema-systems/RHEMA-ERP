@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C2 candidate `4a79f68a` closes cycle-2 items; one deleted-header consistency P1 remains |
+| Review status | Final C2 candidate `78ab2382` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -363,3 +363,9 @@ excludes soft-deleted journal headers while runtime rebuild can include their ac
 evidence can produce different authoritative balances. The coordinator dispatched a final Sol Medium
 fail-before-mutation correction requiring aligned migration/runtime rejection and unit plus SQL Server coverage.
 Integration, Stage C3, migration application, and configured-database access remain blocked.
+
+The implementer completed the deleted-header consistency correction in commit
+`78ab238234ab06498602e1d0979aee23257da56a`; the C2 worktree is clean at this HEAD. A final independent
+GPT-5.6 Sol High re-review is active over the complete five-commit range, including the prior authority,
+mapping, fingerprint, rebuild, API, migration, and concurrency corrections. Integration remains blocked until
+that review returns approval and coordinator verification passes; no database operation has been authorized.
