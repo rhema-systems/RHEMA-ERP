@@ -121,17 +121,13 @@ export default function ProcurementBudgetDetailPage() {
 
     try {
       setRevisionSubmitting(true);
-      const revision = await procurementBudgetService.createRevision(id, {
+      await procurementBudgetService.createRevision(id, {
         revisionType: newAmount > budget.allocatedAmount ? 'Increase' : 'Decrease',
         newAmount,
         reason: revisionReason.trim(),
       });
       setRevisionDialogOpen(false);
-      toast.success(
-        revision.status === 'Approved'
-          ? 'Budget revision applied'
-          : 'Budget revision submitted for independent approval',
-      );
+      toast.success('Budget revision submitted for independent approval');
       await loadBudget();
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create budget revision');
