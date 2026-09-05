@@ -18,7 +18,9 @@ namespace ErpSystem.Data.Migrations
             //
             // The redundant graph may be removed only when it is complete and empty. A partially
             // applied graph or any row is an upgrade-data reconciliation case; fail before making
-            // changes so no historical CRM evidence is silently discarded.
+            // changes so no historical CRM evidence is silently discarded. This migration may
+            // already be recorded as applied on developer databases; do not simplify or remove
+            // this compatibility block without rerunning the full forward/downgrade chain tests.
             migrationBuilder.Sql("""
                 DECLARE @RedundantCrmTableCount int =
                     (SELECT COUNT(*) FROM (VALUES
@@ -1790,6 +1792,16 @@ namespace ErpSystem.Data.Migrations
                 column: "QuoteId",
                 principalTable: "Quote",
                 principalColumn: "Id");
+
+            // Up reconciles the complete empty plural graph created by 20260315081834 and
+            // 20260315150304 before promoting the populated singular graph. Downgrade must
+            // restore that exact immediate-predecessor graph so those migrations can themselves
+            // be downgraded. Reusing their original Up operations preserves all columns, keys,
+            // indexes and delete behavior; the singular business rows remain untouched. These
+            // migrations may already be recorded as applied on developer databases, so retain
+            // this bridge and rerun the full SQL Server chain before changing it.
+            new AddCrmSalesEntities().RestoreForAddCrmEntitiesDown(migrationBuilder);
+            new AddCrmCampaignEntities().RestoreForAddCrmEntitiesDown(migrationBuilder);
         }
     }
 }

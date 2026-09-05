@@ -71,14 +71,6 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
         (await context.Database.GetAppliedMigrationsAsync()).Should()
             .BeEquivalentTo(context.Database.GetMigrations());
 
-        var obsoleteCrmTables = await database.QueryNamesAsync("""
-            SELECT [name] FROM sys.tables
-            WHERE [name] IN (N'Lead',N'Opportunity',N'Activity',N'Quote',N'QuoteLineItem',N'Activities')
-            ORDER BY [name];
-            """);
-        obsoleteCrmTables.Should().BeEmpty(
-            "the supported chain must retain only the authoritative plural CRM tables and CrmActivities");
-
         var untrustedForeignKeys = await database.QueryNamesAsync(
             "SELECT [name] FROM sys.foreign_keys WHERE is_disabled=1 OR is_not_trusted=1 ORDER BY [name];");
         untrustedForeignKeys.Should().BeEmpty("migration-created foreign keys must remain enabled and trusted");
@@ -340,6 +332,9 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
         {
             var baseConnection = Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")
                 ?? throw new InvalidOperationException("RHEMA_TEST_SQLSERVER is required.");
+            // This QS gate exercises the shared production chain and creates/drops a real SQL
+            // Server database. The Stage A prefix is therefore a cross-owner safety contract,
+            // not a QS schema assertion; compatibility-specific coverage lives in Finance tests.
             var databaseName = $"RHEMAERP_GL_REHEARSAL_MIGRATION_{Guid.NewGuid():N}";
             var masterBuilder = new SqlConnectionStringBuilder(baseConnection)
             {

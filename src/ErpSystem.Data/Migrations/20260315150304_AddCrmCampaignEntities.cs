@@ -313,13 +313,19 @@ namespace ErpSystem.Data.Migrations
                 principalColumn: "Id",
                 onDelete: ReferentialAction.Restrict);
 
+            // AddCrmSalesEntities created these four tenant links with Restrict. Restoring
+            // Cascade here misstates the immediate predecessor and produces SQL Server
+            // multiple-cascade paths after AddCrmEntities reconstructs the parallel graph.
+            // Keep the exact predecessor behavior so downgrade preserves data and can continue
+            // through 20260315081834. This migration may already be recorded as applied on
+            // developer databases; do not simplify this repair without the full chain tests.
             migrationBuilder.AddForeignKey(
                 name: "FK_Leads_Tenants_TenantId",
                 table: "Leads",
                 column: "TenantId",
                 principalTable: "Tenants",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.Cascade);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_Opportunities_Tenants_TenantId",
@@ -327,7 +333,7 @@ namespace ErpSystem.Data.Migrations
                 column: "TenantId",
                 principalTable: "Tenants",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.Cascade);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_QuoteLineItems_Tenants_TenantId",
@@ -335,7 +341,7 @@ namespace ErpSystem.Data.Migrations
                 column: "TenantId",
                 principalTable: "Tenants",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.Cascade);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_Quotes_Tenants_TenantId",
@@ -343,7 +349,15 @@ namespace ErpSystem.Data.Migrations
                 column: "TenantId",
                 principalTable: "Tenants",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.Cascade);
+                onDelete: ReferentialAction.Restrict);
         }
+
+        // AddCrmEntities removes this campaign extension together with the abandoned plural
+        // CRM graph. Its Down path invokes the original Up operations after restoring the
+        // sales graph, preserving the exact schema expected by this migration's own Down.
+        // Existing developer databases may already record this migration as applied; keep this
+        // shared-chain bridge until the complete forward-and-downgrade tests prove otherwise.
+        internal void RestoreForAddCrmEntitiesDown(MigrationBuilder migrationBuilder)
+            => Up(migrationBuilder);
     }
 }

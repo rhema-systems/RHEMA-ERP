@@ -395,5 +395,14 @@ namespace ErpSystem.Data.Migrations
             migrationBuilder.DropTable(
                 name: "Leads");
         }
+
+        // AddCrmEntities promotes the older singular CRM tables and must remove this
+        // complete empty plural graph to avoid the historical QuoteLineItem/QuoteLineItems
+        // collision. Its Down path calls this exact Up definition so the immediate
+        // predecessor schema is reconstructed without inventing a second schema description.
+        // Existing developer databases may already record both migrations as applied; do not
+        // simplify or remove this bridge without rerunning the full SQL Server chain tests.
+        internal void RestoreForAddCrmEntitiesDown(MigrationBuilder migrationBuilder)
+            => Up(migrationBuilder);
     }
 }

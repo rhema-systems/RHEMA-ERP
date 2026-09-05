@@ -12,11 +12,19 @@ namespace ErpSystem.Data.Migrations
         {
             // InitialBaseline used VendorInvoices, while this migration's target model and
             // every subsequent runtime mapping use VendorInvoice. Preserve all rows through
-            // the missing compatibility rename and fail closed if both identities coexist.
+            // the missing compatibility rename and fail closed if both identities coexist or
+            // neither lineage exists. The table rename retains its rows, keys and dependent
+            // foreign keys. This migration may already be recorded as applied on developer
+            // databases; do not simplify or remove this bridge without rerunning the full
+            // SQL Server forward-and-downgrade chain tests.
             migrationBuilder.Sql("""
                 IF OBJECT_ID(N'[dbo].[VendorInvoices]', N'U') IS NOT NULL
                    AND OBJECT_ID(N'[dbo].[VendorInvoice]', N'U') IS NOT NULL
                     THROW 51000, 'Vendor invoice migration compatibility failed: both VendorInvoices and VendorInvoice exist. Reconcile the duplicate tables before continuing.', 1;
+
+                IF OBJECT_ID(N'[dbo].[VendorInvoices]', N'U') IS NULL
+                   AND OBJECT_ID(N'[dbo].[VendorInvoice]', N'U') IS NULL
+                    THROW 51000, 'Vendor invoice migration compatibility failed: neither VendorInvoices nor VendorInvoice exists. Restore the predecessor table before continuing.', 1;
 
                 IF OBJECT_ID(N'[dbo].[VendorInvoices]', N'U') IS NOT NULL
                    AND OBJECT_ID(N'[dbo].[VendorInvoice]', N'U') IS NULL
@@ -238,6 +246,18 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ProjectBoqItems_Tenan
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // Up preserves the predecessor VendorInvoices rows by renaming the table. Validate
+            // the complete singular lineage before dropping any Project-owned tables so a
+            // conflicting or missing table fails without destructive mutation. The final rename
+            // restores the exact predecessor table identity and all retained rows, keys and FKs.
+            // Existing developer databases may already record this migration as applied; do not
+            // remove this compatibility block without rerunning the full SQL Server chain tests.
+            migrationBuilder.Sql("""
+                IF OBJECT_ID(N'[dbo].[VendorInvoice]', N'U') IS NULL
+                   OR OBJECT_ID(N'[dbo].[VendorInvoices]', N'U') IS NOT NULL
+                    THROW 51000, 'Vendor invoice downgrade compatibility failed: expected only VendorInvoice. No Project tables were changed.', 1;
+                """);
+
             migrationBuilder.Sql(@"
 IF OBJECT_ID(N'[dbo].[ProjectBoqItems]', N'U') IS NOT NULL
     DROP TABLE [dbo].[ProjectBoqItems];
@@ -251,6 +271,10 @@ IF OBJECT_ID(N'[dbo].[ProjectPhases]', N'U') IS NOT NULL
 IF OBJECT_ID(N'[dbo].[ProjectDevelopmentProfiles]', N'U') IS NOT NULL
     DROP TABLE [dbo].[ProjectDevelopmentProfiles];
 ");
+
+            migrationBuilder.Sql("""
+                EXEC sys.sp_rename N'[dbo].[VendorInvoice]', N'VendorInvoices';
+                """);
         }
     }
 }

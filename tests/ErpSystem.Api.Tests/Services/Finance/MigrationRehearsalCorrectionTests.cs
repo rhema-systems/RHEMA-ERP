@@ -27,6 +27,12 @@ public sealed class MigrationRehearsalCorrectionTests
         compatibilitySql.IndexOf("DROP TABLE [dbo].[QuoteLineItems]", StringComparison.Ordinal)
             .Should().BeLessThan(
                 compatibilitySql.IndexOf("DROP TABLE [dbo].[Quotes]", StringComparison.Ordinal));
+
+        var restoredTables = new ExposedCrmMigration().BuildDownOperations()
+            .OfType<CreateTableOperation>()
+            .Select(operation => operation.Name)
+            .ToArray();
+        restoredTables.Should().Contain(["Leads", "QuoteLineItems", "Campaigns", "CampaignMembers"]);
     }
 
     [Fact]
@@ -40,6 +46,14 @@ public sealed class MigrationRehearsalCorrectionTests
         compatibilitySql.Should().Contain("both VendorInvoices and VendorInvoice exist");
         compatibilitySql.Should().Contain(
             "EXEC sys.sp_rename N'[dbo].[VendorInvoices]', N'VendorInvoice'");
+
+        var downSql = new ExposedProjectFoundationMigration().BuildDownOperations()
+            .OfType<SqlOperation>()
+            .Select(operation => operation.Sql)
+            .ToArray();
+        downSql.First().Should().Contain("expected only VendorInvoice");
+        downSql.Last().Should().Contain(
+            "EXEC sys.sp_rename N'[dbo].[VendorInvoice]', N'VendorInvoices'");
     }
 
     [Fact]
@@ -106,6 +120,13 @@ public sealed class MigrationRehearsalCorrectionTests
             Up(builder);
             return builder.Operations;
         }
+
+        public IReadOnlyList<MigrationOperation> BuildDownOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Down(builder);
+            return builder.Operations;
+        }
     }
 
     private sealed class ExposedProjectFoundationMigration : AddProjectPackageBoqFoundation
@@ -114,6 +135,13 @@ public sealed class MigrationRehearsalCorrectionTests
         {
             var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
             Up(builder);
+            return builder.Operations;
+        }
+
+        public IReadOnlyList<MigrationOperation> BuildDownOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Down(builder);
             return builder.Operations;
         }
     }
