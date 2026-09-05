@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C1 — stable accounting-book identity and idempotency foundation |
-| Status | `CHANGES_REQUIRED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `0b2b8ea04123c4348393cdea49d7734de2042d7a` |
 | Branch | `codex/finance-multibook-identity-foundation` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C1 candidate `af8aef5b` independently reviewed; four P1 corrections issued |
+| Review status | Corrected C1 candidate `a714e252` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -296,3 +296,10 @@ no-pending-model, migration SQL generation and diff checks passed. Integration r
 correction must add a lock at least as coarse as database identity, binary/exact migration comparisons with
 executable SQL coverage, a durable canonical immutable-request fingerprint (or exhaustive equivalent), and
 repair all affected Finance fixtures before re-review.
+
+The implementing task returned correction commits `2e8be6e39bbc4e234f03cc51b17b1a7b94dfd6c2` and
+`a714e25235cc92e75679ea95d06d3eaf47cc6073` on top of `af8aef5b`. The worktree is clean and the full range
+passes `git diff --check`. The correction adds coarse transitional locking, exact migration comparisons and
+SQL Server rehearsal tests, durable request-fingerprint evidence with mutation coverage, and updated Finance
+regression fixtures. Independent GPT-5.6 Sol High re-review is active; no C1 commit may be integrated before
+that verdict.
