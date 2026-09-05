@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C1 — stable accounting-book identity and idempotency foundation |
-| Status | `REVIEW_REQUIRED` |
+| Phase | Post-Phase-6 Stage C2 — book-aware balance and currency-exposure foundation |
+| Status | `AUTHORIZED_PENDING_IMPLEMENTATION` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `0b2b8ea04123c4348393cdea49d7734de2042d7a` |
-| Branch | `codex/finance-multibook-identity-foundation` |
+| Exact base | `a1783dce` |
+| Branch | `codex/finance-multibook-balance-foundation` |
 | Worktree | To be created by implementing task from the exact base |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `0b2b8ea04123c4348393cdea49d7734de2042d7a` |
+| Primary HEAD at activation | `a1783dce` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C1 candidate `a714e252` is under independent Sol High re-review |
+| Review status | C1 approved and integrated; C2 awaiting implementation handoff |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -303,3 +303,21 @@ passes `git diff --check`. The correction adds coarse transitional locking, exac
 SQL Server rehearsal tests, durable request-fingerprint evidence with mutation coverage, and updated Finance
 regression fixtures. Independent GPT-5.6 Sol High re-review is active; no C1 commit may be integrated before
 that verdict.
+
+Stage C1 review cycle 2 approved clean candidate `a714e25235cc92e75679ea95d06d3eaf47cc6073`.
+Independent review confirmed the tenant-wide transitional lock, binary-and-length exact migration evidence,
+versioned immutable request fingerprint, honest legacy retry failure, repaired lifecycle fixtures and stable
+ID/code reversal propagation. Candidate gates passed 21 C1 tests with four SQL Server tests environment-gated,
+92 broader posting/inquiry/report/lifecycle tests, 53 fixed-asset/FX fixture tests, EF no-pending-model and
+diff checks. The three commits were integrated locally as `8ec4e20f`, `5a51e5db` and `a1783dce`. Primary
+verification passed a zero-error test-project build, 114 focused tests with four guarded SQL Server skips,
+EF no-pending-model and diff checks. Migration `20260905151918_AddStablePostingAccountingBookIdentity`
+remains unapplied; no configured database was accessed or mutated.
+
+Next, implement Stage C2 from exact base `a1783dce` on GPT-5.6 Sol Medium. Establish explicit relational
+book/account/period/currency balance and book/account/currency exposure read models whose authority is posted
+journal evidence; wire posting and reversal atomically; provide deterministic rebuild/reconciliation; make
+balance queries require and display one exact book; and restrict generic `Account.Balance` to documented
+primary/default-book compatibility without ever summing alternative representations. Preserve the C1
+`PARALLEL_BOOK_POSTING_DISABLED` gate. C2 must not add accounting-book lifecycle/types, book periods,
+initialization workflow, applicability or neutral-event orchestration, and must not issue owner-module work.
