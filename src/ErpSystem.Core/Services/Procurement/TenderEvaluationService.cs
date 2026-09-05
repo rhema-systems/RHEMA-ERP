@@ -133,9 +133,15 @@ public class TenderEvaluationService : ITenderEvaluationService
             EnsureBidEvaluationState(bid);
             await EnsurePaymentAdmissionForEvaluationAsync(bid);
 
-            // Get evaluator assignment for current user
-            var evaluators = await _evaluatorRepository.GetByUserIdAsync(_currentUserProvider.UserId);
-            var evaluator = evaluators.FirstOrDefault(item => item.TenderId == bid.TenderId);
+            // A source committee owns membership; legacy assignments are only score-row projections.
+            var evaluator = await _evaluationCommittee.EnsureTenderEvaluatorAsync(
+                bid.TenderId, Guid.NewGuid().ToString("N"));
+            if (evaluator is null)
+            {
+                var evaluators = await _evaluatorRepository.GetByUserIdAsync(_currentUserProvider.UserId);
+                evaluator = evaluators.FirstOrDefault(item => item.TenderId == bid.TenderId &&
+                    item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted && item.Status != "Declined");
+            }
             if (evaluator == null)
             {
                 throw new InvalidOperationException("Current user is not assigned as an evaluator");
@@ -409,13 +415,25 @@ public class TenderEvaluationService : ITenderEvaluationService
 
             // Get all evaluators assigned to this tender
             var evaluators = await _evaluatorRepository.GetByTenderIdAsync(bid.TenderId);
+            var committeeUsers = await _evaluationCommittee.GetTenderScoringUserIdsAsync(bid.TenderId);
+            if (committeeUsers is not null)
+            {
+                evaluators = evaluators.Where(item => item.TenantId == _currentUserProvider.TenantId &&
+                    committeeUsers.Contains(item.UserId)).ToList();
+                if (committeeUsers.Count == 0 || committeeUsers.Any(userId => !evaluators.Any(item => item.UserId == userId)))
+                    return; // A missing projection cannot reduce the required committee roster.
+            }
             var assignedEvaluatorIds = evaluators.Select(e => e.Id).ToList();
 
             if (!assignedEvaluatorIds.Any()) return;
 
             // Get all evaluations for this bid
             var evaluations = await _evaluationRepository.GetByBidIdAsync(bidId);
-            var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted").ToList();
+            var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted" &&
+                    assignedEvaluatorIds.Contains(e.TenderEvaluatorId))
+                .GroupBy(item => item.TenderEvaluatorId)
+                .Select(group => group.OrderByDescending(item => item.SubmittedDate ?? item.EvaluationDate).First())
+                .ToList();
 
             // Check if all evaluators have submitted for this bid
             var allEvaluatorsSubmitted = assignedEvaluatorIds.All(evaluatorId =>
@@ -644,7 +662,11 @@ public class TenderEvaluationService : ITenderEvaluationService
 
             // Get all evaluators for this tender
             var evaluators = await _evaluatorRepository.GetByTenderIdAsync(tenderId);
-            var totalEvaluators = evaluators.Count();
+            var committeeUsers = await _evaluationCommittee.GetTenderScoringUserIdsAsync(tenderId);
+            if (committeeUsers is not null)
+                evaluators = evaluators.Where(item => item.TenantId == _currentUserProvider.TenantId &&
+                    committeeUsers.Contains(item.UserId)).ToList();
+            var totalEvaluators = committeeUsers?.Count ?? evaluators.Count();
 
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var bidEvaluations = new List<BidEvaluationSummaryDto>();
@@ -652,12 +674,17 @@ public class TenderEvaluationService : ITenderEvaluationService
             foreach (var bid in bids)
             {
                 var evaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
-                var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted").ToList();
+                var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted" &&
+                        evaluators.Any(evaluator => evaluator.Id == e.TenderEvaluatorId))
+                    .GroupBy(item => item.TenderEvaluatorId)
+                    .Select(group => group.OrderByDescending(item => item.SubmittedDate ?? item.EvaluationDate).First())
+                    .ToList();
                 var avgTotalScore = submittedEvaluations.Any() ? (submittedEvaluations.Average(e => e.TotalScore) ?? 0m) : 0m;
                 var recommendationCount = submittedEvaluations.Count(e => e.IsRecommended);
 
                 // Determine if bid is fully evaluated (all evaluators have submitted)
                 var allEvaluatorsSubmitted = totalEvaluators > 0 &&
+                    (committeeUsers is null || committeeUsers.All(userId => evaluators.Any(item => item.UserId == userId))) &&
                     evaluators.All(evaluator => submittedEvaluations.Any(e => e.TenderEvaluatorId == evaluator.Id));
 
                 // Calculate effective status - if all evaluators have submitted, it's "Evaluated"
@@ -1577,9 +1604,11 @@ public class TenderEvaluationService : ITenderEvaluationService
         var evaluator = evaluation.TenderEvaluator ??
                         await _evaluatorRepository.GetByIdAsync(evaluation.TenderEvaluatorId)
                         ?? throw new InvalidOperationException("The evaluation assignment was not found.");
-        if (evaluator.UserId != _currentUserProvider.UserId)
+        if (evaluator.UserId != _currentUserProvider.UserId || evaluator.TenantId != _currentUserProvider.TenantId)
             throw new ProcurementEvaluationCommitteeAuthorizationException(
                 "An evaluator can change or submit only their own evaluation.");
+        await _evaluationCommittee.EnsureTenderEvaluatorAsync(
+            evaluator.TenderId, Guid.NewGuid().ToString("N"));
     }
 
     private async Task EnsureEvaluationConfigurationAsync(Guid tenderId)
