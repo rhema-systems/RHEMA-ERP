@@ -352,6 +352,9 @@ public sealed class FinancePostingEngineTests
         (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
         debitAccount.Balance.Should().Be(100m);
         creditAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.CountAsync()).Should().Be(2);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == debitAccount.Id)).PeriodDebits.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == creditAccount.Id)).PeriodCredits.Should().Be(100m);
     }
 
     [Fact]
@@ -575,7 +578,7 @@ public sealed class FinancePostingEngineTests
 
     [Fact]
     [Trait("Category", "PostingEngine")]
-    public async Task PostAsync_ShouldUpdateAccountCurrencyLinkBalanceAndHistory_WhenForeignCurrencyPosts()
+    public async Task PostAsync_ShouldUpdateBookCurrencyExposure_WithoutMutatingCurrencyLinkConfiguration()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -600,14 +603,17 @@ public sealed class FinancePostingEngineTests
 
         await CreateService(db, tenantId).PostAsync(CreateForeignCurrencyRequest(tenantId, cashAccount.Id, revenueAccount.Id));
 
-        usdLink.ForeignCurrencyBalance.Should().Be(100m);
-        usdLink.BaseCurrencyEquivalent.Should().Be(1500m);
-        usdLink.CurrentExchangeRate.Should().Be(15m);
-        usdLink.RateEffectiveDate.Should().Be(new DateTime(2026, 7, 4));
-        usdLink.HasTransactionHistory.Should().BeTrue();
-        usdLink.TransactionCount.Should().Be(1);
-        usdLink.FirstTransactionDate.Should().Be(new DateTime(2026, 7, 4));
-        usdLink.LastTransactionDate.Should().Be(new DateTime(2026, 7, 4));
+        usdLink.ForeignCurrencyBalance.Should().Be(0m);
+        usdLink.BaseCurrencyEquivalent.Should().Be(0m);
+        usdLink.TransactionCount.Should().Be(0);
+        var exposure = await db.AccountCurrencyExposures.SingleAsync(item => item.AccountId == cashAccount.Id);
+        exposure.AccountingBookCode.Should().Be("IFRS");
+        exposure.TransactionCurrencyCode.Should().Be("USD");
+        exposure.SignedForeignBalance.Should().Be(100m);
+        exposure.SignedFunctionalBalance.Should().Be(1500m);
+        exposure.TransactionCount.Should().Be(1);
+        exposure.FirstTransactionDate.Should().Be(new DateTime(2026, 7, 4));
+        exposure.LastTransactionDate.Should().Be(new DateTime(2026, 7, 4));
         exchangeRate.HasBeenUsedInTransactions.Should().BeTrue();
         exchangeRate.TransactionCount.Should().Be(1);
         cashAccount.Balance.Should().Be(1500m);
@@ -950,6 +956,7 @@ public sealed class FinancePostingEngineTests
         duplicate.WasDuplicate.Should().BeTrue();
         duplicate.JournalEntryId.Should().Be(reversal.JournalEntryId);
         (await db.JournalEntries.CountAsync()).Should().Be(2);
+        (await db.AccountBalances.ToListAsync()).Should().OnlyContain(item => item.ClosingBalance == 0m);
     }
 
     public static TheoryData<bool, string> ExactReversalMutationCases => new()

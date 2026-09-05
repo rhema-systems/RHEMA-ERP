@@ -300,6 +300,11 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         await using var verification = database.CreateContext();
         (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
         (await verification.JournalEntries.CountAsync()).Should().Be(1);
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
     }
 
     [SqlServerFact]
@@ -349,6 +354,51 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         (await verification.JournalEntries.CountAsync()).Should().Be(1);
         (await verification.Accounts.SingleAsync(item => item.Id == seeded.DebitAccountId)).Balance.Should().Be(100m);
         (await verification.Accounts.SingleAsync(item => item.Id == seeded.CreditAccountId)).Balance.Should().Be(-100m);
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookBalanceC2")]
+    public async Task ConcurrentPostingAndApprovedRebuild_ShouldSerializeWithoutLostOrDuplicateProjection()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+        await using var postingContext = database.CreateContext();
+        await using var rebuildContext = database.CreateContext();
+        var sourceId = Guid.NewGuid();
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "TEST", SourceDocumentType = "C2ConcurrentRebuild",
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post", Description = "Concurrent C2 posting/rebuild",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"C2|CONCURRENT-REBUILD|{sourceId:N}|IFRS|POST", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+        var rebuild = new BookBalanceReconciliationRequestDto(
+            "IFRS", true, "Concurrent C2 reconciliation", $"C2|REBUILD|{sourceId:N}", Guid.NewGuid());
+
+        await Task.WhenAll(
+            CreateSqlPostingEngine(postingContext, seeded.TenantId).PostAsync(request),
+            new BookBalanceReadModelService(rebuildContext).ReconcileAsync(seeded.TenantId, rebuild, Guid.NewGuid()));
+
+        await using var verification = database.CreateContext();
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+        (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
+        (await verification.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(1);
     }
 
     private static FinancePostingEngine CreateSqlPostingEngine(ApplicationDbContext context, Guid tenantId)

@@ -240,11 +240,31 @@ public sealed class AllocationRunBatchServiceTests
         var source = SeedAccount(db, tenantId, "6100", "Shared Rent", AccountType.Expense);
         var targetOne = SeedAccount(db, tenantId, "6110", "Rent - Sales", AccountType.Expense);
         var targetTwo = SeedAccount(db, tenantId, "6120", "Rent - Admin", AccountType.Expense);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        var expenseClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "OPERATING_EXPENSE", Name = "Operating expense", CoreAccountType = AccountType.Expense,
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        db.AccountClassifications.Add(expenseClassification);
+        foreach (var account in new[] { source, targetOne, targetTwo })
+            db.AccountAccountingBooks.Add(new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
+                AccountingBookId = book.Id, AccountClassificationId = expenseClassification.Id, IsEnabled = true
+            });
         db.Set<AccountBalance>().Add(new AccountBalance
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             AccountId = source.Id,
+            AccountingBookId = book.Id,
             FiscalPeriodId = period.Id,
             BookClassification = "IFRS",
             Currency = "GHS",
