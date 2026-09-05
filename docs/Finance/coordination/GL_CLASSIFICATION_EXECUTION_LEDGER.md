@@ -13,11 +13,11 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Phase | Post-Phase-6 Stage C1 — stable accounting-book identity and idempotency foundation |
 | Status | `AUTHORIZED_PENDING_IMPLEMENTATION` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `4172e1cafee90bceef8385eef4102cf8718e4696` |
+| Exact base | `0b2b8ea04123c4348393cdea49d7734de2042d7a` |
 | Branch | `codex/finance-multibook-identity-foundation` |
 | Worktree | To be created by implementing task from the exact base |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `4172e1cafee90bceef8385eef4102cf8718e4696` |
+| Primary HEAD at activation | `0b2b8ea04123c4348393cdea49d7734de2042d7a` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
@@ -273,7 +273,7 @@ passed, the candidate remained clean, and no database or migration command was r
 changes were preserved.
 
 Do not issue Inventory or enable automatic parallel-book posting yet. Begin Stage C1 from exact primary base
-`4172e1cafee90bceef8385eef4102cf8718e4696` on GPT-5.6 Sol Medium. C1 adds/backfills stable relational
+`0b2b8ea04123c4348393cdea49d7734de2042d7a` on GPT-5.6 Sol Medium. C1 adds/backfills stable relational
 `AccountingBookId` on journal headers,
 account transactions and posting events; preserves immutable book-code snapshots; enforces tenant/book lineage;
 and makes source/action plus idempotency uniqueness book-qualified. It must update posting, retry and reversal
