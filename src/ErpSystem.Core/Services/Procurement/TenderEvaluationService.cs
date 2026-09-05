@@ -129,6 +129,7 @@ public class TenderEvaluationService : ITenderEvaluationService
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
             await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
+            await EnsureEvaluationConfigurationAsync(bid.TenderId);
             EnsureBidEvaluationState(bid);
             await EnsurePaymentAdmissionForEvaluationAsync(bid);
 
@@ -239,8 +240,9 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
-            await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
             await EnsureCurrentEvaluatorOwnsAsync(evaluation);
+            await EnsureEvaluationConfigurationAsync(tenderId);
 
             if (evaluation.Status == "Submitted")
             {
@@ -302,6 +304,7 @@ public class TenderEvaluationService : ITenderEvaluationService
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
             var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
             await EnsureCurrentEvaluatorOwnsAsync(evaluation);
+            await EnsureEvaluationConfigurationAsync(tenderId);
             await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
@@ -1018,6 +1021,7 @@ public class TenderEvaluationService : ITenderEvaluationService
             {
                 throw new InvalidOperationException("This tender is not configured for QCBS evaluation");
             }
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
 
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var evaluatedBids = bids.Where(b => b.Status == "Evaluated" || b.Status == "Opened").ToList();
@@ -1576,6 +1580,15 @@ public class TenderEvaluationService : ITenderEvaluationService
         if (evaluator.UserId != _currentUserProvider.UserId)
             throw new ProcurementEvaluationCommitteeAuthorizationException(
                 "An evaluator can change or submit only their own evaluation.");
+    }
+
+    private async Task EnsureEvaluationConfigurationAsync(Guid tenderId)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(tenderId)
+            ?? throw new InvalidOperationException("The source tender was not found.");
+        if (tender.TenantId != _currentUserProvider.TenantId)
+            throw new ProcurementEvaluationCommitteeAuthorizationException("The source tender is not available in this tenant.");
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
     }
 
     private async Task EnsureLegacyEvaluationAllowedAsync(Guid tenderId)

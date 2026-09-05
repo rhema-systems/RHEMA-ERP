@@ -19,6 +19,34 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class TenderEvaluationServiceCommitteeTests
 {
+    [Theory]
+    [InlineData("create")]
+    [InlineData("update")]
+    [InlineData("submit")]
+    public async Task MismatchBlocksDraftAndFinalScoringBeforeAnyWrite(string stage)
+    {
+        var fixture = new Fixture();
+        var template = new EvaluationTemplate { Id = Guid.NewGuid(), TenantId = fixture.TenantId, ScoringMethod = "QCBS" };
+        fixture.Tenders.Setup(item => item.GetByIdAsync(fixture.TenderId)).ReturnsAsync(new Tender
+            { Id = fixture.TenderId, TenantId = fixture.TenantId, EvaluationTemplateId = template.Id, UseQCBSEvaluation = false });
+        var templates = new Mock<IGenericRepository<EvaluationTemplate>>();
+        templates.Setup(item => item.GetByIdAsync(template.Id)).ReturnsAsync(template);
+        fixture.UnitOfWork.Setup(item => item.Repository<EvaluationTemplate>()).Returns(templates.Object);
+        var evaluation = fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Draft");
+        fixture.Evaluations.Setup(item => item.GetByIdAsync(evaluation.Id)).ReturnsAsync(evaluation);
+        Func<Task> action = stage switch
+        {
+            "create" => () => fixture.Service.CreateEvaluationAsync(new CreateEvaluationDto { TenderBidId = fixture.Bids[0].Id }),
+            "update" => () => fixture.Service.UpdateEvaluationAsync(evaluation.Id, new UpdateEvaluationDto { TechnicalScore = 90 }),
+            _ => () => fixture.Service.SubmitEvaluationAsync(evaluation.Id, new SubmitEvaluationDto { ConfirmSubmission = true })
+        };
+        (await action.Should().ThrowAsync<TenderEvaluationConfigurationException>())
+            .Which.Code.Should().Be("TENDER_EVALUATION_METHOD_MISMATCH");
+        fixture.Bids[0].Status.Should().Be("Opened");
+        evaluation.Status.Should().Be("Draft");
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task AssignedEvaluatorCanCreateDraftBeforeCommitteeIsActive()
     {
@@ -273,6 +301,8 @@ public sealed class TenderEvaluationServiceCommitteeTests
 
             CurrentUser.SetupGet(item => item.UserId).Returns(UserId);
             CurrentUser.SetupGet(item => item.TenantId).Returns(TenantId);
+            Tenders.Setup(repository => repository.GetByIdAsync(TenderId))
+                .ReturnsAsync(new Tender { Id = TenderId, TenantId = TenantId });
             BidsRepository.Setup(repository => repository.GetByIdAsync(Bids[0].Id))
                 .ReturnsAsync(Bids[0]);
             BidsRepository.Setup(repository => repository.GetByTenderIdAsync(TenderId))

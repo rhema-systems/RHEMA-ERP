@@ -553,8 +553,7 @@ class TenderService {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to create tender');
+      await throwProcurementResponseError(response, 'Failed to create tender');
     }
 
     return response.json();
@@ -571,8 +570,7 @@ class TenderService {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update tender');
+      await throwProcurementResponseError(response, 'Failed to update tender');
     }
 
     return response.json();
@@ -591,8 +589,7 @@ class TenderService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to submit tender for approval');
+      await throwProcurementResponseError(response, 'Failed to submit tender for approval');
     }
   }
 
@@ -610,8 +607,7 @@ class TenderService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to approve tender');
+      await throwProcurementResponseError(response, 'Failed to approve tender');
     }
   }
 

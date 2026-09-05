@@ -27,3 +27,15 @@ Reports belong under the ignored `local-artifacts/uat-reset-20260905/` folder. T
 ## Completed execution
 
 The authorized reset committed on **2026-09-05 at 00:54:55 UTC**, deleting **2,883 rows from 151 tables** after successful rollback rehearsal and preservation checks. Post-restart SQL and visible browser checks are recorded in [the fresh UAT tracker](../../docs/PROCUREMENT_INVENTORY_STORES_FRESH_UAT_TRACKER.md#reset-evidence). Do not rerun Apply against newly created business data: this script belongs to the completed, specifically authorized reset, not to routine UAT setup. Recovery of the removed records requires the operator's existing backup.
+
+## Separate LOCAL UAT evaluation correction (completed)
+
+`Invoke-LocalUatEvaluationCorrection.ps1` and `local-uat-evaluation-correction-20260905.sql` implement the separately approved correction of **only TND-2026-0001**, not another reset. They must not be deployed, seeded or generalized into a production correction path.
+
+- Exact local host/SQL/database/tenant and tender/bid IDs are guarded. The expected tender must be Closed, its only bid Opened and unscored, and its current template must match the reviewed QCBS mismatch.
+- Preview defaults to read-only rollback. Rehearse and Apply require the reviewed SHA-256 state fingerprint. Rehearse performs the same changes and preservation checks but rolls back.
+- A serializable transaction clones a non-default WeightedAverage template, retaining all five criteria and their scoring parameters. The shared original template remains unchanged. Only the target tender's template link and maintenance metadata change.
+- Bid files and values, committee evidence, other tenders and original templates/criteria are protected by full-row content hashes. SQL triggers/constraints remain enabled. No records are deleted and no application build or migration is required.
+- An append-only central audit records old/new values, authorization and `IsWorkflowApproval=false`. This is direct local maintenance, not an approval through the procurement workflow. An audit-guarded replay returns AlreadyApplied without writing duplicates.
+
+The correction committed at **2026-09-05 21:48:32 UTC**, after fingerprint rejection and successful rollback rehearsal. Audit: `7c299fac-7af0-459a-8656-aa2f6c43c9d5`; new template: `dc2839e9-d639-4898-a674-15c0e1f917e7`. Evidence is recorded under EV-U10-007 onward in [the fresh UAT tracker](../../docs/PROCUREMENT_INVENTORY_STORES_FRESH_UAT_TRACKER.md#u10-configuration-consistency-correction--2026-09-05). No evaluation scores, evaluator assignments or award were created by this correction.

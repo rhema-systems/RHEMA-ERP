@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, FileText, CheckCircle } from 'lucide-react';
 import { type TenderFormData } from '@/app/procurement/tenders/new/page';
 import { evaluationTemplateService, EvaluationTemplate, EvaluationTemplateListItem } from '@/services/evaluationTemplateService';
+import { getTemplateEvaluationSettings } from '@/lib/tender-evaluation-configuration';
 
 interface BasicInformationProps {
   formData: TenderFormData;
@@ -80,33 +81,32 @@ export default function BasicInformation({
 
   // Load template details when selection changes and auto-populate QCBS settings
   useEffect(() => {
+    let cancelled = false;
     const loadTemplateDetails = async () => {
       if (!formData.evaluationTemplateId) {
         setSelectedTemplateDetails(null);
+        setLoadingDetails(false);
         return;
       }
       try {
         setLoadingDetails(true);
+        setSelectedTemplateDetails(null);
         const details = await evaluationTemplateService.getById(formData.evaluationTemplateId);
+        if (cancelled) return;
         setSelectedTemplateDetails(details);
 
-        // Auto-populate QCBS settings if template uses QCBS scoring method
-        if (details.scoringMethod === 'QCBS') {
-          updateFormData({
-            useQCBSEvaluation: true,
-            technicalWeight: details.technicalWeight,
-            financialWeight: details.financialWeight,
-            minimumTechnicalScore: details.minimumTechnicalScore
-          });
-        }
+        // Keep the flag and weights aligned in both directions when switching templates.
+        updateFormData(getTemplateEvaluationSettings(details));
       } catch (error) {
+        if (cancelled) return;
         console.error('Failed to load template details:', error);
         setSelectedTemplateDetails(null);
       } finally {
-        setLoadingDetails(false);
+        if (!cancelled) setLoadingDetails(false);
       }
     };
     loadTemplateDetails();
+    return () => { cancelled = true; };
   }, [formData.evaluationTemplateId]);
 
   const handleTemplateChange = (templateId: string) => {
@@ -433,6 +433,7 @@ export default function BasicInformation({
           <div className="flex items-center space-x-2">
             <Checkbox
               id="useQCBSEvaluation"
+              disabled={Boolean(formData.evaluationTemplateId)}
               checked={formData.useQCBSEvaluation}
               onCheckedChange={(checked) => updateFormData({ useQCBSEvaluation: checked as boolean })}
             />
@@ -440,6 +441,12 @@ export default function BasicInformation({
               Use QCBS Evaluation Method
             </Label>
           </div>
+
+          {formData.evaluationTemplateId && (
+            <p className="text-sm text-muted-foreground">
+              Evaluation method and QCBS settings come from the selected template. Choose another template to change them.
+            </p>
+          )}
 
           {formData.useQCBSEvaluation && (
             <Card className="bg-blue-50/50 border-blue-200">
@@ -450,6 +457,7 @@ export default function BasicInformation({
                     <Label htmlFor="technicalWeight">Technical Weight (%)</Label>
                     <Input
                       id="technicalWeight"
+                      readOnly={Boolean(formData.evaluationTemplateId)}
                       type="number"
                       value={formData.technicalWeight}
                       onChange={(e) => {
@@ -471,6 +479,7 @@ export default function BasicInformation({
                     <Label htmlFor="financialWeight">Financial Weight (%)</Label>
                     <Input
                       id="financialWeight"
+                      readOnly={Boolean(formData.evaluationTemplateId)}
                       type="number"
                       value={formData.financialWeight}
                       onChange={(e) => {
@@ -492,6 +501,7 @@ export default function BasicInformation({
                     <Label htmlFor="minimumTechnicalScore">Minimum Technical Score (%)</Label>
                     <Input
                       id="minimumTechnicalScore"
+                      readOnly={Boolean(formData.evaluationTemplateId)}
                       type="number"
                       value={formData.minimumTechnicalScore}
                       onChange={(e) => updateFormData({ minimumTechnicalScore: parseInt(e.target.value) || 0 })}

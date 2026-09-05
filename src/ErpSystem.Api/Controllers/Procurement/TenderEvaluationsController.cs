@@ -127,6 +127,14 @@ public class TenderEvaluationsController : ControllerBase
             var evaluation = await _evaluationService.CreateEvaluationAsync(dto);
             return CreatedAtAction(nameof(GetEvaluation), new { id = evaluation.Id }, evaluation);
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (ProcurementEvaluationCommitteeNotFoundException ex)
         {
             return NotFound(CommitteeProblem(404, ex.Code, ex.Message));
@@ -170,6 +178,14 @@ public class TenderEvaluationsController : ControllerBase
             var evaluation = await _evaluationService.UpdateEvaluationAsync(id, dto);
             return Ok(evaluation);
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (ProcurementEvaluationCommitteeNotFoundException ex)
         {
             return NotFound(CommitteeProblem(404, ex.Code, ex.Message));
@@ -212,6 +228,14 @@ public class TenderEvaluationsController : ControllerBase
         {
             var evaluation = await _evaluationService.SubmitEvaluationAsync(id, dto);
             return Ok(evaluation);
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (ProcurementEvaluationCommitteeNotFoundException ex)
         {
@@ -360,6 +384,14 @@ public class TenderEvaluationsController : ControllerBase
         {
             var result = await _evaluationService.CalculateQCBSScoresAsync(tenderId);
             return Ok(result);
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (ProcurementEvaluationCommitteeConflictException ex)
         {

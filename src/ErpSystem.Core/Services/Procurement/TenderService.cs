@@ -209,6 +209,9 @@ public class TenderService : ITenderService
         try
         {
             ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, _currentUserProvider.TenantId,
+                dto.EvaluationTemplateId, dto.UseQCBSEvaluation, dto.TechnicalWeight,
+                dto.FinancialWeight, dto.MinimumTechnicalScore);
             if (dto.SourcePurchaseRequisitionId == Guid.Empty)
                 throw new ProcurementRequisitionSourcingValidationException(
                     "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender must be created from a released purchase requisition.");
@@ -354,6 +357,9 @@ public class TenderService : ITenderService
                 throw new InvalidOperationException("Only draft tenders can be updated");
             }
             ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender.TenantId,
+                dto.EvaluationTemplateId, dto.UseQCBSEvaluation, dto.TechnicalWeight,
+                dto.FinancialWeight, dto.MinimumTechnicalScore);
             if (tender.SourcePurchaseRequisitionId.HasValue)
             {
                 var requestForQuotation = IsRequestForQuotation(tender.TenderType);
@@ -440,6 +446,7 @@ public class TenderService : ITenderService
             throw new InvalidOperationException($"Tender must be in Draft status to submit for approval (current status: '{tender.Status}')");
         }
 
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         var workflowResult = await _workflowIntegrationService.SubmitAsync("Tender", id);
         if (!workflowResult.ApprovalRequired)
         {
@@ -477,6 +484,7 @@ public class TenderService : ITenderService
             throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step");
         }
 
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
             "Tender",
             id,
@@ -550,6 +558,7 @@ public class TenderService : ITenderService
             {
                 throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
             }
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
             foreach (var recipientId in (dto.InvitedBusinessPartnerIds ?? []).Where(value => value != Guid.Empty).Distinct())
             {
                 var recipient = await _businessPartnerRepository.GetByIdAsync(recipientId);
