@@ -33,6 +33,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             index.Properties.Select(p => p.Name).SequenceEqual(new[]
             {
                 nameof(FinancePostingEvent.TenantId),
+                nameof(FinancePostingEvent.AccountingBookId),
                 nameof(FinancePostingEvent.SourceDocumentType),
                 nameof(FinancePostingEvent.SourceDocumentId),
                 nameof(FinancePostingEvent.PostingAction)
@@ -261,10 +262,11 @@ public sealed class JournalEntryLifecycleBatch5Tests
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
-        SeedTenant(db, tenantId);
-        var closedPeriod = SeedPeriod(db, tenantId, isOpen: false, isClosed: true);
-        var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
-        var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var closedPeriod = await db.FiscalPeriods.SingleAsync(period => period.TenantId == tenantId);
+        closedPeriod.IsOpen = false;
+        closedPeriod.IsClosed = true;
+        closedPeriod.PeriodStatus = "Closed";
         var journal = SeedBalancedJournal(db, tenantId, closedPeriod.Id, debitAccount.Id, creditAccount.Id, "Approved");
         await db.SaveChangesAsync();
         var service = CreateJournalService(db, tenantId);
@@ -314,6 +316,13 @@ public sealed class JournalEntryLifecycleBatch5Tests
         var procurementDocumentId = Guid.NewGuid();
         var postingDate = new DateTime(2026, 8, 29);
         await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
 
         db.JournalEntries.AddRange(
             new JournalEntry
@@ -328,6 +337,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
                 OriginModuleCode = "PROC",
                 SourceDocumentId = procurementDocumentId,
                 SourceDocumentType = "SupplierOnboardingTokenPayment",
+                AccountingBookId = book.Id,
+                BookClassification = book.Code,
                 FiscalPeriodId = fiscalPeriodId,
                 PostingStatus = "Posted",
                 CreatedAt = postingDate
@@ -341,6 +352,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
                 EntryDate = postingDate,
                 Description = "Vendor invoice",
                 SourceModule = "AP",
+                AccountingBookId = book.Id,
+                BookClassification = book.Code,
                 FiscalPeriodId = fiscalPeriodId,
                 PostingStatus = "Posted",
                 CreatedAt = postingDate
@@ -496,6 +509,14 @@ public sealed class JournalEntryLifecycleBatch5Tests
 
         notification ??= new Mock<INotificationService>();
         var books = new Mock<IAccountingBookService>();
+        if (budgetControl == null)
+        {
+            var defaultBudgetControl = new Mock<IFinanceBudgetControlService>();
+            defaultBudgetControl
+                .Setup(x => x.ValidateManualJournalForPostingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Array.Empty<Guid>());
+            budgetControl = defaultBudgetControl.Object;
+        }
 
         return new JournalEntryService(
             db,
@@ -527,6 +548,35 @@ public sealed class JournalEntryLifecycleBatch5Tests
         SeedPeriod(db, tenantId);
         var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        var assetClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "ASSET_TEST", Name = "Asset test", CoreAccountType = AccountType.Asset,
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        var revenueClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "REVENUE_TEST", Name = "Revenue test", CoreAccountType = AccountType.Revenue,
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        db.AddRange(book, assetClassification, revenueClassification);
+        db.AccountAccountingBooks.AddRange(
+            new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccount.Id,
+                AccountingBookId = book.Id, AccountClassificationId = assetClassification.Id, IsEnabled = true
+            },
+            new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccount.Id,
+                AccountingBookId = book.Id, AccountClassificationId = revenueClassification.Id, IsEnabled = true
+            });
         await db.SaveChangesAsync();
         return (debitAccount, creditAccount);
     }
@@ -634,6 +684,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
         Guid creditAccountId,
         string status)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(),
@@ -645,6 +696,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             TotalDebitAmount = 100m,
             TotalCreditAmount = 100m,
             IsBalanced = true,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             FiscalPeriodId = fiscalPeriodId,
             PostingStatus = status,
@@ -661,6 +713,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             DebitAmount = 100m,
             CreditAmount = 0m,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             LineNumber = 1
         });
@@ -674,6 +727,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             DebitAmount = 0m,
             CreditAmount = 100m,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             LineNumber = 2
         });

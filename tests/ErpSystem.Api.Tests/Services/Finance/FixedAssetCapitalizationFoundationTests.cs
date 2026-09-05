@@ -869,6 +869,7 @@ public sealed class FixedAssetCapitalizationFoundationTests
         Guid? userId = null,
         string userName = "fa.poster")
     {
+        EnsureCanonicalPostingBookFixture(db, tenantId);
         var currentUser = CreateCurrentUser(tenantId, userId, userName);
         var auditService = new FinanceAuditService(
             db,
@@ -905,6 +906,58 @@ public sealed class FixedAssetCapitalizationFoundationTests
             fixedAssetServiceRequired ? fixedAssetService : null);
 
         return new ServiceFixture(vendorInvoiceService, fixedAssetService, subledgerPostingMock);
+    }
+
+    private static void EnsureCanonicalPostingBookFixture(ApplicationDbContext db, Guid tenantId)
+    {
+        var book = db.AccountingBooks.Local.FirstOrDefault(item => item.TenantId == tenantId && item.Code == "IFRS")
+            ?? db.AccountingBooks.FirstOrDefault(item => item.TenantId == tenantId && item.Code == "IFRS");
+        if (book == null)
+        {
+            book = new AccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true
+            };
+            db.AccountingBooks.Add(book);
+        }
+
+        var accounts = db.Accounts.Local.Where(item => item.TenantId == tenantId)
+            .Concat(db.Accounts.Where(item => item.TenantId == tenantId).AsEnumerable())
+            .DistinctBy(item => item.Id)
+            .ToArray();
+        foreach (var group in accounts.GroupBy(item => item.AccountType))
+        {
+            var classification = db.AccountClassifications.Local.FirstOrDefault(item =>
+                    item.TenantId == tenantId && item.AccountingBookId == book.Id && item.CoreAccountType == group.Key)
+                ?? db.AccountClassifications.FirstOrDefault(item =>
+                    item.TenantId == tenantId && item.AccountingBookId == book.Id && item.CoreAccountType == group.Key);
+            if (classification == null)
+            {
+                classification = new AccountClassification
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+                    Code = $"FA_{group.Key.ToString().ToUpperInvariant()}", Name = $"FA {group.Key}",
+                    CoreAccountType = group.Key, IsPostingClassification = true,
+                    Status = AccountClassificationStatus.Active
+                };
+                db.AccountClassifications.Add(classification);
+            }
+
+            foreach (var account in group)
+            {
+                if (!db.AccountAccountingBooks.Local.Any(item => item.AccountId == account.Id && item.AccountingBookId == book.Id)
+                    && !db.AccountAccountingBooks.Any(item => item.AccountId == account.Id && item.AccountingBookId == book.Id))
+                {
+                    db.AccountAccountingBooks.Add(new AccountAccountingBook
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
+                        AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = true
+                    });
+                }
+            }
+        }
+        db.SaveChanges();
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(
