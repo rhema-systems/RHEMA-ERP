@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyTenderDocumentContentArtifact,
   hasTenderDocumentAction,
+  isTenderDocumentContentArtifactApproved,
   pendingMandatoryAcknowledgements,
+  suggestedTenderDocumentSelection,
   validateTenderDocumentChange,
   validateTenderDocumentIssue,
   validateTenderDocumentTemplate,
@@ -14,6 +17,19 @@ import type {
   SaveProcurementTenderDocumentTemplate,
 } from '@/types/procurement-tender-document';
 
+describe('source-specific reusable template default', () => {
+  it('selects only the available server recommendation', () => {
+    expect(suggestedTenderDocumentSelection('', 'eligible', [{ id: 'unrelated' }, { id: 'eligible' }])).toBe('eligible');
+  });
+  it('does not overwrite an explicit user choice', () => {
+    expect(suggestedTenderDocumentSelection('chosen', 'eligible', [{ id: 'eligible' }])).toBe('chosen');
+  });
+  it('does not fall back to an unrelated template', () => {
+    expect(suggestedTenderDocumentSelection('', 'missing', [{ id: 'unrelated' }])).toBe('');
+    expect(suggestedTenderDocumentSelection('', undefined, [{ id: 'unrelated' }])).toBe('');
+  });
+});
+
 const template = (): SaveProcurementTenderDocumentTemplate => ({
   templateCode: 'TDC-NCT-GOODS',
   name: 'Standard NCT goods document',
@@ -24,6 +40,7 @@ const template = (): SaveProcurementTenderDocumentTemplate => ({
   policySetVersion: 3,
   sourceConfigurationProfileId: 'profile-1',
   contentReference: 'workflow-evidence://document/1',
+  contentWorkflowEvidenceDocumentId: 'evidence-1',
   contentChecksumSha256: 'a'.repeat(64),
   workflowDefinitionId: 'workflow-1',
   applicableMethods: ['NationalCompetitiveTendering'],
@@ -66,9 +83,81 @@ describe('controlled tender document presentation', () => {
     expect(
       validateTenderDocumentTemplate({
         ...template(),
+        contentWorkflowEvidenceDocumentId: undefined,
+      })
+    ).toContain('workflow evidence document');
+    expect(
+      validateTenderDocumentTemplate({
+        ...template(),
         effectiveFromUtc: 'not-a-date',
       })
     ).toContain('invalid');
+  });
+
+  it('allows metadata-only Draft creation while retaining strict publication validation', () => {
+    const metadataOnly = {
+      ...template(),
+      contentWorkflowEvidenceDocumentId: undefined,
+      contentReference: '',
+      contentChecksumSha256: '',
+    };
+
+    expect(
+      validateTenderDocumentTemplate(metadataOnly, { requireContent: false })
+    ).toBeUndefined();
+    expect(validateTenderDocumentTemplate(metadataOnly)).toContain(
+      'workflow evidence document'
+    );
+    expect(
+      validateTenderDocumentTemplate(
+        { ...metadataOnly, contentReference: 'partial/path' },
+        { requireContent: false }
+      )
+    ).toContain('workflow evidence document');
+  });
+
+  it('derives the immutable content ID, path, and checksum from one approved artifact', () => {
+    const artifact = {
+      id: 'evidence-2',
+      documentName: 'NCT source document',
+      fileName: 'nct.docx',
+      filePath: 'workflow-evidence/default/nct.docx',
+      sha256: 'b'.repeat(64),
+      version: 2,
+      isCurrent: true,
+      verificationStatus: 1,
+      malwareScanStatus: 1,
+      workflowInstanceId: 'instance-1',
+      workflowName: 'Document control',
+      entityType: 'TenderDocument',
+      entityId: 'entity-1',
+      stepName: 'Content verification',
+    };
+
+    expect(isTenderDocumentContentArtifactApproved(artifact)).toBe(true);
+    expect(
+      applyTenderDocumentContentArtifact(
+        { ...template(), contentFileUploadRecordId: 'legacy-upload' },
+        artifact
+      )
+    ).toMatchObject({
+      contentWorkflowEvidenceDocumentId: 'evidence-2',
+      contentFileUploadRecordId: undefined,
+      contentReference: 'workflow-evidence/default/nct.docx',
+      contentChecksumSha256: 'b'.repeat(64),
+    });
+    expect(
+      isTenderDocumentContentArtifactApproved({
+        ...artifact,
+        malwareScanStatus: 0,
+      })
+    ).toBe(false);
+    expect(
+      isTenderDocumentContentArtifactApproved({
+        ...artifact,
+        verificationStatus: 0,
+      })
+    ).toBe(false);
   });
 
   it('enforces exact paid issue data and rejects payment on a free issue', () => {

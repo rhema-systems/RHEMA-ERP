@@ -276,6 +276,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                             PurchaseOrderItemId =
                                 item.PurchaseOrderItemId,
                             InventoryItemId = item.InventoryItemId,
+                            WarehouseId = dto.WarehouseId,
                             ReceivedQuantity =
                                 item.ReceivedQuantity
                         }).ToList(),

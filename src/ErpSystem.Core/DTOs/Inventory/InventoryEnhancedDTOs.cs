@@ -747,8 +747,25 @@ public class PhysicalCountDetailDto : PhysicalCountDto
     public Guid? AuditAttestedById { get; set; }
     public DateTime? AuditAttestedAtUtc { get; set; }
     public string? InvestigationSummary { get; set; }
+    public List<PhysicalCountEvidenceDto> Evidence { get; set; } = new();
     public List<PhysicalCountItemDto> Items { get; set; } = new();
     public List<PhysicalCountActionDto> Actions { get; set; } = new();
+}
+
+public sealed class PhysicalCountEvidenceDto
+{
+    public Guid CentralDocumentRecordId { get; set; }
+    public Guid CentralDocumentVersionId { get; set; }
+    public Guid FileUploadRecordId { get; set; }
+    public string DocumentReference { get; set; } = string.Empty;
+    public string VersionNumber { get; set; } = string.Empty;
+    public string EvidenceReference { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+    public string ScanStatus { get; set; } = string.Empty;
+    public DateTime UploadedAtUtc { get; set; }
 }
 
 public class PhysicalCountItemDto

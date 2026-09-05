@@ -26,7 +26,7 @@ public class TenderTemplatesController : ControllerBase
     /// Get all templates
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderTemplateDto>>> GetTemplates()
     {
         try
@@ -46,7 +46,7 @@ public class TenderTemplatesController : ControllerBase
     /// Get active templates
     /// </summary>
     [HttpGet("active")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderTemplateDto>>> GetActiveTemplates()
     {
         try
@@ -65,7 +65,7 @@ public class TenderTemplatesController : ControllerBase
     /// Get template by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderTemplateDto>> GetTemplate(Guid id)
     {
         try
@@ -89,7 +89,7 @@ public class TenderTemplatesController : ControllerBase
     /// Create template
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderTemplateDto>> CreateTemplate([FromBody] CreateTenderTemplateDto dto)
     {
         try
@@ -112,7 +112,7 @@ public class TenderTemplatesController : ControllerBase
     /// Update template
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderTemplateDto>> UpdateTemplate(Guid id, [FromBody] UpdateTenderTemplateDto dto)
     {
         try
@@ -156,7 +156,7 @@ public class TenderTemplatesController : ControllerBase
     /// Delete template
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTemplate(Guid id)
     {
         try
@@ -179,7 +179,7 @@ public class TenderTemplatesController : ControllerBase
     /// Create tender from template
     /// </summary>
     [HttpPost("{id}/create-tender")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDto>> CreateTenderFromTemplate(Guid id, [FromBody] CreateTenderFromTemplateDto dto)
     {
         try
@@ -199,4 +199,3 @@ public class TenderTemplatesController : ControllerBase
         }
     }
 }
-

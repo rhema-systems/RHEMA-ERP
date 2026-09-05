@@ -195,6 +195,32 @@ export function BidderCommunicationWorkspace({
       </div>
     );
 
+  const externalRegisterPending =
+    external && overview.isError && errorStatus(overview.error) === 404;
+  if (externalRegisterPending)
+    return (
+      <div
+        className="space-y-6 p-4 md:p-6"
+        data-testid="external-bidder-communication-pending"
+      >
+        <Button asChild variant="ghost" size="sm">
+          <Link href={backHref}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Return to {sourceLabel.toLowerCase()}
+          </Link>
+        </Button>
+        <Alert>
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>Award result pending</AlertTitle>
+          <AlertDescription>
+            No award communication has been published to your supplier account yet.
+            This is expected while evaluation, approval, or award communication is still in progress.
+            Return here after Procurement completes and publishes the result.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+
   if (overview.isError || !overview.data)
     return (
       <div

@@ -89,6 +89,7 @@ public class VendorInvoiceDto
 
     public List<VendorInvoiceLineItemDto> LineItems { get; set; } = new();
     public List<VendorPaymentAllocationDto> PaymentAllocations { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -150,6 +151,7 @@ public class VendorInvoiceCreateDto
 
     [Required]
     public List<VendorInvoiceLineItemCreateDto> LineItems { get; set; } = new();
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class VendorInvoiceUpdateDto
@@ -192,6 +194,7 @@ public class VendorInvoiceUpdateDto
     public bool IsOpeningBalance { get; set; }
 
     public List<VendorInvoiceLineItemCreateDto> LineItems { get; set; } = new();
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class VendorInvoiceQueryDto
@@ -245,6 +248,7 @@ public class VendorInvoiceLineItemDto
 
 public class VendorInvoiceLineItemCreateDto
 {
+    public Guid? Id { get; set; }
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
     public Guid? BudgetEntryId { get; set; }

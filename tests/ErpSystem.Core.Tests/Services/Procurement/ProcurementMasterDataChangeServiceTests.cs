@@ -41,13 +41,28 @@ public sealed class ProcurementMasterDataChangeServiceTests
     public async Task PolicyRejectsOverlappingMakerAndCheckerRolesBeforeWriting()
     {
         await using var fixture = new Fixture();
-        fixture.Switch(fixture.MakerUserId, "SuperAdmin");
+        fixture.Switch(fixture.MakerUserId, ProcurementAccessControlRegistry.IctAdministratorRole);
         var request = PolicyRequest();
         request.CheckerRoles = new() { "TDC_PROCUREMENT_OFFICER" };
 
         var action = () => fixture.Service.SavePolicyAsync(null, request, "trace-role-overlap");
 
         (await action.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>()).Which.Code.Should().Be("ROLE_SEPARATION_REQUIRED");
+        (await fixture.Context.ProcurementMasterDataControlPolicies.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PolicyRejectsLegacyGenericRolesAsMakerOrChecker()
+    {
+        await using var fixture = new Fixture();
+        fixture.Switch(fixture.MakerUserId, ProcurementAccessControlRegistry.IctAdministratorRole);
+        var request = PolicyRequest();
+        request.MakerRoles = new() { "TenantAdmin" };
+
+        var action = () => fixture.Service.SavePolicyAsync(null, request, "trace-legacy-role");
+
+        (await action.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>())
+            .Which.Code.Should().Be("ROLE_UNKNOWN");
         (await fixture.Context.ProcurementMasterDataControlPolicies.CountAsync()).Should().Be(0);
     }
 
@@ -287,7 +302,7 @@ public sealed class ProcurementMasterDataChangeServiceTests
         await fixture.AddActivePolicyAsync();
         var current = await fixture.Context.ProcurementMasterDataControlPolicies.SingleAsync();
         var futureFrom = DateTime.UtcNow.AddDays(30);
-        fixture.Switch(fixture.MakerUserId, "SuperAdmin");
+        fixture.Switch(fixture.MakerUserId, ProcurementAccessControlRegistry.IctAdministratorRole);
         var replacementRequest = PolicyRequest();
         replacementRequest.EffectiveFromUtc = futureFrom;
         var draft = await fixture.Service.SavePolicyAsync(null, replacementRequest, "trace-future-policy-create");

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
@@ -17,6 +18,7 @@ public interface IVendorInvoiceService
     /// Retrieves a vendor invoice by ID, including line items and payment allocations.
     /// </summary>
     Task<VendorInvoiceDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto?> GetByIdAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves a vendor invoice by its auto-generated invoice number.
@@ -36,12 +38,14 @@ public interface IVendorInvoiceService
     /// - Calculates WHT and early payment discount
     /// </summary>
     Task<VendorInvoiceDto> CreateAsync(VendorInvoiceCreateDto dto, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto> CreateAsync(VendorInvoiceCreateDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Updates a vendor invoice (only if Draft or Rejected status).
     /// Recalculates totals and matching status.
     /// </summary>
     Task<VendorInvoiceDto> UpdateAsync(VendorInvoiceUpdateDto dto, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto> UpdateAsync(VendorInvoiceUpdateDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes a vendor invoice (only if Draft status, soft-delete).
@@ -53,21 +57,39 @@ public interface IVendorInvoiceService
     /// Validates matching status if matching type is set.
     /// </summary>
     Task<VendorInvoiceDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto> SubmitForApprovalAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Approves a pending vendor invoice.
     /// </summary>
     Task<VendorInvoiceDto> ApproveAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto> ApproveAsync(Guid id, FinancePostingProducerContext producer, string? comments = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Posts an approved vendor invoice to the general ledger through the central finance posting engine.
     /// </summary>
     Task<VendorInvoiceDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto> PostAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+
+    Task<FinanceSourceDocumentDimensionDto> RefreshBudgetAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rejects a pending vendor invoice with required comments.
     /// </summary>
     Task<VendorInvoiceDto> RejectAsync(Guid id, string comments, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies the AP-owned terminal outcome after the shared Finance workbench has already
+    /// completed the workflow rejection. This releases any active Finance budget reservation
+    /// and is idempotent so a retry can repair interrupted outcome handling.
+    /// </summary>
+    Task<VendorInvoiceDto> ApplyRejectedWorkflowOutcomeAsync(
+        Guid id,
+        string? comments,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Voids an approved vendor invoice.

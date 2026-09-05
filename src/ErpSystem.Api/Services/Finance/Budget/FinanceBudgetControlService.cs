@@ -391,6 +391,16 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             return result;
         }
 
+        // Once a journal has posted, its consumed reservations are the immutable budget
+        // decision evidence. Re-evaluating it against today's ledger would count the journal
+        // as both an actual and a request, and later activity could rewrite its audit history.
+        var postingSnapshot = await TryBuildPostingSnapshotAsync(
+            tenantId,
+            journal,
+            cancellationToken);
+        if (postingSnapshot != null)
+            return postingSnapshot;
+
         result.CurrencyCode = await _db.FinanceSettings.AsNoTracking()
             .Where(x => x.TenantId == tenantId && !x.IsDeleted)
             .Select(x => x.BaseCurrency)
@@ -401,6 +411,8 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             throw new InvalidOperationException("Finance functional-currency settings contain an invalid ISO currency code.");
 
         var scenario = await _db.BudgetScenarios.AsNoTracking()
+            .Include(x => x.ControlDimensions)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
                 && x.FiscalYearId == journal.FiscalPeriod.FiscalYearId
                 && x.AdoptedAt != null && x.AdoptionEffectiveDate != null
@@ -461,9 +473,7 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             else if (matches.Count == 0)
             {
                 line.DecisionCode = "NO_MATCHING_BUDGET_LINE";
-                line.Message = controlSegments.Count > 0
-                    ? "No approved budget line matches this account's department/cost-centre segment."
-                    : "No approved budget line exists for this account and fiscal period.";
+                line.Message = NoMatchingBudgetLineMessage(scenario, controlSegments);
             }
             else if (matches.Count > 1)
             {
@@ -517,6 +527,115 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
         result.IsAllowed = result.Lines.All(x => x.DecisionCode == "AVAILABLE" || x.DecisionCode == "INSUFFICIENT_BUDGET")
             && (!result.RequiresOverride || result.HasApprovedOverride);
         return result;
+    }
+
+    private async Task<FinanceBudgetControlEvaluationDto?> TryBuildPostingSnapshotAsync(
+        Guid tenantId,
+        JournalEntry journal,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(journal.PostingStatus, "Posted", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var reservations = await _db.FinanceBudgetReservations.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                && x.SourceDocumentType == ManualJournalSource
+                && x.SourceDocumentId == journal.Id
+                && x.Status == ConsumedStatus)
+            .OrderBy(x => x.Id)
+            .ToListAsync(cancellationToken);
+        if (reservations.Count == 0)
+            return null;
+
+        var evaluationHashes = reservations.Select(x => x.EvaluationHash).Distinct(StringComparer.Ordinal).ToList();
+        var currencyCodes = reservations.Select(x => x.CurrencyCode.Trim().ToUpperInvariant()).Distinct(StringComparer.Ordinal).ToList();
+        if (evaluationHashes.Count != 1
+            || currencyCodes.Count != 1
+            || reservations.Any(x => x.JournalEntryId != journal.Id
+                || !x.PostingEventId.HasValue
+                || !x.ConsumedAt.HasValue))
+        {
+            throw new InvalidOperationException("The posted journal's Finance budget evidence is incomplete or inconsistent.");
+        }
+
+        var entryIds = reservations.Select(x => x.BudgetEntryId).Distinct().ToList();
+        var entries = await _db.BudgetEntries.AsNoTracking()
+            .Include(x => x.Account)
+            .Include(x => x.FiscalPeriod)
+            .Include(x => x.BudgetReturn).ThenInclude(x => x!.BudgetScenario)
+            .Include(x => x.BudgetReturn).ThenInclude(x => x!.SegmentValue)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionValue)
+            .Where(x => x.TenantId == tenantId && entryIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (entries.Count != entryIds.Count)
+            throw new InvalidOperationException("The posted journal's Finance budget cell evidence could not be resolved.");
+
+        var lines = reservations.Select(reservation =>
+        {
+            var entry = entries[reservation.BudgetEntryId];
+            if (entry.Account == null || entry.FiscalPeriod == null || entry.BudgetReturn?.BudgetScenario == null)
+                throw new InvalidOperationException("The posted journal's Finance budget cell evidence is incomplete.");
+            var shortfall = Math.Max(0m, reservation.ReservedAmount - reservation.AvailableBeforeReservationSnapshot);
+            return new FinanceBudgetControlLineDto
+            {
+                AccountId = reservation.AccountId,
+                AccountNumber = entry.Account.AccountNumber,
+                AccountName = entry.Account.AccountName,
+                FiscalPeriodId = reservation.FiscalPeriodId,
+                FiscalPeriodCode = entry.FiscalPeriod.PeriodCode,
+                BudgetScenarioId = reservation.BudgetScenarioId,
+                BudgetScenarioName = entry.BudgetReturn.BudgetScenario.Name,
+                BudgetReturnId = reservation.BudgetReturnId,
+                BudgetEntryId = reservation.BudgetEntryId,
+                SegmentValueId = reservation.SegmentValueId,
+                SegmentValue = entry.BudgetReturn.SegmentValue?.SegmentValue,
+                FinanceDimensionSetId = reservation.FinanceDimensionSetId,
+                DimensionCombinationHash = reservation.DimensionCombinationHashSnapshot,
+                DimensionAssignments = MapAssignments(entry),
+                RequestedAmount = reservation.ReservedAmount,
+                BudgetAmount = reservation.BudgetAmountSnapshot,
+                PostedActualAmount = reservation.PostedActualSnapshot,
+                ReservedAmount = reservation.OtherReservationsSnapshot,
+                AvailableAmount = reservation.AvailableBeforeReservationSnapshot,
+                ShortfallAmount = shortfall,
+                DecisionCode = shortfall > 0 ? "INSUFFICIENT_BUDGET" : "AVAILABLE",
+                Message = shortfall > 0
+                    ? $"Available budget was short by {shortfall.ToString("0.00", CultureInfo.InvariantCulture)} at approval."
+                    : "Budget was available at approval."
+            };
+        }).ToList();
+
+        var evaluationHash = evaluationHashes[0];
+        var matchingOverride = await _db.FinanceBudgetOverrideRequests.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                && x.SourceDocumentType == ManualJournalSource
+                && x.SourceDocumentId == journal.Id
+                && x.EvaluationHash == evaluationHash
+                && (x.Status == "PendingApproval" || x.Status == "Approved"))
+            .OrderByDescending(x => x.RequestedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        var requiresOverride = lines.Sum(x => x.ShortfallAmount) > 0;
+        var hasApprovedOverride = matchingOverride?.Status == "Approved" && matchingOverride.ApprovedAt.HasValue;
+
+        return new FinanceBudgetControlEvaluationDto
+        {
+            SourceDocumentId = journal.Id,
+            EntryDate = journal.EntryDate.Date,
+            CurrencyCode = currencyCodes[0],
+            EvaluationHash = evaluationHash,
+            HasTrackedExpenseLines = true,
+            IsPostingSnapshot = true,
+            IsAllowed = !requiresOverride || hasApprovedOverride,
+            RequiresOverride = requiresOverride,
+            HasApprovedOverride = hasApprovedOverride,
+            OverrideStatus = matchingOverride?.Status,
+            TotalRequestedAmount = lines.Sum(x => x.RequestedAmount),
+            TotalShortfallAmount = lines.Sum(x => x.ShortfallAmount),
+            Lines = lines
+        };
     }
 
     private async Task<FinanceBudgetOverrideRequest?> ApprovedOverrideAsync(Guid tenantId, Guid journalEntryId, string hash, CancellationToken cancellationToken) =>
@@ -606,6 +725,41 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                 ValueCode = item.DimensionValueCodeSnapshot,
                 ValueName = item.DimensionValueNameSnapshot
             }).ToList() ?? new List<BudgetDimensionAssignmentDto>();
+
+    /// <summary>
+    /// Names the adopted scenario's actual controlled grain in operator-facing diagnostics.
+    /// Legacy segmented-account budgets fall back to their configured segment names; this
+    /// avoids implying that every tenant controls only Department and Cost Centre.
+    /// </summary>
+    private static string NoMatchingBudgetLineMessage(
+        BudgetScenario scenario,
+        IReadOnlyCollection<AccountSegmentValue> controlSegments)
+    {
+        var dimensionNames = scenario.ControlDimensions
+            .Where(item => !item.IsDeleted
+                && item.FinanceDimensionDefinition is { IsDeleted: false })
+            .OrderBy(item => item.DisplayOrder)
+            .ThenBy(item => item.FinanceDimensionDefinition.Code)
+            .Select(item => item.FinanceDimensionDefinition.Name.Trim())
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (dimensionNames.Count == 0)
+        {
+            dimensionNames = controlSegments
+                .Where(segment => segment.SegmentStructure is not null)
+                .OrderBy(segment => segment.SegmentStructure.SegmentPosition)
+                .Select(segment => segment.SegmentStructure.SegmentName.Trim())
+                .Where(name => name.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return dimensionNames.Count > 0
+            ? $"No approved budget line matches this account's {string.Join(" + ", dimensionNames)} budget combination for this fiscal period."
+            : "No approved budget line exists for this account and fiscal period.";
+    }
 
     private static string EvaluationHash(
         Guid tenantId,

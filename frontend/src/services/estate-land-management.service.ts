@@ -93,6 +93,18 @@ export interface EstateManagedAsset {
   externalListingPrice?: number;
   externalSalePrice?: number;
   externalMonthlyRent?: number;
+  rentBillingActivatedAt?: string;
+  nextRentBillingDate?: string;
+  lastRentInvoiceId?: string;
+  lastRentInvoiceNumber?: string;
+  autoGenerateRentInvoices: boolean;
+  rentGracePeriodDays: number;
+  rentPenaltyMethod: string;
+  rentPenaltyValue: number;
+  rentPenaltyCapAmount?: number;
+  lastRentPenaltyInvoiceId?: string;
+  lastRentPenaltyInvoiceNumber?: string;
+  lastRentPenaltySourceInvoiceId?: string;
   externalLeaseTermMonths?: number;
   externalListingCurrency: string;
   externalListingNotes?: string;
@@ -249,6 +261,8 @@ export interface UpdateEstateManagedAssetRegister {
 
 export interface UpdateEstateManagedAssetOccupancy {
   status: EstateManagedAssetStatus;
+  actualDate?: string | null;
+  releaseOccupant?: boolean | null;
   isAvailableForLease?: boolean | null;
   isAvailableForSale?: boolean | null;
   isPublishedToExternalPortal?: boolean | null;

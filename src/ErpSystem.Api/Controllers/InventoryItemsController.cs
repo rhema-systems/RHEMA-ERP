@@ -25,8 +25,6 @@ namespace ErpSystem.Api.Controllers;
 [Authorize(Policy = "InternalOnly")]
 public class InventoryItemsController : ControllerBase
 {
-    private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IStockMovementRepository _stockMovementRepository;
@@ -716,11 +714,7 @@ public class InventoryItemsController : ControllerBase
             page = Math.Max(1, page);
             pageSize = Math.Clamp(pageSize, 1, 200);
 
-            var tenantId = _currentUserProvider.TenantId;
-            if (tenantId == Guid.Empty)
-            {
-                tenantId = DefaultTenantId;
-            }
+            var tenantId = GetTenantId();
 
             IQueryable<InventoryLocation> query = _inventoryLocationRepository
                 .GetQueryable(il => il.TenantId == tenantId)
@@ -794,6 +788,10 @@ public class InventoryItemsController : ControllerBase
                 PageSize = pageSize
             });
         }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving bin stock snapshot");
@@ -807,16 +805,57 @@ public class InventoryItemsController : ControllerBase
     /// </summary>
     [HttpPost("reconcile-stock")]
     public async Task<ActionResult<ApiResponse<object>>> ReconcileStockTotals(
-        [FromQuery] bool dryRun = false,
+        [FromQuery] bool dryRun = true,
         [FromQuery] Guid? warehouseId = null,
-        [FromQuery] Guid? inventoryItemId = null)
+        [FromQuery] Guid? inventoryItemId = null,
+        [FromQuery, MaxLength(500)] string? reason = null)
     {
         try
         {
-            var tenantId = _currentUserProvider.TenantId;
-            if (tenantId == Guid.Empty)
+            var tenantId = GetTenantId();
+            var sourceReference = warehouseId.HasValue
+                ? $"inventory-stock-reconciliation:{warehouseId.Value:N}"
+                : "inventory-stock-reconciliation:all";
+            var manageDecision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
             {
-                tenantId = DefaultTenantId;
+                PermissionCode = "procurement.inventory.master-data.manage",
+                SourceType = "InventoryStockReconciliation",
+                SourceReference = sourceReference
+            }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+            if (!manageDecision.Allowed)
+            {
+                return Forbid();
+            }
+
+            if (!dryRun)
+            {
+                if (!warehouseId.HasValue || warehouseId.Value == Guid.Empty)
+                {
+                    return BadRequest(ApiResponse<object>.ErrorResponse(
+                        "An actual reconciliation must be restricted to one warehouse."));
+                }
+                if (string.IsNullOrWhiteSpace(reason))
+                {
+                    return BadRequest(ApiResponse<object>.ErrorResponse(
+                        "A reconciliation reason is required before stock balances can be changed."));
+                }
+                if (_unitOfWork is null)
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                        ApiResponse<object>.ErrorResponse("The controlled reconciliation boundary is unavailable."));
+                }
+
+                var adjustmentDecision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = "procurement.inventory.adjust.approve",
+                    WarehouseId = warehouseId.Value,
+                    SourceType = "InventoryStockReconciliation",
+                    SourceReference = sourceReference
+                }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+                if (!adjustmentDecision.Allowed)
+                {
+                    return Forbid();
+                }
             }
 
             var consignmentWarehouseIds = await _warehouseRepository
@@ -1032,6 +1071,31 @@ public class InventoryItemsController : ControllerBase
 
             if (!dryRun)
             {
+                await _unitOfWork!.Repository<AuditLog>().AddAsync(new AuditLog
+                {
+                    TenantId = tenantId,
+                    UserId = _currentUserProvider.UserId,
+                    Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username)
+                        ? "Unknown"
+                        : _currentUserProvider.Username,
+                    Action = "InventoryStock.Reconciled",
+                    Resource = "InventoryStockReconciliation",
+                    ResourceId = warehouseId!.Value.ToString(),
+                    NewValues = JsonSerializer.Serialize(new
+                    {
+                        WarehouseId = warehouseId,
+                        InventoryItemId = inventoryItemId,
+                        Reason = reason!.Trim(),
+                        MovementGroups = movementTotals.Count,
+                        WarehouseQuantitiesCreated = createdWarehouseQuantities,
+                        WarehouseQuantitiesUpdated = updatedWarehouseQuantities,
+                        InventoryItemsUpdated = updatedInventoryItems,
+                        CorrelationId = HttpContext.TraceIdentifier
+                    }),
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    UserAgent = Request.Headers.UserAgent.ToString(),
+                    Timestamp = DateTime.UtcNow
+                });
                 // One SaveChanges is enough - all repositories share the same DbContext in this request scope.
                 await _inventoryItemRepository.SaveChangesAsync();
             }
@@ -1040,6 +1104,7 @@ public class InventoryItemsController : ControllerBase
             {
                 TenantId = tenantId,
                 DryRun = dryRun,
+                Reason = dryRun ? null : reason!.Trim(),
                 Scope = new { WarehouseId = warehouseId, InventoryItemId = inventoryItemId },
                 MovementGroups = movementTotals.Count,
                 WarehouseQuantities = new { Created = createdWarehouseQuantities, Updated = updatedWarehouseQuantities },

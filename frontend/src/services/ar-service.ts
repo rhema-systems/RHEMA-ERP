@@ -132,7 +132,7 @@ class ArService {
         return apiService.post<Invoice>(`${this.baseUrl}/invoices`, data);
     }
 
-    public async sendInvoice(id: string): Promise<Invoice> {
+    public async submitInvoiceForApproval(id: string): Promise<Invoice> {
         return apiService.post<Invoice>(`${this.baseUrl}/invoices/${id}/send`);
     }
 

@@ -23,7 +23,8 @@ public sealed class QuantitySurveyContractCommercialTermsSecurityTests
             "QuantitySurveyContractCommercialTermsService.cs");
 
         source.Should().Contain("db.Contracts")
-            .And.Contain("projectService.GetProjectByIdAsync")
+            .And.Contain("projectService.HasProjectAccessAsync")
+            .And.NotContain("projectService.GetProjectByIdAsync")
             .And.Contain("db.PaymentTerms")
             .And.Contain("GovernedDocumentQuery")
             .And.Contain("FileVirusScanStatus.Clean")

@@ -3,6 +3,7 @@ using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -81,21 +82,21 @@ public sealed class RfqsControllerStatutoryControlsTests
     }
 
     [Fact]
-    public void StatutoryRoutesDeclareExplicitRoleBoundaries()
+    public void StatutoryRoutesUseRegisteredProcurementPermissions()
     {
         var controllerType = typeof(RfqsController);
-        var controlsRoles = controllerType.GetMethod(nameof(RfqsController.GetControls))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var evaluationRoles = controllerType.GetMethod(nameof(RfqsController.SaveEvaluation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var decisionRoles = controllerType.GetMethod(nameof(RfqsController.DecideEvaluation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-
-        Assert.Contains("TDC_INTERNAL_AUDIT", controlsRoles);
-        Assert.Contains("TDC_OBSERVER", controlsRoles);
-        Assert.Contains("TDC_EVALUATOR", evaluationRoles);
-        Assert.DoesNotContain("TDC_EVALUATOR", decisionRoles);
-        Assert.Contains("TDC_HEAD_OF_PROCUREMENT", decisionRoles);
+        Assert.Equal("procurement.records.read", controllerType.GetMethod(nameof(RfqsController.GetRfqPdf))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.sourcing.manage", controllerType.GetMethod(nameof(RfqsController.UpdateRfq))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.sourcing.manage", controllerType.GetMethod(nameof(RfqsController.SendRfq))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.records.read", controllerType.GetMethod(nameof(RfqsController.GetControls))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.tender.evaluate", controllerType.GetMethod(nameof(RfqsController.SaveEvaluation))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.tender.approve", controllerType.GetMethod(nameof(RfqsController.DecideEvaluation))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
 
         var awardAuthorization = controllerType
             .GetMethod(nameof(RfqsController.AwardRfqAndCreatePurchaseOrders))!
@@ -144,6 +145,79 @@ public sealed class RfqsControllerStatutoryControlsTests
             body.GetType().GetProperty("status")!.GetValue(body));
         Assert.Equal(expectedCode,
             body.GetType().GetProperty("code")!.GetValue(body));
+        fixture.Rfqs.VerifyAll();
+    }
+
+    [Fact]
+    public async Task AwardMapsPurchaseOrderLineageFailureToActionableValidation()
+    {
+        var fixture = new Fixture();
+        var rfqId = Guid.NewGuid();
+        var request = new CreatePurchaseOrdersFromRfqDto();
+        fixture.Rfqs.Setup(service =>
+                service.CreatePurchaseOrdersFromAwardAsync(rfqId, request))
+            .ThrowsAsync(new ProcurementRequisitionSourcingValidationException(
+                "PO_APPROVED_SOURCE_LINEAGE_INVALID",
+                "No award or purchase order was saved."));
+
+        var response = await fixture.Controller
+            .AwardRfqAndCreatePurchaseOrders(rfqId, request);
+
+        var result = Assert.IsType<UnprocessableEntityObjectResult>(response.Result);
+        var problem = Assert.IsType<ProblemDetails>(result.Value);
+        Assert.Equal(422, problem.Status);
+        Assert.Equal("PO_APPROVED_SOURCE_LINEAGE_INVALID", problem.Extensions["code"]);
+        Assert.Equal("trace-rfq-controls", problem.Extensions["correlationId"]);
+        fixture.Rfqs.VerifyAll();
+    }
+
+    [Fact]
+    public async Task AwardMapsBudgetCommitmentFailureToActionableValidation()
+    {
+        var fixture = new Fixture();
+        var rfqId = Guid.NewGuid();
+        var request = new CreatePurchaseOrdersFromRfqDto();
+        fixture.Rfqs.Setup(service =>
+                service.CreatePurchaseOrdersFromAwardAsync(rfqId, request))
+            .ThrowsAsync(new ProcurementPurchaseOrderSourceValidationException(
+                "PO_BUDGET_COMMITMENT_INSUFFICIENT",
+                "Approved exposure is insufficient."));
+
+        var response = await fixture.Controller
+            .AwardRfqAndCreatePurchaseOrders(rfqId, request);
+
+        var result = Assert.IsType<UnprocessableEntityObjectResult>(response.Result);
+        var problem = Assert.IsType<ProblemDetails>(result.Value);
+        Assert.Equal(422, problem.Status);
+        Assert.Equal("PO_BUDGET_COMMITMENT_INSUFFICIENT", problem.Extensions["code"]);
+        Assert.Equal("trace-rfq-controls", problem.Extensions["correlationId"]);
+        fixture.Rfqs.VerifyAll();
+    }
+
+    [Fact]
+    public async Task SendMapsReleaseOnlySupplierEligibilityFailureToActionableValidation()
+    {
+        var fixture = new Fixture();
+        var rfqId = Guid.NewGuid();
+        var request = new SendRfqDto { SupplierIds = [Guid.NewGuid()] };
+        fixture.Rfqs.Setup(service => service.SendRfqAsync(rfqId, request))
+            .ThrowsAsync(new SupplierEligibilityException(
+                "SUPPLIER_NOT_APPROVED",
+                "The selected supplier is not approved for RFQ participation.",
+                new SupplierValidationResult
+                {
+                    IsValid = false,
+                    ValidationCode = "SUPPLIER_NOT_APPROVED",
+                    Errors = ["Supplier approval is required."]
+                }));
+
+        var response = await fixture.Controller.SendRfq(rfqId, request);
+
+        var result = Assert.IsType<UnprocessableEntityObjectResult>(response);
+        Assert.Equal(422, result.StatusCode);
+        Assert.NotNull(result.Value);
+        Assert.Equal("SUPPLIER_NOT_APPROVED",
+            result.Value!.GetType().GetProperty("code")!.GetValue(result.Value));
         fixture.Rfqs.VerifyAll();
     }
 

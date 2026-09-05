@@ -114,6 +114,9 @@ public static class FinancePermissionPolicyMap
             "SupplierDebitNotes" => SupplierDebitNotesPolicy(action),
             "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
             "FinanceDimensions" => ReadOrManage(action, methods, FinancePermissions.ManageCodingDimensions),
+            "FinanceDimensionCertifications" => action is "GetRoutes"
+                ? One(FinancePermissions.ViewFinance)
+                : One(FinancePermissions.ManageDimensionCertification),
             "PaymentBatch" => PaymentBatchPolicy(action),
             "ApReports" => ReportPolicy(action),
             "Invoice" => ArInvoicePolicy(action),
@@ -391,6 +394,7 @@ public static class FinancePermissionPolicyMap
             // Opening a never-used Future period is deliberately separate from both month-end
             // close preparation and maker-checker reopening of a certified Closed period.
             "OpenPeriod" => One(FinancePermissions.OpenAccountingPeriods),
+            "UpdatePostingDatePolicy" => One(FinancePermissions.AdministerFinance),
             "EvaluatePeriodCloseWorkspace" or "PreparePeriodClose" or "UpdateFinanceCloseTask" or
             "ClosePeriod" or "CloseFiscalYear" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
             "RequestPeriodReopen" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
@@ -434,13 +438,16 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> JournalEntryPolicy(string action)
         => action switch
         {
+            "GetJournalEntryById" or "GetAttachments" => One(FinancePermissions.ViewTenderPaymentJournalPolicy),
             "CreateJournalEntry" => One(FinancePermissions.CreateJournalEntries),
             "UpdateJournalEntry" or "LinkAttachment" or "UnlinkAttachment" => One(FinancePermissions.EditJournalEntries),
             "DeleteJournalEntry" => One(FinancePermissions.DeleteJournalEntries),
             "PostJournalEntry" => One(FinancePermissions.PostJournalEntries),
             "ReverseJournalEntry" => One(FinancePermissions.ReverseJournalEntries),
             "RequestApproval" => One(FinancePermissions.SubmitJournalEntries),
-            "WithdrawApproval" => One(FinancePermissions.WorkflowCancel),
+            // Submitters may recall their own request; WorkflowCancel grants the controlled
+            // administrative override. The action performs the resource-level ownership check.
+            "WithdrawApproval" => One(FinancePermissions.WithdrawJournalApprovalPolicy),
             "ApproveJournalEntry" => One(FinancePermissions.ApproveJournalEntries),
             "RejectJournalEntry" => One(FinancePermissions.ApproveJournalEntries),
             "GetPendingApprovals" => One(FinancePermissions.ApproveJournalEntries),

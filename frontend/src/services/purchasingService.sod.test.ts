@@ -66,4 +66,42 @@ describe('purchase-order SOD client', () => {
       purchasingService.approvePurchaseOrder('po-0405', { approved: true })
     ).rejects.toThrow('The PO creator cannot approve this purchase order.');
   });
+
+  it('shows PO role-separation read guidance when readiness is forbidden', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail:
+              'The current actor has no Security role granting this procurement privilege.',
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+
+    await expect(
+      purchasingService.getPurchaseOrderSodReadiness('po-0405')
+    ).rejects.toThrow('procurement.records.read');
+  });
+
+  it('shows the exact PO approval permission when approval is forbidden', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail:
+              'The current actor has no Security role granting this procurement privilege.',
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+
+    await expect(
+      purchasingService.approvePurchaseOrder('po-0405', { approved: true })
+    ).rejects.toThrow('procurement.purchase-order.approve');
+  });
 });

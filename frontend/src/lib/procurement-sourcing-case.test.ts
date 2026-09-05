@@ -77,13 +77,10 @@ describe('procurement sourcing-case presentation controls', () => {
     ).toBeUndefined();
   });
 
-  it('requires justification and a named lot', () => {
+  it('allows optional sourcing notes and still requires a named lot', () => {
     const invalid = request();
-    invalid.justification = 'no';
-    expect(validateProcurementSourcingCase(invalid, lines)).toContain(
-      'at least 5'
-    );
-    invalid.justification = 'Valid reason';
+    invalid.justification = '';
+    expect(validateProcurementSourcingCase(invalid, lines)).toBeUndefined();
     invalid.lots[0].title = '';
     expect(validateProcurementSourcingCase(invalid, lines)).toContain(
       'requires a title'
@@ -100,9 +97,17 @@ describe('procurement sourcing-case presentation controls', () => {
     expect(
       procurementSourcingCaseActions(
         { status: 'InProgress', isSourceCurrent: true },
+        true,
+        false
+      )
+    ).toEqual({ canClose: false, canCancel: true });
+    expect(
+      procurementSourcingCaseActions(
+        { status: 'InProgress', isSourceCurrent: true },
+        false,
         true
       )
-    ).toEqual({ canClose: true, canCancel: true });
+    ).toEqual({ canClose: true, canCancel: false });
     expect(
       procurementSourcingCaseActions(
         { status: 'InProgress', isSourceCurrent: false },

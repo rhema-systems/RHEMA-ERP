@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
 using System.Text;
@@ -29,6 +30,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     private const string EventType = "ProcurementSupplierOnboardingTokenControl";
     private const string ManagePermission = "procurement.supplier.manage";
     private const string ReviewPermission = "procurement.supplier.review";
+    private const string ApplicationTokenDeliveredStatus = "ApplicationTokenSent";
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(item => $"DEC-{item:000}").ToArray();
@@ -779,6 +781,25 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 "SUPPLIER_ONBOARDING_RECONCILIATION_REFERENCE_REQUIRED",
                 "A trusted cashier receipt or provider transaction reference is required.");
         var reconciliationNotes = Trim(request.Notes, 1000);
+        if (payment.Status == ProcurementSupplierOnboardingPaymentStatus.Reconciled)
+        {
+            if (!string.Equals(
+                    payment.ReconciliationReference,
+                    reconciliationReference,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    payment.ReconciliationNotes,
+                    reconciliationNotes,
+                    StringComparison.Ordinal))
+            {
+                throw Conflict(
+                    "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH",
+                    "The payment is already reconciled with a different verification reference or decision note.");
+            }
+
+            return await RecoverUndeliveredApplicationTokenAsync(
+                entity, correlation, cancellationToken);
+        }
         if (IsReplay(payment.LastOperation, payment.LastOperationCorrelationId,
                 "Verified", correlation))
         {
@@ -934,6 +955,94 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         await PublishNotificationAsync(
             "procurement.supplier-onboarding-token.payment-verified",
             entity, cancellationToken);
+        return new ProcurementSupplierOnboardingTokenIssueResultDto
+        {
+            Token = Map(entity),
+            PlaintextToken = tokenValue
+        };
+    }
+
+    private async Task<ProcurementSupplierOnboardingTokenIssueResultDto>
+        RecoverUndeliveredApplicationTokenAsync(
+            ProcurementSupplierOnboardingToken entity,
+            string correlation,
+            CancellationToken cancellationToken)
+    {
+        if (entity.Status != ProcurementSupplierOnboardingTokenStatus.Active ||
+            entity.PaymentStatus != ProcurementSupplierOnboardingPaymentStatus.Reconciled)
+        {
+            return new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = Map(entity)
+            };
+        }
+
+        var applicantAccess = await ApplicantAccesses.GetQueryable(item =>
+                item.TenantId == entity.TenantId &&
+                item.TokenId == entity.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (applicantAccess is null ||
+            applicantAccess.TerminalAtUtc.HasValue ||
+            string.Equals(
+                applicantAccess.LastNotificationStatus,
+                ApplicationTokenDeliveredStatus,
+                StringComparison.Ordinal))
+        {
+            return new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = Map(entity)
+            };
+        }
+
+        // Plaintext application tokens are intentionally never persisted. If
+        // payment reconciliation committed but delivery did not, recovery must
+        // therefore rotate the token and deliver a new secret. A recorded
+        // successful delivery above remains a metadata-only idempotent replay.
+        var tokenValue = GenerateTokenValue();
+        var before = Snapshot(entity);
+        var now = DateTime.UtcNow;
+        var nextGeneration = entity.Generation + 1;
+        entity.TokenHashSha256 = Hash(tokenValue);
+        entity.TokenLastFour = tokenValue[^4..];
+        entity.Generation = nextGeneration;
+        entity.ReissuedAtUtc = now;
+        entity.ReissuedById = _currentUser.UserId;
+        entity.ReissueReason =
+            "Automatic recovery after reconciled payment had no successful application-token delivery record.";
+        Touch(entity, "ApplicationTokenDeliveryRecovery", correlation, now);
+        Capture(entity);
+
+        await ExecuteAsync(async () =>
+        {
+            var revokedApplicantSessions = await RevokeActiveApplicantSessionsAsync(
+                entity,
+                "Application token rotated to recover delivery after payment verification.",
+                now,
+                cancellationToken);
+            await Tokens.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(
+                entity,
+                $"ApplicationTokenDeliveryRecoveryG{nextGeneration}",
+                ProcurementControlEventResult.Succeeded,
+                before,
+                new
+                {
+                    Token = Snapshot(entity),
+                    ApplicantAccessId = applicantAccess.Id,
+                    applicantAccess.NotificationAttemptCount,
+                    applicantAccess.LastNotificationStatus,
+                    RevokedApplicantSessions = revokedApplicantSessions
+                },
+                "The token was securely rotated because payment was reconciled without a successful application-token delivery record.",
+                [],
+                correlation,
+                now,
+                cancellationToken);
+        }, cancellationToken);
+
         return new ProcurementSupplierOnboardingTokenIssueResultDto
         {
             Token = Map(entity),
@@ -1247,6 +1356,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         EnsureAuthenticatedTenant();
         IQueryable<ProcurementSupplierOnboardingToken> query = TokenQuery()
             .Include(item => item.Registration)
+            .Include(item => item.ApplicantAccess)
             .Include(item => item.Payments.Where(payment => !payment.IsDeleted))
             .Include(item => item.Exemptions.Where(exemption => !exemption.IsDeleted));
         if (!tracked) query = query.AsNoTracking();
@@ -1493,7 +1603,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierOnboardingTokenAuthorizationException(
                 "Supplier applicants cannot perform internal token-control actions.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -1640,13 +1750,11 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierOnboardingTokenAuthorizationException(
                 "Supplier applicants cannot access token administration.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementSupplierOnboardingTokenAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -1657,9 +1765,8 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") || _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private static void EnsureRegistrationActive(BusinessPartnerRegistration registration)
     {
@@ -1832,6 +1939,18 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             ExpiryReason = entity.ExpiryReason,
             ReissueReason = entity.ReissueReason,
             ReissuedAtUtc = entity.ReissuedAtUtc,
+            ApplicationTokenDeliveryRecoveryRequired =
+                entity.Status == ProcurementSupplierOnboardingTokenStatus.Active &&
+                entity.PaymentStatus == ProcurementSupplierOnboardingPaymentStatus.Reconciled &&
+                entity.ApplicantAccess is
+                {
+                    IsDeleted: false,
+                    TerminalAtUtc: null
+                } &&
+                !string.Equals(
+                    entity.ApplicantAccess.LastNotificationStatus,
+                    ApplicationTokenDeliveredStatus,
+                    StringComparison.Ordinal),
             Payments = entity.Payments.OrderByDescending(item => item.PaidAtUtc)
                 .Select(MapPayment).ToList(),
             Exemptions = entity.Exemptions.OrderByDescending(item => item.RequestedAtUtc)

@@ -149,7 +149,59 @@ public sealed class FinanceBudgetControlServiceTests
 
         result.IsAllowed.Should().BeFalse();
         result.Lines.Single().DecisionCode.Should().Be("NO_MATCHING_BUDGET_LINE");
-        result.Lines.Single().Message.Should().Contain("department/cost-centre");
+        result.Lines.Single().Message.Should().Contain("Department budget combination");
+        result.Lines.Single().Message.Should().NotContain("cost-centre");
+    }
+
+    [Fact]
+    public async Task Missing_budget_cell_names_the_adopted_scenario_control_dimensions()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedJournal(db, budgetTrackingEnabled: true);
+        var budget = SeedAdoptedBudget(db, fixture, 1_000m);
+        // Keep the adopted scenario but remove its only cell from consideration so the
+        // diagnostic must describe the scenario grain rather than a successful match.
+        budget.Entry.IsDeleted = true;
+        var department = new FinanceDimensionDefinition
+        {
+            TenantId = TenantId,
+            Code = "DEPT",
+            Name = "Department",
+            DisplayOrder = 1,
+            IsActive = true
+        };
+        var project = new FinanceDimensionDefinition
+        {
+            TenantId = TenantId,
+            Code = "PROJECT",
+            Name = "Project",
+            DisplayOrder = 2,
+            IsActive = true
+        };
+        db.AddRange(department, project);
+        db.AddRange(
+            new BudgetScenarioControlDimension
+            {
+                TenantId = TenantId,
+                BudgetScenarioId = budget.Scenario.Id,
+                FinanceDimensionDefinitionId = department.Id,
+                DisplayOrder = 1
+            },
+            new BudgetScenarioControlDimension
+            {
+                TenantId = TenantId,
+                BudgetScenarioId = budget.Scenario.Id,
+                FinanceDimensionDefinitionId = project.Id,
+                DisplayOrder = 2
+            });
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).EvaluateManualJournalAsync(fixture.Journal.Id);
+
+        result.IsAllowed.Should().BeFalse();
+        result.Lines.Single().DecisionCode.Should().Be("NO_MATCHING_BUDGET_LINE");
+        result.Lines.Single().Message.Should().Be(
+            "No approved budget line matches this account's Department + Project budget combination for this fiscal period.");
     }
 
     [Fact]
@@ -169,6 +221,77 @@ public sealed class FinanceBudgetControlServiceTests
         reservation.Status.Should().Be("Consumed");
         reservation.JournalEntryId.Should().Be(fixture.Journal.Id);
         reservation.PostingEventId.Should().Be(postingEventId);
+    }
+
+    [Fact]
+    public async Task Posted_journal_uses_immutable_budget_evidence_and_retains_approved_override()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedJournal(db, budgetTrackingEnabled: true);
+        var budget = SeedAdoptedBudget(db, fixture, 1_000m);
+        var clearingAccountId = fixture.Journal.Transactions.Single(x => x.CreditAmount > 0).AccountId;
+        var priorJournal = new JournalEntry
+        {
+            TenantId = TenantId,
+            JournalEntryNumber = "JE-2026-PRIOR",
+            EntryDate = fixture.Journal.EntryDate.AddDays(-1),
+            FiscalPeriodId = fixture.Period.Id,
+            JournalType = "General",
+            Description = "Prior controlled expense",
+            PostingStatus = "Posted",
+            BookClassification = "IFRS",
+            TotalDebitAmount = 500m,
+            TotalCreditAmount = 500m,
+            IsBalanced = true,
+            Transactions = new List<AccountTransaction>
+            {
+                new() { TenantId = TenantId, AccountId = fixture.Expense.Id, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), DebitAmount = 500m, LineNumber = 1 },
+                new() { TenantId = TenantId, AccountId = clearingAccountId, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), CreditAmount = 500m, LineNumber = 2 }
+            }
+        };
+        db.JournalEntries.Add(priorJournal);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+
+        var beforePosting = await service.EvaluateManualJournalAsync(fixture.Journal.Id);
+        beforePosting.TotalShortfallAmount.Should().Be(100m);
+        db.FinanceBudgetOverrideRequests.Add(new FinanceBudgetOverrideRequest
+        {
+            TenantId = TenantId,
+            SourceDocumentType = FinanceBudgetControlService.ManualJournalSource,
+            SourceDocumentId = fixture.Journal.Id,
+            CurrencyCode = "GHS",
+            EvaluationHash = beforePosting.EvaluationHash,
+            Reason = "Approved exceptional expenditure",
+            RequestedAmount = beforePosting.TotalRequestedAmount,
+            ShortfallAmount = beforePosting.TotalShortfallAmount,
+            Status = "Approved",
+            RequestedByUserId = UserId,
+            RequestedAt = DateTime.UtcNow.AddMinutes(-5),
+            ApprovedByUserId = Guid.NewGuid(),
+            ApprovedAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        await db.SaveChangesAsync();
+        var reservationIds = await service.ReserveManualJournalAsync(fixture.Journal.Id);
+        var postingEventId = Guid.NewGuid();
+        await service.ConsumeReservationsAsync(TenantId, fixture.Journal.Id, reservationIds, fixture.Journal.Id, postingEventId);
+        fixture.Journal.PostingStatus = "Posted";
+        await db.SaveChangesAsync();
+
+        // Later actuals must not rewrite the historical decision evidence.
+        priorJournal.Transactions.Single(x => x.DebitAmount > 0).DebitAmount = 900m;
+        await db.SaveChangesAsync();
+        var posted = await service.EvaluateManualJournalAsync(fixture.Journal.Id);
+
+        posted.IsPostingSnapshot.Should().BeTrue();
+        posted.EvaluationHash.Should().Be(beforePosting.EvaluationHash);
+        posted.HasApprovedOverride.Should().BeTrue();
+        posted.IsAllowed.Should().BeTrue();
+        posted.TotalRequestedAmount.Should().Be(600m);
+        posted.TotalShortfallAmount.Should().Be(100m);
+        posted.Lines.Single().BudgetAmount.Should().Be(budget.Entry.AmountBase);
+        posted.Lines.Single().PostedActualAmount.Should().Be(500m);
+        posted.Lines.Single().AvailableAmount.Should().Be(500m);
     }
 
     [Fact]

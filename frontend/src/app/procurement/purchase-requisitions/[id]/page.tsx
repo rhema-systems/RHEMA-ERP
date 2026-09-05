@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Card,
@@ -69,14 +69,28 @@ import {
   PurchaseRequisitionSubmissionReadinessDto,
   PurchaseRequisitionSourcingReadinessDto,
   PurchaseRequisitionSourcingReleaseDto,
+  ProcurementPurchaseOrderSourceStatusDto,
 } from '@/services/purchasingService';
-import { getBudgetControlPresentation } from '@/lib/procurement-requisition-budget';
+import { procurementSourcingCaseService } from '@/services/procurement-sourcing-case.service';
+import type { ProcurementSourcingCaseReadiness } from '@/types/procurement-sourcing-case';
+import type { ProcurementMethodType } from '@/types/procurement-policy';
+import {
+  getBudgetControlPresentation,
+  getPurchaseRequisitionBudgetControlHistory,
+} from '@/lib/procurement-requisition-budget';
 import { getAuthorityControlPresentation } from '@/lib/procurement-requisition-authority';
 import { getSubmissionControlPresentation } from '@/lib/procurement-requisition-submission';
 import { getSourcingReleasePresentation } from '@/lib/procurement-requisition-sourcing';
 import { PurchaseRequisitionSourcingReleaseControl } from '@/components/procurement/PurchaseRequisitionSourcingReleaseControl';
+import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseRequisitionDocuments';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import { printProcurementDocument } from '@/lib/procurement-document-output';
+import { useAuth } from '@/hooks/use-auth';
+import {
+  canRenderPurchaseRequisitionApprovalActions,
+  canUsePurchaseRequisitionApprovalActions,
+} from '@/lib/purchase-requisition-actions';
 
 const PRStatuses = [
   {
@@ -131,8 +145,23 @@ const formatMoney = (amount: number, currency?: string) =>
     maximumFractionDigits: 2,
   }).format(amount);
 
+const tenderMethods = new Set<ProcurementMethodType>([
+  'NationalCompetitiveTendering',
+  'InternationalCompetitiveTendering',
+  'RestrictedTendering',
+  'SingleSource',
+  'QualityBasedSelection',
+  'QualityAndCostBasedSelection',
+]);
+
+const formatMethod = (method?: ProcurementMethodType) =>
+  method
+    ? method.replace(/([a-z])([A-Z])/g, '$1 $2')
+    : 'Not resolved';
+
 export default function PurchaseRequisitionDetailPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
 
@@ -170,8 +199,12 @@ export default function PurchaseRequisitionDetailPage() {
     PurchaseRequisitionSourcingReleaseDto[]
   >([]);
   const [sourcingReadinessLoading, setSourcingReadinessLoading] = useState(true);
-  const [releasingForSourcing, setReleasingForSourcing] = useState(false);
+  const [sourcingCaseReadiness, setSourcingCaseReadiness] =
+    useState<ProcurementSourcingCaseReadiness>();
+  const [poSourceStatus, setPoSourceStatus] =
+    useState<ProcurementPurchaseOrderSourceStatusDto>();
   const [exporting, setExporting] = useState(false);
+  const documentRef = useRef<HTMLDivElement>(null);
 
   const fetchRequisition = async () => {
     try {
@@ -260,6 +293,22 @@ export default function PurchaseRequisitionDetailPage() {
       } finally {
         setSourcingReadinessLoading(false);
       }
+      const [caseResult, poResult] = await Promise.allSettled([
+        procurementSourcingCaseService.readiness(id),
+        purchasingService.getPurchaseOrderSourceOptions(id),
+      ]);
+      if (caseResult.status === 'fulfilled') {
+        setSourcingCaseReadiness(caseResult.value);
+      } else {
+        console.warn('Policy-selected sourcing route is unavailable:', caseResult.reason);
+        setSourcingCaseReadiness(undefined);
+      }
+      if (poResult.status === 'fulfilled') {
+        setPoSourceStatus(poResult.value);
+      } else {
+        console.warn('Purchase-order source readiness is unavailable:', poResult.reason);
+        setPoSourceStatus(undefined);
+      }
       try {
         setSubmissionHistory(
           await purchasingService.getPurchaseRequisitionSubmissionControlHistory(
@@ -330,6 +379,8 @@ export default function PurchaseRequisitionDetailPage() {
     budgetReadiness,
     budgetReadinessLoading
   );
+  const budgetControlHistory =
+    getPurchaseRequisitionBudgetControlHistory(budgetHistory);
   const authorityPresentation = getAuthorityControlPresentation(
     authorityReadiness,
     authorityReadinessLoading
@@ -338,6 +389,14 @@ export default function PurchaseRequisitionDetailPage() {
     sourcingReadiness,
     sourcingReadinessLoading
   );
+  const itemsMissingSpecifications =
+    requisition?.linkage.specificationTemplateId
+      ? []
+      : (requisition?.items || []).filter(
+          (item) =>
+            item.status?.toLowerCase() !== 'cancelled' &&
+            !item.specifications?.trim()
+        );
 
   const workflow = useWorkflowRecord({
     entityType: 'PurchaseRequisition',
@@ -349,11 +408,11 @@ export default function PurchaseRequisitionDetailPage() {
     canSubmit:
       requisition?.status === 'Draft' &&
       submissionReadiness?.canSubmit === true &&
-      budgetReadiness?.canReserve === true &&
-      authorityReadiness?.canSubmit === true,
-    canApproveReject:
-      requisition?.status === 'Pending Approval' ||
-      requisition?.status === 'Submitted',
+      budgetReadiness?.canReserve === true,
+    canApproveReject: canUsePurchaseRequisitionApprovalActions(
+      requisition?.status,
+      user
+    ),
     enabled: Boolean(id && requisition),
     commands: {
       submit: () => purchasingService.submitPurchaseRequisition(id),
@@ -372,22 +431,35 @@ export default function PurchaseRequisitionDetailPage() {
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
   });
+  const canRenderApprovalActions =
+    canRenderPurchaseRequisitionApprovalActions(
+      requisition?.status,
+      user,
+      workflow.summary?.canCurrentUserApprove
+    );
 
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
   const handleConvertToPO = async () => {
-    try {
-      const poData = await purchasingService.convertToPurchaseOrder(id);
-      toast.success('Redirecting to create purchase order...');
-      // Navigate to PO creation page with pre-filled data
-      router.push(`/procurement/purchase-orders/new?fromRequisition=${id}`);
-    } catch (error: any) {
-      console.error('Error converting to PO:', error);
-      toast.error(error.message || 'Failed to convert to purchase order');
+    if (!poSourceStatus?.ready) {
+      toast.error(
+        poSourceStatus?.blockedReasons[0] ||
+          'Complete the approved award or other eligible PO source before creating the purchase order.'
+      );
+      return;
     }
+    router.push(`/procurement/purchase-orders/new?fromRequisition=${id}`);
   };
 
   const handleCreateRfq = async () => {
+    if (!canCreateRfq) {
+      toast.error(
+        resolvedMethod
+          ? `The effective policy selected ${formatMethod(resolvedMethod)}, not Request for Quotation.`
+          : sourcingCaseReadiness?.message || 'The procurement method has not been resolved.'
+      );
+      return;
+    }
     try {
       const result =
         await purchasingService.createRfqFromPurchaseRequisition(id);
@@ -402,30 +474,23 @@ export default function PurchaseRequisitionDetailPage() {
   };
 
   const handleCreateTender = async () => {
+    if (!canCreateTender) {
+      toast.error(
+        existingTenderSource
+          ? `This requisition is already being sourced through ${existingTenderSource.sourceEntityReference || sourcingCaseReadiness?.currentCase?.caseNumber}. Continue that tender instead of creating a duplicate.`
+          : activeSourcingCaseIsStale
+            ? sourcingCaseReadiness?.message || 'The active sourcing case must be closed or cancelled before a replacement tender can be created.'
+            : resolvedMethod
+              ? `The effective policy selected ${formatMethod(resolvedMethod)}, which is not routed through Tender creation.`
+              : sourcingCaseReadiness?.message || 'The procurement method has not been resolved.'
+      );
+      return;
+    }
     try {
       router.push(`/procurement/tenders/new?fromRequisitionId=${id}`);
     } catch (error: any) {
       console.error('Error navigating to tender creation:', error);
       toast.error(error.message || 'Failed to start Tender process');
-    }
-  };
-
-  const handleReleaseForSourcing = async (reason: string) => {
-    try {
-      setReleasingForSourcing(true);
-      const release = await purchasingService.releasePurchaseRequisitionForSourcing(id, reason);
-      toast.success(`Sourcing release ${release.releaseReference} recorded`);
-      const [readiness, history] = await Promise.all([
-        purchasingService.getPurchaseRequisitionSourcingReadiness(id),
-        purchasingService.getPurchaseRequisitionSourcingReleaseHistory(id),
-      ]);
-      setSourcingReadiness(readiness);
-      setSourcingHistory(history);
-    } catch (releaseError: any) {
-      toast.error(releaseError.message || 'Failed to release requisition for sourcing');
-      throw releaseError;
-    } finally {
-      setReleasingForSourcing(false);
     }
   };
 
@@ -451,6 +516,15 @@ export default function PurchaseRequisitionDetailPage() {
       );
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handlePrint = () => {
+    if (!documentRef.current || !requisition) return;
+    try {
+      printProcurementDocument(documentRef.current, requisition.requisitionNumber);
+    } catch (printError: any) {
+      toast.error(printError?.message || 'Failed to open the requisition print view');
     }
   };
 
@@ -489,12 +563,37 @@ export default function PurchaseRequisitionDetailPage() {
   }
 
   const canEdit = requisition.status === 'Draft';
-  const canConvertToPO = requisition.status === 'Approved';
-  const canCreateRfq = requisition.status === 'Approved' && sourcingPresentation.canEnterSourcing;
-  const canCreateTender = requisition.status === 'Approved' && sourcingPresentation.canEnterSourcing;
+  const approved = requisition.status === 'Approved';
+  const resolvedMethod =
+    sourcingCaseReadiness?.selectedMethod ??
+    sourcingCaseReadiness?.recommendedMethod;
+  const existingTenderSource = sourcingCaseReadiness?.currentCase?.sourceRequests.find(
+    (request) =>
+      request.status === 'Created' &&
+      request.sourceType.toLowerCase() === 'tender'
+  );
+  const activeSourcingCaseIsStale = Boolean(
+    sourcingCaseReadiness?.currentCase &&
+    (sourcingCaseReadiness.currentCase.status === 'Ready' ||
+      sourcingCaseReadiness.currentCase.status === 'InProgress') &&
+    !sourcingCaseReadiness.currentCase.isSourceCurrent
+  );
+  const canConvertToPO = approved && poSourceStatus?.ready === true;
+  const canCreateRfq =
+    approved &&
+    sourcingPresentation.canEnterSourcing &&
+    sourcingCaseReadiness?.isMethodCompliant === true &&
+    resolvedMethod === 'RequestForQuotation';
+  const canCreateTender =
+    approved &&
+    sourcingPresentation.canEnterSourcing &&
+    sourcingCaseReadiness?.isMethodCompliant === true &&
+    Boolean(resolvedMethod && tenderMethods.has(resolvedMethod)) &&
+    !existingTenderSource &&
+    !activeSourcingCaseIsStale;
 
   return (
-    <div className="space-y-6">
+    <div ref={documentRef} className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -526,7 +625,7 @@ export default function PurchaseRequisitionDetailPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-document-exclude="true">
           {canEdit && (
             <Link href={`/procurement/purchase-requisitions/${id}/edit`}>
               <Button variant="outline">
@@ -536,35 +635,72 @@ export default function PurchaseRequisitionDetailPage() {
             </Link>
           )}
 
-          <WorkflowApprovalActions {...workflow.actionProps} />
+          <WorkflowApprovalActions
+            {...workflow.actionProps}
+            canApproveReject={canRenderApprovalActions}
+          />
 
-          {canCreateTender && (
-            <Button variant="outline" onClick={handleCreateTender}>
+          {approved && (
+            <Button
+              variant="outline"
+              onClick={handleCreateTender}
+              disabled={!canCreateTender}
+              title={!canCreateTender
+                ? existingTenderSource
+                  ? `Continue ${existingTenderSource.sourceEntityReference || 'the existing tender'} instead.`
+                  : activeSourcingCaseIsStale
+                    ? 'Close or cancel the stale active sourcing case before starting a replacement tender.'
+                    : 'Available only when policy selects a tender method.'
+                : undefined}
+            >
               <FileText className="h-4 w-4 mr-2" />
               Create Tender
             </Button>
           )}
 
-          {canConvertToPO && (
-            <Button onClick={handleConvertToPO}>
+          {approved && (
+            <Button
+              onClick={handleConvertToPO}
+              disabled={!canConvertToPO}
+              title={!canConvertToPO ? poSourceStatus?.blockedReasons[0] || 'An approved PO source is required.' : undefined}
+            >
               <ShoppingCart className="h-4 w-4 mr-2" />
               Create Purchase Order
             </Button>
           )}
 
-          {canCreateRfq && (
-            <Button variant="outline" onClick={handleCreateRfq}>
+          {approved && (
+            <Button
+              variant="outline"
+              onClick={handleCreateRfq}
+              disabled={!canCreateRfq}
+              title={!canCreateRfq ? 'Available only when policy selects Request for Quotation.' : undefined}
+            >
               <FileText className="h-4 w-4 mr-2" />
               Create RFQ
             </Button>
           )}
 
-          <Button variant="outline">
+          <Button variant="outline" onClick={handlePrint}>
             <Printer className="h-4 w-4 mr-2" />
             Print
           </Button>
         </div>
       </div>
+
+      {approved && (
+        <div className="rounded-lg border bg-slate-50 px-4 py-3 text-sm">
+          <span className="font-medium">Next procurement route:</span>{' '}
+          {sourcingCaseReadiness?.isMethodCompliant
+            ? `${formatMethod(resolvedMethod)} was selected by the effective category, amount, currency, and threshold rules.`
+            : sourcingCaseReadiness?.message || 'The policy-selected sourcing route is being resolved.'}
+          {!poSourceStatus?.ready && poSourceStatus?.blockedReasons[0] && (
+            <span className="ml-2 text-muted-foreground">
+              Purchase Order: {poSourceStatus.blockedReasons[0]}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Breadcrumbs */}
       <Breadcrumb>
@@ -611,8 +747,9 @@ export default function PurchaseRequisitionDetailPage() {
               Submission control
             </CardTitle>
             <CardDescription className="mt-1">
-              An acknowledged APP linkage or a traceable approved exception is
-              required before workflow submission.
+              Required requisition details are checked before the configured
+              approval workflow starts. APP exchange is shown for traceability
+              and does not block submission.
             </CardDescription>
           </div>
           <Badge variant="outline">{submissionPresentation.basisLabel}</Badge>
@@ -683,18 +820,33 @@ export default function PurchaseRequisitionDetailPage() {
               </div>
             )}
 
+          {itemsMissingSpecifications.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-background p-4 text-sm">
+              <p className="font-medium">Items needing specifications</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                {itemsMissingSpecifications.map((item) => (
+                  <li key={item.id}>{item.itemDescription}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Edit each listed line and enter its requirements, or select a
+                published requisition specification template.
+              </p>
+            </div>
+          )}
+
           {canEdit && (
             <div className="flex flex-wrap gap-2">
               <Link href={`/procurement/purchase-requisitions/${id}/edit`}>
                 <Button variant="outline" size="sm">
                   <Edit className="mr-2 h-4 w-4" />
-                  Edit governance linkage
+                  Edit requisition
                 </Button>
               </Link>
               <Link href="/procurement/planning/app-submissions">
                 <Button variant="outline" size="sm">
                   <ShieldCheck className="mr-2 h-4 w-4" />
-                  Open APP register
+                  View APP register
                 </Button>
               </Link>
             </div>
@@ -724,8 +876,10 @@ export default function PurchaseRequisitionDetailPage() {
               Finance budget control
             </CardTitle>
             <CardDescription className="mt-1">
-              Submission atomically reserves current approved budget; concurrent
-              requests cannot spend the same availability.
+              The approved budget and current availability are validated here;
+              PR submission and approval do not reserve funds. The Finance
+              commitment is created only at final PO approval or contract
+              activation.
             </CardDescription>
           </div>
           <Badge variant="outline">{budgetPresentation.basisLabel}</Badge>
@@ -735,7 +889,7 @@ export default function PurchaseRequisitionDetailPage() {
             <p className="font-medium">{budgetPresentation.title}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {budgetReadiness?.message ||
-                'Current Finance availability and commitment state are being evaluated.'}
+                'Current Finance budget availability is being evaluated.'}
             </p>
             {budgetReadiness?.decisionCode && (
               <p className="mt-2 font-mono text-xs text-muted-foreground">
@@ -800,25 +954,6 @@ export default function PurchaseRequisitionDetailPage() {
             </div>
           )}
 
-          {budgetReadiness?.commitmentReference && (
-            <div className="grid grid-cols-1 gap-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 text-sm md:grid-cols-3">
-              <div>
-                <span className="text-muted-foreground">Commitment:</span>{' '}
-                {budgetReadiness.commitmentReference}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Status:</span>{' '}
-                {budgetReadiness.commitmentStatus}
-              </div>
-              <div>
-                <span className="text-muted-foreground">
-                  Reservation sequence:
-                </span>{' '}
-                {budgetReadiness.reservationSequence}
-              </div>
-            </div>
-          )}
-
           {budgetReadiness?.isOverride && (
             <div className="grid grid-cols-1 gap-3 rounded-lg border bg-background/70 p-4 text-sm md:grid-cols-3">
               <div>
@@ -870,12 +1005,12 @@ export default function PurchaseRequisitionDetailPage() {
               ) : (
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               )}
-              Approval authority route
+              Policy authority guidance
             </CardTitle>
             <CardDescription className="mt-1">
-              Category, amount, currency, effective policy, authority stages,
-              quorum, SOD, and one exact shared-workflow version are resolved
-              server-side.
+              Optional policy routing metadata is shown for administrators. PR
+              submission uses the published Purchase Requisition workflow and
+              is not blocked by an executable-policy authority band.
             </CardDescription>
           </div>
           <Badge variant="outline">{authorityPresentation.basisLabel}</Badge>
@@ -1002,11 +1137,14 @@ export default function PurchaseRequisitionDetailPage() {
 
           {authorityReadiness &&
             authorityReadiness.requiredActions.length > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-medium text-amber-950">
-                  Configuration action required
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-medium text-slate-900">
+                  Optional administrator note
                 </p>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+                <p className="mt-1 text-xs text-slate-600">
+                  This does not prevent requisition submission or approval.
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
                   {authorityReadiness.requiredActions.map((action) => (
                     <li key={action}>{action}</li>
                   ))}
@@ -1037,8 +1175,6 @@ export default function PurchaseRequisitionDetailPage() {
         readiness={sourcingReadiness}
         history={sourcingHistory}
         loading={sourcingReadinessLoading}
-        releasing={releasingForSourcing}
-        onRelease={handleReleaseForSourcing}
       />
 
       {/* Rejection Notice */}
@@ -1065,6 +1201,7 @@ export default function PurchaseRequisitionDetailPage() {
           <TabsTrigger value="items">
             Items ({requisition.itemCount})
           </TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="linkage">Planning &amp; Governance</TabsTrigger>
           <WorkflowTabTrigger value="approval" />
         </TabsList>
@@ -1151,12 +1288,6 @@ export default function PurchaseRequisitionDetailPage() {
                   </div>
                 )}
 
-                {requisition.costCenter && (
-                  <div>
-                    <Label className="text-muted-foreground">Cost Center</Label>
-                    <p className="font-medium mt-1">{requisition.costCenter}</p>
-                  </div>
-                )}
               </div>
 
               {requisition.justification && (
@@ -1205,11 +1336,7 @@ export default function PurchaseRequisitionDetailPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Total Amount:</span>
                   <span className="text-2xl font-bold text-primary">
-                    $
-                    {requisition.totalAmount.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatMoney(requisition.totalAmount, requisition.currency)}
                   </span>
                 </div>
               </div>
@@ -1350,18 +1477,10 @@ export default function PurchaseRequisitionDetailPage() {
                         </TableCell>
                         <TableCell>{item.unitOfMeasure || '-'}</TableCell>
                         <TableCell className="text-right">
-                          $
-                          {item.estimatedUnitPrice.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(item.estimatedUnitPrice, requisition.currency)}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          $
-                          {item.lineTotal.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(item.lineTotal, requisition.currency)}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
@@ -1404,11 +1523,7 @@ export default function PurchaseRequisitionDetailPage() {
                       <div className="flex justify-between">
                         <span className="font-semibold">Total Amount:</span>
                         <span className="text-xl font-bold text-primary">
-                          $
-                          {requisition.totalAmount.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(requisition.totalAmount, requisition.currency)}
                         </span>
                       </div>
                     </div>
@@ -1417,6 +1532,14 @@ export default function PurchaseRequisitionDetailPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="documents" className="space-y-6">
+          <PurchaseRequisitionDocuments
+            requisitionId={id}
+            requisitionStatus={requisition.status}
+            editable={canEdit}
+          />
         </TabsContent>
 
         <TabsContent value="linkage" className="space-y-6">
@@ -1466,12 +1589,6 @@ export default function PurchaseRequisitionDetailPage() {
                   <Label className="text-muted-foreground">Category</Label>
                   <p className="mt-1 font-medium">
                     {requisition.linkage.procurementCategory || 'Not selected'}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Cost centre</Label>
-                  <p className="mt-1 font-medium">
-                    {requisition.linkage.costCenter || 'Not linked'}
                   </p>
                 </div>
                 <div>
@@ -1552,6 +1669,64 @@ export default function PurchaseRequisitionDetailPage() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Immutable budget-control history</CardTitle>
+              <CardDescription>
+                PR availability decisions and downstream reservation, reuse,
+                adjustment, or release events remain keyed to this requisition.
+                The formal ledger entry also appears on the approved PO or
+                activated contract.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {budgetControlHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No budget-control decisions have been recorded.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {budgetControlHistory.map((event) => (
+                    <div key={event.id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={
+                              event.result === 'Denied'
+                                ? 'destructive'
+                                : 'default'
+                            }
+                          >
+                            {event.result}
+                          </Badge>
+                          <span className="font-medium">{event.action}</span>
+                          {event.ruleCode && (
+                            <Badge variant="outline">{event.ruleCode}</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {format(
+                            new Date(event.occurredAtUtc),
+                            'MMM dd, yyyy HH:mm'
+                          )}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {event.reason || 'Budget availability evaluated.'}
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Actor: {event.actorName}
+                      </p>
+                      <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
+                        Integrity: {event.integrityHash}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
@@ -1657,62 +1832,6 @@ export default function PurchaseRequisitionDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Immutable budget-control history</CardTitle>
-              <CardDescription>
-                Blocked checks, idempotent retries, reservations, overrides, and
-                releases remain in the shared control-event ledger.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {budgetHistory.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No budget-control decisions have been recorded.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {budgetHistory.map((event) => (
-                    <div key={event.id} className="rounded-lg border p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant={
-                              event.result === 'Denied'
-                                ? 'destructive'
-                                : 'default'
-                            }
-                          >
-                            {event.result}
-                          </Badge>
-                          <span className="font-medium">{event.action}</span>
-                          {event.ruleCode && (
-                            <Badge variant="outline">{event.ruleCode}</Badge>
-                          )}
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {format(
-                            new Date(event.occurredAtUtc),
-                            'MMM dd, yyyy HH:mm'
-                          )}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {event.reason || 'Budget control evaluated.'}
-                      </p>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Actor: {event.actorName}
-                      </p>
-                      <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
-                        Integrity: {event.integrityHash}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle>Immutable authority-route history</CardTitle>
               <CardDescription>
                 Every submitted attempt retains its exact policy, authority
@@ -1787,6 +1906,7 @@ export default function PurchaseRequisitionDetailPage() {
           value="approval"
           className="space-y-6"
           {...workflow.actionProps}
+          canApproveReject={canRenderApprovalActions}
         />
       </Tabs>
     </div>

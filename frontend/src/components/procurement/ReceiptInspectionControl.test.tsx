@@ -11,6 +11,7 @@ import {
 
 const overview: ProcurementReceiptInspectionOverviewDto = {
   purchaseOrderReceiptId: 'receipt-0502',
+  warehouseId: 'warehouse-0502',
   receiptNumber: 'POR-0502',
   purchaseOrderNumber: 'PO-0502',
   supplierName: 'Governed Supplier',
@@ -123,9 +124,28 @@ describe('ReceiptInspectionControl', () => {
     expect(markup).toContain('Acknowledge rejection');
     expect(markup).toContain('DEC-001');
     expect(markup).toContain('DEC-014');
-    expect(markup).toContain('INSPECTION_REPORT');
-    expect(markup).toContain('DELIVERY_NOTE');
+    expect(markup).toContain('Inspection Report');
+    expect(markup).toContain('Delivery Note');
     expect(markup).not.toContain('Save inspection');
+    expect(markup).not.toContain('File upload record ID');
+    expect(markup).not.toContain('Workflow evidence ID');
+  });
+
+  it('uses controlled business selectors instead of raw quarantine and evidence identifiers', () => {
+    const internal = {
+      ...overview,
+      canAcknowledge: false,
+      canEdit: true,
+      canSubmit: true,
+    };
+    const markup = renderToStaticMarkup(
+      <ReceiptInspectionControl receiptId="receipt-0502" initialOverview={internal} />
+    );
+
+    expect(markup.toLowerCase()).toContain('quarantine location');
+    expect(markup).toContain('Published DMS document');
+    expect(markup).not.toContain('Quarantine location ID');
+    expect(markup).not.toContain('Evidence source');
   });
 
   it('binds return and replacement evidence to each distinct lifecycle stage', () => {

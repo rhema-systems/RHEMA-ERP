@@ -55,6 +55,50 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
     }
 
     [Fact]
+    public async Task AppliesAmendmentWithoutInventingInventoryIdForExistingSourceLine()
+    {
+        await using var fixture = new Fixture();
+        fixture.IsAdministrator = false;
+        fixture.PurchaseOrder.Items.Single().InventoryItemId = null;
+        await fixture.Context.SaveChangesAsync();
+
+        var created = await fixture.Service.CreateAsync(
+            fixture.PurchaseOrder.Id,
+            fixture.Request(quantity: 3m),
+            "corr-description-only-create");
+        var submitted = await fixture.Service.SubmitAsync(
+            created.Id,
+            new ProcurementPurchaseOrderAmendmentLifecycleRequest
+            {
+                Comment = "Submit the description-only source-line amendment.",
+                RowVersion = created.RowVersion,
+                EvidenceReference = "DMS-DESCRIPTION-ONLY-SUBMIT"
+            },
+            "corr-description-only-submit");
+
+        fixture.ActorUserId = fixture.ApproverUserId;
+        var applied = await fixture.Service.DecideAsync(
+            submitted.Id,
+            new DecideProcurementPurchaseOrderAmendmentRequest
+            {
+                Approved = true,
+                Comment = "Approve the controlled description-only line amendment.",
+                RowVersion = submitted.RowVersion,
+                EvidenceReference = "DMS-DESCRIPTION-ONLY-APPROVE"
+            },
+            "corr-description-only-approve");
+
+        applied.Status.Should().Be(
+            ProcurementPurchaseOrderAmendmentStatus.Applied);
+        var line = await fixture.Context.PurchaseOrderItems
+            .SingleAsync(item =>
+                item.PurchaseOrderId == fixture.PurchaseOrder.Id &&
+                !item.IsDeleted);
+        line.InventoryItemId.Should().BeNull();
+        line.OrderedQuantity.Should().Be(3m);
+    }
+
+    [Fact]
     public async Task IdempotentRetryReturnsSameDraftWithoutDuplicateAudit()
     {
         await using var fixture = new Fixture();
@@ -198,6 +242,130 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
                 "corr-lifecycle-approve",
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task MultiPurchaseOrderAmendmentPreservesOutstandingReservationForSecondApprovalAndReplay()
+    {
+        await using var fixture = new Fixture();
+        fixture.IsAdministrator = false;
+        fixture.Budget.ReservedAmount = 50m;
+        fixture.Budget.RemainingAmount = 30m;
+        fixture.Commitment.ReservedAmount = 70m;
+        fixture.Commitment.FormallyCommittedAmount = 20m;
+        var secondPurchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            OrderNumber = "PO-0406-002",
+            BusinessPartnerId = fixture.Supplier.Id,
+            Status = "Pending Approval",
+            SourceRequisitionId = fixture.PurchaseOrder.SourceRequisitionId,
+            ProcurementSourceType = fixture.PurchaseOrder.ProcurementSourceType,
+            ProcurementSourceId = Guid.NewGuid(),
+            ProcurementSourceReference = "RFQ-0406-SECOND",
+            SourceSnapshotJson = "{}",
+            SourceIntegrityHash = new string('b', 64),
+            SourceValidatedAtUtc = DateTime.UtcNow,
+            Currency = "GHS",
+            SubTotal = 50m,
+            TotalAmount = 50m
+        };
+        fixture.Context.PurchaseOrders.Add(secondPurchaseOrder);
+        await fixture.Context.SaveChangesAsync();
+
+        var created = await fixture.Service.CreateAsync(
+            fixture.PurchaseOrder.Id,
+            fixture.Request(quantity: 3m),
+            "corr-multi-po-create");
+        var submitted = await fixture.Service.SubmitAsync(
+            created.Id,
+            new ProcurementPurchaseOrderAmendmentLifecycleRequest
+            {
+                Comment = "Increase the first PO while retaining the second PO envelope.",
+                RowVersion = created.RowVersion,
+                EvidenceReference = "DMS-PO-AMD-MULTI-SUBMIT"
+            },
+            "corr-multi-po-submit");
+        fixture.ActorUserId = fixture.ApproverUserId;
+        await fixture.Service.DecideAsync(
+            submitted.Id,
+            new DecideProcurementPurchaseOrderAmendmentRequest
+            {
+                Approved = true,
+                Comment = "Approve the controlled multi-PO value increase.",
+                RowVersion = submitted.RowVersion,
+                EvidenceReference = "DMS-PO-AMD-MULTI-APPROVE"
+            },
+            "corr-multi-po-approve");
+
+        fixture.Commitment.ReservedAmount.Should().Be(80m,
+            "the unchanged 50 reservation for PO2 must survive PO1's 10 increase");
+        fixture.Commitment.FormallyCommittedAmount.Should().Be(30m);
+        fixture.Budget.ReservedAmount.Should().Be(50m);
+        fixture.Budget.CommittedAmount.Should().Be(30m);
+
+        var committed = await fixture.Lifecycle.CommitPurchaseOrderAsync(
+            secondPurchaseOrder,
+            "corr-po2-approve");
+        await fixture.Context.SaveChangesAsync();
+        var replay = await fixture.Lifecycle.CommitPurchaseOrderAsync(
+            secondPurchaseOrder,
+            "corr-po2-approve-retry");
+
+        replay.Id.Should().Be(committed.Id);
+        fixture.Budget.ReservedAmount.Should().Be(0m);
+        fixture.Budget.CommittedAmount.Should().Be(80m);
+        fixture.Commitment.FormallyCommittedAmount.Should().Be(80m);
+        (await fixture.Context.ProcurementBudgetCommitmentLedgerEntries.CountAsync(item =>
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == "PurchaseOrder"))
+            .Should().Be(2);
+    }
+
+    [Fact]
+    public async Task PositiveValueAmendmentRejectsWhenSiblingReservationsConsumeAllAvailability()
+    {
+        await using var fixture = new Fixture();
+        fixture.IsAdministrator = false;
+        fixture.Budget.ReservedAmount = 80m;
+        fixture.Budget.RemainingAmount = 0m;
+        fixture.Commitment.ReservedAmount = 100m;
+        fixture.Commitment.FormallyCommittedAmount = 20m;
+
+        var created = await fixture.Service.CreateAsync(
+            fixture.PurchaseOrder.Id,
+            fixture.Request(quantity: 3m),
+            "corr-fully-reserved-create");
+        var submitted = await fixture.Service.SubmitAsync(
+            created.Id,
+            new ProcurementPurchaseOrderAmendmentLifecycleRequest
+            {
+                Comment = "Submit while sibling orders retain the full remaining envelope.",
+                RowVersion = created.RowVersion,
+                EvidenceReference = "DMS-PO-AMD-FULLY-RESERVED-SUBMIT"
+            },
+            "corr-fully-reserved-submit");
+        fixture.ActorUserId = fixture.ApproverUserId;
+
+        var approve = () => fixture.Service.DecideAsync(
+            submitted.Id,
+            new DecideProcurementPurchaseOrderAmendmentRequest
+            {
+                Approved = true,
+                Comment = "Attempt a value increase without unreserved capacity.",
+                RowVersion = submitted.RowVersion,
+                EvidenceReference = "DMS-PO-AMD-FULLY-RESERVED-APPROVE"
+            },
+            "corr-fully-reserved-approve");
+
+        await approve.Should()
+            .ThrowAsync<ProcurementPurchaseOrderAmendmentConflictException>()
+            .Where(exception =>
+                exception.Code == "PO_AMENDMENT_BUDGET_INSUFFICIENT");
+        fixture.Budget.CommittedAmount.Should().Be(20m);
+        fixture.Budget.ReservedAmount.Should().Be(80m);
+        fixture.Commitment.ReservedAmount.Should().Be(100m);
     }
 
     [Fact]
@@ -446,6 +614,7 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
                 ReservationSequence = 1,
                 Status = ProcurementBudgetCommitmentStatus.Reserved,
                 ReservedAmount = 20m,
+                FormallyCommittedAmount = 20m,
                 Currency = "GHS",
                 BudgetAllocatedSnapshot = 100m,
                 BudgetCommittedAfter = 20m,
@@ -462,6 +631,26 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
                 PurchaseOrder,
                 Budget,
                 Commitment,
+                new ProcurementBudgetCommitmentLedgerEntry
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    ProcurementBudgetCommitmentId = Commitment.Id,
+                    ProcurementBudgetId = Budget.Id,
+                    PurchaseRequisitionId = requisitionId,
+                    EntryType = ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+                    SourceType = "PurchaseOrder",
+                    SourceId = PurchaseOrder.Id,
+                    SourceReference = PurchaseOrder.OrderNumber,
+                    Amount = 20m,
+                    Currency = "GHS",
+                    OccurredAtUtc = DateTime.UtcNow,
+                    ActorUserId = UserId,
+                    ActorName = "TDC Administrator",
+                    CorrelationId = "commitment-fixture-formal",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedById = UserId
+                },
                 new BusinessPartnerUser
                 {
                     Id = Guid.NewGuid(),
@@ -631,6 +820,10 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
                 notifications.Object,
                 NullLogger<
                     ProcurementPurchaseOrderAmendmentService>.Instance);
+            Lifecycle = new ProcurementBudgetCommitmentLifecycleService(
+                unitOfWork,
+                _currentUser.Object,
+                BudgetStore.Object);
         }
 
         public Guid TenantId { get; }
@@ -646,6 +839,7 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
         public ProcurementPurchaseOrderSourceResolution Source { get; }
         public ApplicationDbContext Context { get; }
         public ProcurementPurchaseOrderAmendmentService Service { get; }
+        public ProcurementBudgetCommitmentLifecycleService Lifecycle { get; }
         public Mock<IProcurementAccessControlService> Access { get; } =
             new();
         public Mock<IProcurementPurchaseOrderSodService> Sod { get; } =
@@ -704,7 +898,7 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
                             PurchaseOrder.Items.Single().Id,
                         InventoryItemId =
                             PurchaseOrder.Items.Single()
-                                .InventoryItemId!.Value,
+                                .InventoryItemId,
                         ItemDescription = "Controlled item",
                         OrderedQuantity = quantity,
                         UnitOfMeasure = "EA",

@@ -54,10 +54,10 @@ export interface ProcurementSourcingCaseSourceOption {
   requisitionId: string;
   requisitionNumber: string;
   requisitionStatus: string;
-  sourcingReleaseId: string;
-  releaseReference: string;
-  sourcePlanId: string;
-  sourcePlanItemId: string;
+  sourcingReleaseId?: string;
+  releaseReference?: string;
+  sourcePlanId?: string;
+  sourcePlanItemId?: string;
   sourcePlanNumber?: string;
   sourcePlanItemDescription?: string;
   category: ProcurementCategoryClass;
@@ -138,8 +138,8 @@ export interface ProcurementSourcingCase {
   methodRuleCode: string;
   thresholdRuleId: string;
   thresholdRuleCode: string;
-  authorityRouteId: string;
-  authorityRouteReference: string;
+  authorityRouteId?: string;
+  authorityRouteReference?: string;
   approvedExceptionRuleId?: string;
   methodOverrideWorkflowInstanceId?: string;
   methodOverrideReason?: string;

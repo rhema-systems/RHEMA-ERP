@@ -25,6 +25,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Get negotiation by ID
     /// </summary>
     [HttpGet("{id}")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderNegotiationDto>> GetById(Guid id)
     {
         var negotiation = await _service.GetByIdAsync(id);
@@ -36,6 +37,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Get negotiation by tender and bid
     /// </summary>
     [HttpGet("by-tender-bid")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderNegotiationDto>> GetByTenderAndBid([FromQuery] Guid tenderId, [FromQuery] Guid bidId)
     {
         var negotiation = await _service.GetByTenderAndBidAsync(tenderId, bidId);
@@ -47,6 +49,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Get all negotiations for a tender
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderNegotiationDto>>> GetByTenderId(Guid tenderId)
     {
         var negotiations = await _service.GetByTenderIdAsync(tenderId);
@@ -57,6 +60,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Get all negotiations for a bid
     /// </summary>
     [HttpGet("by-bid/{bidId}")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderNegotiationDto>>> GetByBidId(Guid bidId)
     {
         var negotiations = await _service.GetByBidIdAsync(bidId);
@@ -67,6 +71,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Create a new negotiation (invite bidder for negotiation)
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderNegotiationDto>> Create([FromBody] CreateNegotiationDto dto)
     {
         try
@@ -84,6 +89,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Update a negotiation item's negotiated price
     /// </summary>
     [HttpPut("{id}/items")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderNegotiationDto>> UpdateItem(Guid id, [FromBody] UpdateNegotiationItemDto dto)
     {
         try
@@ -101,6 +107,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Save negotiation as draft (save progress without completing)
     /// </summary>
     [HttpPost("{id}/save-draft")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderNegotiationDto>> SaveDraft(Guid id, [FromBody] CompleteNegotiationDto dto)
     {
         try
@@ -118,6 +125,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Complete a negotiation with final negotiated prices
     /// </summary>
     [HttpPost("{id}/complete")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderNegotiationDto>> Complete(Guid id, [FromBody] CompleteNegotiationDto dto)
     {
         try
@@ -135,6 +143,7 @@ public class TenderNegotiationsController : ControllerBase
     /// Cancel a negotiation
     /// </summary>
     [HttpPost("{id}/cancel")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> Cancel(Guid id)
     {
         try

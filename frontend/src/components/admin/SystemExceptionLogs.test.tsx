@@ -11,6 +11,10 @@ vi.mock('../ui/use-toast', () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
 
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({ hasPermission: () => true }),
+}));
+
 import SystemExceptionLogs from './SystemExceptionLogs';
 
 const logItem = {
@@ -45,7 +49,7 @@ describe('SystemExceptionLogs detail UX', () => {
         .fn()
         .mockResolvedValueOnce({
           ok: true,
-          json: async () => ({ items: [logItem] }),
+          json: async () => ({ items: [logItem], totalCount: 1 }),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -62,6 +66,10 @@ describe('SystemExceptionLogs detail UX', () => {
     render(<SystemExceptionLogs />);
 
     await screen.findByText(logItem.shortMessage);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/admin\/system-exception-logs\?/),
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
     expect(
       screen.queryByRole('columnheader', { name: 'Count' })
     ).not.toBeInTheDocument();

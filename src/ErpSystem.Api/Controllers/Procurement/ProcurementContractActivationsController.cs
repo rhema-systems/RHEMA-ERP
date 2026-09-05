@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 
 [ApiController]
 [Route("api/procurement/contract-activations")]
-[Authorize(Policy = "InternalOnly")]
+[Authorize]
 public sealed class ProcurementContractActivationsController : ControllerBase
 {
     private readonly IProcurementContractActivationService _service;
@@ -19,6 +19,7 @@ public sealed class ProcurementContractActivationsController : ControllerBase
     }
 
     [HttpGet("contracts/{contractId:guid}")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetOverview(
         Guid contractId,
         CancellationToken cancellationToken) =>
@@ -26,6 +27,7 @@ public sealed class ProcurementContractActivationsController : ControllerBase
             contractId, cancellationToken)));
 
     [HttpPost("contracts/{contractId:guid}/submit")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> Submit(
         Guid contractId,
         [FromBody] SubmitProcurementContractActivationRequest request,
@@ -40,6 +42,7 @@ public sealed class ProcurementContractActivationsController : ControllerBase
         });
 
     [HttpPost("{activationId:guid}/decision")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public Task<IActionResult> Decide(
         Guid activationId,
         [FromBody] DecideProcurementContractActivationRequest request,
@@ -48,6 +51,7 @@ public sealed class ProcurementContractActivationsController : ControllerBase
             activationId, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{activationId:guid}/activate")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public Task<IActionResult> Activate(
         Guid activationId,
         [FromBody] ActivateProcurementContractRequest request,

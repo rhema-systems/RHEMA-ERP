@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -39,18 +41,23 @@ namespace ErpSystem.Api.Controllers.Finance
     [Route("api/ar/invoices")]
     public class InvoiceController : ControllerBase
     {
+        private static readonly FinancePostingProducerContext DimensionProducer =
+            new(FinanceDimensionRouteId.FinanceArCustomerInvoice);
         private readonly IInvoiceService _invoiceService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ApplicationDbContext _dbContext;
+        private readonly IWorkflowService _workflowService;
 
         public InvoiceController(
             IInvoiceService invoiceService,
             ICurrentUserService currentUserService,
-            ApplicationDbContext dbContext)
+            ApplicationDbContext dbContext,
+            IWorkflowService workflowService)
         {
             _invoiceService = invoiceService;
             _currentUserService = currentUserService;
             _dbContext = dbContext;
+            _workflowService = workflowService;
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
@@ -127,7 +134,7 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}")]
         public async Task<ActionResult<InvoiceDto>> GetById(Guid id)
         {
-            var invoice = await _invoiceService.GetByIdAsync(id);
+            var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
             return invoice == null ? NotFound() : Ok(invoice);
         }
 
@@ -168,7 +175,7 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
-                var invoice = await _invoiceService.CreateAsync(dto);
+                var invoice = await _invoiceService.CreateAsync(dto, DimensionProducer);
                 return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, invoice);
             }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -208,7 +215,7 @@ namespace ErpSystem.Api.Controllers.Finance
             if (id != dto.Id) return BadRequest("ID mismatch");
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Edit", "Finance.AR.Invoices.Write"))
                 return Forbid();
-            try { return Ok(await _invoiceService.UpdateAsync(dto)); }
+            try { return Ok(await _invoiceService.UpdateAsync(dto, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -248,7 +255,7 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Finalizes and sends a draft invoice to the customer, triggering GL journal posting.
+        /// Submits a draft customer invoice to the configured Finance approval workflow.
         /// </summary>
         /// <remarks>
         /// **Common Use Cases:**
@@ -281,7 +288,33 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Send"))
                 return Forbid();
-            try { return Ok(await _invoiceService.SendInvoiceAsync(id)); }
+            try
+            {
+                var invoice = await _dbContext.Invoices
+                    .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == _currentUserService.TenantId && !item.IsDeleted);
+                if (invoice == null)
+                    return NotFound();
+                if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Rejected)
+                    return BadRequest(new { error = $"Only draft or rejected invoices can be submitted for approval. Current status: {invoice.Status}." });
+
+                var previousStatus = invoice.Status;
+                invoice.Status = InvoiceStatus.PendingApproval;
+                invoice.UpdatedAt = DateTime.UtcNow;
+                invoice.UpdatedBy = _currentUserService.UserName;
+                await _dbContext.SaveChangesAsync();
+
+                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("Invoice", id);
+                if (!workflowResult.Success)
+                {
+                    invoice.Status = previousStatus;
+                    invoice.UpdatedAt = DateTime.UtcNow;
+                    invoice.UpdatedBy = _currentUserService.UserName;
+                    await _dbContext.SaveChangesAsync();
+                    return BadRequest(new { error = workflowResult.Message ?? "Unable to start the customer invoice approval workflow." });
+                }
+
+                return Ok(await _invoiceService.GetByIdAsync(id, DimensionProducer));
+            }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -290,7 +323,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.ApprovePost"))
                 return Forbid();
-            try { return Ok(await _invoiceService.PostAsync(id)); }
+            try { return Ok(await _invoiceService.PostAsync(id, DimensionProducer)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

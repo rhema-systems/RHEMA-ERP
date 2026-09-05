@@ -55,13 +55,25 @@ export default function SupplierRfqsPage() {
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-muted-foreground" />
                       <div className="font-medium truncate">{r.rfqNumber}</div>
-                      <Badge variant="outline">{r.status}</Badge>
+                      <Badge variant="outline">{r.supplierStatus || r.status}</Badge>
                     </div>
                     <div className="text-sm text-muted-foreground truncate">{r.title}</div>
+                    {r.supplierStatusChangedAt && (
+                      <div className="text-xs text-muted-foreground">
+                        Updated {new Date(r.supplierStatusChangedAt).toLocaleString()}
+                        {r.supplierQuoteRevisionNumber > 0
+                          ? ` · Quote revision ${r.supplierQuoteRevisionNumber}`
+                          : ''}
+                      </div>
+                    )}
                   </div>
-                  <Button asChild size="sm">
-                    <Link href={`/external-portal/rfqs/${r.id}`}>Open</Link>
-                  </Button>
+                  {r.supplierStatus === 'Not sent' ? (
+                    <Button size="sm" disabled>Not sent</Button>
+                  ) : (
+                    <Button asChild size="sm">
+                      <Link href={`/external-portal/rfqs/${r.id}`}>Open</Link>
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

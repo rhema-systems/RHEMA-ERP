@@ -367,6 +367,7 @@ public class BusinessPartner : TenantEntity
     public virtual ICollection<BusinessPartnerSpecialization> Specializations { get; set; } = new List<BusinessPartnerSpecialization>();
     public virtual ICollection<BusinessPartnerLicense> Licenses { get; set; } = new List<BusinessPartnerLicense>();
     public virtual ICollection<BusinessPartnerContact> Contacts { get; set; } = new List<BusinessPartnerContact>();
+    public virtual ICollection<BusinessPartnerBankAccount> BankAccounts { get; set; } = new List<BusinessPartnerBankAccount>();
     public virtual ICollection<BusinessPartnerDocument> Documents { get; set; } = new List<BusinessPartnerDocument>();
     public virtual ICollection<BusinessPartnerFinancial> Financials { get; set; } = new List<BusinessPartnerFinancial>();
 }
@@ -546,6 +547,43 @@ public class BusinessPartnerContact : TenantEntity
     public bool IsPrimary { get; set; } = false;
 
     // Navigation Properties
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+}
+
+/// <summary>
+/// Tenant-scoped bank accounts owned by a business partner.
+/// The singular banking fields on <see cref="BusinessPartner"/> remain available
+/// as a compatibility summary of the primary account.
+/// </summary>
+public class BusinessPartnerBankAccount : TenantEntity
+{
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
+
+    [MaxLength(200)]
+    public string? BankName { get; set; }
+
+    [MaxLength(200)]
+    public string? BranchName { get; set; }
+
+    [MaxLength(200)]
+    public string? AccountName { get; set; }
+
+    [MaxLength(100)]
+    public string? AccountNumber { get; set; }
+
+    [MaxLength(50)]
+    public string? SwiftCode { get; set; }
+
+    [MaxLength(100)]
+    public string? Iban { get; set; }
+
+    [MaxLength(50)]
+    public string? Currency { get; set; }
+
+    public bool IsPrimary { get; set; }
+    public bool IsActive { get; set; } = true;
+
     public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 }
 

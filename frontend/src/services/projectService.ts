@@ -615,6 +615,7 @@ export interface ProjectAssetLinkDto {
   id: string;
   projectId: string;
   maintenanceAssetId?: string;
+  fixedAssetId?: string;
   companyAssetId?: string;
   jobCardId?: string;
   linkType: string;
@@ -626,6 +627,7 @@ export interface ProjectAssetLinkDto {
 
 export interface CreateProjectAssetLinkDto {
   maintenanceAssetId?: string;
+  fixedAssetId?: string;
   companyAssetId?: string;
   jobCardId?: string;
   linkType?: string;
@@ -828,6 +830,9 @@ export interface ProjectMobileAssignmentDto {
   status: string;
   percentComplete: number;
   plannedEndDate?: string;
+  civilDirectTaskId?: string;
+  civilDirectTaskStatus?: string;
+  civilDirectTaskRowVersion?: string;
 }
 
 export interface ProjectMobileSummaryDto {
@@ -2313,6 +2318,9 @@ export interface QuantitySurveyEstimateVersionDto {
   estimateDate: string;
   currencyId: string;
   currencyCode: string;
+  fundingSource?: string;
+  propertyReference?: string;
+  sourceSnapshotSchemaVersion: number;
   directCost: number;
   markupTotal: number;
   totalAmount: number;

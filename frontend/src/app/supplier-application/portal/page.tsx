@@ -4,13 +4,31 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { FileText, LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { FileText, LogOut, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { SupplierContactBankEditor } from '@/components/procurement/SupplierContactBankEditor';
+import {
+  bankAccountsFromRegistrationData,
+  contactsFromRegistrationData,
+  ensureOnePrimary,
+  parseRegistrationData,
+  registrationString,
+  type RegistrationDataRecord,
+  type SupplierBankAccountDetails,
+  type SupplierContactDetails,
+} from '@/lib/supplier-registration-details';
 import { supplierApplicantAccessService as service } from '@/services/procurement-supplier-applicant-access.service';
 import type {
   SupplierApplicantPaymentMethod,
@@ -24,8 +42,6 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type RegistrationDataRecord = Record<string, unknown>;
-
 const editableRegistrationKeys = new Set(
   [
     'companyName',
@@ -37,45 +53,17 @@ const editableRegistrationKeys = new Set(
     'physicalAddress',
     'city',
     'country',
+    'contacts',
+    'bankAccounts',
+    'contactPersonName',
+    'contactPersonTitle',
+    'contactPersonEmail',
+    'contactPersonPhone',
+    'bankName',
+    'bankAccountNumber',
+    'bankBranchCode',
   ].map((key) => key.toLowerCase())
 );
-
-function parseRegistrationData(value?: string): RegistrationDataRecord {
-  if (!value?.trim()) return {};
-
-  let current: unknown = JSON.parse(value);
-  for (let depth = 0; depth < 3; depth += 1) {
-    if (!current || Array.isArray(current) || typeof current !== 'object')
-      break;
-    const record = current as RegistrationDataRecord;
-    const wrapper = Object.keys(record).find(
-      (key) => key.toLowerCase() === 'registrationdata'
-    );
-    if (!wrapper) break;
-    const nested = record[wrapper];
-    if (typeof nested === 'string' && nested.trim()) {
-      current = JSON.parse(nested);
-      continue;
-    }
-    if (nested && !Array.isArray(nested) && typeof nested === 'object') {
-      current = nested;
-      continue;
-    }
-    break;
-  }
-
-  return current && !Array.isArray(current) && typeof current === 'object'
-    ? (current as RegistrationDataRecord)
-    : {};
-}
-
-function registrationString(data: RegistrationDataRecord, key: string) {
-  const actualKey = Object.keys(data).find(
-    (candidate) => candidate.toLowerCase() === key.toLowerCase()
-  );
-  const value = actualKey ? data[actualKey] : undefined;
-  return typeof value === 'string' ? value : '';
-}
 
 export default function SupplierApplicantPortalPage() {
   const router = useRouter();
@@ -92,6 +80,10 @@ export default function SupplierApplicantPortalPage() {
   const [physicalAddress, setPhysicalAddress] = useState('');
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('Ghana');
+  const [contacts, setContacts] = useState<SupplierContactDetails[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<
+    SupplierBankAccountDetails[]
+  >([]);
   const [paymentMethodId, setPaymentMethodId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [evidenceRequirementCode, setEvidenceRequirementCode] = useState('');
@@ -100,6 +92,10 @@ export default function SupplierApplicantPortalPage() {
   const [expiryDate, setExpiryDate] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [documentToDelete, setDocumentToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [savedRegistrationData, setSavedRegistrationData] =
     useState<RegistrationDataRecord>({});
 
@@ -135,9 +131,13 @@ export default function SupplierApplicantPortalPage() {
       setPhysicalAddress(registrationString(data, 'physicalAddress'));
       setCity(registrationString(data, 'city'));
       setCountry(registrationString(data, 'country') || 'Ghana');
+      setContacts(ensureOnePrimary(contactsFromRegistrationData(data)));
+      setBankAccounts(ensureOnePrimary(bankAccountsFromRegistrationData(data)));
     } catch {
       // Retain editable defaults when a legacy draft has non-standard JSON.
       setSavedRegistrationData({});
+      setContacts([]);
+      setBankAccounts([]);
     }
   }, []);
 
@@ -188,11 +188,38 @@ export default function SupplierApplicantPortalPage() {
       physicalAddress,
       city,
       country,
+      contacts,
+      bankAccounts: bankAccounts.map((account) => ({
+        id: account.id,
+        bankName: account.bankName,
+        branchName: account.bankBranch,
+        bankBranchCode: account.bankBranchCode,
+        accountName: account.accountName,
+        accountNumber: account.accountNumber,
+        swiftCode: account.swiftCode,
+        iban: account.iban,
+        currency: account.currency,
+        isPrimary: account.isPrimary,
+      })),
+      // Keep the established singular fields populated for older readers.
+      contactPersonName: contacts.find((contact) => contact.isPrimary)
+        ?.contactName,
+      contactPersonTitle: contacts.find((contact) => contact.isPrimary)
+        ?.contactTitle,
+      contactPersonEmail: contacts.find((contact) => contact.isPrimary)?.email,
+      contactPersonPhone: contacts.find((contact) => contact.isPrimary)?.phone,
+      bankName: bankAccounts.find((account) => account.isPrimary)?.bankName,
+      bankAccountNumber: bankAccounts.find((account) => account.isPrimary)
+        ?.accountNumber,
+      bankBranchCode: bankAccounts.find((account) => account.isPrimary)
+        ?.bankBranchCode,
     });
   }, [
+    bankAccounts,
     category,
     city,
     companyName,
+    contacts,
     country,
     email,
     phone,
@@ -231,6 +258,25 @@ export default function SupplierApplicantPortalPage() {
     !exceedsRequirementFileLimit;
 
   const save = async () => {
+    if (contacts.some((contact) => !contact.contactName.trim())) {
+      toast.error('Each retained contact requires a full name.');
+      return;
+    }
+    if (
+      bankAccounts.some(
+        (account) => !account.bankName.trim() || !account.accountNumber.trim()
+      )
+    ) {
+      toast.error(
+        'Each retained bank account requires a bank name and account number.'
+      );
+      return;
+    }
+    if (contacts.length > 10 || bankAccounts.length > 10) {
+      toast.error('A maximum of 10 contacts and 10 bank accounts is allowed.');
+      return;
+    }
+
     setBusy(true);
     try {
       hydrate(
@@ -330,6 +376,27 @@ export default function SupplierApplicantPortalPage() {
     }
   };
 
+  const deleteDocument = async () => {
+    if (!documentToDelete) return false;
+    setBusy(true);
+    try {
+      await service.deleteDocument(documentToDelete.id);
+      setDocumentToDelete(null);
+      await load();
+      toast.success('Document deleted.');
+      return true;
+    } catch (deleteError) {
+      toast.error(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Document deletion failed.'
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const exit = () => {
     service.clearSession();
     router.replace('/supplier-application');
@@ -409,16 +476,21 @@ export default function SupplierApplicantPortalPage() {
             <AlertDescription>
               The effective configuration requires a trusted provider or cashier
               to verify payment before application editing, document submission
-              and status tracking are unlocked.
+              and status tracking are unlocked. Once unlocked, the Application
+              tab is where contact persons and bank accounts are captured.
             </AlertDescription>
           </Alert>
         )}
 
-        <div className="flex justify-end">
-          <Button disabled={busy || !portal?.canSubmit} onClick={submit}>
-            Submit for review
-          </Button>
-        </div>
+        {portal && !portal.paymentOnly && (
+          <Alert className="border-blue-200 bg-blue-50 text-blue-950">
+            <AlertDescription>
+              <strong className="font-medium">Next: open Application.</strong>{' '}
+              Add the supplier&apos;s contact persons and bank accounts there,
+              select one primary entry in each list, then save the application.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <Tabs defaultValue="payment">
           <TabsList className="grid w-full grid-cols-4 md:w-[620px]">
@@ -438,6 +510,11 @@ export default function SupplierApplicantPortalPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Application details</CardTitle>
+                <CardDescription>
+                  Complete the company information, then add all relevant
+                  contact persons and bank accounts below. You can record up to
+                  10 of each and select one primary entry per list.
+                </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
                 {[
@@ -477,6 +554,17 @@ export default function SupplierApplicantPortalPage() {
                     <option>Services</option>
                   </select>
                 </div>
+                <SupplierContactBankEditor
+                  contacts={contacts}
+                  bankAccounts={bankAccounts}
+                  disabled={busy || !portal?.canEdit}
+                  onContactsChange={(items) =>
+                    setContacts(ensureOnePrimary(items))
+                  }
+                  onBankAccountsChange={(items) =>
+                    setBankAccounts(ensureOnePrimary(items))
+                  }
+                />
                 <div className="flex gap-2 md:col-span-2">
                   <Button disabled={busy || !portal?.canEdit} onClick={save}>
                     Save application
@@ -747,15 +835,34 @@ export default function SupplierApplicantPortalPage() {
                         </div>
                       </div>
                     </div>
-                    <Badge
-                      variant={document.isVerified ? 'default' : 'outline'}
-                    >
-                      {document.isRejected
-                        ? 'Rejected'
-                        : document.isVerified
-                          ? 'Verified'
-                          : 'Submitted'}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant={document.isVerified ? 'default' : 'outline'}
+                      >
+                        {document.isRejected
+                          ? 'Rejected'
+                          : document.isVerified
+                            ? 'Verified'
+                            : 'Submitted'}
+                      </Badge>
+                      {portal?.canEdit && (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Delete ${document.documentName}`}
+                          disabled={busy}
+                          onClick={() =>
+                            setDocumentToDelete({
+                              id: document.id,
+                              name: document.documentName,
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {!portal?.documents?.length && (
@@ -855,6 +962,22 @@ export default function SupplierApplicantPortalPage() {
           </TabsContent>
         </Tabs>
       </div>
+      <ConfirmationDialog
+        open={documentToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setDocumentToDelete(null);
+        }}
+        title="Delete uploaded document?"
+        description={
+          documentToDelete
+            ? `${documentToDelete.name} will be removed from this supplier application.`
+            : undefined
+        }
+        confirmText="Delete document"
+        variant="destructive"
+        isLoading={busy}
+        onConfirm={deleteDocument}
+      />
     </main>
   );
 }

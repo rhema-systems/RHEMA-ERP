@@ -4,12 +4,115 @@ namespace ErpSystem.Core.Services.Estate;
 
 public sealed class FacilitiesProcedureCatalogService : IFacilitiesProcedureCatalogService
 {
+    private static readonly FacilitiesWorkspaceStage[] MaintenanceStages =
+    [
+        new("Facilities Intake", "Facilities Officer",
+            "The Facilities team validates the customer maintenance request, property context, urgency, and access details.",
+            [
+                "Requester, contact, property/unit, issue type, and priority are confirmed",
+                "Service impact, target date, and access notes are recorded",
+                "Maintenance job card need is assessed"
+            ]),
+        new("Maintenance Handoff Review", "Facilities Supervisor",
+            "The supervisor confirms routing, SLA context, and whether the request should proceed into Maintenance Management.",
+            [
+                "Maintenance routing decision is recorded",
+                "Safety, access, and SLA context are confirmed",
+                "Requester update has been issued"
+            ]),
+        new("Maintenance Closeout", "Facilities Manager",
+            "Facilities reviews the linked job card or work order outcome and closes the requester-facing case.",
+            [
+                "Job card or work order reference is recorded where required",
+                "Inspection, requester feedback, and completion outcome are reviewed",
+                "Facilities case is ready for closeout"
+            ])
+    ];
+
+    private static readonly FacilitiesWorkspaceStage[] ComplaintStages =
+    [
+        new("Facilities Complaint Intake", "Facilities Officer",
+            "The Facilities team validates the complaint, property context, impact, and expected resolution route.",
+            [
+                "Complainant, contact, property/unit, category, and priority are confirmed",
+                "Service impact, incident date, target date, and complaint details are recorded",
+                "Complaint routing path is assessed"
+            ]),
+        new("Complaint Resolution Review", "Facilities Supervisor",
+            "The supervisor confirms the resolution plan, linked ticket or handoff, and requester communication.",
+            [
+                "Resolution route and responsible team are recorded",
+                "Linked helpdesk, maintenance, provider, or estate action is confirmed",
+                "Requester update has been issued"
+            ]),
+        new("Complaint Closeout", "Facilities Manager",
+            "Facilities reviews the outcome, requester feedback, and closeout evidence before closing the case.",
+            [
+                "Resolution outcome and feedback status are recorded",
+                "Any linked ticket or handoff reference is captured",
+                "Facilities complaint case is ready for closeout"
+            ])
+    ];
+
+    private static readonly FacilitiesWorkspaceField[] MaintenanceFields =
+    [
+        new("referenceNumber", "Reference number", "text"),
+        new("applicantName", "Requester name", "text"),
+        new("contactReference", "Requester contact", "text"),
+        new("propertyUnit", "Property / unit / plot", "text"),
+        new("location", "Location", "text"),
+        new("issueType", "Issue type", "text"),
+        new("priority", "Priority", "select", ["Low", "Normal", "High", "Urgent"]),
+        new("serviceImpact", "Service impact", "select", ["Low", "Medium", "High", "Critical"]),
+        new("targetDate", "Target date", "date"),
+        new("preferredVisitDate", "Preferred visit date", "date"),
+        new("accessInstructions", "Access instructions", "textarea"),
+        new("issueDescription", "Issue description", "textarea"),
+        new("maintenanceJobCardReference", "Maintenance job card reference", "text"),
+        new("maintenanceWorkOrderReference", "Maintenance work order reference", "text"),
+        new("requesterFeedbackStatus", "Requester feedback status", "select", ["Pending", "Satisfied", "Not satisfied", "Not required"]),
+        new("closureNotes", "Closeout notes", "textarea")
+    ];
+
+    private static readonly FacilitiesWorkspaceField[] ComplaintFields =
+    [
+        new("referenceNumber", "Reference number", "text"),
+        new("applicantName", "Complainant name", "text"),
+        new("contactReference", "Complainant contact", "text"),
+        new("propertyUnit", "Property / unit / plot", "text"),
+        new("location", "Location", "text"),
+        new("complaintCategory", "Complaint category", "text"),
+        new("priority", "Priority", "select", ["Low", "Normal", "High", "Urgent"]),
+        new("serviceImpact", "Service impact", "select", ["Low", "Medium", "High", "Critical"]),
+        new("incidentDate", "Incident date", "date"),
+        new("targetDate", "Target date", "date"),
+        new("complaintDescription", "Complaint description", "textarea"),
+        new("desiredResolution", "Desired resolution", "textarea"),
+        new("helpdeskTicketReference", "Helpdesk ticket reference", "text"),
+        new("requesterFeedbackStatus", "Requester feedback status", "select", ["Pending", "Satisfied", "Not satisfied", "Not required"]),
+        new("closureNotes", "Closeout notes", "textarea")
+    ];
+
+    private static readonly FacilitiesWorkspaceHandoff[] MaintenanceHandoffs =
+    [
+        new("Facilities Officer", "Facilities Supervisor", "Maintenance request intake is validated and ready for routing."),
+        new("Facilities Supervisor", "Maintenance Management", "Request requires a job card or work order in Maintenance Management."),
+        new("Facilities Manager", "Requester / Estate Services", "Maintenance case is closed and requester outcome is available.")
+    ];
+
+    private static readonly FacilitiesWorkspaceHandoff[] ComplaintHandoffs =
+    [
+        new("Facilities Officer", "Facilities Supervisor", "Complaint intake is validated and ready for resolution review."),
+        new("Facilities Supervisor", "Helpdesk / Maintenance / Service Provider", "Complaint requires downstream operational action."),
+        new("Facilities Manager", "Requester / Estate Services", "Complaint case is closed and requester outcome is available.")
+    ];
+
     private static readonly FacilitiesProcedureCatalogItem[] Procedures =
     [
         new("Property / Site Operating View", "EstateFacilityPropertySite", "Source: Estate / Facilities -> Property / Site Operations", "Facilities site, building, floor, unit, common-area, occupancy impact, responsible officer, and operating-document view routed through configured workflows.", "Building2", 0, "teal", "Register"),
         new("Lease / Occupancy Coordination", "EstateFacilityLease", "Source: Estate / Facilities -> Property Management / Finance AR", "Facilities lease, occupancy, viewing, billing trigger, access, renewal, termination, and service-impact coordination routed through configured workflows.", "FileCheck", 0, "sky", "Operational Queue"),
-        new("Maintenance Intake", "EstateFacilityMaintenance", "Source: Estate / Facilities -> Maintenance Management", "Estate / Facilities maintenance intake routed into the configured workflow and existing Maintenance Management execution.", "Wrench", 0, "amber"),
-        new("Complaint Management", "EstateFacilityComplaint", "Source: Estate / Facilities -> Helpdesk Complaint Management", "Estate / Facilities complaint intake routed into the configured workflow and existing Helpdesk complaint lifecycle.", "MessageSquare", 0, "rose"),
+        new("Maintenance Intake", "EstateFacilityMaintenance", "Source: Estate / Facilities -> Maintenance Management", "Estate / Facilities maintenance intake routed into the configured workflow and existing Maintenance Management execution.", "Wrench", 3, "amber"),
+        new("Complaint Management", "EstateFacilityComplaint", "Source: Estate / Facilities -> Helpdesk Complaint Management", "Estate / Facilities complaint intake routed into the configured workflow and existing Helpdesk complaint lifecycle.", "MessageSquare", 3, "rose"),
         new("Service Provider Management", "EstateFacilityServiceProvider", "Source: Estate / Facilities -> Procurement / Finance AP", "Estate / Facilities provider operating view for approved Procurement suppliers and configured provider workflows.", "Briefcase", 0, "violet"),
         new("Staff & Cleaner Duty Operations", "EstateFacilityStaffCleaner", "Source: Estate / Facilities -> HR / Administration", "Estate / Facilities duty operations for HR-sourced staff and cleaners through configured workflows.", "ClipboardCheck", 0, "emerald"),
         new("Facilities Asset Operating View", "EstateFacilityAssetRegister", "Source: Estate / Facilities -> Finance Fixed Assets / Maintenance", "Estate / Facilities operational asset view linked to source asset systems and configured workflows.", "Database", 0, "indigo"),
@@ -24,8 +127,51 @@ public sealed class FacilitiesProcedureCatalogService : IFacilitiesProcedureCata
         var procedure = Procedures.FirstOrDefault(item =>
             string.Equals(item.EntityType, entityType, StringComparison.OrdinalIgnoreCase));
 
-        return procedure is null
-            ? null
-            : new FacilitiesProcedureWorkspace(procedure, [], [], [], [], []);
+        if (procedure is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<FacilitiesWorkspaceField> fields = entityType switch
+        {
+            "EstateFacilityMaintenance" => MaintenanceFields,
+            "EstateFacilityComplaint" => ComplaintFields,
+            _ => Array.Empty<FacilitiesWorkspaceField>()
+        };
+
+        IReadOnlyList<FacilitiesWorkspaceStage> stages = entityType switch
+        {
+            "EstateFacilityMaintenance" => MaintenanceStages,
+            "EstateFacilityComplaint" => ComplaintStages,
+            _ => Array.Empty<FacilitiesWorkspaceStage>()
+        };
+
+        IReadOnlyList<string> outputs = entityType switch
+        {
+            "EstateFacilityMaintenance" =>
+            [
+                "Validated maintenance intake",
+                "Maintenance job card or work order reference",
+                "Requester update",
+                "Facilities closeout record"
+            ],
+            "EstateFacilityComplaint" =>
+            [
+                "Validated complaint intake",
+                "Resolution review note",
+                "Requester update",
+                "Facilities complaint closeout record"
+            ],
+            _ => Array.Empty<string>()
+        };
+
+        IReadOnlyList<FacilitiesWorkspaceHandoff> handoffs = entityType switch
+        {
+            "EstateFacilityMaintenance" => MaintenanceHandoffs,
+            "EstateFacilityComplaint" => ComplaintHandoffs,
+            _ => Array.Empty<FacilitiesWorkspaceHandoff>()
+        };
+
+        return new FacilitiesProcedureWorkspace(procedure, stages, [], fields, outputs, handoffs);
     }
 }

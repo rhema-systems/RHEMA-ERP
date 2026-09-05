@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -50,7 +51,7 @@ public class TenderBidsController : ControllerBase
     /// Get all bids with pagination
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<PagedResult<TenderBidSummaryDto>>> GetBids(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
@@ -59,9 +60,7 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
-            // Service interface expects (int page, int pageSize, string? search, string? status)
-            // tenderId parameter is Guid? but service expects string? for search
-            var result = await _bidService.GetBidsAsync(page, pageSize, null, status);
+            var result = await _bidService.GetBidsAsync(page, pageSize, null, status, tenderId);
             return Ok(result);
         }
         catch (Exception ex)
@@ -128,7 +127,7 @@ public class TenderBidsController : ControllerBase
     /// Get bids by tender ID
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderBidSummaryDto>>> GetBidsByTender(Guid tenderId)
     {
         try
@@ -206,33 +205,25 @@ public class TenderBidsController : ControllerBase
     /// Check bid initiation status (assignment and payment) for a tender
     /// </summary>
     [HttpGet("initiation-status/{tenderId}")]
-    public async Task<ActionResult<object>> GetInitiationStatus(Guid tenderId)
+    public async Task<ActionResult<TenderBidInitiationStatusDto>> GetInitiationStatus(Guid tenderId)
     {
         try
         {
-            // Get the business partner for the current user
-            var businessPartner = await _businessPartnerRepository.GetByUserIdAsync(_currentUserProvider.UserId);
-            if (businessPartner == null)
+            return Ok(await _bidService.GetInitiationStatusAsync(tenderId));
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
             {
-                return NotFound("Business partner not found");
-            }
-
-            // Check if assignment exists
-            var assignments = await _assignmentRepository.GetByTenderAndBusinessPartnerAsync(tenderId, businessPartner.Id);
-            var hasAssignment = assignments.Any();
-            var assignmentType = assignments.FirstOrDefault()?.AssignmentType;
-
-            // Check if payment has been made
-            var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(businessPartner.Id);
-            var tenderPayments = payments.Where(p => p.TenderFee != null && p.TenderFee.TenderId == tenderId);
-            var hasPayment = tenderPayments.Any(p => p.Status == "Completed" || p.Status == "Verified");
-
-            return Ok(new
-            {
-                hasAssignment,
-                assignmentType,
-                hasPayment,
-                canProceed = hasAssignment && hasPayment
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
             });
         }
         catch (Exception ex)
@@ -253,6 +244,21 @@ public class TenderBidsController : ControllerBase
             var bid = await _bidService.CreateBidAsync(dto);
             return CreatedAtAction(nameof(GetBid), new { id = bid.Id }, bid);
         }
+        catch (ProcurementSupplierEvidencePackAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Supplier bid evidence access forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "SUPPLIER_BID_EVIDENCE_ACCESS_FORBIDDEN",
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -272,6 +278,11 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var existingBid = await _bidService.GetBidByIdAsync(id);
+            if (existingBid is null || !await CanAccessBidAsync(existingBid))
+            {
+                return NotFound();
+            }
             var bid = await _bidService.UpdateBidAsync(id, dto);
             return Ok(bid);
         }
@@ -296,6 +307,21 @@ public class TenderBidsController : ControllerBase
         {
             var bid = await _bidService.SubmitBidAsync(id, dto);
             return Ok(bid);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -335,13 +361,17 @@ public class TenderBidsController : ControllerBase
     /// Mark bid as opened
     /// </summary>
     [HttpPost("{id}/open")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderBidDetailDto>> OpenBid(Guid id)
     {
         try
         {
             var bid = await _bidService.OpenBidAsync(id);
             return Ok(bid);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
         }
         catch (InvalidOperationException ex)
         {
@@ -358,13 +388,28 @@ public class TenderBidsController : ControllerBase
     /// Open all submitted bids for a tender
     /// </summary>
     [HttpPost("tender/{tenderId}/open-all")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<object>> OpenAllBidsByTender(Guid tenderId)
     {
         try
         {
             var count = await _bidService.OpenAllBidsByTenderAsync(tenderId);
             return Ok(new { openedCount = count, message = $"{count} bid(s) opened successfully" });
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Tender opening conflict",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions = { ["code"] = ex.Code, ["correlationId"] = HttpContext.TraceIdentifier }
+            });
         }
         catch (Exception ex)
         {
@@ -377,7 +422,7 @@ public class TenderBidsController : ControllerBase
     /// Get supplier bid list for a tender
     /// </summary>
     [HttpGet("tender/{tenderId}/supplier-list")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<List<SupplierBidListItemDto>>> GetSupplierBidList(Guid tenderId)
     {
         try
@@ -730,16 +775,9 @@ public class TenderBidsController : ControllerBase
             return false;
         }
 
-        if (bid.BusinessPartnerId == businessPartner.Id)
-        {
-            return true;
-        }
-
-        var assignments = await _assignmentRepository.GetByBusinessPartnerIdAsync(
-            businessPartner.Id);
-        return assignments.Any(item => item.TenderId == bid.TenderId &&
-            (item.AssignmentType == "AllUsers" ||
-             item.AssignedToUserId == _currentUserProvider.UserId));
+        // A tender assignment grants access to the tender, never to another
+        // supplier's sealed bid or its mutable draft children.
+        return bid.BusinessPartnerId == businessPartner.Id;
     }
 
     /// <summary>
@@ -752,6 +790,16 @@ public class TenderBidsController : ControllerBase
         {
             var payments = await _bidService.GetBidPaymentsAsync(id);
             return Ok(payments);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Tender payment access forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            });
         }
         catch (Exception ex)
         {
@@ -778,11 +826,27 @@ public class TenderBidsController : ControllerBase
                 Currency = dto.Currency,
                 PaymentMethod = dto.PaymentMethod,
                 TransactionId = dto.TransactionId,
+                PaymentProof = dto.PaymentProof,
                 Notes = dto.Notes
             };
 
             var payment = await _bidService.RecordPaymentAsync(createDto);
             return Ok(payment);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -799,13 +863,28 @@ public class TenderBidsController : ControllerBase
     /// Verify payment
     /// </summary>
     [HttpPost("{bidId}/payments/{paymentId}/verify")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = ProcurementAccessControlRegistry.TenderPaymentVerifyPermission)]
     public async Task<ActionResult<TenderPaymentDto>> VerifyPayment(Guid bidId, Guid paymentId, [FromBody] VerifyPaymentDto dto)
     {
         try
         {
-            var payment = await _bidService.VerifyPaymentAsync(paymentId, dto);
+            var payment = await _bidService.VerifyPaymentAsync(bidId, paymentId, dto);
             return Ok(payment);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -822,7 +901,7 @@ public class TenderBidsController : ControllerBase
     /// Schedule interview
     /// </summary>
     [HttpPost("{id}/interviews")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderInterviewDto>> ScheduleInterview(Guid id, [FromBody] ScheduleInterviewDto dto)
     {
         try
@@ -847,7 +926,7 @@ public class TenderBidsController : ControllerBase
     /// Update interview
     /// </summary>
     [HttpPut("{bidId}/interviews/{interviewId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderInterviewDto>> UpdateInterview(Guid bidId, Guid interviewId, [FromBody] UpdateInterviewDto dto)
     {
         try
@@ -1036,4 +1115,17 @@ public class TenderBidsController : ControllerBase
     }
 
     #endregion
+
+    private ProblemDetails PaymentAdmissionProblem(TenderBidInitiationValidationException exception) => new()
+    {
+        Status = StatusCodes.Status422UnprocessableEntity,
+        Title = "Tender bid payment admission failed",
+        Detail = exception.Message,
+        Instance = HttpContext.Request.Path,
+        Extensions =
+        {
+            ["code"] = exception.Code,
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
 }

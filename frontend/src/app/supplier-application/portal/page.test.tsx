@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   recordPayment: vi.fn(),
   uploadDocument: vi.fn(),
+  deleteDocument: vi.fn(),
   clearSession: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ vi.mock('@/services/procurement-supplier-applicant-access.service', () => ({
     submit: mocks.submit,
     recordPayment: mocks.recordPayment,
     uploadDocument: mocks.uploadDocument,
+    deleteDocument: mocks.deleteDocument,
     clearSession: mocks.clearSession,
   },
 }));
@@ -102,12 +104,17 @@ describe('supplier applicant evidence uploads', () => {
     mocks.updateApplication.mockResolvedValue(portal);
     mocks.submit.mockResolvedValue({ ...portal, status: 'Submitted' });
     mocks.uploadDocument.mockResolvedValue({});
+    mocks.deleteDocument.mockResolvedValue(undefined);
   });
 
   it('keeps the submit action visible above every portal tab', async () => {
     render(<SupplierApplicantPortalPage />);
 
     await screen.findByText('REG-001');
+    expect(screen.getByText('Next: open Application.')).toBeInTheDocument();
+    expect(
+      screen.getByText(/add the supplier's contact persons and bank accounts/i)
+    ).toBeInTheDocument();
     const submitButton = screen.getByRole('button', {
       name: 'Submit for review',
     });
@@ -174,6 +181,100 @@ describe('supplier applicant evidence uploads', () => {
     expect(saved.RegistrationData).toBeUndefined();
   });
 
+  it('captures and serializes repeatable contacts and bank accounts with one primary each', async () => {
+    mocks.updateApplication.mockImplementation(async (request) => ({
+      ...portal,
+      registrationData: request.registrationData,
+    }));
+
+    render(<SupplierApplicantPortalPage />);
+
+    await screen.findByText('REG-001');
+    const applicationTab = screen.getByRole('tab', { name: 'Application' });
+    fireEvent.mouseDown(applicationTab, { button: 0, ctrlKey: false });
+    fireEvent.click(applicationTab);
+
+    expect(
+      screen.getByText(
+        /add all relevant contact persons and bank accounts below/i
+      )
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    const contactNames = screen.getAllByLabelText('Full name');
+    fireEvent.change(contactNames[0], { target: { value: 'Primary Buyer' } });
+    fireEvent.change(contactNames[1], {
+      target: { value: 'Accounts Officer' },
+    });
+    fireEvent.click(screen.getAllByLabelText('Primary contact')[1]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add bank account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add bank account' }));
+    const bankNames = screen.getAllByLabelText('Bank name');
+    const accountNumbers = screen.getAllByLabelText('Account number');
+    fireEvent.change(bankNames[0], { target: { value: 'First Bank' } });
+    fireEvent.change(accountNumbers[0], { target: { value: '11110000' } });
+    fireEvent.change(bankNames[1], { target: { value: 'Second Bank' } });
+    fireEvent.change(accountNumbers[1], { target: { value: '22220000' } });
+    fireEvent.click(screen.getAllByLabelText('Primary bank account')[1]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save application' }));
+
+    await waitFor(() =>
+      expect(mocks.updateApplication).toHaveBeenCalledTimes(1)
+    );
+    const saved = JSON.parse(
+      mocks.updateApplication.mock.calls[0][0].registrationData
+    );
+    expect(saved.contacts).toHaveLength(2);
+    expect(
+      saved.contacts.filter(
+        (contact: { isPrimary: boolean }) => contact.isPrimary
+      )
+    ).toHaveLength(1);
+    expect(saved.contacts[1]).toMatchObject({
+      contactName: 'Accounts Officer',
+      isPrimary: true,
+    });
+    expect(saved.bankAccounts).toHaveLength(2);
+    expect(
+      saved.bankAccounts.filter(
+        (account: { isPrimary: boolean }) => account.isPrimary
+      )
+    ).toHaveLength(1);
+    expect(saved.bankAccounts[1]).toMatchObject({
+      bankName: 'Second Bank',
+      accountNumber: '22220000',
+      isPrimary: true,
+    });
+    expect(saved.contactPersonName).toBe('Accounts Officer');
+    expect(saved.bankAccountNumber).toBe('22220000');
+  });
+
+  it('removes repeatable rows and reassigns the primary selection', async () => {
+    render(<SupplierApplicantPortalPage />);
+
+    await screen.findByText('REG-001');
+    const applicationTab = screen.getByRole('tab', { name: 'Application' });
+    fireEvent.mouseDown(applicationTab, { button: 0, ctrlKey: false });
+    fireEvent.click(applicationTab);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove contact 1' }));
+    expect(screen.getAllByLabelText('Full name')).toHaveLength(1);
+    expect(screen.getByLabelText('Primary contact')).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add bank account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add bank account' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove bank account 1' })
+    );
+    expect(screen.getAllByLabelText('Bank name')).toHaveLength(1);
+    expect(screen.getByLabelText('Primary bank account')).toBeChecked();
+  });
+
   it('binds the selected evidence requirement and its validation metadata', async () => {
     render(<SupplierApplicantPortalPage />);
 
@@ -215,6 +316,43 @@ describe('supplier applicant evidence uploads', () => {
     expect(form.get('classificationCode')).toBe('Current');
     expect(form.get('issueDate')).toBe('2026-07-01');
     expect(form.get('expiryDate')).toBe('2027-07-01');
+  });
+
+  it('lets the applicant confirm and delete an uploaded document while the application is editable', async () => {
+    const uploadedDocument = {
+      id: 'document-1',
+      documentName: 'tax-clearance.pdf',
+      documentType: 'TaxClearance',
+      fileSize: 2048,
+      isVerified: false,
+      isRejected: false,
+      evidenceRequirementCode: 'SUP-TAX',
+    };
+    mocks.portal
+      .mockResolvedValueOnce({ ...portal, documents: [uploadedDocument] })
+      .mockResolvedValueOnce(portal);
+
+    render(<SupplierApplicantPortalPage />);
+
+    await screen.findByText('REG-001');
+    const documentsTab = screen.getByRole('tab', { name: 'Documents' });
+    fireEvent.mouseDown(documentsTab, { button: 0, ctrlKey: false });
+    fireEvent.click(documentsTab);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Delete tax-clearance.pdf',
+      })
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Delete uploaded document?' })
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete document' }));
+
+    await waitFor(() =>
+      expect(mocks.deleteDocument).toHaveBeenCalledWith('document-1')
+    );
+    await waitFor(() => expect(mocks.portal).toHaveBeenCalledTimes(2));
   });
 
   it('presents payment first and locks every downstream tab until verification', async () => {

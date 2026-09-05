@@ -225,6 +225,20 @@ public class JournalEntry : BusinessEntity
     [MaxLength(1000)]
     public string? RejectionReason { get; set; }
 
+    /// <summary>
+    /// Reason supplied when a pending approval request was withdrawn.
+    /// Kept separate from RejectionReason because a recall is initiated by the requester
+    /// (or an authorised workflow administrator), not decided by an approver.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? WithdrawalReason { get; set; }
+
+    /// <summary>User who withdrew the pending approval request.</summary>
+    public Guid? WithdrawnByUserId { get; set; }
+
+    /// <summary>Date and time when the approval request was withdrawn.</summary>
+    public DateTime? WithdrawnDate { get; set; }
+
     // ========================================================================
     // REVERSAL TRACKING
     // ========================================================================

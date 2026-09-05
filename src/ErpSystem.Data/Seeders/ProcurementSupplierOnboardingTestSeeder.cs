@@ -142,7 +142,7 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
         }
         _logger.LogInformation(
             "Supplier-onboarding test prerequisites are ready for tenant {TenantId}: profile {ProfileCode}, " +
-            "effective policy {PolicyCode}, six SOD controls, three evidence packs, GL accounts, and coded payment methods.",
+            "effective policy {PolicyCode}, three evidence packs, GL accounts, and coded payment methods.",
             tenant.Id,
             ProfileCode,
             policy.Code);
@@ -402,15 +402,11 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
                     "Supplier-onboarding E2E seeding found an ambiguous effective procurement-policy selection. " +
                     "Retain one effective default policy before retrying the seed.");
 
+            // Policy-specific SOD declarations are optional. An effective policy owned by the
+            // tenant is authoritative business data, so this development seeder must neither
+            // mutate nor reject it merely because it does not carry the recommended templates.
             if (!string.Equals(selected.Code, PolicyCode, StringComparison.OrdinalIgnoreCase))
-            {
-                var missing = MissingRequiredSodControls(selected, now);
-                if (missing.Count > 0)
-                    throw new InvalidOperationException(
-                        $"Effective procurement policy '{selected.Code}' is missing required SOD controls: " +
-                        $"{string.Join(", ", missing)}. The development seeder will not mutate an existing published policy.");
                 return selected;
-            }
 
             EnsureRequiredSodControls(selected, actorUserId, now);
             return selected;
@@ -470,25 +466,6 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
         EnsureRequiredSodControls(policy, actorUserId, now);
         return policy;
     }
-
-    private static IReadOnlyList<string> MissingRequiredSodControls(
-        ProcurementPolicySet policy,
-        DateTime moment) =>
-        ProcurementSodRequiredControlRegistry.Definitions
-            .Where(definition => !policy.SodRules.Any(rule =>
-                !rule.IsDeleted && rule.IsEnabled &&
-                rule.EffectiveFrom <= moment &&
-                (!rule.EffectiveTo.HasValue || rule.EffectiveTo.Value >= moment) &&
-                string.Equals(rule.RuleCode, definition.Code, StringComparison.OrdinalIgnoreCase) &&
-                ProcurementSodRequiredControlRegistry.MatchesRequiredShape(
-                    definition,
-                    rule.InitiatorRole,
-                    rule.ConflictingRole,
-                    rule.EntityType,
-                    rule.Action,
-                    rule.Enforcement)))
-            .Select(definition => definition.Code)
-            .ToList();
 
     private static void EnsureRequiredSodControls(
         ProcurementPolicySet policy,

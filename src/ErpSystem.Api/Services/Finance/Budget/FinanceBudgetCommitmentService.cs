@@ -67,7 +67,13 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                 && x.BudgetReturn.BudgetScenarioId == scenario.Id
                 && x.BudgetReturn.Status == "Approved"
                 && x.Account!.TenantId == tenantId && !x.Account.IsDeleted
-                && x.Account.IsActive && x.Account.BudgetTrackingEnabled
+                // BusinessEntity.IsActive is a computed CLR property and cannot be translated
+                // by relational EF providers. Keep the eligibility test explicit and evaluate
+                // effective dating against the requested budget date, not the server clock.
+                && x.Account.Status == AccountStatus.Active
+                && (!x.Account.EffectiveDate.HasValue || x.Account.EffectiveDate.Value <= date)
+                && (!x.Account.ExpirationDate.HasValue || x.Account.ExpirationDate.Value > date)
+                && x.Account.BudgetTrackingEnabled
                 && x.Account.AccountType == AccountType.Expense)
             .Where(x => !query.AccountId.HasValue || x.AccountId == query.AccountId.Value)
             .Where(x => !query.SegmentValueId.HasValue || x.BudgetReturn!.SegmentValueId == query.SegmentValueId.Value)
@@ -670,7 +676,10 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
     private async Task ValidateBudgetCellAsync(BudgetEntry entry, DateTime date, CancellationToken cancellationToken)
     {
         if (entry.Account is null || entry.Account.TenantId != entry.TenantId || entry.Account.IsDeleted
-            || !entry.Account.IsActive || !entry.Account.BudgetTrackingEnabled
+            || entry.Account.Status != AccountStatus.Active
+            || entry.Account.EffectiveDate.HasValue && entry.Account.EffectiveDate.Value > date
+            || entry.Account.ExpirationDate.HasValue && entry.Account.ExpirationDate.Value <= date
+            || !entry.Account.BudgetTrackingEnabled
             || entry.Account.AccountType != AccountType.Expense)
             throw Validation("BUDGET_ACCOUNT_NOT_ELIGIBLE", "The Finance budget entry does not use an active budget-tracked expense account.");
         if (entry.FiscalPeriod is null || entry.FiscalPeriod.TenantId != entry.TenantId || entry.FiscalPeriod.IsDeleted

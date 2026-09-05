@@ -233,6 +233,18 @@ export interface BudgetReportLine {
     variancePercent?: number;
     favorability: 'Favorable' | 'Unfavorable' | 'OnBudget' | string;
     contributions: BudgetReportContribution[];
+    dimensionCells: BudgetDimensionCellPosition[];
+}
+
+export interface BudgetDimensionCellPosition {
+    financeDimensionSetId?: string;
+    dimensionDisplayValue: string;
+    dimensionCombinationHash?: string;
+    dimensionAssignments: BudgetDimensionAssignment[];
+    budgetAmount: number;
+    actualAmount: number;
+    reservedAmount: number;
+    availableAmount: number;
 }
 
 export interface BudgetUnitSummary {

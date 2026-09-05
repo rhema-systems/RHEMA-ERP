@@ -12,6 +12,7 @@ public interface IProcurementTenderDocumentControlService
     Task<IReadOnlyList<ProcurementTenderDocumentPolicyOptionDto>> GetTemplatePolicyOptionsAsync(CancellationToken cancellationToken = default);
     Task<ProcurementTenderDocumentTemplateDto> CreateTemplateAsync(SaveProcurementTenderDocumentTemplateRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderDocumentTemplateDto> UpdateTemplateAsync(Guid id, SaveProcurementTenderDocumentTemplateRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementTenderDocumentTemplateDto> AttachTemplateContentAsync(Guid id, AttachProcurementTenderDocumentTemplateContentRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderDocumentTemplateDto> SubmitTemplateAsync(Guid id, ProcurementTenderDocumentTemplateLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderDocumentTemplateDto> PublishTemplateAsync(Guid id, ProcurementTenderDocumentTemplateLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderDocumentTemplateDto> RejectTemplateAsync(Guid id, ProcurementTenderDocumentTemplateLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);

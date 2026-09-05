@@ -375,52 +375,6 @@ export default function EstateOperationsPage() {
           <CardContent className="flex items-center justify-between gap-4 p-5">
             <div className="flex items-start gap-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
-                <BarChart3 className="h-5 w-5 text-sky-700 dark:text-sky-300" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold">Property Dashboard</h2>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() =>
-                router.push('/estate/property-management/dashboard')
-              }
-              aria-label="Open property dashboard"
-            >
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border bg-card text-card-foreground">
-          <CardContent className="flex items-center justify-between gap-4 p-5">
-            <div className="flex items-start gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
-                <BarChart3 className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold">
-                  Facilities Dashboard
-                </h2>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => router.push('/estate/facilities/dashboard')}
-              aria-label="Open facilities dashboard"
-            >
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border bg-card text-card-foreground">
-          <CardContent className="flex items-center justify-between gap-4 p-5">
-            <div className="flex items-start gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
                 <Landmark className="h-5 w-5 text-teal-700 dark:text-teal-300" />
               </div>
               <div>
@@ -466,7 +420,9 @@ export default function EstateOperationsPage() {
                 <Home className="h-5 w-5 text-sky-700 dark:text-sky-300" />
               </div>
               <div>
-                <h2 className="text-base font-semibold">Property Management</h2>
+                <h2 className="text-base font-semibold">
+                  Property Management
+                </h2>
               </div>
             </div>
             <Button
@@ -487,16 +443,14 @@ export default function EstateOperationsPage() {
                 <Building2 className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
               </div>
               <div>
-                <h2 className="text-base font-semibold">
-                  Facilities Management
-                </h2>
+                <h2 className="text-base font-semibold">Facilities &amp; Corporate Services</h2>
               </div>
             </div>
             <Button
               variant="outline"
               size="icon"
               onClick={() => router.push('/estate/facilities')}
-              aria-label="Open facilities management"
+              aria-label="Open facilities operations"
             >
               <ArrowRight className="h-4 w-4" />
             </Button>

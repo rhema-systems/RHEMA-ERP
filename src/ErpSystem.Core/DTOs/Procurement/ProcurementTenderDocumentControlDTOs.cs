@@ -73,6 +73,8 @@ public sealed class ProcurementTenderDocumentTemplateDto
     public string ContentChecksumSha256 { get; set; } = string.Empty;
     public Guid WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
+    /// <summary>Server-validated content choices, populated by the template detail endpoint.</summary>
+    public List<Guid> EligibleContentEvidenceDocumentIds { get; set; } = new();
     public Guid? SupersedesVersionId { get; set; }
     public string? ChangeSummary { get; set; }
     public string? ApprovalEvidenceReference { get; set; }
@@ -123,14 +125,20 @@ public sealed class SaveProcurementTenderDocumentTemplateRequest
     [Required, StringLength(50)] public string PolicySetCode { get; set; } = string.Empty;
     [Range(1, int.MaxValue)] public int PolicySetVersion { get; set; }
     public Guid SourceConfigurationProfileId { get; set; }
-    [Required, StringLength(2000)] public string ContentReference { get; set; } = string.Empty;
+    [StringLength(2000)] public string ContentReference { get; set; } = string.Empty;
     public Guid? ContentWorkflowEvidenceDocumentId { get; set; }
     public Guid? ContentFileUploadRecordId { get; set; }
-    [Required, RegularExpression("^[A-Fa-f0-9]{64}$")] public string ContentChecksumSha256 { get; set; } = string.Empty;
+    [RegularExpression("^[A-Fa-f0-9]{64}$")] public string ContentChecksumSha256 { get; set; } = string.Empty;
     public Guid WorkflowDefinitionId { get; set; }
     [MinLength(1)] public List<ProcurementMethodType> ApplicableMethods { get; set; } = new();
     [StringLength(1000)] public string? ChangeSummary { get; set; }
     public string? RowVersion { get; set; }
+}
+
+public sealed class AttachProcurementTenderDocumentTemplateContentRequest
+{
+    public Guid ContentWorkflowEvidenceDocumentId { get; set; }
+    [Required] public string RowVersion { get; set; } = string.Empty;
 }
 
 public sealed class ProcurementTenderDocumentTemplateLifecycleRequest

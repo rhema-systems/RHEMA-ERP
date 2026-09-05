@@ -320,7 +320,7 @@ public sealed class QuantitySurveyAdvanceRecoveryService(
         ?? throw new QuantitySurveyAdvanceRecoveryNotFoundException("The governed advance recovery agreement was not found.");
     private async Task RequireProjectAsync(Guid projectId)
     {
-        if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null)
+        if (!await projectService.HasProjectAccessAsync(projectId))
             throw new UnauthorizedAccessException("You are not permitted to access this project.");
     }
     private void AddRevision(QuantitySurveyAdvanceRecoveryAgreement entity, string action, string reason,

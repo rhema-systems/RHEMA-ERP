@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.QuantitySurvey;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
 using Microsoft.AspNetCore.Authorization;
@@ -80,18 +81,20 @@ public sealed class QuantitySurveyPaymentCertificatesController(
         { return Conflict(Problem(409, "QS payment certificate conflict", exception.Message)); }
         catch (QuantitySurveyPaymentCertificateValidationException exception)
         { return BadRequest(Problem(400, "QS payment certificate validation failed", exception.Message)); }
+        catch (ProcurementBudgetCommitmentLifecycleException exception)
+        { return Conflict(Problem(409, "QS payment certificate budget conflict", exception.Message, exception.Code)); }
         catch (UnauthorizedAccessException exception)
         { return StatusCode(403, Problem(403, "QS payment certificate access forbidden", exception.Message)); }
     }
 
-    private ProblemDetails Problem(int status, string title, string detail) => new()
+    private ProblemDetails Problem(int status, string title, string detail, string? code = null) => new()
     {
         Status = status, Title = title, Detail = detail,
         Type = $"https://tdc.gov.gh/problems/quantity-survey-payment-certificate-{status}",
         Instance = HttpContext.Request.Path,
         Extensions =
         {
-            ["code"] = $"QS_PAYMENT_CERTIFICATE_{status}",
+            ["code"] = code ?? $"QS_PAYMENT_CERTIFICATE_{status}",
             ["correlationId"] = CorrelationId
         }
     };

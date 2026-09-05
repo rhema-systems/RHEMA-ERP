@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
+  ArchiveX,
   CalendarClock,
   CheckCircle2,
   FileLock2,
@@ -19,9 +20,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import {
-  hasAnyEvaluationCommitteeAction,
-} from '@/lib/procurement-evaluation-committee';
+import { hasAnyEvaluationCommitteeAction } from '@/lib/procurement-evaluation-committee';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import type {
   ProcurementEvaluationAppointment,
   ProcurementEvaluationCommitteeControl,
@@ -41,25 +41,34 @@ const formatDate = (value?: string) =>
       }).format(new Date(value))
     : '—';
 
-const roleLabel = (value: string) =>
-  value.replace(/([a-z])([A-Z])/g, '$1 $2');
+const roleLabel = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 const statusVariant = (
   status: string
 ): 'default' | 'destructive' | 'outline' | 'secondary' => {
   if (
-    ['Active', 'Accepted', 'NoConflict', 'QuorumConfirmed', 'Locked', 'Approved'].includes(
-      status
-    )
+    [
+      'Active',
+      'Accepted',
+      'NoConflict',
+      'QuorumConfirmed',
+      'Locked',
+      'Approved',
+    ].includes(status)
   )
     return 'default';
   if (
-    ['Declined', 'Withdrawn', 'ConflictDeclared', 'QuorumFailed', 'Rejected'].includes(
-      status
-    )
+    [
+      'Declined',
+      'Withdrawn',
+      'ConflictDeclared',
+      'QuorumFailed',
+      'Rejected',
+    ].includes(status)
   )
     return 'destructive';
-  if (['Draft', 'Pending', 'PendingApproval'].includes(status)) return 'secondary';
+  if (['Draft', 'Pending', 'PendingApproval'].includes(status))
+    return 'secondary';
   return 'outline';
 };
 
@@ -72,12 +81,16 @@ export interface EvaluationCommitteeRegisterProps {
   scorerEligibility: Partial<
     Record<ProcurementEvaluationPhase, ProcurementEvaluationScorerEligibility>
   >;
+  scorerEligibilityErrors?: Partial<
+    Record<ProcurementEvaluationPhase, unknown>
+  >;
   currentUserId?: string;
   canAdminister: boolean;
   canEvaluate: boolean;
   canApprove: boolean;
   onBind: () => void;
   onActivate: () => void;
+  onRetireDraft: () => void;
   onAppointment: (
     member: ProcurementEvaluationAppointment,
     accept: boolean
@@ -100,12 +113,14 @@ export function EvaluationCommitteeRegister({
   readiness,
   control,
   scorerEligibility,
+  scorerEligibilityErrors,
   currentUserId,
   canAdminister,
   canEvaluate,
   canApprove,
   onBind,
   onActivate,
+  onRetireDraft,
   onAppointment,
   onDeclareCoi,
   onCreateMeeting,
@@ -128,6 +143,14 @@ export function EvaluationCommitteeRegister({
     canAdminister &&
     Boolean(control) &&
     serverAllows(control?.allowedActions, ['Activate', 'ActivateCommittee']);
+  const canRetireDraft =
+    canAdminister &&
+    Boolean(control) &&
+    serverAllows(control?.allowedActions, ['RetireDraft']);
+  const canBindReplacement =
+    canAdminister &&
+    control?.status === 'Retired' &&
+    serverAllows(control.allowedActions, ['Bind', 'BindCommittee']);
   const canCreateMeeting =
     canAdminister &&
     Boolean(control) &&
@@ -159,10 +182,7 @@ export function EvaluationCommitteeRegister({
               No source-specific committee has been constituted
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Bind this procurement source to an exact active Evaluation Committee
-              snapshot. The reusable committee remains administered in Access &amp;
-              Committees; this record retains the source-specific appointment,
-              declaration, quorum, and score history.
+              Select an active evaluation committee to continue.
             </p>
             {canBind && (
               <Button className="mt-5" onClick={onBind}>
@@ -190,12 +210,26 @@ export function EvaluationCommitteeRegister({
                     {control.purpose}
                   </p>
                 </div>
-                {canActivate && (
-                  <Button onClick={onActivate}>
-                    <ShieldCheck className="mr-2 h-4 w-4" />
-                    Activate exact composition
-                  </Button>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  {canRetireDraft && (
+                    <Button variant="destructive" onClick={onRetireDraft}>
+                      <ArchiveX className="mr-2 h-4 w-4" />
+                      Retire incorrect draft
+                    </Button>
+                  )}
+                  {canActivate && (
+                    <Button onClick={onActivate}>
+                      <ShieldCheck className="mr-2 h-4 w-4" />
+                      Activate exact composition
+                    </Button>
+                  )}
+                  {canBindReplacement && (
+                    <Button onClick={onBind}>
+                      <Users className="mr-2 h-4 w-4" />
+                      Constitute replacement
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -218,9 +252,18 @@ export function EvaluationCommitteeRegister({
                   value={`${formatDate(control.effectiveFromUtc)} → ${formatDate(control.effectiveToUtc)}`}
                 />
               </div>
-              <p className="mt-4 break-all font-mono text-[11px] text-muted-foreground">
-                Composition hash: {control.compositionIntegrityHash}
-              </p>
+              {control.status === 'Retired' && (
+                <Alert className="mt-5">
+                  <ArchiveX className="h-4 w-4" />
+                  <AlertTitle>Draft retired; history preserved</AlertTitle>
+                  <AlertDescription>
+                    {control.retirementReason}
+                    {control.retiredAtUtc
+                      ? ` Retired ${formatDate(control.retiredAtUtc)}.`
+                      : ''}
+                  </AlertDescription>
+                </Alert>
+              )}
             </CardContent>
           </Card>
 
@@ -246,6 +289,7 @@ export function EvaluationCommitteeRegister({
           <ScoreSection
             control={control}
             scorerEligibility={scorerEligibility}
+            scorerEligibilityErrors={scorerEligibilityErrors}
             currentUserId={currentUserId}
             canEvaluate={canEvaluate}
             canApprove={canApprove}
@@ -349,7 +393,9 @@ function CompositionSection({
         <div>
           <div className="mb-2 flex items-center justify-between gap-3">
             <p className="text-sm font-medium">Required composition</p>
-            <Badge variant={control.compositionReady ? 'default' : 'destructive'}>
+            <Badge
+              variant={control.compositionReady ? 'default' : 'destructive'}
+            >
               {control.requiredRoles.filter((role) => role.isMet).length}/
               {control.requiredRoles.length} roles met
             </Badge>
@@ -400,7 +446,8 @@ function CompositionSection({
                     <td className="px-3 py-3">
                       <p>{roleLabel(member.memberKind)}</p>
                       <p className="text-xs text-muted-foreground">
-                        {member.roleName} · {member.isVoting ? 'Voting' : 'Non-voting'}
+                        {member.roleName} ·{' '}
+                        {member.isVoting ? 'Voting' : 'Non-voting'}
                       </p>
                     </td>
                     <td className="px-3 py-3">
@@ -434,7 +481,9 @@ function CompositionSection({
                     </td>
                     <td className="px-3 py-3">
                       <Badge
-                        variant={member.eligibleToScore ? 'default' : 'destructive'}
+                        variant={
+                          member.eligibleToScore ? 'default' : 'destructive'
+                        }
                       >
                         {member.eligibleToScore ? 'Eligible' : 'Blocked'}
                       </Badge>
@@ -448,28 +497,38 @@ function CompositionSection({
                       <div className="flex justify-end gap-2">
                         {canEvaluate &&
                           isSelf &&
+                          control.status === 'Active' &&
                           member.status === 'Pending' &&
                           serverAllows(control.allowedActions, [
                             'respondToAppointment',
                           ]) && (
-                          <>
-                            <Button
-                              size="sm"
-                              onClick={() => onAppointment(member, true)}
-                            >
-                              Accept
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onAppointment(member, false)}
-                            >
-                              Decline
-                            </Button>
-                          </>
-                        )}
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() => onAppointment(member, true)}
+                              >
+                                Accept
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onAppointment(member, false)}
+                              >
+                                Decline
+                              </Button>
+                            </>
+                          )}
                         {canEvaluate &&
                           isSelf &&
+                          control.status === 'Draft' &&
+                          member.status === 'Pending' && (
+                            <span className="text-xs text-muted-foreground">
+                              Awaiting committee activation
+                            </span>
+                          )}
+                        {canEvaluate &&
+                          isSelf &&
+                          control.status === 'Active' &&
                           member.status === 'Accepted' &&
                           serverAllows(control.allowedActions, [
                             'submitConflictDeclaration',
@@ -549,18 +608,33 @@ function MeetingSection({
               const selfAttendance = meeting.attendance.find(
                 (item) => item.appointmentId === currentMember?.id
               );
+              const attendanceOpen =
+                meeting.status === 'Draft' || meeting.status === 'QuorumFailed';
               const canSign =
                 canEvaluate &&
                 Boolean(currentMember) &&
                 currentMember?.status === 'Accepted' &&
                 !selfAttendance?.signedAtUtc &&
-                meeting.status === 'Draft' &&
+                attendanceOpen &&
                 serverAllows(control.allowedActions, ['signAttendance']);
               const canConfirm =
                 canAdminister &&
-                meeting.status === 'Draft' &&
-                meeting.signedVotingAttendanceCount >= control.requiredQuorum &&
+                attendanceOpen &&
                 serverAllows(control.allowedActions, ['confirmQuorum']);
+              const quorumDisplay = getQuorumDisplay(
+                control,
+                meeting,
+                attendanceOpen
+              );
+              const attendanceUnavailableReason =
+                getAttendanceUnavailableReason({
+                  control,
+                  meeting,
+                  currentMember,
+                  selfAttendanceSigned: Boolean(selfAttendance?.signedAtUtc),
+                  canEvaluate,
+                  canSign,
+                });
               return (
                 <div key={meeting.id} className="rounded-lg border p-4">
                   <div className="flex flex-col justify-between gap-3 md:flex-row">
@@ -578,19 +652,15 @@ function MeetingSection({
                         {formatDate(meeting.scheduledAtUtc)} ·{' '}
                         {meeting.meetingChannel}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Meeting evidence: {meeting.evidenceReference}
-                        {meeting.remoteMeetingEvidenceReference
-                          ? ` · Remote evidence: ${meeting.remoteMeetingEvidenceReference}`
-                          : ''}
-                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {canSign && currentMember && (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => onSignAttendance(meeting, currentMember)}
+                          onClick={() =>
+                            onSignAttendance(meeting, currentMember)
+                          }
                         >
                           Sign attendance
                         </Button>
@@ -600,39 +670,72 @@ function MeetingSection({
                           size="sm"
                           onClick={() => onConfirmQuorum(meeting)}
                         >
-                          Confirm server quorum
+                          Confirm Quorum
                         </Button>
                       )}
                     </div>
                   </div>
+                  {attendanceUnavailableReason && (
+                    <Alert className="mt-4">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Attendance signing unavailable</AlertTitle>
+                      <AlertDescription>
+                        {attendanceUnavailableReason}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {attendanceOpen && (
+                    <Alert className="mt-4">
+                      <History className="h-4 w-4" />
+                      <AlertTitle>
+                        Recorded attendance — pending quorum confirmation
+                      </AlertTitle>
+                      <AlertDescription>
+                        These figures reflect eligible signed attendance
+                        recorded so far. Confirm Quorum creates the
+                        authoritative server snapshot.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <QuorumSignal
-                      label="Eligible voting attendance"
-                      value={`${meeting.signedVotingAttendanceCount}/${control.requiredQuorum}`}
+                      label={
+                        attendanceOpen
+                          ? 'Recorded eligible voting attendance'
+                          : 'Eligible voting attendance'
+                      }
+                      value={`${quorumDisplay.signedVotingAttendanceCount}/${control.requiredQuorum}`}
                       ok={
-                        meeting.signedVotingAttendanceCount >=
+                        quorumDisplay.signedVotingAttendanceCount >=
                         control.requiredQuorum
                       }
                     />
                     <QuorumSignal
-                      label="Required Chair"
-                      value={meeting.chairPresent ? 'Present' : 'Missing'}
-                      ok={meeting.chairPresent}
+                      label={
+                        attendanceOpen ? 'Recorded Chair' : 'Required Chair'
+                      }
+                      value={quorumDisplay.chairPresent ? 'Present' : 'Missing'}
+                      ok={quorumDisplay.chairPresent}
                     />
                     <QuorumSignal
-                      label="Required Secretary"
-                      value={meeting.secretaryPresent ? 'Present' : 'Missing'}
-                      ok={meeting.secretaryPresent}
+                      label={
+                        attendanceOpen
+                          ? 'Recorded Secretary'
+                          : 'Required Secretary'
+                      }
+                      value={
+                        quorumDisplay.secretaryPresent ? 'Present' : 'Missing'
+                      }
+                      ok={quorumDisplay.secretaryPresent}
                     />
                   </div>
                   <div className="mt-4 overflow-x-auto rounded-md border">
-                    <table className="w-full min-w-[680px] text-sm">
+                    <table className="w-full min-w-[560px] text-sm">
                       <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
                         <tr>
                           <th className="px-3 py-2">Member</th>
                           <th className="px-3 py-2">Role</th>
                           <th className="px-3 py-2">Attendance</th>
-                          <th className="px-3 py-2">Signature</th>
                           <th className="px-3 py-2">Eligibility at signing</th>
                         </tr>
                       </thead>
@@ -647,9 +750,6 @@ function MeetingSection({
                             </td>
                             <td className="px-3 py-2">
                               {attendance.isPresent ? 'Present' : 'Absent'}
-                            </td>
-                            <td className="px-3 py-2">
-                              {attendance.signatureReference ?? 'Unsigned'}
                             </td>
                             <td className="px-3 py-2">
                               <Badge
@@ -669,9 +769,6 @@ function MeetingSection({
                       </tbody>
                     </table>
                   </div>
-                  <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
-                    Quorum hash: {meeting.quorumIntegrityHash}
-                  </p>
                 </div>
               );
             })
@@ -681,9 +778,88 @@ function MeetingSection({
   );
 }
 
+function getQuorumDisplay(
+  control: ProcurementEvaluationCommitteeControl,
+  meeting: ProcurementEvaluationMeeting,
+  useRecordedAttendance: boolean
+) {
+  if (!useRecordedAttendance) {
+    return {
+      signedVotingAttendanceCount: meeting.signedVotingAttendanceCount,
+      chairPresent: meeting.chairPresent,
+      secretaryPresent: meeting.secretaryPresent,
+    };
+  }
+
+  const eligibleMembers = new Map(
+    control.members
+      .filter((member) => member.eligibleToScore)
+      .map((member) => [member.id, member])
+  );
+  const recordedPresentMembers = meeting.attendance.flatMap((attendance) => {
+    const member = eligibleMembers.get(attendance.appointmentId);
+    return attendance.isPresent &&
+      attendance.signedAtUtc &&
+      attendance.wasEligibleAtSignature &&
+      attendance.signatureReference &&
+      member
+      ? [member]
+      : [];
+  });
+
+  return {
+    signedVotingAttendanceCount: recordedPresentMembers.filter(
+      (member) => member.isVoting
+    ).length,
+    chairPresent: recordedPresentMembers.some(
+      (member) => member.memberKind === 'Chair'
+    ),
+    secretaryPresent: recordedPresentMembers.some(
+      (member) => member.memberKind === 'Secretary'
+    ),
+  };
+}
+
+function getAttendanceUnavailableReason({
+  control,
+  meeting,
+  currentMember,
+  selfAttendanceSigned,
+  canEvaluate,
+  canSign,
+}: {
+  control: ProcurementEvaluationCommitteeControl;
+  meeting: ProcurementEvaluationMeeting;
+  currentMember?: ProcurementEvaluationAppointment;
+  selfAttendanceSigned: boolean;
+  canEvaluate: boolean;
+  canSign: boolean;
+}) {
+  if (canSign) return undefined;
+  if (selfAttendanceSigned)
+    return 'You have already signed attendance for this meeting.';
+  if (meeting.status !== 'Draft' && meeting.status !== 'QuorumFailed')
+    return `Attendance can no longer be signed because this meeting is ${roleLabel(meeting.status)}.`;
+  if (!canEvaluate)
+    return 'Your Security role does not grant the tender-evaluation permission required to sign attendance.';
+  if (!currentMember)
+    return 'Only a user appointed to this source-specific evaluation committee can sign their own attendance. Sign in as an appointed member.';
+  if (currentMember.status !== 'Accepted')
+    return 'Accept this committee appointment before signing attendance.';
+  if (currentMember.blockedReasons.length > 0)
+    return currentMember.blockedReasons.join(' · ');
+  if (!serverAllows(control.allowedActions, ['signAttendance']))
+    return (
+      control.blockedReasons[0] ??
+      'The server has not authorized attendance signing for the current member.'
+    );
+  return undefined;
+}
+
 function ScoreSection({
   control,
   scorerEligibility,
+  scorerEligibilityErrors,
   currentUserId,
   canEvaluate,
   canApprove,
@@ -693,6 +869,9 @@ function ScoreSection({
   control: ProcurementEvaluationCommitteeControl;
   scorerEligibility: Partial<
     Record<ProcurementEvaluationPhase, ProcurementEvaluationScorerEligibility>
+  >;
+  scorerEligibilityErrors?: Partial<
+    Record<ProcurementEvaluationPhase, unknown>
   >;
   currentUserId?: string;
   canEvaluate: boolean;
@@ -708,40 +887,43 @@ function ScoreSection({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FileLock2 className="h-5 w-5" />
-          Scorer eligibility, immutable score sheets, and controlled recall
+          Evaluation readiness and score history
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-3 md:grid-cols-3">
           {(['Technical', 'Financial', 'Combined'] as const).map((phase) => {
             const eligibility = scorerEligibility[phase];
+            const eligibilityError = scorerEligibilityErrors?.[phase];
+            const presentation = scorerEligibilityPresentation({
+              eligibility,
+              error: eligibilityError,
+              canEvaluate,
+              controlStatus: control.status,
+            });
             return (
               <div key={phase} className="rounded-md border p-4">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-medium">{phase}</p>
-                  <Badge
-                    variant={eligibility?.allowed ? 'default' : 'destructive'}
-                  >
-                    {eligibility?.allowed ? 'Eligible' : 'Blocked'}
+                  <Badge variant={presentation.variant}>
+                    {presentation.label}
                   </Badge>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {eligibility
-                    ? eligibility.allowed
-                      ? `Authorized attempt ${eligibility.authorizedAttempt}; quorum meeting resolved.`
-                      : eligibility.blockedReasons.join(' · ')
-                    : 'Authoritative scorer eligibility is loading.'}
+                  {presentation.detail}
                 </p>
                 {canEvaluate && eligibility?.allowed && (
                   <Button asChild size="sm" className="mt-3 w-full">
                     <Link
                       href={
                         control.sourceType === 'Tender'
-                          ? `/procurement/tenders/${control.sourceId}`
+                          ? `/procurement/bids?tenderId=${encodeURIComponent(control.sourceId)}`
                           : `/procurement/rfqs/${control.sourceId}/controls`
                       }
                     >
-                      Open evaluation workspace
+                      {control.sourceType === 'Tender'
+                        ? 'Open Tender Bids'
+                        : 'Open evaluation workspace'}
                     </Link>
                   </Button>
                 )}
@@ -753,8 +935,8 @@ function ScoreSection({
         {control.scoreSheets.length === 0 ? (
           <EmptyState
             icon={FileLock2}
-            title="No immutable score sheet has been submitted"
-            detail="Complete scoring in the existing evaluation workspace. Authoritative submission atomically retains the exact signed snapshot here and locks it against update or delete; this register never accepts caller-entered score JSON."
+            title="No score sheet has been submitted"
+            detail="Complete scoring in the evaluation workspace."
           />
         ) : (
           <div className="overflow-x-auto rounded-md border">
@@ -811,14 +993,14 @@ function ScoreSection({
                           serverAllows(control.allowedActions, [
                             'requestRecall',
                           ]) && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onRequestRecall(sheet)}
-                          >
-                            Request controlled recall
-                          </Button>
-                        )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onRequestRecall(sheet)}
+                            >
+                              Request controlled recall
+                            </Button>
+                          )}
                       </td>
                     </tr>
                   ))}
@@ -868,23 +1050,25 @@ function ScoreSection({
                     </div>
                     {recall.status === 'PendingApproval' &&
                       canApprove &&
-                      serverAllows(control.allowedActions, ['decideRecall']) && (
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => onDecideRecall(recall, true)}
-                        >
-                          Approve recall
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => onDecideRecall(recall, false)}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    )}
+                      serverAllows(control.allowedActions, [
+                        'decideRecall',
+                      ]) && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => onDecideRecall(recall, true)}
+                          >
+                            Approve recall
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => onDecideRecall(recall, false)}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      )}
                   </div>
                 ))}
             </div>
@@ -893,6 +1077,69 @@ function ScoreSection({
       </CardContent>
     </Card>
   );
+}
+
+function scorerEligibilityPresentation({
+  eligibility,
+  error,
+  canEvaluate,
+  controlStatus,
+}: {
+  eligibility?: ProcurementEvaluationScorerEligibility;
+  error?: unknown;
+  canEvaluate: boolean;
+  controlStatus: ProcurementEvaluationCommitteeControl['status'];
+}): {
+  label: string;
+  detail: string;
+  variant: 'default' | 'destructive' | 'outline' | 'secondary';
+} {
+  if (eligibility) {
+    return eligibility.allowed
+      ? {
+          label: 'Eligible',
+          detail: `Authorized attempt ${eligibility.authorizedAttempt}; quorum meeting resolved.`,
+          variant: 'default',
+        }
+      : {
+          label: 'Blocked',
+          detail:
+            eligibility.blockedReasons.join(' · ') ||
+            'The server did not authorize scoring for this phase.',
+          variant: 'destructive',
+        };
+  }
+  if (!canEvaluate) {
+    return {
+      label: 'Not checked',
+      detail:
+        'Scorer eligibility is actor-specific. Sign in as an appointed evaluator with the tender-evaluation permission to check it.',
+      variant: 'secondary',
+    };
+  }
+  if (controlStatus !== 'Active') {
+    return {
+      label: 'Not checked',
+      detail:
+        'Authoritative scorer eligibility becomes available after this committee control is active.',
+      variant: 'secondary',
+    };
+  }
+  if (error) {
+    return {
+      label: 'Unavailable',
+      detail: getProcurementProblemMessage(
+        error,
+        'Authoritative scorer eligibility could not be loaded. Refresh the controls or verify the current evaluator access.'
+      ),
+      variant: 'destructive',
+    };
+  }
+  return {
+    label: 'Loading',
+    detail: 'Authoritative scorer eligibility is loading.',
+    variant: 'outline',
+  };
 }
 
 function TimelineSection({
@@ -905,7 +1152,7 @@ function TimelineSection({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <History className="h-5 w-5" />
-          Immutable committee timeline
+          Committee activity
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -924,7 +1171,10 @@ function TimelineSection({
                   new Date(a.occurredAtUtc).getTime()
               )
               .map((entry, index) => (
-                <div key={`${entry.occurredAtUtc}-${entry.action}-${index}`} className="relative pb-6 pl-6 last:pb-0">
+                <div
+                  key={`${entry.occurredAtUtc}-${entry.action}-${index}`}
+                  className="relative pb-6 pl-6 last:pb-0"
+                >
                   <span className="absolute -left-1.5 top-1.5 h-3 w-3 rounded-full border bg-background" />
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{entry.action}</p>

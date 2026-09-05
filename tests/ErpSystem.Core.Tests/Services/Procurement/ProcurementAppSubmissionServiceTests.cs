@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Procurement;
+using System.Text;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -29,8 +30,16 @@ public sealed class ProcurementAppSubmissionServiceTests
         created.AttemptNumber.Should().Be(1);
         created.SubmissionNumber.Should().MatchRegex("^APP-[0-9]{4}-00001$");
         created.PlanNumber.Should().Be("APP-PLAN-001");
+        created.ExportFileName.Should().EndWith(".csv");
+        created.ExportChecksumSha256.Should().Be(Fixture.Checksum);
+        fixture.LastUploadedContent.Should().Contain("Office equipment");
         created.Timeline.Should().ContainSingle(item => item.Action == "ExportRecorded" &&
-            item.Evidence.Any(evidence => evidence.Reference == $"sha256:{Fixture.Checksum}"));
+            item.Evidence.Any(evidence => evidence.Reference == $"sha256:{Fixture.Checksum}") &&
+            item.Evidence.Any(evidence => evidence.RequirementKey == "APP_EXPORT_PACKAGE" &&
+                evidence.FileName == created.ExportFileName));
+        var exportFile = await fixture.Service.GetExportFileAsync(created.Id);
+        exportFile.FileName.Should().Be(created.ExportFileName);
+        exportFile.FileUploadRecordId.Should().NotBeEmpty();
         (await fixture.Context.ProcurementControlEvents.SingleAsync()).DecisionKeysJson.Should().Contain("DEC-009");
 
         var draftAction = () => fixture.Service.RecordExportAsync(fixture.ExportRequest(fixture.DraftPlanId), "trace-draft");
@@ -57,10 +66,7 @@ public sealed class ProcurementAppSubmissionServiceTests
         }, "trace-reject");
         var second = await fixture.Service.ResubmitAsync(first.Id, new ResubmitProcurementAppRequest
         {
-            ExportFileName = "app-plan-r2.xlsx",
-            ExportFormat = "XLSX",
-            ExportTemplateVersion = "PPA-APP-v2",
-            ExportChecksumSha256 = new string('B', 64),
+            ExportFormat = "JSON",
             RowVersion = rejected.RowVersion
         }, "trace-resubmit");
         var resubmitted = await fixture.Service.SubmitAsync(second.Id, new SubmitProcurementAppRequest
@@ -120,6 +126,8 @@ public sealed class ProcurementAppSubmissionServiceTests
         (await fixture.Service.SearchAsync(new ProcurementAppSubmissionSearchRequest())).TotalCount.Should().Be(0);
         await fixture.Service.Invoking(service => service.GetAsync(created.Id))
             .Should().ThrowAsync<ProcurementAppSubmissionNotFoundException>();
+        await fixture.Service.Invoking(service => service.GetExportFileAsync(created.Id))
+            .Should().ThrowAsync<ProcurementAppSubmissionNotFoundException>();
     }
 
     [Fact]
@@ -140,6 +148,22 @@ public sealed class ProcurementAppSubmissionServiceTests
 
         await action.Should().ThrowAsync<ProcurementAppSubmissionAuthorizationException>();
         (await fixture.Context.ProcurementAppSubmissions.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TenantAdministratorCanReadWhileUnregisteredRoleIsDenied()
+    {
+        await using var fixture = new Fixture();
+
+        var summary = await fixture.Service.GetSummaryAsync();
+
+        summary.PublishedPlanCount.Should().Be(1);
+
+        fixture.SwitchRoles("Manager");
+        var denied = () => fixture.Service.SearchAsync(new ProcurementAppSubmissionSearchRequest());
+
+        await denied.Should().ThrowAsync<ProcurementAppSubmissionAuthorizationException>()
+            .WithMessage("*procurement records read permission*");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -203,7 +227,40 @@ public sealed class ProcurementAppSubmissionServiceTests
             Access.Setup(service => service.EnforceCapabilityAsync(
                     It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true, Code = "ACCESS_ALLOWED", Message = "Allowed" });
+            ControlledFiles = new Mock<IControlledFileUploadService>();
+            ControlledFiles.Setup(service => service.UploadAsync(
+                    It.IsAny<ControlledFileUploadRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ControlledFileUploadRequest request, CancellationToken _) =>
+                {
+                    using var reader = new StreamReader(
+                        request.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                    LastUploadedContent = reader.ReadToEnd();
+                    var record = new FileUploadRecord
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = request.TenantId,
+                        Category = request.Category,
+                        OriginalFileName = request.FileName,
+                        StoredFileName = request.FileName,
+                        FilePath = $"private/{request.FileName}",
+                        ContentType = request.ContentType,
+                        FileSize = request.FileSize,
+                        StorageProvider = "Test",
+                        UploadedByUserId = request.ActorUserId,
+                        VirusScanStatus = FileVirusScanStatus.Clean,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    Context.FileUploadRecords.Add(record);
+                    Context.SaveChanges();
+                    return new ControlledFileUploadResult
+                    {
+                        Record = record,
+                        ChecksumSha256 = Checksum,
+                        PublicUrl = string.Empty
+                    };
+                });
             Service = new ProcurementAppSubmissionService(_unitOfWork, _currentUser.Object, Access.Object, events,
+                ControlledFiles.Object,
                 NullLogger<ProcurementAppSubmissionService>.Instance);
         }
 
@@ -215,15 +272,14 @@ public sealed class ProcurementAppSubmissionServiceTests
         public Guid DraftPlanId { get; }
         public ApplicationDbContext Context { get; }
         public Mock<IProcurementAccessControlService> Access { get; }
+        public Mock<IControlledFileUploadService> ControlledFiles { get; }
         public ProcurementAppSubmissionService Service { get; }
+        public string LastUploadedContent { get; private set; } = string.Empty;
 
         public RecordProcurementAppExportRequest ExportRequest(Guid planId) => new()
         {
             ProcurementPlanId = planId,
-            ExportFileName = "app-plan.xlsx",
-            ExportFormat = "XLSX",
-            ExportTemplateVersion = "PPA-APP-v1",
-            ExportChecksumSha256 = Checksum,
+            ExportFormat = "CSV",
             Notes = "Published-plan APP export package"
         };
 

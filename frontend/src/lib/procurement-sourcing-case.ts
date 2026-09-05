@@ -22,10 +22,11 @@ export const procurementSourcingCaseMethodLabels: Record<
 
 export const procurementSourcingCaseActions = (
   sourcingCase: Pick<ProcurementSourcingCase, 'status' | 'isSourceCurrent'>,
-  canManage: boolean
+  canManage: boolean,
+  canApprove: boolean = canManage
 ) => ({
   canClose:
-    canManage &&
+    canApprove &&
     sourcingCase.isSourceCurrent &&
     sourcingCase.status === 'InProgress',
   canCancel:
@@ -47,9 +48,9 @@ export const validateProcurementSourcingCase = (
     (request.methodOverrideReason?.trim().length ?? 0) < 5
   )
     return 'An approved method override requires a reason of at least 5 characters.';
-  if (request.justification.trim().length < 5)
-    return 'A sourcing justification of at least 5 characters is required.';
   if (!request.lots.length) return 'At least one sourcing lot is required.';
+  if (request.lots.length > 1 && request.justification.trim().length < 10)
+    return 'Explain in at least 10 characters why the requisition is divided into multiple sourcing lots.';
 
   const sourceIds = new Set(lines.map((line) => line.id));
   const assigned = new Set<string>();

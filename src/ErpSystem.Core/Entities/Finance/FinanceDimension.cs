@@ -102,11 +102,28 @@ public sealed class FinanceDimensionSetItem : TenantEntity
     [Required, MaxLength(30)]
     public string DimensionCodeSnapshot { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Convenience name retained on the shared canonical set.  Exact transaction-time evidence is
+    /// stored on FinanceDimensionSnapshotItem because one canonical set may be reused over time.
+    /// </summary>
+    [Required, MaxLength(100)]
+    public string DimensionNameSnapshot { get; set; } = string.Empty;
+
     [Required, MaxLength(50)]
     public string DimensionValueCodeSnapshot { get; set; } = string.Empty;
 
     [Required, MaxLength(200)]
     public string DimensionValueNameSnapshot { get; set; } = string.Empty;
+
+    [Required, MaxLength(50)]
+    public string SnapshotSource { get; set; } = "CanonicalResolution";
+
+    public DateTime SnapshotCapturedAt { get; set; } = DateTime.UtcNow;
+
+    [Required, MaxLength(30)]
+    public string SnapshotQuality { get; set; } = "Exact";
+
+    public bool HistoricalNameReconstructed { get; set; }
 
     [ForeignKey(nameof(FinanceDimensionSetId))]
     public FinanceDimensionSet FinanceDimensionSet { get; set; } = null!;
@@ -124,6 +141,14 @@ public sealed class FinanceDimensionSetItem : TenantEntity
 /// </summary>
 public sealed class FinanceDimensionAccountRule : TenantEntity
 {
+    /// <summary>Stable identity shared by effective-dated versions of the same governed rule.</summary>
+    public Guid RuleFamilyId { get; set; }
+
+    /// <summary>Monotonic version within <see cref="RuleFamilyId"/>.</summary>
+    public int RuleVersion { get; set; } = 1;
+
+    public Guid? SupersedesRuleId { get; set; }
+
     [Required]
     public Guid AccountId { get; set; }
 
@@ -147,10 +172,27 @@ public sealed class FinanceDimensionAccountRule : TenantEntity
     [MaxLength(50)]
     public string? PostingAction { get; set; }
 
+    public ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId? RouteId { get; set; }
+
+    [MaxLength(150)]
+    public string? SourceRoute { get; set; }
+
+    [MaxLength(20)]
+    public string? ContractVersion { get; set; }
+
     public Guid? DefaultDimensionValueId { get; set; }
     public DateTime EffectiveDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// True after the rule has been frozen into source, approval, or posting evidence.  Evidence-
+    /// locked versions are retired and superseded; they are never edited in place.
+    /// </summary>
+    public bool IsEvidenceLocked { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     [ForeignKey(nameof(AccountId))]
     public Account Account { get; set; } = null!;
@@ -160,4 +202,112 @@ public sealed class FinanceDimensionAccountRule : TenantEntity
 
     [ForeignKey(nameof(DefaultDimensionValueId))]
     public FinanceDimensionValue? DefaultDimensionValue { get; set; }
+
+    [ForeignKey(nameof(SupersedesRuleId))]
+    public FinanceDimensionAccountRule? SupersedesRule { get; set; }
+}
+
+/// <summary>
+/// Immutable, line-specific snapshot of one dimension combination.  It deliberately duplicates
+/// readable codes/names and rule evidence instead of treating the shared canonical set as exact
+/// historical proof.
+/// </summary>
+public sealed class FinanceDimensionSnapshot : TenantEntity
+{
+    [Required]
+    public Guid FinanceDimensionSetId { get; set; }
+
+    [Required, MaxLength(64)]
+    public string CombinationHashSnapshot { get; set; } = string.Empty;
+
+    [Required, MaxLength(1000)]
+    public string DisplayValueSnapshot { get; set; } = string.Empty;
+
+    [Required, MaxLength(50)]
+    public string SnapshotSource { get; set; } = "PostingResolution";
+
+    public DateTime SnapshotCapturedAt { get; set; } = DateTime.UtcNow;
+
+    [Required, MaxLength(30)]
+    public string SnapshotQuality { get; set; } = "Exact";
+
+    public bool HistoricalNameReconstructed { get; set; }
+
+    [MaxLength(64)]
+    public string? RuleEvidenceHash { get; set; }
+
+    [MaxLength(50)]
+    public string? ProducerModule { get; set; }
+
+    [MaxLength(150)]
+    public string? SourceRoute { get; set; }
+
+    [MaxLength(100)]
+    public string? SourceDocumentType { get; set; }
+
+    [MaxLength(20)]
+    public string? ContractVersion { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSetId))]
+    public FinanceDimensionSet FinanceDimensionSet { get; set; } = null!;
+
+    public ICollection<FinanceDimensionSnapshotItem> Items { get; set; } =
+        new List<FinanceDimensionSnapshotItem>();
+}
+
+/// <summary>Immutable definition/value/rule evidence belonging to one exact source or posting line.</summary>
+public sealed class FinanceDimensionSnapshotItem : TenantEntity
+{
+    [Required]
+    public Guid FinanceDimensionSnapshotId { get; set; }
+
+    [Required]
+    public Guid FinanceDimensionDefinitionId { get; set; }
+
+    [Required]
+    public Guid FinanceDimensionValueId { get; set; }
+
+    [Required, MaxLength(30)]
+    public string DimensionCodeSnapshot { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string DimensionNameSnapshot { get; set; } = string.Empty;
+
+    [Required, MaxLength(50)]
+    public string DimensionValueCodeSnapshot { get; set; } = string.Empty;
+
+    [Required, MaxLength(200)]
+    public string DimensionValueNameSnapshot { get; set; } = string.Empty;
+
+    public Guid? FinanceDimensionAccountRuleId { get; set; }
+    public Guid? RuleFamilyIdSnapshot { get; set; }
+    public int? RuleVersionSnapshot { get; set; }
+
+    [MaxLength(20)]
+    public string? RuleTypeSnapshot { get; set; }
+
+    public DateTime? RuleEffectiveDateSnapshot { get; set; }
+    public DateTime? RuleExpiryDateSnapshot { get; set; }
+
+    [Required, MaxLength(50)]
+    public string SnapshotSource { get; set; } = "PostingResolution";
+
+    public DateTime SnapshotCapturedAt { get; set; } = DateTime.UtcNow;
+
+    [Required, MaxLength(30)]
+    public string SnapshotQuality { get; set; } = "Exact";
+
+    public bool HistoricalNameReconstructed { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSnapshotId))]
+    public FinanceDimensionSnapshot FinanceDimensionSnapshot { get; set; } = null!;
+
+    [ForeignKey(nameof(FinanceDimensionDefinitionId))]
+    public FinanceDimensionDefinition FinanceDimensionDefinition { get; set; } = null!;
+
+    [ForeignKey(nameof(FinanceDimensionValueId))]
+    public FinanceDimensionValue FinanceDimensionValue { get; set; } = null!;
+
+    [ForeignKey(nameof(FinanceDimensionAccountRuleId))]
+    public FinanceDimensionAccountRule? FinanceDimensionAccountRule { get; set; }
 }

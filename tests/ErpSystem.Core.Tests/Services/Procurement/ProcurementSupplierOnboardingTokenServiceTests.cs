@@ -243,6 +243,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RowVersion = pending.RowVersion
             },
             "verify-payment");
+        await fixture.MarkApplicationTokenDeliveredAsync(issued.Token.Id);
         var verificationReplay = await fixture.Service.ReconcilePaymentAsync(
             issued.Token.Id,
             pending.Id,
@@ -256,6 +257,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         verified.Token.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
         verified.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
+        verified.Token.ApplicationTokenDeliveryRecoveryRequired.Should().BeTrue();
         verified.PlaintextToken.Should().NotBeNullOrWhiteSpace();
         verified.Token.Generation.Should().Be(2);
         verified.Token.Payments.Should().ContainSingle(item =>
@@ -279,6 +281,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             item.TransactionTag == "SupplierOnboardingFee" &&
             item.AccountId == fixture.RevenueAccount!.Id);
         verificationReplay.Token.Payments.Should().ContainSingle();
+        verificationReplay.Token.ApplicationTokenDeliveryRecoveryRequired.Should().BeFalse();
         verificationReplay.PlaintextToken.Should().BeNull();
         var mismatchedVerificationReplay = () => fixture.Service.ReconcilePaymentAsync(
             issued.Token.Id,
@@ -299,6 +302,78 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         fixture.FinancePostCount.Should().Be(1,
             "verification replays must not create duplicate Finance postings");
         fixture.AssertPostedThenReconciledLifecycle();
+    }
+
+    [Fact]
+    public async Task ReconciledPaymentRetryRotatesOnlyWhenApplicationTokenWasNotDelivered()
+    {
+        await using var fixture = new Fixture(paid: true);
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-for-delivery-recovery");
+        await fixture.SeedApplicantSessionAsync(issued.Token.Id);
+        var submitted = await fixture.Service.RecordPaymentAsync(
+            issued.Token.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod!.Id,
+                PaymentReference = "MOMO-DELIVERY-RECOVERY-001",
+                RowVersion = issued.Token.RowVersion
+            },
+            "record-for-delivery-recovery");
+        var payment = submitted.Token.Payments.Should().ContainSingle().Subject;
+        fixture.SetUser(Guid.NewGuid());
+        var request = new ReconcileProcurementSupplierOnboardingPaymentRequest
+        {
+            ReconciliationReference = "PROVIDER-DELIVERY-RECOVERY-001",
+            Notes = "Trusted payment matched.",
+            RowVersion = payment.RowVersion
+        };
+
+        var reconciled = await fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            payment.Id,
+            request,
+            "verify-before-delivery-interruption");
+        reconciled.Token.ApplicationTokenDeliveryRecoveryRequired.Should().BeTrue();
+        var recovered = await fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            payment.Id,
+            request,
+            "retry-after-delivery-interruption");
+
+        reconciled.PlaintextToken.Should().NotBeNullOrWhiteSpace();
+        recovered.PlaintextToken.Should().NotBeNullOrWhiteSpace()
+            .And.NotBe(reconciled.PlaintextToken,
+                "the committed token secret cannot be recovered and must be securely rotated");
+        recovered.Token.Generation.Should().Be(reconciled.Token.Generation + 1);
+        recovered.Token.ReissueReason.Should().Contain("Automatic recovery");
+        recovered.Token.Payments.Should().ContainSingle(item =>
+            item.Id == payment.Id &&
+            item.Status == ProcurementSupplierOnboardingPaymentStatus.Reconciled &&
+            item.PostingEventId == fixture.PostingEventId &&
+            item.JournalEntryId == fixture.JournalEntryId);
+        fixture.FinancePostCount.Should().Be(1,
+            "delivery recovery must never repost the reconciled payment to Finance");
+
+        var mismatchedRetry = () => fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            payment.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "DIFFERENT-PROVIDER-REFERENCE",
+                Notes = request.Notes,
+                RowVersion = request.RowVersion
+            },
+            "mismatched-delivery-recovery");
+        await mismatchedRetry.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenConflictException>()
+            .Where(exception => exception.Code ==
+                "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH");
+        fixture.FinancePostCount.Should().Be(1);
     }
 
     [Fact]
@@ -950,12 +1025,30 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 .Returns(() => _authenticationProvider);
             current.SetupGet(item => item.Claims).Returns(_claims);
             current.SetupGet(item => item.Roles).Returns(() =>
-                _external ? ["External"] : ["TenantAdmin"]);
+                _external ? ["External"] : ["TDC_PROCUREMENT_OFFICER"]);
             current.Setup(item => item.HasRole(It.IsAny<string>()))
-                .Returns((string role) => !_external && role == "TenantAdmin");
+                .Returns((string role) =>
+                    !_external && role == "TDC_PROCUREMENT_OFFICER");
 
             _unitOfWork = new UnitOfWork(Context);
             var access = new Mock<IProcurementAccessControlService>();
+            access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((
+                    ProcurementAccessCapabilityRequest request,
+                    string _,
+                    CancellationToken _) => new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ACCESS_ALLOWED",
+                    Message = "The test actor has the required controlled capability.",
+                    ActorUserId = _userId,
+                    TenantId = _tenantId,
+                    PermissionCode = request.PermissionCode,
+                    EvaluatedAtUtc = DateTime.UtcNow
+                });
             var sod = new Mock<IProcurementSodGuardService>();
             sod.Setup(item => item.EnforceAsync(
                     It.IsAny<ProcurementSodGuardRequest>(),
@@ -1119,6 +1212,17 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             Context.AddRange(access, session);
             await Context.SaveChangesAsync();
             return session;
+        }
+
+        public async Task MarkApplicationTokenDeliveredAsync(Guid tokenId)
+        {
+            var access = await Context.ProcurementSupplierApplicantAccesses
+                .SingleAsync(item => item.TenantId == TenantId && item.TokenId == tokenId);
+            access.NotificationAttemptCount++;
+            access.LastNotificationAtUtc = DateTime.UtcNow;
+            access.LastNotificationStatus = "ApplicationTokenSent";
+            access.LastNotificationFailure = null;
+            await Context.SaveChangesAsync();
         }
 
         public Task BeginTransactionAsync() => _unitOfWork.BeginTransactionAsync();

@@ -391,9 +391,20 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         if (committee.Status == ProcurementCommitteeStatus.Retired)
             throw new ProcurementAccessConflictException("Retired committee membership is immutable.");
         var assignment = await Assignments.GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId && item.Id == request.AssignmentId && !item.IsDeleted && item.IsActive)
+                item.TenantId == _currentUser.TenantId && item.Id == request.AssignmentId && !item.IsDeleted)
             .Include(item => item.User).SingleOrDefaultAsync(cancellationToken)
             ?? throw new ProcurementAccessNotFoundException("The selected responsibility assignment was not found.");
+        if (!assignment.IsActive)
+            throw new ProcurementAccessValidationException("COMMITTEE_ASSIGNMENT_INACTIVE",
+                "The selected responsibility assignment is inactive. Reactivate it under Scopes & duties before adding the member.");
+        var memberFrom = EnsureUtc(request.EffectiveFrom);
+        var memberTo = request.EffectiveTo.HasValue ? EnsureUtc(request.EffectiveTo.Value) : (DateTime?)null;
+        var assignmentFrom = EnsureUtc(assignment.EffectiveFrom);
+        var assignmentTo = assignment.EffectiveTo.HasValue ? EnsureUtc(assignment.EffectiveTo.Value) : (DateTime?)null;
+        if (assignmentFrom > memberFrom ||
+            (assignmentTo.HasValue && (!memberTo.HasValue || assignmentTo.Value < memberTo.Value)))
+            throw new ProcurementAccessValidationException("COMMITTEE_ASSIGNMENT_PERIOD_MISMATCH",
+                "The committee membership period must be fully covered by the selected responsibility assignment.");
         var observerAllowed = request.MemberKind == ProcurementCommitteeMemberKind.Observer &&
                               (assignment.RoleName == "TDC_OBSERVER" || assignment.RoleName == ProcurementAccessControlRegistry.InternalAuditRole);
         if (!observerAllowed && assignment.RoleName != committee.RequiredRoleName)
@@ -413,8 +424,8 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             MemberKind = request.MemberKind,
             IsVoting = request.MemberKind != ProcurementCommitteeMemberKind.Observer && request.IsVoting,
             IsActive = true,
-            EffectiveFrom = EnsureUtc(request.EffectiveFrom),
-            EffectiveTo = request.EffectiveTo.HasValue ? EnsureUtc(request.EffectiveTo.Value) : null,
+            EffectiveFrom = memberFrom,
+            EffectiveTo = memberTo,
             Reason = request.Reason.Trim(),
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username,
@@ -925,8 +936,17 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.Roles.Any(role => role is "SuperAdmin" or "TenantAdmin"))
-            throw new ProcurementAccessAuthorizationException("Procurement access administration requires SuperAdmin or TenantAdmin.");
+        // Platform SuperAdmin remains the authority for configuration workspaces.
+        // This bypass is deliberately limited to this access-administration service;
+        // it does not make the actor a TDC evaluator, approver, or committee member.
+        if (_currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin))
+            return;
+
+        if (!_currentUser.Roles.Any(role =>
+                ProcurementAccessControlRegistry.RoleGrantsPermission(
+                    role, "procurement.access.manage")))
+            throw new ProcurementAccessAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to manage procurement access.");
     }
 
     private void EnsureAuthenticatedTenant()

@@ -425,7 +425,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         if (isOpeningStock && reasonCode != StockAdjustmentReasonCodes.InitialStock)
             throw new InvalidOperationException("The governed opening-stock endpoint can create only INITIAL_STOCK adjustments.");
         var description = Required(dto.Description, "A detailed adjustment reason is required.", 1000);
-        var reference = Normalize(dto.Reference, isOpeningStock ? 50 : 100) ?? string.Empty;
+        var reference = Normalize(dto.Reference, 50) ?? string.Empty;
         var payloadHash = isOpeningStock
             ? CreateOpeningStockPayloadHash(dto, description, reference, openingBookClassification!)
             : CreateAdjustmentPayloadHash(dto, reasonCode, description, reference);
@@ -438,7 +438,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         var adjustment = new StockAdjustment
         {
             TenantId = _currentUserProvider.TenantId,
-            AdjustmentNumber = await _adjustmentRepository.GenerateAdjustmentNumberAsync(),
+            AdjustmentNumber = await _adjustmentRepository.GenerateAdjustmentNumberAsync(_currentUserProvider.TenantId),
             AdjustmentDate = dto.AdjustmentDate ?? DateTime.UtcNow,
             WarehouseId = dto.WarehouseId,
             BookClassification = openingBookClassification ?? "IFRS",
@@ -486,7 +486,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         var before = Snapshot(adjustment);
         adjustment.ReasonCode = requestedReasonCode;
         adjustment.Description = Required(dto.Description, "A detailed adjustment reason is required.", 1000);
-        adjustment.Reference = Normalize(dto.Reference, 100) ?? string.Empty;
+        adjustment.Reference = Normalize(dto.Reference, 50) ?? string.Empty;
         if (dto.AdjustmentDate.HasValue) adjustment.AdjustmentDate = dto.AdjustmentDate.Value;
         if (dto.Items is { Count: > 0 })
         {
@@ -1015,7 +1015,10 @@ public class StockAdjustmentService : IStockAdjustmentService
                 var adjustment = await LoadAsync(adjustmentId)
                     ?? throw new ArgumentException($"Stock adjustment {adjustmentId} not found");
                 adjustment = await mutation(adjustment);
-                await _adjustmentRepository.UpdateAsync(adjustment);
+                // Lifecycle mutations flush the tracked parent before appending their
+                // immutable action. An idempotent replay returns the tracked entity
+                // unchanged, so do not mark the aggregate Modified again: doing so
+                // advances RowVersion and makes the caller's next genuine action stale.
                 await _unitOfWork.SaveChangesAsync();
                 await _unitOfWork.CommitAsync();
                 return await GetByIdAsync(adjustmentId)
@@ -1188,8 +1191,8 @@ public class StockAdjustmentService : IStockAdjustmentService
                 ?? throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
             if (inventoryItem.TenantId != adjustment.TenantId || inventoryItem.IsDeleted)
                 throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
-            if (inventoryItem.Status != ItemStatus.Active || inventoryItem.ItemType != ItemType.StockItem)
-                throw new InvalidOperationException($"Inventory item {inventoryItem.ItemCode} must be an active stock item.");
+            if (inventoryItem.Status != ItemStatus.Active || !IsStockedInventoryItem(inventoryItem.ItemType))
+                throw new InvalidOperationException($"Inventory item {inventoryItem.ItemCode} must be an active stocked item.");
             var exactBalance = await _unitOfWork.Repository<InventoryLocation>().GetQueryable(value =>
                     value.TenantId == adjustment.TenantId && value.InventoryItemId == input.InventoryItemId &&
                     value.LocationId == location.Id && !value.IsDeleted)
@@ -1378,6 +1381,12 @@ public class StockAdjustmentService : IStockAdjustmentService
                     x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus &&
                     x.PublishedAt.HasValue && x.FileUploadRecordId.HasValue)
                 ?? throw new InvalidOperationException("Evidence must reference the current published version in central DMS.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(x => x.Id == version.FileUploadRecordId!.Value &&
+                    x.TenantId == adjustment.TenantId && !x.IsDeleted &&
+                    x.VirusScanStatus == FileVirusScanStatus.Clean);
+            if (!cleanUpload)
+                throw new InvalidOperationException("Evidence must have a successful clean malware scan.");
             var evidence = new StockAdjustmentEvidence
             {
                 TenantId = adjustment.TenantId,
@@ -1405,6 +1414,12 @@ public class StockAdjustmentService : IStockAdjustmentService
                     x.DocumentRecord.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
                     x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && x.PublishedAt.HasValue);
             if (!current) throw new InvalidOperationException("Linked central-DMS evidence is no longer current and published.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(x => x.Id == evidence.FileUploadRecordId &&
+                    x.TenantId == adjustment.TenantId && !x.IsDeleted &&
+                    x.VirusScanStatus == FileVirusScanStatus.Clean);
+            if (!cleanUpload)
+                throw new InvalidOperationException("Linked central-DMS evidence no longer has a successful clean malware scan.");
         }
     }
 
@@ -1492,7 +1507,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         if (warehouse.TenantId != adjustment.TenantId || warehouse.IsDeleted || (!reverse && !warehouse.IsActive))
             throw new InvalidOperationException("The effective adjustment warehouse is inactive or outside the current tenant.");
         if (inventoryItem.TenantId != adjustment.TenantId || inventoryItem.IsDeleted ||
-            (!reverse && (inventoryItem.Status != ItemStatus.Active || inventoryItem.ItemType != ItemType.StockItem)))
+            (!reverse && (inventoryItem.Status != ItemStatus.Active || !IsStockedInventoryItem(inventoryItem.ItemType))))
             throw new InvalidOperationException("The adjustment item is inactive or outside the current tenant.");
         var delta = reverse ? -item.AdjustmentQuantity : item.AdjustmentQuantity;
         InventoryStockDecreaseAuthorization? decreaseAuthorization = null;
@@ -1754,6 +1769,9 @@ public class StockAdjustmentService : IStockAdjustmentService
         StockAdjustmentReasonCodes.Damage or StockAdjustmentReasonCodes.Loss or StockAdjustmentReasonCodes.Theft or
         StockAdjustmentReasonCodes.Expired or StockAdjustmentReasonCodes.QualityIssue or StockAdjustmentReasonCodes.Donation or
         StockAdjustmentReasonCodes.WriteOff or StockAdjustmentReasonCodes.Other;
+
+    private static bool IsStockedInventoryItem(ItemType itemType) =>
+        itemType is ItemType.StockItem or ItemType.FixedAsset;
 
     private static string AdjustmentPayloadHash(StockAdjustment item) => Hash(JsonSerializer.Serialize(new
     {

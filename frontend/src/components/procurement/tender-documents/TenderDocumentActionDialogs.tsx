@@ -26,6 +26,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import {
   hasAnyTenderDocumentAction,
+  suggestedTenderDocumentSelection,
   tenderDocumentChangeTypeLabel,
   validateTenderDocumentChange,
   validateTenderDocumentIssue,
@@ -113,6 +114,12 @@ export function TenderDocumentActionDialogs({
       amountPaid: register.feeMode === 'Paid' ? register.feeAmount : 0,
     }));
   }, [register]);
+
+  useEffect(() => {
+    setTemplateVersionId(current => suggestedTenderDocumentSelection(
+      current, readiness.effectiveTemplateVersionId, approvedTemplates
+    ));
+  }, [readiness.effectiveTemplateVersionId, approvedTemplates]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {

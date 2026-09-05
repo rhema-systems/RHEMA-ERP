@@ -15,7 +15,7 @@ param(
     [string]$SshUser = 'Administrator',
     [string]$SshKeyPath = (Join-Path $env:USERPROFILE '.ssh\id_rsa'),
     [string]$PublicBaseUrl = 'https://149.102.145.190:8443',
-    [int]$ApiReadyTimeoutSeconds = 420
+    [int]$ApiReadyTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Stop'
@@ -196,6 +196,76 @@ function ConvertTo-SingleQuotedPowerShellLiteral {
     return "'" + $Value.Replace("'", "''") + "'"
 }
 
+function Get-SyncfusionLicenseKey {
+    foreach ($name in @('SYNCFUSION_LICENSE', 'Syncfusion__LicenseKey')) {
+        foreach ($scope in @('Process', 'User', 'Machine')) {
+            $configured = [Environment]::GetEnvironmentVariable($name, $scope)
+            if (-not [string]::IsNullOrWhiteSpace($configured)) {
+                Write-Host "Using the protected Syncfusion license configured for this build host." `
+                    -ForegroundColor DarkGray
+                return $configured
+            }
+        }
+    }
+
+    # The browser license must be embedded while Next.js is built. Reuse the
+    # protected API-service value over SSH when the release host has no local
+    # copy. Capture it only in process memory; never echo it or write it to the
+    # release manifest, deployment result, or repository.
+    $remoteScript = @'
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$path = 'C:\RhemaERP\services\api\RhemaERPAPI.xml'
+[xml]$xml = Get-Content -LiteralPath $path -Raw
+$node = @($xml.service.env | Where-Object {
+    $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
+    -not [string]::IsNullOrWhiteSpace([string]$_.value)
+})[0]
+if ($null -eq $node) { throw 'The protected Syncfusion API license is not configured.' }
+[Console]::Out.Write([Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes([string]$node.value)))
+'@
+    $encoded = [Convert]::ToBase64String(
+        [Text.Encoding]::Unicode.GetBytes($remoteScript))
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command ssh.exe -ErrorAction Stop).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in (Get-SshArguments)) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    [void]$startInfo.ArgumentList.Add(
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded")
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    [void]$stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    Assert-True ($exitCode -eq 0) `
+        'Could not load the protected Syncfusion license from the VPS service configuration.'
+
+    try {
+        $license = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($stdout.Trim()))
+    }
+    catch {
+        throw 'The protected Syncfusion license returned by the VPS is malformed.'
+    }
+    Assert-True (-not [string]::IsNullOrWhiteSpace($license)) `
+        'The protected Syncfusion license returned by the VPS is empty.'
+    Write-Host 'Loaded the protected Syncfusion license without logging its value.' `
+        -ForegroundColor DarkGray
+    return $license
+}
+
 function Invoke-RemoteHelper {
     param(
         [string]$RemoteHelperPath,
@@ -219,10 +289,38 @@ function Invoke-RemoteHelper {
     $encoded = [Convert]::ToBase64String(
         [Text.Encoding]::Unicode.GetBytes($remoteScript))
     $sshArguments = Get-SshArguments
-    $output = & ssh @sshArguments `
-        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded" `
-        2>&1
-    if ($LASTEXITCODE -ne 0) {
+    # Capture native stdout/stderr as raw text. PowerShell's native-command
+    # adapter attempts to deserialize large remote CLIXML error streams and
+    # can itself fail with "unclosed literal string", hiding the real remote
+    # result after packages and backups have already succeeded.
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command ssh.exe -ErrorAction Stop).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $sshArguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    [void]$startInfo.ArgumentList.Add(
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded")
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+
+    $output = @(
+        @($stdout -split "`r?`n")
+        @($stderr -split "`r?`n")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    if ($exitCode -ne 0) {
         $summary = (@($output) | Where-Object {
             $_ -notmatch '^#< CLIXML' -and $_ -notmatch '^<Objs '
         } | Select-Object -Last 20) -join [Environment]::NewLine
@@ -254,6 +352,7 @@ function Test-ReleaseManifest {
             [string]::IsNullOrWhiteSpace([string]$manifest.cacheVersion)) {
             return $null
         }
+        if ($manifest.syncfusionFrontendLicensed -ne $true) { return $null }
         $apiPath = Join-Path (Split-Path $ManifestPath) $manifest.api.file
         $frontendPath = Join-Path (Split-Path $ManifestPath) $manifest.frontend.file
         if (-not (Test-Path $apiPath) -or -not (Test-Path $frontendPath)) {
@@ -305,6 +404,7 @@ function New-ReleaseArtifacts {
     param([string]$ReleaseDirectory)
 
     Assert-FastMigrationDiscovery
+    $syncfusionLicenseKey = Get-SyncfusionLicenseKey
     $apiOutput = Join-Path $ReleaseDirectory 'api'
     $frontendOutput = Join-Path $ReleaseDirectory 'frontend'
     Reset-GeneratedDirectory $apiOutput $ReleaseDirectory
@@ -314,7 +414,8 @@ function New-ReleaseArtifacts {
         'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
         '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-o', $apiOutput,
-        '/p:PublishSingleFile=false', '-p:TdcFastEfBuild=true'
+        '/p:PublishSingleFile=false', '-p:TdcFastEfBuild=true',
+        '-p:UseSharedCompilation=false', '-m:1'
     ) 'API publish failed' | Out-Host
 
     foreach ($name in @(
@@ -356,16 +457,26 @@ function New-ReleaseArtifacts {
         API_URL = "$PublicBaseUrl/api"
         NEXTAUTH_URL = $PublicBaseUrl
         NEXT_TELEMETRY_DISABLED = '1'
+        SYNCFUSION_LICENSE = $syncfusionLicenseKey
     }
     try {
         Push-Location $frontendRoot
         try {
+            $syncfusionActivator = Join-Path $frontendRoot `
+                'node_modules\.bin\syncfusion-license.cmd'
+            Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
+                'The installed Syncfusion frontend license activator is missing.'
+            Invoke-NativeChecked $syncfusionActivator @('activate') `
+                'Syncfusion frontend license activation failed' | Out-Host
             Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
                 'Frontend build failed' | Out-Host
         }
         finally { Pop-Location }
     }
-    finally { Restore-TemporaryEnvironment $previousEnvironment }
+    finally {
+        Restore-TemporaryEnvironment $previousEnvironment
+        $syncfusionLicenseKey = $null
+    }
 
     $buildId = (Get-Content (Join-Path $nextOutput 'BUILD_ID') -Raw).Trim()
     Assert-True ($buildId -ne 'development') `
@@ -391,10 +502,18 @@ function New-ReleaseArtifacts {
     ) 'Frontend public staging failed'
     Copy-Item (Join-Path $nextOutput 'standalone\server.js') `
         (Join-Path $frontendOutput 'server.js') -Force
+    Invoke-RobocopyChecked @(
+        (Join-Path $nextOutput 'standalone\node_modules'),
+        (Join-Path $frontendOutput 'node_modules'),
+        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+    ) 'Frontend runtime dependencies staging failed'
     Copy-Item (Join-Path $frontendRoot 'package.json') `
         (Join-Path $frontendOutput 'package.json') -Force
 
-    $cacheVersion = "vps-$($script:ShortCommit)"
+    # A diagnostic dirty-worktree release can share HEAD with an earlier VPS
+    # package. Include the deployment stamp so browsers always receive a new
+    # service-worker cache identity for the exact package being applied.
+    $cacheVersion = "vps-$($script:ShortCommit)-$($script:DeploymentStamp)"
     $serviceWorkerPath = Join-Path $frontendOutput 'public\sw.js'
     $serviceWorker = Get-Content $serviceWorkerPath -Raw
     $cacheMap = @{
@@ -444,6 +563,7 @@ function New-ReleaseArtifacts {
         publicBaseUrl = $PublicBaseUrl
         buildId = $buildId
         cacheVersion = $cacheVersion
+        syncfusionFrontendLicensed = $true
         api = [ordered]@{
             file = $apiInfo.Name
             bytes = $apiInfo.Length
@@ -572,9 +692,19 @@ function Invoke-PublicSmoke {
         '(?im)^access-control-allow-origin:') `
         'Unapproved-origin CORS preflight returned an allow-origin header.'
 
-    $direct = & curl.exe -sS --connect-timeout 5 --max-time 8 -o NUL `
-        -w '%{http_code}' "http://${VpsHost}:5000/health" 2>$null
-    Assert-True ($direct -eq '000') 'Direct public port 5000 is reachable.'
+    $directClient = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $directTask = $directClient.ConnectAsync($VpsHost, 5000)
+        $directReachable = $directTask.Wait([TimeSpan]::FromSeconds(5)) -and
+            $directClient.Connected
+    }
+    catch {
+        $directReachable = $false
+    }
+    finally {
+        $directClient.Dispose()
+    }
+    Assert-True (-not $directReachable) 'Direct public port 5000 is reachable.'
     Write-Output "PUBLIC_ASSETS|$($allAssets.Count)|JS=$javascriptCount|BAD_URLS=0"
     Write-Output 'PUBLIC_SMOKE|PASS'
 }
@@ -644,8 +774,8 @@ try {
             "HEAD is $($script:Commit), but origin/master is $remoteHead."
     }
 
-    $deploymentStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
-    $deploymentId = "$($script:ShortCommit)-$deploymentStamp"
+    $script:DeploymentStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
+    $deploymentId = "$($script:ShortCommit)-$($script:DeploymentStamp)"
     $releaseDirectory = Join-Path $ReleaseRoot $script:ShortCommit
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     $releaseManifest = $null

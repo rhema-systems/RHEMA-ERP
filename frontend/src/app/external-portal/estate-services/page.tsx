@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import React from 'react';
-import { ClipboardList, Loader2, Send, Wrench } from 'lucide-react';
+import { ClipboardList, Eye, Loader2, Send, Wrench } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,8 +21,14 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   externalEstateServicesService,
   type ExternalEstateRequestType,
+  type ExternalEstateRequestsPage,
   type ExternalEstateServiceRequest,
+  type ExternalPropertyPortfolio,
 } from '@/services/external-estate-services.service';
+import {
+  externalEstateListingsService,
+  type ExternalCustomerProfile,
+} from '@/services/external-estate-listings.service';
 
 type PortalExtraField = {
   key: string;
@@ -38,7 +46,6 @@ type EstateServiceFormState = {
   category: string;
   priority: string;
   serviceImpact: string;
-  targetDate: string;
   description: string;
   additionalValues: Record<string, string>;
 };
@@ -212,15 +219,36 @@ const initialForm = {
   category: '',
   priority: 'Normal',
   serviceImpact: 'Tenant affected',
-  targetDate: '',
   description: '',
   additionalValues: {},
 } satisfies EstateServiceFormState;
+
+const REQUEST_PAGE_SIZE = 5;
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString();
+}
+
+function propertyReference(
+  property: ExternalPropertyPortfolio['properties'][number]
+) {
+  return property.projectUnitCode || property.assetCode || property.name;
+}
+
+function propertyLocation(
+  property: ExternalPropertyPortfolio['properties'][number]
+) {
+  return [property.location, property.town, property.district]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function customerContact(customer?: ExternalCustomerProfile | null) {
+  return [customer?.primaryEmail, customer?.primaryPhone]
+    .filter(Boolean)
+    .join(' / ');
 }
 
 export default function ExternalEstateServicesPage() {
@@ -230,11 +258,17 @@ export default function ExternalEstateServicesPage() {
   const [requests, setRequests] = React.useState<ExternalEstateServiceRequest[]>(
     []
   );
+  const [requestPage, setRequestPage] = React.useState(1);
+  const [requestTotalCount, setRequestTotalCount] = React.useState(0);
+  const [isRequestPageLoading, setIsRequestPageLoading] = React.useState(false);
+  const [properties, setProperties] = React.useState<
+    ExternalPropertyPortfolio['properties']
+  >([]);
+  const [customers, setCustomers] = React.useState<ExternalCustomerProfile[]>([]);
   const [form, setForm] = React.useState<EstateServiceFormState>(initialForm);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
 
   const selectedType = React.useMemo(
     () => requestTypes.find((type) => type.code === form.requestType),
@@ -244,24 +278,76 @@ export default function ExternalEstateServicesPage() {
     () => extraFieldsByRequestType[form.requestType] ?? [],
     [form.requestType]
   );
+  const totalRequestPages = Math.max(
+    1,
+    Math.ceil(requestTotalCount / REQUEST_PAGE_SIZE)
+  );
+
+  const applyRequestsPage = React.useCallback(
+    (pageResult: ExternalEstateRequestsPage) => {
+      setRequests(pageResult.items);
+      setRequestPage(pageResult.page);
+      setRequestTotalCount(pageResult.totalCount);
+    },
+    []
+  );
+
+  const loadRequestsPage = React.useCallback(
+    async (pageNumber: number) => {
+      setIsRequestPageLoading(true);
+      try {
+        const pageResult = await externalEstateServicesService.getMyRequestsPage({
+          page: pageNumber,
+          pageSize: REQUEST_PAGE_SIZE,
+          source: 'estateServices',
+        });
+        applyRequestsPage(pageResult);
+      } finally {
+        setIsRequestPageLoading(false);
+      }
+    },
+    [applyRequestsPage]
+  );
 
   const loadData = React.useCallback(async () => {
-    const [types, submittedRequests] = await Promise.all([
-      externalEstateServicesService.getRequestTypes(),
-      externalEstateServicesService.getMyRequests(),
-    ]);
+    const [types, submittedRequests, propertyPortfolio, customerProfiles] =
+      await Promise.all([
+        externalEstateServicesService.getRequestTypes(),
+        externalEstateServicesService.getMyRequestsPage({
+          page: 1,
+          pageSize: REQUEST_PAGE_SIZE,
+          source: 'estateServices',
+        }),
+        externalEstateServicesService.getMyProperties(),
+        externalEstateListingsService.getCustomerProfiles(),
+      ]);
+    const ownedProperties = propertyPortfolio.properties ?? [];
+    const selectedProperty =
+      ownedProperties.length === 1 ? ownedProperties[0] : undefined;
+    const selectedCustomer =
+      (selectedProperty?.customerBusinessPartnerId
+        ? customerProfiles.find(
+            (customer) => customer.id === selectedProperty.customerBusinessPartnerId
+          )
+        : undefined) ??
+      (customerProfiles.length === 1 ? customerProfiles[0] : undefined);
     setRequestTypes(types);
-    setRequests(
-      submittedRequests.filter(
-        (request) =>
-          request.sourceDepartment !== 'External Portal - Estate Listings'
-      )
-    );
+    setProperties(ownedProperties);
+    setCustomers(customerProfiles);
+    applyRequestsPage(submittedRequests);
     setForm((current) => ({
       ...current,
       requestType: current.requestType || types[0]?.code || '',
+      applicantName: current.applicantName || selectedCustomer?.partnerName || '',
+      contact: current.contact || customerContact(selectedCustomer),
+      propertyReference:
+        current.propertyReference ||
+        (selectedProperty ? propertyReference(selectedProperty) : ''),
+      location:
+        current.location ||
+        (selectedProperty ? propertyLocation(selectedProperty) : ''),
     }));
-  }, []);
+  }, [applyRequestsPage]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -302,6 +388,27 @@ export default function ExternalEstateServicesPage() {
       requestType: value,
       category: nextType?.category || current.category,
       additionalValues: {},
+    }));
+  };
+
+  const updatePropertyReference = (value: string) => {
+    const selectedProperty = properties.find(
+      (property) => propertyReference(property) === value
+    );
+    const selectedCustomer =
+      selectedProperty?.customerBusinessPartnerId
+        ? customers.find(
+            (customer) => customer.id === selectedProperty.customerBusinessPartnerId
+          )
+        : customers.length === 1
+          ? customers[0]
+          : undefined;
+    setForm((current) => ({
+      ...current,
+      applicantName: selectedCustomer?.partnerName || current.applicantName,
+      contact: customerContact(selectedCustomer) || current.contact,
+      propertyReference: value,
+      location: selectedProperty ? propertyLocation(selectedProperty) : current.location,
     }));
   };
 
@@ -379,10 +486,14 @@ export default function ExternalEstateServicesPage() {
   const submitRequest = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    setSuccess(null);
 
     if (!form.requestType || !form.description.trim()) {
-      setError('Request type and description are required.');
+      toast.error('Request type and description are required.');
+      return;
+    }
+
+    if (properties.length > 0 && !form.propertyReference.trim()) {
+      toast.error('Select the property, unit, or plot for this request.');
       return;
     }
 
@@ -405,20 +516,47 @@ export default function ExternalEstateServicesPage() {
         category: form.category.trim() || selectedType?.category || '',
         priority: form.priority,
         serviceImpact: form.serviceImpact,
-        targetDate: form.targetDate || undefined,
         description: form.description.trim(),
         additionalValues,
       });
-      setRequests((current) => [created, ...current]);
-      setSuccess(`Request ${created.referenceNumber || created.title} submitted.`);
+      toast.success(`Request ${created.referenceNumber || created.title} submitted.`);
+      try {
+        await loadRequestsPage(1);
+      } catch {
+        setRequests((current) => [created, ...current]);
+        setRequestPage(1);
+        setRequestTotalCount((current) => current + 1);
+      }
       setForm((current) => ({
         ...initialForm,
         requestType: current.requestType,
+        applicantName: current.applicantName,
+        contact: current.contact,
+        propertyReference: current.propertyReference,
+        location: current.location,
       }));
     } catch {
-      setError('Could not submit the Estate service request.');
+      toast.error('Could not submit the Estate service request.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const changeRequestPage = async (nextPage: number) => {
+    if (
+      nextPage < 1 ||
+      nextPage > totalRequestPages ||
+      nextPage === requestPage ||
+      isRequestPageLoading
+    ) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await loadRequestsPage(nextPage);
+    } catch {
+      setError('Could not load Estate service requests.');
     }
   };
 
@@ -437,7 +575,7 @@ export default function ExternalEstateServicesPage() {
           </Badge>
         ) : (
           <Badge variant="outline" className="w-fit">
-            {requests.length} request{requests.length === 1 ? '' : 's'}
+            {requestTotalCount} request{requestTotalCount === 1 ? '' : 's'}
           </Badge>
         )}
       </div>
@@ -447,12 +585,6 @@ export default function ExternalEstateServicesPage() {
           {error}
         </div>
       ) : null}
-      {success ? (
-        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {success}
-        </div>
-      ) : null}
-
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card>
           <CardHeader>
@@ -494,36 +626,55 @@ export default function ExternalEstateServicesPage() {
                   <Label>Name</Label>
                   <Input
                     value={form.applicantName}
-                    onChange={(event) =>
-                      updateForm('applicantName', event.target.value)
-                    }
+                    readOnly
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>Contact</Label>
                   <Input
                     value={form.contact}
-                    onChange={(event) => updateForm('contact', event.target.value)}
+                    readOnly
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>Property / unit / plot</Label>
-                  <Input
-                    value={form.propertyReference}
-                    onChange={(event) =>
-                      updateForm('propertyReference', event.target.value)
-                    }
-                  />
+                  {properties.length > 0 ? (
+                    <Select
+                      value={form.propertyReference || undefined}
+                      onValueChange={updatePropertyReference}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select your property" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {properties.map((property) => {
+                          const reference = propertyReference(property);
+                          return (
+                            <SelectItem key={property.id} value={reference}>
+                              {reference} · {property.name}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={form.propertyReference}
+                      onChange={(event) =>
+                        updateForm('propertyReference', event.target.value)
+                      }
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Location</Label>
                   <Input
                     value={form.location}
-                    onChange={(event) => updateForm('location', event.target.value)}
+                    readOnly
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Priority</Label>
+                  <Label>Urgency</Label>
                   <Select
                     value={form.priority}
                     onValueChange={(value) => updateForm('priority', value)}
@@ -532,23 +683,13 @@ export default function ExternalEstateServicesPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {['Low', 'Normal', 'High', 'Emergency'].map((priority) => (
+                      {['Low', 'Normal', 'High', 'Urgent'].map((priority) => (
                         <SelectItem key={priority} value={priority}>
                           {priority}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Target date</Label>
-                  <Input
-                    type="date"
-                    value={form.targetDate}
-                    onChange={(event) =>
-                      updateForm('targetDate', event.target.value)
-                    }
-                  />
                 </div>
               </div>
               {extraFields.length > 0 ? (
@@ -617,26 +758,78 @@ export default function ExternalEstateServicesPage() {
                 No Estate service requests submitted yet.
               </div>
             ) : null}
+            {isRequestPageLoading ? (
+              <div className="rounded-md border border-dashed p-4 text-center text-sm text-slate-500">
+                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                Loading requests
+              </div>
+            ) : null}
             {requests.map((request) => (
-              <div key={request.id} className="rounded-md border p-3 text-sm">
+              <div
+                key={request.id}
+                className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm text-slate-100 shadow-sm"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="font-medium text-slate-900">
+                    <div className="font-medium text-white">
                       {request.referenceNumber || request.title}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
+                    <div className="mt-1 text-xs text-slate-300">
                       {request.title}
                     </div>
                   </div>
                   <Badge variant="secondary">{request.status}</Badge>
                 </div>
-                <div className="mt-3 grid gap-2 text-xs text-slate-600">
+                <div className="mt-3 grid gap-2 text-xs text-slate-300">
                   <div>{request.currentStageName}</div>
                   <div>{request.currentAssignedRole || 'Awaiting assignment'}</div>
                   <div>{formatDate(request.createdAt)}</div>
                 </div>
+                <div className="mt-4 flex justify-end border-t border-slate-800 pt-3">
+                  <Button
+                    asChild
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="border-slate-500 bg-slate-900 text-white hover:bg-slate-800 hover:text-white"
+                  >
+                    <Link href={`/external-portal/estate-services/${request.id}`}>
+                      <Eye className="mr-2 h-4 w-4" />
+                      Open
+                    </Link>
+                  </Button>
+                </div>
               </div>
             ))}
+            {requestTotalCount > REQUEST_PAGE_SIZE ? (
+              <div className="flex items-center justify-between border-t pt-3 text-xs text-slate-600">
+                <span>
+                  Page {requestPage} of {totalRequestPages}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={requestPage <= 1 || isRequestPageLoading}
+                    onClick={() => void changeRequestPage(requestPage - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      requestPage >= totalRequestPages || isRequestPageLoading
+                    }
+                    onClick={() => void changeRequestPage(requestPage + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>

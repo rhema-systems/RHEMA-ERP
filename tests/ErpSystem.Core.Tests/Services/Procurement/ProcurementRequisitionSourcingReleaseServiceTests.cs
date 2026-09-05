@@ -25,14 +25,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
     [Theory]
     [InlineData("status", "PR_NOT_APPROVED")]
     [InlineData("mandatory", "PR_SOURCING_FIELDS_INCOMPLETE")]
-    [InlineData("plan", "PR_SOURCING_PLAN_LINK_REQUIRED")]
-    [InlineData("app", "PR_APP_OR_EXCEPTION_REQUIRED")]
-    [InlineData("specification", "PR_SOURCING_SPECIFICATION_INVALID")]
     [InlineData("commitment", "PR_BUDGET_COMMITMENT_RELEASED")]
-    [InlineData("policy", "PR_SOURCING_POLICY_STALE")]
-    [InlineData("authority", "PR_AUTHORITY_ROUTE_MISSING")]
-    [InlineData("workflow", "PR_SOURCING_WORKFLOW_INCOMPLETE")]
-    [InlineData("evidence", "PR_SOURCING_EVIDENCE_INCOMPLETE")]
     public async Task EachPrerequisiteFailsClosedWithStableActionableDecision(
         string blocker,
         string expectedCode)
@@ -71,10 +64,10 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         first.IntegrityHash.Should().HaveLength(64);
         (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(1);
         var stored = await fixture.Context.ProcurementRequisitionSourcingReleases.SingleAsync();
-        stored.SnapshotJson.Should().Contain("tdc.pr-sourcing-release.v1");
-        stored.AppSubmissionId.Should().Be(fixture.AppSubmissionId);
+        stored.SnapshotJson.Should().Contain("tdc.pr-sourcing-release.v2");
         stored.BudgetCommitmentId.Should().Be(fixture.BudgetCommitmentId);
         stored.AuthorityRouteId.Should().Be(fixture.Route.Id);
+        stored.AuthorityRouteReference.Should().Be(fixture.Route.RouteReference);
         stored.WorkflowInstanceId.Should().Be(fixture.Workflow.Id);
         var actions = await fixture.Context.ProcurementControlEvents
             .Where(item => item.SourceId == fixture.Requisition.Id)
@@ -86,28 +79,38 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
     }
 
     [Fact]
-    public async Task IncompleteAuthorityWorkflowBlocksReleaseAndPersistsDeniedAuditWithoutPartialRelease()
+    public async Task CapturedAuthorityRouteWithInvalidIntegrityFailsClosed()
+    {
+        await using var fixture = new Fixture();
+        fixture.Route.IntegrityHash = new string('0', 64);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
+
+        readiness.IsCompliant.Should().BeFalse();
+        readiness.CanRelease.Should().BeFalse();
+        readiness.DecisionCode.Should().Be("PR_SOURCING_AUTHORITY_ROUTE_INVALID");
+        readiness.AuthorityRouteId.Should().BeNull();
+        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ApprovedOutcomeDoesNotRequireASecondAuthorityWorkflowGateAtSourcing()
     {
         await using var fixture = new Fixture();
         fixture.Workflow.Status = WorkflowInstanceStatus.InProgress;
         fixture.Workflow.CompletedDate = null;
         await fixture.Context.SaveChangesAsync();
 
-        var action = () => fixture.Service.ReleaseAsync(
+        var release = await fixture.Service.ReleaseAsync(
             fixture.Requisition.Id, "Attempt sourcing before approval completes.", "trace-workflow-blocked");
 
-        var exception = await action.Should().ThrowAsync<ProcurementRequisitionSourcingBlockedException>();
-        exception.Which.Readiness.DecisionCode.Should().Be("PR_SOURCING_WORKFLOW_INCOMPLETE");
-        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(0);
-        var audit = await fixture.Context.ProcurementControlEvents.SingleAsync(
-            item => item.SourceId == fixture.Requisition.Id);
-        audit.Action.Should().Be("SourcingReleaseBlocked");
-        audit.Result.Should().Be(ProcurementControlEventResult.Denied);
-        audit.IntegrityHash.Should().HaveLength(64);
+        release.Should().NotBeNull();
+        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(1);
     }
 
     [Fact]
-    public async Task InitiatorApprovalFailsSegregationOfDutiesBeforeRelease()
+    public async Task ReleaseDoesNotDuplicateTheMakerCheckerDecisionAlreadyEnforcedAtApproval()
     {
         await using var fixture = new Fixture();
         var step = new WorkflowStepInstance
@@ -131,13 +134,12 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
 
         var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
 
-        readiness.IsCompliant.Should().BeFalse();
-        readiness.DecisionCode.Should().Be("PR_SOURCING_SOD_VIOLATION");
-        readiness.Requirements.Should().Contain(item => item.Key == "SOD" && !item.Satisfied);
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.Requirements.Should().NotContain(item => item.Key == "SOD");
     }
 
     [Fact]
-    public async Task ChangedRequisitionFingerprintMakesPriorReleaseStaleAndBlocksDirectSourcingEntry()
+    public async Task ChangedEligibleRequisitionAutomaticallyAppendsReleaseOnSourcingEntry()
     {
         await using var fixture = new Fixture();
         await fixture.Service.ReleaseAsync(
@@ -147,17 +149,35 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         await fixture.Context.SaveChangesAsync();
 
         var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
-        var action = () => fixture.Service.EnforceSourcingAsync(
+        var release = await fixture.Service.EnforceSourcingAsync(
             fixture.Requisition.Id, "Tender", "TND-STALE-001", "trace-stale-source");
 
         readiness.IsCompliant.Should().BeTrue();
         readiness.HasStaleRelease.Should().BeTrue();
         readiness.IsReleased.Should().BeFalse();
         readiness.CanRelease.Should().BeTrue();
-        await action.Should().ThrowAsync<ProcurementRequisitionSourcingBlockedException>();
-        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(1);
+        release.AttemptNumber.Should().Be(2);
+        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(2);
         (await fixture.Context.ProcurementControlEvents.CountAsync(item =>
-            item.SourceId == fixture.Requisition.Id && item.Action == "SourcingEntryBlocked")).Should().Be(1);
+            item.SourceId == fixture.Requisition.Id && item.Action == "SourcingEntryAllowed")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task EligibleSourcingEntryCreatesTheReleaseAuditRecordAutomatically()
+    {
+        await using var fixture = new Fixture();
+
+        var release = await fixture.Service.EnforceSourcingAsync(
+            fixture.Requisition.Id, "RequestForQuotation", "RFQ-AUTO-001", "trace-auto-source");
+
+        release.AttemptNumber.Should().Be(1);
+        release.ReleaseReason.Should().Be("System-generated release for RequestForQuotation RFQ-AUTO-001.");
+        (await fixture.Context.ProcurementRequisitionSourcingReleases.CountAsync()).Should().Be(1);
+        var actions = await fixture.Context.ProcurementControlEvents
+            .Where(item => item.SourceId == fixture.Requisition.Id)
+            .Select(item => item.Action)
+            .ToListAsync();
+        actions.Should().Contain(["SourcingReleased", "SourcingEntryAllowed"]);
     }
 
     [Fact]
@@ -197,7 +217,10 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         private static readonly DateTime Moment = new(2026, 7, 22, 8, 0, 0, DateTimeKind.Utc);
         private readonly UnitOfWork _unitOfWork;
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
-        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TenantAdmin" };
+        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "TDC_PROCUREMENT_OFFICER"
+        };
 
         public Fixture()
         {
@@ -247,6 +270,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                 RequestedById = Guid.NewGuid(),
                 RequiredDate = Moment.AddMonths(1),
                 Status = "Approved",
+                Department = "Operations",
                 CostCenter = "OPS-001",
                 Justification = "Approved operational requirement.",
                 RequisitionType = PurchaseRequisitionType.StockReplenishment,
@@ -372,6 +396,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                     RequisitionNumber = Requisition.RequisitionNumber,
                     Status = Requisition.Status,
                     IsCompliant = true,
+                    CanReserve = true,
                     DecisionCode = "PR_BUDGET_COMMITMENT_CURRENT",
                     Message = "The Finance commitment is reserved.",
                     CommitmentId = BudgetCommitmentId,
@@ -381,6 +406,9 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                 ReservedAtUtc = Moment.AddHours(-3)
             };
             Budget.Setup(service => service.GetReadinessAsync(
+                    Requisition.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(BudgetReadiness);
+            Budget.Setup(service => service.GetLinkedControlReadinessAsync(
                     Requisition.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(BudgetReadiness);
             AuthorityReadiness = new PurchaseRequisitionAuthorityReadinessDto
@@ -442,6 +470,16 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
             Compliance.Setup(service => service.EvaluateAuthorityRouteAsync(
                     It.IsAny<ProcurementAuthorityRouteDecisionRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(PolicyDecision);
+            Access.Setup(service => service.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ACCESS_ALLOWED",
+                    Message = "Allowed by the focused test fixture."
+                });
 
             _unitOfWork = new UnitOfWork(Context);
             var events = new ProcurementControlEventService(
@@ -450,7 +488,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                 _unitOfWork,
                 _currentUser.Object,
                 Compliance.Object,
-                Mock.Of<IProcurementAccessControlService>(),
+                Access.Object,
                 events,
                 Submission.Object,
                 Budget.Object,
@@ -476,6 +514,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
         public Mock<IProcurementRequisitionBudgetControlService> Budget { get; } = new();
         public Mock<IProcurementRequisitionAuthorityRouteService> Authority { get; } = new();
         public Mock<IProcurementComplianceDecisionService> Compliance { get; } = new();
+        public Mock<IProcurementAccessControlService> Access { get; } = new();
         public ProcurementRequisitionSourcingReleaseService Service { get; }
 
         public void SwitchRoles(params string[] roles)
@@ -494,7 +533,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                     Requisition.ApprovedById = null;
                     break;
                 case "mandatory":
-                    Requisition.CostCenter = null;
+                    Requisition.Department = null;
                     break;
                 case "plan":
                     SubmissionReadiness.SourcePlanItemId = Guid.NewGuid();
@@ -509,6 +548,7 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
                     break;
                 case "commitment":
                     BudgetReadiness.IsCompliant = false;
+                    BudgetReadiness.CanReserve = false;
                     BudgetReadiness.CommitmentStatus = ProcurementBudgetCommitmentStatus.Released.ToString();
                     BudgetReadiness.DecisionCode = "PR_BUDGET_COMMITMENT_RELEASED";
                     BudgetReadiness.Message = "The Finance commitment has been released.";

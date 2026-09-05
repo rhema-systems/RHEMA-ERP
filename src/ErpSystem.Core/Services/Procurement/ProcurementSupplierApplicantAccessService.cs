@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,7 +11,6 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
-using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -684,7 +684,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     access.VerifiedContact,
                     "Your supplier application token",
                     $"<p>{System.Net.WebUtility.HtmlEncode(message)}</p>",
-                    isHtml: true);
+                    isHtml: true,
+                    persistBody: false);
             }
             else
             {
@@ -2119,7 +2120,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     $"<strong>Temporary password:</strong> {encodedPassword}<br/>" +
                     $"<strong>Expires:</strong> {encodedExpiry}</p>" +
                     "<p>You must change this password at first login.</p>",
-                    isHtml: true);
+                    isHtml: true,
+                    persistBody: false);
             }
             else
             {
@@ -2219,7 +2221,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         string correlationId,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -2251,7 +2253,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         string correlationId,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -2426,8 +2428,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "An internal tenant user is required.", 403);
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("TenantAdmin") || _currentUser.HasRole("SuperAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string[] NormalizeApprovedRoles()
     {

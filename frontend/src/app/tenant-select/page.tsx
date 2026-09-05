@@ -1,30 +1,33 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { Building2, Loader2, LogOut } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, Building2, Loader2, LogOut } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { useTenant } from '../../contexts/TenantContext';
 import { tenantService } from '../../services/tenant';
 import { authService } from '../../services/auth';
 import { apiService, type UserTenantInfo } from '../../services/api.service';
-import type { Tenant } from '../../types';
 import {
   getRedirectTargetFromCurrentLocation,
   resolveRedirectTarget,
 } from '../../lib/auth-redirect';
 import { getAuthenticatedHomePath } from '../../lib/auth-routing';
+import { completeTenantSelectionTransition } from '../../lib/tenant-selection-transition';
 
 export default function TenantSelectPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { setCurrentTenantCode } = useTenant();
   const [isAutoSelecting, setIsAutoSelecting] = useState(false);
   const [isManuallySelecting, setIsManuallySelecting] = useState(false);
   const [selectedTenantName, setSelectedTenantName] = useState<string>('');
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   // Fetch current user info including accessible tenants
@@ -47,18 +50,29 @@ export default function TenantSelectPage() {
 
   const selectTenantMutation = useMutation({
     mutationFn: (tenant: UserTenantInfo) => tenantService.selectTenant(tenant.tenantCode, false),
-    onSuccess: (response, tenant) => {
-      setCurrentTenantCode(tenant.tenantCode);
-
+    onSuccess: async (_response, tenant) => {
       const userForRouting = userInfo ?? authService.getStoredUser();
       const redirectTarget = getRedirectTargetFromCurrentLocation();
       const fallbackPath = getAuthenticatedHomePath(userForRouting);
 
-      router.push(resolveRedirectTarget(redirectTarget, fallbackPath));
+      await completeTenantSelectionTransition({
+        tenantCode: tenant.tenantCode,
+        target: resolveRedirectTarget(redirectTarget, fallbackPath),
+        setCurrentTenantCode,
+        cancelQueries: () => queryClient.cancelQueries(),
+        removeQueries: () => queryClient.removeQueries(),
+      });
     },
-    onError: (error) => {
+    onError: (error: unknown) => {
       console.error('Error selecting tenant:', error);
-      // Handle error - could show a toast notification
+      setIsAutoSelecting(false);
+      setIsManuallySelecting(false);
+      setSelectedTenantName('');
+      setSelectionError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Failed to select the organization. Please try again.'
+      );
     },
   });
 
@@ -75,14 +89,10 @@ export default function TenantSelectPage() {
   });
 
   const handleTenantSelect = (tenant: UserTenantInfo) => {
-    // Show loading workspace screen for manual selection
+    setSelectionError(null);
     setIsManuallySelecting(true);
     setSelectedTenantName(tenant.tenantName);
-    
-    // Add delay to show loading workspace (3 seconds for better UX)
-    setTimeout(() => {
-      selectTenantMutation.mutate(tenant);
-    }, 3000);
+    selectTenantMutation.mutate(tenant);
   };
 
   const handleLogout = () => {
@@ -96,14 +106,9 @@ export default function TenantSelectPage() {
   // Auto-select if user has only one tenant (especially for public registration users)
   useEffect(() => {
     if (tenants?.length === 1) {
-      // Set loading state to show "preparing workspace" message
       setIsAutoSelecting(true);
-      // Add a delay to show the loading message
-      const timer = setTimeout(() => {
-        handleTenantSelect(tenants[0]);
-      }, 3000); // 3 seconds delay for better UX
-      
-      return () => clearTimeout(timer);
+      setSelectedTenantName(tenants[0].tenantName);
+      selectTenantMutation.mutate(tenants[0]);
     }
   }, [tenants]);
 
@@ -125,11 +130,7 @@ export default function TenantSelectPage() {
     setIsAutoSelecting(true);
     setSelectedTenantName(match.tenantName);
 
-    const timer = setTimeout(() => {
-      handleTenantSelect(match);
-    }, 1200);
-
-    return () => clearTimeout(timer);
+    selectTenantMutation.mutate(match);
   }, [tenants, publicSettingsRaw?.tenantCode, isAutoSelecting, isManuallySelecting, selectTenantMutation.isPending]);
 
   if (isLoading) {
@@ -257,6 +258,13 @@ export default function TenantSelectPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {selectionError && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Organization selection failed</AlertTitle>
+                  <AlertDescription>{selectionError}</AlertDescription>
+                </Alert>
+              )}
               {tenants.map((tenant) => (
                 <Button
                   key={tenant.tenantCode}

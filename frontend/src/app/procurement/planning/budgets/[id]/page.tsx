@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,11 +8,61 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Edit, Send, DollarSign, TrendingUp, Loader2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { ArrowLeft, Edit, FilePenLine, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementBudgetService, type ProcurementBudgetDetailDto } from '@/services/procurementPlanningService';
+import {
+  procurementBudgetService,
+  type ProcurementBudgetDetailDto,
+  type ProcurementBudgetRevisionDto,
+} from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
-import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  WorkflowApprovalActions,
+  WorkflowTabContent,
+  WorkflowTabTrigger,
+  useWorkflowRecord,
+} from '@/components/workflow';
+
+function BudgetRevisionActions({
+  revision,
+  budgetCode,
+  onChanged,
+}: {
+  revision: ProcurementBudgetRevisionDto;
+  budgetCode: string;
+  onChanged: () => Promise<void>;
+}) {
+  const router = useRouter();
+  const isPending = ['pending', 'pendingapproval', 'pending approval']
+    .includes((revision.status || '').trim().toLowerCase());
+  const workflow = useWorkflowRecord({
+    entityType: 'ProcurementBudgetRevision',
+    entityId: revision.id,
+    entityLabel: 'Procurement Budget Revision',
+    entityNumber: `${budgetCode}/R${revision.revisionNumber}`,
+    status: revision.status,
+    canSubmit: false,
+    canApproveReject: isPending,
+    enabled: isPending,
+    commands: {
+      approve: async ({ comments }) => {
+        await procurementBudgetService.approveRevision(revision.id, comments || undefined);
+      },
+      reject: async ({ comments }) => {
+        await procurementBudgetService.rejectRevision(revision.id, comments);
+      },
+      afterAction: onChanged,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
+  if (!isPending) return null;
+  return <WorkflowApprovalActions {...workflow.actionProps} size="sm" showStepBadge />;
+}
 
 export default function ProcurementBudgetDetailPage() {
   const router = useRouter();
@@ -20,8 +70,10 @@ export default function ProcurementBudgetDetailPage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [budget, setBudget] = useState<ProcurementBudgetDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
+  const [revisionAmount, setRevisionAmount] = useState('');
+  const [revisionReason, setRevisionReason] = useState('');
+  const [revisionSubmitting, setRevisionSubmitting] = useState(false);
 
   useEffect(() => {
     if (id) loadBudget();
@@ -41,19 +93,80 @@ export default function ProcurementBudgetDetailPage() {
   };
 
   const handleSubmitForApproval = async () => {
+    await procurementBudgetService.submitBudget(id);
+  };
+
+  const openRevisionDialog = () => {
+    if (!budget) return;
+    setRevisionAmount(budget.allocatedAmount.toString());
+    setRevisionReason('');
+    setRevisionDialogOpen(true);
+  };
+
+  const handleCreateRevision = async () => {
+    if (!budget) return;
+    const newAmount = Number(revisionAmount);
+    if (!Number.isFinite(newAmount) || newAmount <= 0) {
+      toast.error('Enter a revised amount greater than zero');
+      return;
+    }
+    if (newAmount === budget.allocatedAmount) {
+      toast.error('The revised amount must differ from the current approved amount');
+      return;
+    }
+    if (revisionReason.trim().length < 3) {
+      toast.error('Enter a meaningful reason for the revision');
+      return;
+    }
+
     try {
-      setSubmitting(true);
-      await procurementBudgetService.submitBudget(id);
-      toast.success('Budget submitted to the approval workflow');
+      setRevisionSubmitting(true);
+      const revision = await procurementBudgetService.createRevision(id, {
+        revisionType: newAmount > budget.allocatedAmount ? 'Increase' : 'Decrease',
+        newAmount,
+        reason: revisionReason.trim(),
+      });
+      setRevisionDialogOpen(false);
+      toast.success(
+        revision.status === 'Approved'
+          ? 'Budget revision applied'
+          : 'Budget revision submitted for independent approval',
+      );
       await loadBudget();
-    } catch (error) {
-      console.error('Error submitting budget:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to submit budget for approval');
-      return false;
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to create budget revision');
     } finally {
-      setSubmitting(false);
+      setRevisionSubmitting(false);
     }
   };
+
+  const workflow = useWorkflowRecord({
+    entityType: 'ProcurementBudget',
+    entityId: id,
+    entityLabel: 'Procurement Budget',
+    entityNumber: budget?.budgetCode,
+    status: budget?.status || '',
+    canSubmit: budget?.status === 'Draft',
+    canApproveReject: budget?.status === 'Submitted' || budget?.status === 'UnderReview',
+    enabled: Boolean(id && budget),
+    commands: {
+      submit: handleSubmitForApproval,
+      approve: async ({ comments }) => {
+        await procurementBudgetService.approveBudget(id, {
+          isApproved: true,
+          comments: comments || undefined,
+        });
+      },
+      reject: async ({ comments }) => {
+        await procurementBudgetService.approveBudget(id, {
+          isApproved: false,
+          comments: comments || undefined,
+        });
+      },
+      afterAction: loadBudget,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   const getStatusBadge = (status: string) => {
     const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
@@ -81,6 +194,17 @@ export default function ProcurementBudgetDetailPage() {
     return <div className="text-center py-8 text-gray-500">Budget not found</div>;
   }
 
+  const hasPendingRevision = (budget.revisions || []).some((revision) =>
+    ['pending', 'pendingapproval', 'pending approval']
+      .includes((revision.status || '').trim().toLowerCase()));
+  const canRevise = ['approved', 'active'].includes((budget.status || '').trim().toLowerCase());
+  const categoryAllocationTotal = (budget.allocations || [])
+    .reduce((total, allocation) => total + allocation.allocatedAmount, 0);
+  const minimumVisibleExposure = Math.max(
+    budget.utilizedAmount + budget.committedAmount,
+    categoryAllocationTotal,
+  );
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -96,21 +220,28 @@ export default function ProcurementBudgetDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {budget.status === 'Draft' && (
-            <>
-              <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
-                <Edit className="h-4 w-4" />Edit
-              </Button>
-              <Button onClick={() => setSubmitDialogOpen(true)} disabled={submitting} className="gap-2">
-                <Send className="h-4 w-4" />{submitting ? 'Submitting...' : 'Submit for approval'}
-              </Button>
-            </>
+          {canRevise && (
+            <Button
+              variant="outline"
+              onClick={openRevisionDialog}
+              disabled={hasPendingRevision}
+              className="gap-2"
+              title={hasPendingRevision ? 'Complete the pending revision first' : 'Request a governed budget amount revision'}
+            >
+              <FilePenLine className="h-4 w-4" />Revise Budget
+            </Button>
           )}
+          {budget.status === 'Draft' && (
+            <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
+              <Edit className="h-4 w-4" />Edit
+            </Button>
+          )}
+          <WorkflowApprovalActions {...workflow.actionProps} size="default" showStepBadge />
         </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Allocated</CardTitle></CardHeader>
           <CardContent><div className="text-2xl font-bold">{formatCurrency(budget.allocatedAmount, budget.currency)}</div></CardContent>
@@ -118,6 +249,10 @@ export default function ProcurementBudgetDetailPage() {
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Utilized</CardTitle></CardHeader>
           <CardContent><div className="text-2xl font-bold text-orange-600">{formatCurrency(budget.utilizedAmount, budget.currency)}</div></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Committed</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold text-blue-600">{formatCurrency(budget.committedAmount, budget.currency)}</div></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Remaining</CardTitle></CardHeader>
@@ -136,7 +271,7 @@ export default function ProcurementBudgetDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="details" className="w-full">
-        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="allocations">Allocations</TabsTrigger><TabsTrigger value="revisions">Revisions</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="allocations">Allocations</TabsTrigger><TabsTrigger value="revisions">Revisions</TabsTrigger><WorkflowTabTrigger /></TabsList>
         
         <TabsContent value="details" className="space-y-4">
           <Card>
@@ -198,8 +333,17 @@ export default function ProcurementBudgetDetailPage() {
 
         <TabsContent value="revisions">
           <Card>
-            <CardHeader><CardTitle>Budget Revisions</CardTitle><CardDescription>History of budget changes</CardDescription></CardHeader>
-            <CardContent>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <div><CardTitle>Budget Revisions</CardTitle><CardDescription>Governed history of requested and approved amount changes</CardDescription></div>
+                {canRevise && (
+                  <Button size="sm" onClick={openRevisionDialog} disabled={hasPendingRevision} className="gap-2">
+                    <FilePenLine className="h-4 w-4" />New Revision
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
               {budget.revisions && budget.revisions.length > 0 ? (
                 <Table>
                   <TableHeader>
@@ -210,7 +354,11 @@ export default function ProcurementBudgetDetailPage() {
                       <TableHead>New Amount</TableHead>
                       <TableHead>Change</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Reason</TableHead>
+                      <TableHead>Requested By</TableHead>
+                      <TableHead>Approved By</TableHead>
                       <TableHead>Date</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -228,7 +376,17 @@ export default function ProcurementBudgetDetailPage() {
                             {rev.status}
                           </Badge>
                         </TableCell>
+                        <TableCell className="min-w-64 whitespace-normal">{rev.reason || '-'}</TableCell>
+                        <TableCell>{rev.requestedByName || '-'}</TableCell>
+                        <TableCell>{rev.approvedByName || '-'}</TableCell>
                         <TableCell>{format(new Date(rev.createdAt), 'dd MMM yyyy')}</TableCell>
+                        <TableCell className="text-right">
+                          <BudgetRevisionActions
+                            revision={rev}
+                            budgetCode={budget.budgetCode}
+                            onChanged={loadBudget}
+                          />
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -239,17 +397,65 @@ export default function ProcurementBudgetDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <WorkflowTabContent
+          {...workflow.actionProps}
+          entityType="ProcurementBudget"
+          showActions
+        />
       </Tabs>
 
-      <ConfirmationDialog
-        open={submitDialogOpen}
-        onOpenChange={setSubmitDialogOpen}
-        title="Submit budget for approval?"
-        description="This sends the budget to the configured shared approval workflow. You will not be able to edit it while approval is in progress."
-        confirmText="Submit for approval"
-        onConfirm={handleSubmitForApproval}
-        isLoading={submitting}
-      />
+      <Dialog open={revisionDialogOpen} onOpenChange={setRevisionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revise Approved Budget</DialogTitle>
+            <DialogDescription>
+              The current approved value remains effective until this revision completes the configured workflow.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 rounded-md border p-3 text-sm">
+              <div><span className="text-muted-foreground">Current approved amount</span><p className="font-semibold">{formatCurrency(budget.allocatedAmount, budget.currency)}</p></div>
+              <div><span className="text-muted-foreground">Visible minimum exposure</span><p className="font-semibold">{formatCurrency(minimumVisibleExposure, budget.currency)}</p></div>
+              <div><span className="text-muted-foreground">Utilized + committed</span><p>{formatCurrency(budget.utilizedAmount + budget.committedAmount, budget.currency)}</p></div>
+              <div><span className="text-muted-foreground">Category allocations</span><p>{formatCurrency(categoryAllocationTotal, budget.currency)}</p></div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="revised-budget-amount">New approved amount ({budget.currency})</Label>
+              <Input
+                id="revised-budget-amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={revisionAmount}
+                onChange={(event) => setRevisionAmount(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="budget-revision-reason">Reason</Label>
+              <Textarea
+                id="budget-revision-reason"
+                value={revisionReason}
+                onChange={(event) => setRevisionReason(event.target.value)}
+                placeholder="Explain why the approved budget must change"
+                maxLength={2000}
+                rows={4}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The server also checks linked procurement-plan exposure before accepting a decrease.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevisionDialogOpen(false)} disabled={revisionSubmitting}>Cancel</Button>
+            <Button onClick={handleCreateRevision} disabled={revisionSubmitting}>
+              {revisionSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Submit Revision
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

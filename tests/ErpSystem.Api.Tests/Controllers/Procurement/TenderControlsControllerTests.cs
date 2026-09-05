@@ -39,7 +39,7 @@ public sealed class TenderControlsControllerTests
     [Theory]
     [InlineData("missing", 404)]
     [InlineData("conflict", 409)]
-    [InlineData("invalid", 400)]
+    [InlineData("invalid", 422)]
     [InlineData("forbidden", 403)]
     public async Task GetMapsGovernedFailures(string failure, int expectedStatus)
     {
@@ -84,17 +84,19 @@ public sealed class TenderControlsControllerTests
     }
 
     [Fact]
-    public void MutationRoutesHaveExplicitRoleBoundaries()
+    public void MutationRoutesUseRegisteredProcurementPermissions()
     {
         var type = typeof(TenderControlsController);
         var technical = type.GetMethod(nameof(TenderControlsController.SaveTechnical))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
+        var submitApproval = type.GetMethod(nameof(TenderControlsController.SubmitApproval))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
         var decision = type.GetMethod(nameof(TenderControlsController.DecideApproval))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
 
-        Assert.Contains("Employee", technical);
-        Assert.DoesNotContain("Employee", decision);
-        Assert.Contains("Manager", decision);
+        Assert.Equal("procurement.tender.evaluate", technical);
+        Assert.Equal("procurement.tender.approve", submitApproval);
+        Assert.Equal("procurement.tender.approve", decision);
 
         var awardAuthorization = type.GetMethod(nameof(TenderControlsController.RecordAward))!
             .GetCustomAttribute<AuthorizeAttribute>()!;

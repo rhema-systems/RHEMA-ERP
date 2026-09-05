@@ -18,8 +18,6 @@ import {
   CheckCircle,
   Star,
   Building2,
-  Mail,
-  Phone,
   MapPin,
   FileText,
   Award,
@@ -42,6 +40,8 @@ import { purchasingService, type PurchaseOrderSummaryDto } from '@/services/purc
 import { PerformanceReviewDialog } from '@/components/procurement/PerformanceReviewDialog';
 import { PerformanceReviewDetailDialog } from '@/components/procurement/PerformanceReviewDetailDialog';
 import { PerformanceTrendsChart } from '@/components/procurement/PerformanceTrendsChart';
+import { SupplierBankAccountsPanel, SupplierContactsPanel } from '@/components/procurement/SupplierContactBankDetails';
+import { bankAccountsFromRegistrationData, contactsFromRegistrationData } from '@/lib/supplier-registration-details';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -293,6 +293,8 @@ export default function BusinessPartnerDetailPage() {
   const canActivate = partner.status === 'Suspended' || partner.status === 'Inactive';
   const canBlacklist = !partner.isBlacklisted;
   const canRemoveFromBlacklist = partner.isBlacklisted;
+  const partnerContacts = contactsFromRegistrationData(partner as unknown as Record<string, unknown>);
+  const partnerBankAccounts = bankAccountsFromRegistrationData(partner as unknown as Record<string, unknown>);
 
   return (
     <div className="space-y-6">
@@ -436,9 +438,10 @@ export default function BusinessPartnerDetailPage() {
 
       {/* Content Tabs */}
       <Tabs defaultValue="details" className="space-y-4">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="details">Company Details</TabsTrigger>
-          <TabsTrigger value="contacts">Contacts ({partner.contacts?.length || 0})</TabsTrigger>
+          <TabsTrigger value="contacts">Contacts ({partnerContacts.length})</TabsTrigger>
+          <TabsTrigger value="bank-accounts">Bank Accounts ({partnerBankAccounts.length})</TabsTrigger>
           <TabsTrigger value="documents">Documents ({partner.documents?.length || 0})</TabsTrigger>
           <TabsTrigger value="licenses" className="relative">
             Licenses ({partner.licenses?.length || 0})
@@ -488,6 +491,20 @@ export default function BusinessPartnerDetailPage() {
               <div>
                 <Label className="text-gray-600">Partner Code</Label>
                 <p className="font-semibold font-mono">{partner.partnerCode}</p>
+              </div>
+              <div className="md:col-span-2">
+                <Label className="text-gray-600">Business Categories</Label>
+                {partner.categories?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {partner.categories.map((category) => (
+                      <Badge key={category} variant="secondary">
+                        {category}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="font-semibold">Not assigned</p>
+                )}
               </div>
               {partner.registrationNumber && (
                 <div>
@@ -547,61 +564,12 @@ export default function BusinessPartnerDetailPage() {
 
         {/* Contacts Tab */}
         <TabsContent value="contacts">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Mail className="w-5 h-5" />
-                Contact Persons
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {!partner.contacts || partner.contacts.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No contacts available</p>
-              ) : (
-                <div className="space-y-3">
-                  {partner.contacts.map((contact, index) => (
-                    <div key={index} className="p-4 border rounded-lg">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <Label className="text-gray-600">Name</Label>
-                          <p className="font-semibold">{contact.contactName || contact.name || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <Label className="text-gray-600">Position</Label>
-                          <p className="font-semibold">{contact.contactTitle || contact.title || contact.position || 'N/A'}</p>
-                        </div>
-                        {contact.department && (
-                          <div>
-                            <Label className="text-gray-600">Department</Label>
-                            <p className="font-semibold">{contact.department}</p>
-                          </div>
-                        )}
-                        <div>
-                          <Label className="text-gray-600">Email</Label>
-                          <p className="font-semibold">{contact.email || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <Label className="text-gray-600">Phone</Label>
-                          <p className="font-semibold">{contact.phone || 'N/A'}</p>
-                        </div>
-                        {contact.mobile && (
-                          <div>
-                            <Label className="text-gray-600">Mobile</Label>
-                            <p className="font-semibold">{contact.mobile}</p>
-                          </div>
-                        )}
-                        {contact.isPrimary && (
-                          <div className="col-span-2">
-                            <Badge>Primary Contact</Badge>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <SupplierContactsPanel contacts={partnerContacts} />
+        </TabsContent>
+
+        {/* Bank Accounts Tab */}
+        <TabsContent value="bank-accounts">
+          <SupplierBankAccountsPanel accounts={partnerBankAccounts} />
         </TabsContent>
 
         {/* Documents Tab */}
@@ -776,61 +744,10 @@ export default function BusinessPartnerDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {(!partner.financialInfo || partner.financialInfo.length === 0) && !partner.bankName ? (
+              {!partner.financialInfo || partner.financialInfo.length === 0 ? (
                 <p className="text-center text-gray-500 py-8">No financial information available</p>
               ) : (
                 <div className="space-y-6">
-                  {/* Banking Information from Business Partner */}
-                  {(partner.bankName || partner.accountNumber) && (
-                    <div>
-                      <h3 className="font-semibold text-lg mb-3">Banking Information</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {partner.bankName && (
-                          <div>
-                            <Label className="text-gray-600">Bank Name</Label>
-                            <p className="font-semibold">{partner.bankName}</p>
-                          </div>
-                        )}
-                        {partner.bankBranch && (
-                          <div>
-                            <Label className="text-gray-600">Bank Branch</Label>
-                            <p className="font-semibold">{partner.bankBranch}</p>
-                          </div>
-                        )}
-                        {partner.accountNumber && (
-                          <div>
-                            <Label className="text-gray-600">Account Number</Label>
-                            <p className="font-semibold font-mono">{partner.accountNumber}</p>
-                          </div>
-                        )}
-                        {partner.accountName && (
-                          <div>
-                            <Label className="text-gray-600">Account Name</Label>
-                            <p className="font-semibold">{partner.accountName}</p>
-                          </div>
-                        )}
-                        {partner.swiftCode && (
-                          <div>
-                            <Label className="text-gray-600">SWIFT Code</Label>
-                            <p className="font-semibold font-mono">{partner.swiftCode}</p>
-                          </div>
-                        )}
-                        {partner.iban && (
-                          <div>
-                            <Label className="text-gray-600">IBAN</Label>
-                            <p className="font-semibold font-mono">{partner.iban}</p>
-                          </div>
-                        )}
-                        {partner.currency && (
-                          <div>
-                            <Label className="text-gray-600">Currency</Label>
-                            <p className="font-semibold">{partner.currency}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Financial Records */}
                   {partner.financialInfo && partner.financialInfo.length > 0 && (
                     <div>

@@ -4,6 +4,8 @@ import {
   compactProcurementAppSubmissionSearch,
   procurementAppSubmissionActions,
   procurementAppSubmissionStatusTone,
+  readProcurementAppExportFile,
+  toProcurementAppEventInputValue,
   validateProcurementAppExport,
 } from './procurement-app-submission';
 
@@ -32,18 +34,15 @@ describe('procurement APP submission presentation controls', () => {
     ).toBe(true);
   });
 
-  it('validates immutable export package metadata', () => {
+  it('validates the server-generated export format', () => {
     const value = {
       procurementPlanId: 'plan-1',
-      exportFileName: 'app.xlsx',
-      exportFormat: 'XLSX',
-      exportTemplateVersion: 'PPA-v1',
-      exportChecksumSha256: 'A'.repeat(64),
+      exportFormat: 'CSV',
     };
     expect(validateProcurementAppExport(value)).toBeUndefined();
     expect(
-      validateProcurementAppExport({ ...value, exportChecksumSha256: 'bad' })
-    ).toContain('64');
+      validateProcurementAppExport({ ...value, exportFormat: 'XLSX' })
+    ).toContain('CSV');
   });
 
   it('removes empty filters while retaining paging', () => {
@@ -63,5 +62,17 @@ describe('procurement APP submission presentation controls', () => {
     );
     expect(procurementAppSubmissionStatusTone('Rejected')).toContain('red');
     expect(procurementAppSubmissionStatusTone('Submitted')).toContain('blue');
+  });
+
+  it('defaults lifecycle events after the prior event without dropping seconds', () => {
+    const now = new Date('2026-09-04T01:33:42.900Z');
+    const priorEvent = '2026-09-04T01:33:42.950Z';
+
+    const value = toProcurementAppEventInputValue(priorEvent, now);
+
+    expect(value).toHaveLength(19);
+    expect(new Date(value).getTime()).toBeGreaterThan(
+      new Date(priorEvent).getTime()
+    );
   });
 });

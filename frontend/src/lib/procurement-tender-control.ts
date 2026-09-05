@@ -1,6 +1,7 @@
 import {
   ProcurementTenderControlStatus as Status,
   ProcurementTenderSubmissionDisposition as Disposition,
+  ProcurementMethodType as Method,
   type ProcurementTenderControl,
 } from '@/types/procurement-tender-control';
 
@@ -62,7 +63,7 @@ export function buildFinancialScores(control: ProcurementTenderControl) {
       item.disposition === Disposition.OnTimeAccepted &&
       qualified.has(item.tenderBidId)
   );
-  if (control.method === 7) {
+  if (control.method === Method.QualityBasedSelection) {
     const ranking = [...control.technicalResults]
       .filter((item) => item.qualified)
       .sort(

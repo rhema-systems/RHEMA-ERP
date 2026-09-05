@@ -99,6 +99,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? SwiftCode { get; set; }
     public string? Iban { get; set; }
     public string? Currency { get; set; }
+    public List<BusinessPartnerBankAccountDto> BankAccounts { get; set; } = new();
 
     // Classification
     public string? IndustryType { get; set; }
@@ -172,6 +173,24 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public List<BusinessPartnerDocumentDto> Documents { get; set; } = new();
     public List<BusinessPartnerFinancialDto> FinancialRecords { get; set; } = new();
     public List<BusinessPartnerFinancialDto> FinancialInfo { get; set; } = new(); // Alias for FinancialRecords
+}
+
+/// <summary>
+/// A bank account owned by a business partner.
+/// </summary>
+public class BusinessPartnerBankAccountDto
+{
+    public Guid Id { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public string? BankName { get; set; }
+    public string? BranchName { get; set; }
+    public string? AccountName { get; set; }
+    public string? AccountNumber { get; set; }
+    public string? SwiftCode { get; set; }
+    public string? Iban { get; set; }
+    public string? Currency { get; set; }
+    public bool IsPrimary { get; set; }
+    public bool IsActive { get; set; }
 }
 
 /// <summary>

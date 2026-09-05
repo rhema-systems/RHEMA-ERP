@@ -41,4 +41,17 @@ public sealed class PhysicalCountControllerSecurityTests
         typeof(PhysicalCountsController).GetMethod(nameof(PhysicalCountsController.UpdateCycleSchedule))!
             .GetCustomAttribute<HttpPutAttribute>()!.Template.Should().Be("cycle-schedules/{scheduleId:guid}");
     }
+
+    [Fact]
+    public void Stock_taking_evidence_uses_source_scoped_internal_multipart_routes()
+    {
+        var upload = typeof(PhysicalCountsController).GetMethod(nameof(PhysicalCountsController.UploadEvidence))!;
+        upload.GetCustomAttribute<HttpPostAttribute>()!.Template.Should().Be("{id:guid}/evidence");
+        upload.GetCustomAttribute<ConsumesAttribute>()!.ContentTypes.Should().ContainSingle("multipart/form-data");
+        upload.GetCustomAttribute<AllowAnonymousAttribute>(true).Should().BeNull();
+
+        var read = typeof(PhysicalCountsController).GetMethod(nameof(PhysicalCountsController.GetEvidence))!;
+        read.GetCustomAttribute<HttpGetAttribute>()!.Template.Should().Be("{id:guid}/evidence");
+        read.GetCustomAttribute<AllowAnonymousAttribute>(true).Should().BeNull();
+    }
 }

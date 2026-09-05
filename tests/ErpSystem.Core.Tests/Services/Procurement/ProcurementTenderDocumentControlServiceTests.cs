@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
@@ -42,6 +43,389 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         }, options => options.ExcludingMissingMembers());
         foreign.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task MetadataOnlyDraftCanStartItsExactApprovalWorkflowBeforeContentExists()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+
+        var draft = await fixture.Service.CreateTemplateAsync(
+            fixture.DraftTemplateRequest(), "create-metadata-draft");
+        var submitted = await fixture.Service.SubmitTemplateAsync(draft.Id,
+            Lifecycle(draft.RowVersion), "submit-metadata-draft");
+
+        draft.Status.Should().Be(ProcurementTenderDocumentTemplateStatus.Draft);
+        draft.ContentWorkflowEvidenceDocumentId.Should().BeNull();
+        draft.BlockedReasons.Should().Contain(reason => reason.Contains("content", StringComparison.OrdinalIgnoreCase));
+        submitted.Status.Should().Be(ProcurementTenderDocumentTemplateStatus.PendingApproval);
+        submitted.WorkflowInstanceId.Should().NotBeNull();
+        submitted.BlockedReasons.Should().Contain(reason => reason.Contains("exact approval workflow", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task PendingTemplateAcceptsOnlyVerifiedCleanContentFromItsExactWorkflowInstance()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var draft = await fixture.Service.CreateTemplateAsync(
+            fixture.DraftTemplateRequest(), "create-content-draft");
+        var submitted = await fixture.Service.SubmitTemplateAsync(draft.Id,
+            Lifecycle(draft.RowVersion), "submit-content-draft");
+        var definition = await fixture.Context.WorkflowDefinitions.SingleAsync(item =>
+            item.Id == fixture.WorkflowDefinitionId);
+        var workflow = new WorkflowInstance
+        {
+            Id = submitted.WorkflowInstanceId!.Value,
+            TenantId = fixture.TenantId,
+            WorkflowDefinitionId = definition.Id,
+            EntityTypeId = definition.EntityTypeId,
+            EntityId = submitted.Id,
+            InitiatedById = Guid.NewGuid(),
+            Status = WorkflowInstanceStatus.InProgress
+        };
+        var step = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            WorkflowInstanceId = workflow.Id,
+            WorkflowStepId = Guid.NewGuid(),
+            Status = WorkflowStepInstanceStatus.InProgress
+        };
+        var artifact = new WorkflowEvidenceDocument
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            StepInstanceId = step.Id,
+            AttachmentId = Guid.NewGuid().ToString("N"),
+            DocumentName = "Approved NCT tender document",
+            FileName = "nct-tender.pdf",
+            FilePath = "workflow/tdc/nct-tender.pdf",
+            Sha256 = new string('a', 64),
+            FileSizeBytes = 128,
+            UploadedById = Guid.NewGuid(),
+            DocumentOwnerId = Guid.NewGuid(),
+            IsCurrent = true,
+            VerificationStatus = WorkflowEvidenceVerificationStatus.Verified,
+            MalwareScanStatus = WorkflowMalwareScanStatus.Clean,
+            RetainUntil = DateTime.UtcNow.AddYears(7)
+        };
+        var unrelatedStep = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            WorkflowInstanceId = Guid.NewGuid(),
+            WorkflowStepId = Guid.NewGuid(),
+            Status = WorkflowStepInstanceStatus.InProgress
+        };
+        var unrelatedArtifact = new WorkflowEvidenceDocument
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            StepInstanceId = unrelatedStep.Id,
+            AttachmentId = Guid.NewGuid().ToString("N"),
+            FileName = "unrelated-pr.pdf",
+            FilePath = "workflow/tdc/unrelated-pr.pdf",
+            Sha256 = new string('b', 64),
+            UploadedById = Guid.NewGuid(),
+            DocumentOwnerId = Guid.NewGuid(),
+            IsCurrent = true,
+            VerificationStatus = WorkflowEvidenceVerificationStatus.Verified,
+            MalwareScanStatus = WorkflowMalwareScanStatus.Clean,
+            RetainUntil = DateTime.UtcNow.AddYears(7)
+        };
+        fixture.Context.AddRange(workflow, step, artifact, unrelatedStep, unrelatedArtifact);
+        await fixture.Context.SaveChangesAsync();
+
+        var unrelated = () => fixture.Service.AttachTemplateContentAsync(submitted.Id,
+            new AttachProcurementTenderDocumentTemplateContentRequest
+            {
+                ContentWorkflowEvidenceDocumentId = unrelatedArtifact.Id,
+                RowVersion = submitted.RowVersion
+            }, "reject-unrelated-workflow-content");
+        await unrelated.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_CONTENT_WORKFLOW_MISMATCH");
+
+        var attached = await fixture.Service.AttachTemplateContentAsync(submitted.Id,
+            new AttachProcurementTenderDocumentTemplateContentRequest
+            {
+                ContentWorkflowEvidenceDocumentId = artifact.Id,
+                RowVersion = submitted.RowVersion
+            }, "attach-exact-workflow-content");
+
+        attached.ContentWorkflowEvidenceDocumentId.Should().Be(artifact.Id);
+        attached.ContentReference.Should().Be(artifact.FilePath);
+        attached.ContentChecksumSha256.Should().Be(artifact.Sha256);
+        attached.BlockedReasons.Should().NotContain(reason =>
+            reason.Contains("attach", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExactRecordedPolicyCanUseCompletedIndependentReviewInsteadOfSeparateVerification()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var scenario = await CreateConfiguredReviewAsync(fixture);
+
+        var detail = await fixture.Service.GetTemplateAsync(scenario.Template.Id);
+        detail.EligibleContentEvidenceDocumentIds.Should().ContainSingle().Which.Should().Be(scenario.Artifact.Id);
+        var attached = await fixture.Service.AttachTemplateContentAsync(scenario.Template.Id,
+            new AttachProcurementTenderDocumentTemplateContentRequest
+            {
+                ContentWorkflowEvidenceDocumentId = scenario.Artifact.Id,
+                RowVersion = scenario.Template.RowVersion
+            }, "attach-policy-reviewed-content");
+        var published = await fixture.Service.PublishTemplateAsync(attached.Id,
+            Lifecycle(attached.RowVersion), "publish-policy-reviewed-content");
+
+        published.Status.Should().Be(ProcurementTenderDocumentTemplateStatus.Published);
+        scenario.Artifact.VerificationStatus.Should().Be(WorkflowEvidenceVerificationStatus.Pending,
+            "configured review must not fabricate a separate verification record");
+        scenario.Policy.ApprovalConfiguration.Should().Be(WaivedReviewConfiguration,
+            "published configuration must remain immutable");
+    }
+
+    [Theory]
+    [InlineData("no-recorded-policy")]
+    [InlineData("malformed-step-result")]
+    [InlineData("malformed-policy")]
+    [InlineData("verification-unspecified")]
+    [InlineData("verification-required")]
+    [InlineData("unrelated-requirement")]
+    [InlineData("duplicate-requirement")]
+    [InlineData("wrong-document-type")]
+    [InlineData("multiple-documents")]
+    [InlineData("foreign-policy")]
+    [InlineData("unpublished-policy")]
+    [InlineData("policy-not-effective")]
+    [InlineData("unfinished-workflow")]
+    [InlineData("self-approval")]
+    [InlineData("approval-before-upload")]
+    [InlineData("missing-actor")]
+    [InlineData("no-approval")]
+    [InlineData("missing-key")]
+    [InlineData("unknown-verification")]
+    [InlineData("missing-system-log")]
+    [InlineData("forged-policy-result")]
+    [InlineData("malformed-system-log")]
+    [InlineData("wrong-system-log-code")]
+    [InlineData("user-authored-log")]
+    [InlineData("foreign-system-log")]
+    [InlineData("log-after-approval")]
+    [InlineData("duplicate-system-log")]
+    [InlineData("ambiguous-policy-property")]
+    [InlineData("ambiguous-result-property")]
+    public async Task ConfiguredReviewFallsBackToStrictVerificationWhenAuthorityIsUnclear(string condition)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var scenario = await CreateConfiguredReviewAsync(fixture, condition);
+        switch (condition)
+        {
+            case "no-recorded-policy": scenario.Step.ResultData = "{}"; break;
+            case "malformed-step-result": scenario.Step.ResultData = "invalid"; break;
+            case "malformed-policy": scenario.Policy.ApprovalConfiguration = "invalid"; break;
+            case "verification-unspecified": scenario.Policy.ApprovalConfiguration =
+                "{\"evidenceRequirements\":[{\"requirementKey\":\"TENDER_CONTENT\"}]}"; break;
+            case "verification-required": scenario.Policy.ApprovalConfiguration =
+                WaivedReviewConfiguration.Replace("false", "true"); break;
+            case "unrelated-requirement": scenario.Artifact.RequirementKey = "OTHER"; break;
+            case "duplicate-requirement": scenario.Policy.ApprovalConfiguration =
+                "{\"evidenceRequirements\":[{\"requirementKey\":\"TENDER_CONTENT\",\"requireVerification\":false},{\"requirementKey\":\"TENDER_CONTENT\",\"requireVerification\":false}]}"; break;
+            case "wrong-document-type": scenario.Artifact.DocumentType = "INVOICE"; break;
+            case "multiple-documents": scenario.Policy.ApprovalConfiguration =
+                WaivedReviewConfiguration.Replace("\"minimumDocuments\":1", "\"minimumDocuments\":2"); break;
+            case "foreign-policy": scenario.Policy.TenantId = Guid.NewGuid(); break;
+            case "unpublished-policy": scenario.Policy.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft; break;
+            case "policy-not-effective": scenario.Policy.EffectiveFrom = DateTime.UtcNow.AddDays(1); break;
+            case "unfinished-workflow": scenario.Workflow.Status = WorkflowInstanceStatus.InProgress; break;
+            case "self-approval": scenario.Approval.ProcessedById = scenario.Artifact.UploadedById; break;
+            case "approval-before-upload": scenario.Approval.ProcessedDate = scenario.Artifact.UploadedAt.AddMinutes(-1); break;
+            case "missing-actor": scenario.Approval.ProcessedById = null; break;
+            case "no-approval": scenario.Approval.Status = WorkflowApprovalStatus.Pending; break;
+            case "missing-key": scenario.Artifact.RequirementKey = null; break;
+            case "unknown-verification": scenario.Artifact.VerificationStatus = (WorkflowEvidenceVerificationStatus)99; break;
+            case "forged-policy-result":
+                scenario.Policy.ApprovalConfiguration = WaivedReviewConfiguration.Replace("false", "true");
+                var forgedPolicy = new WorkflowApprovalPolicySet
+                {
+                    Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "UNRELATED-WAIVER",
+                    Name = "Unrelated policy", EntityType = "Procurement Sourcing",
+                    EffectiveFrom = DateTime.UtcNow.AddDays(-1), LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                    ApprovalConfiguration = WaivedReviewConfiguration
+                };
+                fixture.Context.Add(forgedPolicy);
+                scenario.Step.ResultData = JsonSerializer.Serialize(new { appliedApprovalPolicySetId = forgedPolicy.Id });
+                break;
+            case "duplicate-system-log": fixture.Context.Add(new WorkflowActivityLog
+                {
+                    Id = Guid.NewGuid(), TenantId = fixture.TenantId, WorkflowInstanceId = scenario.Workflow.Id,
+                    StepInstanceId = scenario.Step.Id, ActivityType = WorkflowActivityType.DataUpdated,
+                    Title = "Approval policy applied", Data = scenario.Activity.Data,
+                    ActivityDate = scenario.Activity.ActivityDate
+                }); break;
+            case "ambiguous-policy-property": scenario.Policy.ApprovalConfiguration =
+                WaivedReviewConfiguration.Replace("\"requireVerification\":false", "\"requireVerification\":true,\"RequireVerification\":false"); break;
+            case "ambiguous-result-property": scenario.Step.ResultData =
+                "{\"appliedApprovalPolicySetId\":\"" + scenario.Policy.Id + "\",\"AppliedApprovalPolicySetId\":\"" + scenario.Policy.Id + "\"}"; break;
+        }
+        await fixture.Context.SaveChangesAsync();
+
+        (await fixture.Service.GetTemplateAsync(scenario.Template.Id))
+            .EligibleContentEvidenceDocumentIds.Should().BeEmpty();
+        var action = () => fixture.Service.AttachTemplateContentAsync(scenario.Template.Id,
+            new AttachProcurementTenderDocumentTemplateContentRequest
+            {
+                ContentWorkflowEvidenceDocumentId = scenario.Artifact.Id,
+                RowVersion = scenario.Template.RowVersion
+            }, "reject-unclear-review-policy");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_CONTENT_NOT_APPROVED");
+    }
+
+    [Theory]
+    [InlineData("pending-scan", "TENDER_DOCUMENT_CONTENT_NOT_APPROVED")]
+    [InlineData("infected", "TENDER_DOCUMENT_CONTENT_SCAN_FAILED")]
+    [InlineData("failed-scan", "TENDER_DOCUMENT_CONTENT_SCAN_FAILED")]
+    [InlineData("rejected", "TENDER_DOCUMENT_CONTENT_VERIFICATION_REJECTED")]
+    [InlineData("superseded", "TENDER_DOCUMENT_CONTENT_ARTIFACT_SUPERSEDED")]
+    [InlineData("expired", "TENDER_DOCUMENT_CONTENT_ARTIFACT_EXPIRED")]
+    [InlineData("unrelated-workflow", "TENDER_DOCUMENT_CONTENT_WORKFLOW_MISMATCH")]
+    public async Task ConfiguredReviewNeverWaivesDocumentSafetyOrExactWorkflow(string condition, string expectedCode)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var scenario = await CreateConfiguredReviewAsync(fixture);
+        switch (condition)
+        {
+            case "pending-scan": scenario.Artifact.MalwareScanStatus = WorkflowMalwareScanStatus.Pending; break;
+            case "infected": scenario.Artifact.MalwareScanStatus = WorkflowMalwareScanStatus.Infected; break;
+            case "failed-scan": scenario.Artifact.MalwareScanStatus = WorkflowMalwareScanStatus.Failed; break;
+            case "rejected": scenario.Artifact.VerificationStatus = WorkflowEvidenceVerificationStatus.Rejected; break;
+            case "superseded": scenario.Artifact.IsCurrent = false; break;
+            case "expired": scenario.Artifact.ExpiryDate = DateTime.UtcNow.AddMinutes(-1); break;
+            case "unrelated-workflow": scenario.Artifact.StepInstanceId = Guid.NewGuid(); break;
+        }
+        await fixture.Context.SaveChangesAsync();
+
+        (await fixture.Service.GetTemplateAsync(scenario.Template.Id))
+            .EligibleContentEvidenceDocumentIds.Should().BeEmpty();
+        var action = () => fixture.Service.AttachTemplateContentAsync(scenario.Template.Id,
+            new AttachProcurementTenderDocumentTemplateContentRequest
+            {
+                ContentWorkflowEvidenceDocumentId = scenario.Artifact.Id,
+                RowVersion = scenario.Template.RowVersion
+            }, "reject-unsafe-policy-content");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == expectedCode);
+    }
+
+    [Fact]
+    public async Task ConfiguredReviewRechecksTheAttachedArtifactChecksumBeforePublication()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var scenario = await CreateConfiguredReviewAsync(fixture);
+        var attached = await fixture.Service.AttachTemplateContentAsync(scenario.Template.Id,
+            new AttachProcurementTenderDocumentTemplateContentRequest
+            {
+                ContentWorkflowEvidenceDocumentId = scenario.Artifact.Id,
+                RowVersion = scenario.Template.RowVersion
+            }, "attach-before-checksum-change");
+        scenario.Artifact.Sha256 = new string('b', 64);
+        await fixture.Context.SaveChangesAsync();
+
+        var publish = () => fixture.Service.PublishTemplateAsync(attached.Id,
+            Lifecycle(attached.RowVersion), "reject-changed-content-checksum");
+        await publish.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_CHECKSUM_MISMATCH");
+    }
+
+    private const string WaivedReviewConfiguration =
+        "{\"evidenceRequirements\":[{\"requirementKey\":\"TENDER_CONTENT\",\"documentType\":\"TENDER\",\"minimumDocuments\":1,\"requireVerification\":false}]}";
+
+    private static async Task<(ProcurementTenderDocumentTemplateDto Template, WorkflowInstance Workflow,
+        WorkflowStepInstance Step, WorkflowApproval Approval, WorkflowEvidenceDocument Artifact,
+        WorkflowApprovalPolicySet Policy, WorkflowActivityLog Activity)> CreateConfiguredReviewAsync(
+            Fixture fixture, string? logVariant = null)
+    {
+        var draft = await fixture.Service.CreateTemplateAsync(fixture.DraftTemplateRequest(), "draft-configured-review");
+        var submitted = await fixture.Service.SubmitTemplateAsync(draft.Id,
+            Lifecycle(draft.RowVersion), "submit-configured-review");
+        var definition = await fixture.Context.WorkflowDefinitions.SingleAsync(item => item.Id == fixture.WorkflowDefinitionId);
+        var workflow = new WorkflowInstance
+        {
+            Id = submitted.WorkflowInstanceId!.Value, TenantId = fixture.TenantId,
+            WorkflowDefinitionId = definition.Id, EntityTypeId = definition.EntityTypeId,
+            EntityId = submitted.Id, InitiatedById = Guid.NewGuid(),
+            Status = WorkflowInstanceStatus.Completed, StartedDate = DateTime.UtcNow.AddMinutes(-10)
+        };
+        var policy = new WorkflowApprovalPolicySet
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "TDC-TEMPLATE-REVIEW",
+            Name = "Configured template review", EntityType = "Procurement Sourcing",
+            EffectiveFrom = DateTime.UtcNow.AddDays(-1), LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+            ApprovalConfiguration = WaivedReviewConfiguration
+        };
+        var stepDefinition = new WorkflowStep
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, WorkflowDefinitionId = definition.Id,
+            Name = "TDC configured approval", StepType = WorkflowStepType.Approval
+        };
+        var step = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, WorkflowInstanceId = workflow.Id,
+            WorkflowStepId = stepDefinition.Id, Status = WorkflowStepInstanceStatus.Completed,
+            CreatedDate = DateTime.UtcNow.AddMinutes(-8),
+            ResultData = JsonSerializer.Serialize(new { appliedApprovalPolicySetId = policy.Id })
+        };
+        var artifact = new WorkflowEvidenceDocument
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, StepInstanceId = step.Id,
+            AttachmentId = Guid.NewGuid().ToString("N"), RequirementKey = "TENDER_CONTENT", DocumentType = "TENDER",
+            FileName = "tender.pdf", FilePath = "workflow/tdc/tender.pdf", Sha256 = new string('a', 64),
+            IsCurrent = true, MalwareScanStatus = WorkflowMalwareScanStatus.Clean,
+            VerificationStatus = WorkflowEvidenceVerificationStatus.Pending,
+            UploadedById = Guid.NewGuid(), UploadedAt = DateTime.UtcNow.AddMinutes(-5), RetainUntil = DateTime.UtcNow.AddYears(7)
+        };
+        var approval = new WorkflowApproval
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, StepInstanceId = step.Id,
+            Status = WorkflowApprovalStatus.Approved, ProcessedById = Guid.NewGuid(),
+            ProcessedDate = DateTime.UtcNow.AddMinutes(-1), ApproverRole = "TDC_HEAD_OF_PROCUREMENT"
+        };
+        var activity = new WorkflowActivityLog
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, WorkflowInstanceId = workflow.Id,
+            StepInstanceId = step.Id, ActivityType = WorkflowActivityType.DataUpdated,
+            Title = "Approval policy applied", ActivityDate = DateTime.UtcNow.AddMinutes(-7),
+            Data = JsonSerializer.Serialize(new { PolicySetId = policy.Id, PolicyCode = policy.Code })
+        };
+        // Activity logs are immutable after insertion. Arrange legacy/corrupt provenance before
+        // the initial save, rather than weakening the production append-only protection.
+        switch (logVariant)
+        {
+            case "malformed-system-log": activity.Data = "invalid"; break;
+            case "wrong-system-log-code": activity.Data = JsonSerializer.Serialize(new
+                { PolicySetId = policy.Id, PolicyCode = "OTHER" }); break;
+            case "user-authored-log": activity.PerformedById = Guid.NewGuid(); break;
+            case "foreign-system-log": activity.TenantId = Guid.NewGuid(); break;
+            case "log-after-approval": activity.ActivityDate = DateTime.UtcNow.AddDays(1); break;
+        }
+        fixture.Context.AddRange(workflow, policy, stepDefinition, step, artifact, approval);
+        if (logVariant != "missing-system-log")
+            fixture.Context.Add(activity);
+        await fixture.Context.SaveChangesAsync();
+        return (submitted, workflow, step, approval, artifact, policy, activity);
+    }
+
+    private static ProcurementTenderDocumentTemplateLifecycleRequest Lifecycle(string rowVersion) => new()
+    {
+        RowVersion = rowVersion,
+        Comment = "Start governed content approval.",
+        Evidence =
+        [
+            new ProcurementControlEventEvidenceReference
+            {
+                ReferenceKind = ProcurementControlEvidenceReferenceKind.ExternalReference,
+                Reference = "UAT-F05B-CONTENT"
+            }
+        ]
+    };
 
     [Fact]
     public async Task PaidIssuanceRequiresExactFeeAndReplaysSameCorrelationWithoutDuplicate()
@@ -536,11 +920,20 @@ public sealed class ProcurementTenderDocumentControlServiceTests
             current.SetupGet(item => item.Username).Returns("officer@tdc.test");
             current.SetupGet(item => item.FullName).Returns("Procurement Officer");
             current.SetupGet(item => item.Roles).Returns(() =>
-                _external ? ["Supplier"] : ["TenantAdmin"]);
+                _external ? ["Supplier"] : ["TenantAdmin", "TDC_PROCUREMENT_OFFICER"]);
             current.Setup(item => item.HasRole(It.IsAny<string>()))
                 .Returns((string role) => !_external && role == "TenantAdmin");
             _unitOfWork = new UnitOfWork(Context);
             var access = new Mock<IProcurementAccessControlService>();
+            access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ACCESS_ALLOWED",
+                    Message = "Allowed"
+                });
             var sod = new Mock<IProcurementSodGuardService>();
             sod.Setup(item => item.EnforceAsync(It.IsAny<ProcurementSodGuardRequest>(),
                     It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -576,6 +969,20 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         public Guid WorkflowDefinitionId { get; }
         public ProcurementTenderDocumentFeeMode FeeMode { get; }
         public ProcurementTenderDocumentControlService Service { get; }
+
+        public SaveProcurementTenderDocumentTemplateRequest DraftTemplateRequest() => new()
+        {
+            TemplateCode = "TDC-NCT-DRAFT",
+            Name = "Standard NCT tender document",
+            DocumentTypeCode = "TENDER-DOCUMENT",
+            EffectiveFromUtc = DateTime.UtcNow.AddMinutes(-1),
+            PolicySetId = Policy.Id,
+            PolicySetCode = Policy.Code,
+            PolicySetVersion = Policy.Version,
+            SourceConfigurationProfileId = Profile.Id,
+            WorkflowDefinitionId = WorkflowDefinitionId,
+            ApplicableMethods = [ProcurementMethodType.NationalCompetitiveTendering]
+        };
 
         public void SwitchTenant(Guid tenantId) => _tenantId = tenantId;
 

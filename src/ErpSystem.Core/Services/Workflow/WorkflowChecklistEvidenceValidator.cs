@@ -1,9 +1,15 @@
 using ErpSystem.Core.DTOs.Workflow;
+using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Workflow;
 
 public static class WorkflowChecklistEvidenceValidator
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public static List<string> Validate(
         IReadOnlyCollection<WorkflowQualityCheckDto> checklist,
         IReadOnlyCollection<WorkflowApprovalChecklistResponseDto> responses,
@@ -73,6 +79,43 @@ public static class WorkflowChecklistEvidenceValidator
         return !string.IsNullOrWhiteSpace(id)
             ? id.Trim()
             : (name ?? string.Empty).Trim();
+    }
+
+    public static List<WorkflowApprovalChecklistResponseDto> ReadResponses(string? resultData)
+    {
+        if (string.IsNullOrWhiteSpace(resultData))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(resultData);
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(
+                           document.RootElement.GetRawText(), JsonOptions) ?? [];
+            }
+
+            if (document.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, "approvalChecklistResponses", StringComparison.OrdinalIgnoreCase)
+                        && property.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(
+                                   property.Value.GetRawText(), JsonOptions) ?? [];
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        return [];
     }
 
     private static string NormalizeDocumentName(string? value)

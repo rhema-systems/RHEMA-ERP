@@ -673,8 +673,18 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
         var isStepAssignment = string.Equals(activity, "WorkflowStepAssignment", StringComparison.OrdinalIgnoreCase);
         var isSubcontractCharge = string.Equals(key, "QuantitySurvey.SubcontractChargeNoticeIssued", StringComparison.OrdinalIgnoreCase) ||
                                   string.Equals(key, "QuantitySurvey.SubcontractChargeDecision", StringComparison.OrdinalIgnoreCase);
-        if (!isApprovalRequest && !isStepAssignment && !isSubcontractCharge) return topic;
+        var isEvaluationAppointment = string.Equals(key,
+            "ProcurementEvaluationCommittee.AppointmentCreated.Internal",
+            StringComparison.OrdinalIgnoreCase);
+        if (!isApprovalRequest && !isStepAssignment && !isSubcontractCharge &&
+            !isEvaluationAppointment) return topic;
 
+        var defaultTitleTemplate = isEvaluationAppointment
+            ? "Evaluation committee appointment: {{SourceReference}}"
+            : "{{Title}}";
+        var defaultBodyTemplate = isEvaluationAppointment
+            ? "You have been appointed as {{MemberKind}} to {{CommitteeName}}. Review and respond to the appointment."
+            : "{{Message}}";
         var changed = false;
         if (topic == null)
         {
@@ -683,19 +693,21 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 Id = Guid.NewGuid(),
                 TenantId = evt.TenantId,
                 Key = key,
-                Name = isSubcontractCharge ? "Quantity Survey subcontract charge communication" :
+                Name = isEvaluationAppointment ? "Evaluation committee appointment" :
+                    isSubcontractCharge ? "Quantity Survey subcontract charge communication" :
                     isApprovalRequest ? $"{segments[0]} approval required" : $"{segments[0]} workflow assignment",
-                Description = isSubcontractCharge ? "A governed subcontract charge notice or decision is available in the external project portal." :
+                Description = isEvaluationAppointment ? "An appointed evaluation committee member must review and respond to an active appointment." :
+                    isSubcontractCharge ? "A governed subcontract charge notice or decision is available in the external project portal." :
                     isApprovalRequest ? "A workflow request is waiting for approval." : "A workflow step has been assigned.",
                 EntityType = evt.EntityType ?? segments[0],
                 IsSystem = true,
                 IsRequired = true,
                 IsActive = true,
                 EnableInApp = true,
-                EnableEmail = isSubcontractCharge,
+                EnableEmail = isSubcontractCharge || isEvaluationAppointment,
                 EnableSms = false,
-                InAppTitleTemplate = "{{Title}}",
-                InAppBodyTemplate = "{{Message}}",
+                InAppTitleTemplate = defaultTitleTemplate,
+                InAppBodyTemplate = defaultBodyTemplate,
                 ActionUrlTemplate = "{{ActionUrl}}",
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "System"
@@ -709,9 +721,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
             if (!topic.IsRequired) { topic.IsRequired = true; changed = true; }
             if (!topic.IsActive) { topic.IsActive = true; changed = true; }
             if (!topic.EnableInApp) { topic.EnableInApp = true; changed = true; }
-            if (isSubcontractCharge && !topic.EnableEmail) { topic.EnableEmail = true; changed = true; }
-            if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate)) { topic.InAppTitleTemplate = "{{Title}}"; changed = true; }
-            if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate)) { topic.InAppBodyTemplate = "{{Message}}"; changed = true; }
+            if ((isSubcontractCharge || isEvaluationAppointment) && !topic.EnableEmail) { topic.EnableEmail = true; changed = true; }
+            if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate)) { topic.InAppTitleTemplate = defaultTitleTemplate; changed = true; }
+            if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate)) { topic.InAppBodyTemplate = defaultBodyTemplate; changed = true; }
             if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate)) { topic.ActionUrlTemplate = "{{ActionUrl}}"; changed = true; }
             if (changed)
             {
@@ -722,6 +734,8 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
         var requiredRules = isSubcontractCharge
             ? new[] { (Kind: "BusinessPartnerFromData", Value: "BusinessPartnerId", SendEmail: true) }
+            : isEvaluationAppointment
+                ? new[] { (Kind: "UserFromData", Value: "TargetUserId", SendEmail: true) }
             : isApprovalRequest
                 ? new[]
                 {

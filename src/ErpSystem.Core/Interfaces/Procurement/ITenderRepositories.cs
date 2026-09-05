@@ -75,7 +75,7 @@ public interface ITenderBidRepository
     Task<TenderBid?> GetByTenderAndPartnerAsync(Guid tenderId, Guid businessPartnerId);
     Task<IEnumerable<TenderBid>> GetByTenderIdAsync(Guid tenderId);
     Task<IEnumerable<TenderBid>> GetByBusinessPartnerIdAsync(Guid businessPartnerId);
-    Task<PagedResult<TenderBid>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null);
+    Task<PagedResult<TenderBid>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null, Guid? tenderId = null);
     Task<TenderBid> CreateAsync(TenderBid bid);
     Task<TenderBid> UpdateAsync(TenderBid bid);
     Task DeleteAsync(Guid id);

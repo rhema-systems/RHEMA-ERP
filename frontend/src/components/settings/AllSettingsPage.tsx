@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Bell,
   Building2,
-  ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   Database,
   Search,
@@ -28,6 +28,7 @@ export interface SettingsLink {
   title: string;
   href: string;
   icon: NavItem['icon'];
+  trail: string[];
   searchPath: string;
 }
 
@@ -42,6 +43,10 @@ export interface SettingsSection {
   key: string;
   title: string;
   cards: SettingsCard[];
+}
+
+export function getSettingsModuleHref(sectionKey: string, cardKey: string) {
+  return `/settings/${encodeURIComponent(sectionKey)}/${encodeURIComponent(cardKey)}`;
 }
 
 const moduleTitleAliases: Record<string, string> = {
@@ -74,6 +79,7 @@ function flattenSettingsLinks(item: NavItem, trail: string[] = []): SettingsLink
     title: item.title,
     href: item.href,
     icon: item.icon,
+    trail: nextTrail,
     searchPath: nextTrail.join(' '),
   }];
 }
@@ -237,19 +243,6 @@ export function AllSettingsPage() {
   const { currentTenant } = useTenant();
   const { hasAnyRole, hasAnyPermission } = useAuth();
   const [query, setQuery] = useState('');
-  const [collapsedCards, setCollapsedCards] = useState<Set<string>>(new Set());
-
-  const toggleCard = (cardKey: string) => {
-    setCollapsedCards(current => {
-      const next = new Set(current);
-      if (next.has(cardKey)) {
-        next.delete(cardKey);
-      } else {
-        next.add(cardKey);
-      }
-      return next;
-    });
-  };
 
   const sections = useMemo(() => {
     const allowedItems = filterSettingsByAccess(settingsNavigationItems, hasAnyRole, hasAnyPermission);
@@ -263,16 +256,10 @@ export function AllSettingsPage() {
     return sections
       .map(section => ({
         ...section,
-        cards: section.cards
-          .map(card => {
-            if (`${section.title} ${card.title}`.toLowerCase().includes(normalizedQuery)) return card;
-            return {
-              ...card,
-              links: card.links.filter(link =>
-                `${link.title} ${link.searchPath}`.toLowerCase().includes(normalizedQuery)),
-            };
-          })
-          .filter(card => card.links.length > 0),
+        cards: section.cards.filter(card =>
+          `${section.title} ${card.title} ${card.links.map(link => `${link.title} ${link.searchPath}`).join(' ')}`
+            .toLowerCase()
+            .includes(normalizedQuery)),
       }))
       .filter(section => section.cards.length > 0);
   }, [query, sections]);
@@ -300,7 +287,7 @@ export function AllSettingsPage() {
               autoFocus
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="Search settings"
+              placeholder="Search modules and settings"
               className="h-10 bg-white pl-9 shadow-sm dark:border-neutral-700 dark:bg-neutral-800"
             />
           </div>
@@ -319,60 +306,49 @@ export function AllSettingsPage() {
         </div>
       </header>
 
-      <main className="space-y-6 p-5 lg:p-7">
+      <main className="space-y-4 p-4 lg:p-5">
         {visibleSections.map(section => (
           <section
             key={section.key}
             aria-labelledby={`${section.key}-settings-heading`}
-            className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-[#1b1b1b]"
+            className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-[#1b1b1b]"
           >
             <h2
               id={`${section.key}-settings-heading`}
-              className="mb-4 text-lg font-medium text-slate-800 dark:text-slate-100"
+              className="mb-3 text-base font-semibold text-slate-800 dark:text-slate-100"
             >
               {section.title}
             </h2>
             <div
-              data-testid={`${section.key}-settings-masonry`}
-              className="columns-1 gap-4 md:columns-2 xl:columns-4 2xl:columns-5"
+              data-testid={`${section.key}-settings-grid`}
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
             >
               {section.cards.map((card, cardIndex) => {
                 const CardIcon = card.icon;
-                const accordionKey = `${section.key}:${card.key}`;
-                const isExpanded = query.trim().length > 0 || !collapsedCards.has(accordionKey);
-                const contentId = `${accordionKey}-content`;
                 return (
                   <article
                     key={card.key}
-                    className="mb-4 inline-block w-full break-inside-avoid overflow-hidden rounded-xl border border-slate-200 bg-white align-top shadow-sm dark:border-neutral-700 dark:bg-neutral-900"
+                    className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-blue-700"
                   >
-                    <button
-                      type="button"
-                      aria-expanded={isExpanded}
-                      aria-controls={contentId}
-                      aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${card.title} settings`}
-                      onClick={() => toggleCard(accordionKey)}
+                    <Link
+                      href={getSettingsModuleHref(section.key, card.key)}
+                      aria-label={`Open ${card.title} settings`}
                       className={cn(
-                      'flex w-full items-center gap-2 bg-gradient-to-r px-4 py-3 text-left text-sm font-semibold transition-colors',
-                      cardAccentClasses[cardIndex % cardAccentClasses.length],
-                    )}>
-                      <CardIcon className="h-4 w-4 shrink-0" />
-                      <h3 className="flex-1">{card.title}</h3>
-                      <ChevronDown className={cn('h-4 w-4 transition-transform', isExpanded && 'rotate-180')} />
-                    </button>
-                    {isExpanded && (
-                      <nav id={contentId} aria-label={`${card.title} settings`} className="space-y-0.5 p-2">
-                        {card.links.map(link => (
-                          <Link
-                            key={link.href}
-                            href={link.href}
-                            className="block rounded-lg px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
-                          >
-                            {link.title}
-                          </Link>
-                        ))}
-                      </nav>
-                    )}
+                        'flex min-h-20 w-full items-center gap-3 bg-gradient-to-br px-4 py-3 text-left transition-colors',
+                        cardAccentClasses[cardIndex % cardAccentClasses.length],
+                      )}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/80 shadow-sm ring-1 ring-black/5 dark:bg-black/20 dark:ring-white/10">
+                        <CardIcon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <h3 className="text-base font-semibold">{card.title}</h3>
+                        <span className="mt-0.5 block text-xs font-medium opacity-75">
+                          {card.links.length} {card.links.length === 1 ? 'setting' : 'settings'}
+                        </span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+                    </Link>
                   </article>
                 );
               })}

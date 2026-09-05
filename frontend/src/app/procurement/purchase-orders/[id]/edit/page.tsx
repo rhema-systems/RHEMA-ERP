@@ -49,6 +49,7 @@ import {
 import { inventoryManagementService, InventoryItemDto, WarehouseDto, ItemUnitOfMeasureDto, WarehouseItemDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
 import pricingService from '@/services/pricingService';
+import { formatProcurementMoney, normalizeProcurementCurrency } from '@/lib/procurement-currency';
 import { format } from 'date-fns';
 
 interface POItemFormData extends CreatePurchaseOrderItemDto {
@@ -121,6 +122,7 @@ export default function EditPurchaseOrderPage() {
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
+  const [currency, setCurrency] = useState('GHS');
   const [items, setItems] = useState<POItemFormData[]>([]);
   
   // Financial fields
@@ -133,7 +135,7 @@ export default function EditPurchaseOrderPage() {
   const [discountAmount, setDiscountAmount] = useState(0);
 
   // Planned landed cost plan (captured at PO stage, carried to GRN LC voucher)
-  const [landedCostPlanCurrency, setLandedCostPlanCurrency] = useState('USD');
+  const [landedCostPlanCurrency, setLandedCostPlanCurrency] = useState('');
   const [landedCostPlanNotes, setLandedCostPlanNotes] = useState('');
   const [landedCostPlanItems, setLandedCostPlanItems] = useState<POLandedCostPlanLineFormData[]>([]);
   
@@ -214,6 +216,8 @@ export default function EditPurchaseOrderPage() {
         setDeliveryAddress(po.deliveryAddress || '');
         setDeliveryInstructions(po.deliveryInstructions || '');
         setReferenceNumber(po.referenceNumber || '');
+        setCurrency(normalizeProcurementCurrency(po.currency));
+        setLandedCostPlanCurrency(normalizeProcurementCurrency(po.currency));
         
         // Load financial fields
         setTaxAmount(po.taxAmount || 0);
@@ -247,7 +251,7 @@ export default function EditPurchaseOrderPage() {
         try {
           const plan = await purchasingService.getPurchaseOrderLandedCostPlan(id);
           if (plan) {
-            setLandedCostPlanCurrency(plan.currency || 'USD');
+            setLandedCostPlanCurrency(plan.currency || po.currency);
             setLandedCostPlanNotes(plan.notes || '');
             setLandedCostPlanItems(
               (plan.items || []).map((i) => ({
@@ -255,7 +259,7 @@ export default function EditPurchaseOrderPage() {
                 costType: i.costType,
                 description: i.description || '',
                 amount: i.amount || 0,
-                currency: i.currency || plan.currency || 'USD',
+                currency: i.currency || plan.currency || po.currency,
                 exchangeRate: i.exchangeRate || 1,
                 allocationMethod: (i.allocationMethod as LandedCostAllocationMethod) || 'ByValue',
                 supplierId: i.supplierId,
@@ -318,6 +322,7 @@ export default function EditPurchaseOrderPage() {
   
   const totalAdditionalCost = shippingCost + miscellaneousCost;
   const totalAmount = subTotal + taxAmount + totalAdditionalCost - discountAmount;
+  const documentCurrency = normalizeProcurementCurrency(currency);
   const showLegacyAllocationAndAdditionalCosts = totalAdditionalCost > 0 || costAllocationMethod === 'GLExpense';
 
   const getApportionmentWeight = (item: POItemFormData) => {
@@ -673,7 +678,7 @@ export default function EditPurchaseOrderPage() {
         costType: 1,
         description: getLandedCostTypeLabel(1),
         amount: 0,
-        currency: landedCostPlanCurrency || 'USD',
+        currency: landedCostPlanCurrency || documentCurrency,
         exchangeRate: 1,
         allocationMethod: 'ByValue',
         supplierId: undefined,
@@ -698,7 +703,7 @@ export default function EditPurchaseOrderPage() {
         ...i,
         description: ((i.description || '').trim() || getLandedCostTypeLabel(i.costType)).trim(),
         referenceNumber: (i.referenceNumber || '').trim(),
-        currency: (i.currency || landedCostPlanCurrency || 'USD').trim().toUpperCase(),
+        currency: (i.currency || landedCostPlanCurrency || documentCurrency).trim().toUpperCase(),
         exchangeRate: Number.isFinite(i.exchangeRate) && i.exchangeRate > 0 ? i.exchangeRate : 1,
         amount: Number.isFinite(i.amount) ? i.amount : 0
       }));
@@ -760,11 +765,7 @@ export default function EditPurchaseOrderPage() {
         // Check if it's a valid non-empty GUID
         return id && id.length > 0 && id !== '00000000-0000-0000-0000-000000000000';
       });
-      
-      if (validItems.length === 0) {
-        toast.error('No valid items to save. Please ensure all items have a valid inventory item selected.');
-        return;
-      }
+      const preserveSourceItems = validItems.length !== items.length;
       
       const normalizedDeliveryWarehouseId =
         deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
@@ -792,7 +793,11 @@ export default function EditPurchaseOrderPage() {
         expenseGLAccount: costAllocationMethod === 'GLExpense' ? expenseGLAccount || undefined : undefined,
         discountAmount: discountAmount || undefined,
         requestedById,
-        items: validItems.map(item => ({
+        // An RFQ/PR award may legitimately contain controlled description-only
+        // lines that have not yet been linked to InventoryItem. Sending no lines
+        // tells the update endpoint to preserve the immutable source lines while
+        // applying safe header changes such as delivery location.
+        items: (preserveSourceItems ? [] : validItems).map(item => ({
           inventoryItemId: item.inventoryItemId,
           supplierItemCode: item.supplierItemCode || undefined,
           itemDescription: item.itemDescription || undefined,
@@ -823,6 +828,9 @@ export default function EditPurchaseOrderPage() {
       }
 
       toast.success('Purchase order updated');
+      if (preserveSourceItems) {
+        toast.info('Delivery and header details were updated; approved source lines were preserved unchanged.');
+      }
       router.push(`/procurement/purchase-orders/${id}`);
     } catch (error: any) {
       console.error('Error updating purchase order:', error);
@@ -919,6 +927,12 @@ export default function EditPurchaseOrderPage() {
                 className="bg-muted"
               />
               <p className="text-xs text-muted-foreground">Supplier cannot be changed after creation</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="currency">PO Currency</Label>
+              <Input id="currency" value={documentCurrency} disabled className="bg-muted" />
+              <p className="text-xs text-muted-foreground">Inherited from the approved procurement source.</p>
             </div>
             
             <div className="space-y-2">
@@ -1228,19 +1242,19 @@ export default function EditPurchaseOrderPage() {
                             />
                           </TableCell>
                           <TableCell className="font-medium">
-                            ${calculateLineTotal(editingItem?.orderedQuantity || 0, editingItem?.unitPrice || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            {formatProcurementMoney(calculateLineTotal(editingItem?.orderedQuantity || 0, editingItem?.unitPrice || 0), documentCurrency)}
                           </TableCell>
                           {showLegacyAllocationAndAdditionalCosts && (
                             <TableCell className="font-medium">
                               {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem?.tempId || '']
-                                ? `$${allocationPreview[editingItem?.tempId || ''].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                ? formatProcurementMoney(allocationPreview[editingItem?.tempId || ''].allocated, documentCurrency)
                                 : '-'}
                             </TableCell>
                           )}
                           {showLegacyAllocationAndAdditionalCosts && (
                             <TableCell className="font-medium">
                               {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem?.tempId || '']
-                                ? `$${allocationPreview[editingItem?.tempId || ''].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                                ? formatProcurementMoney(allocationPreview[editingItem?.tempId || ''].landedUnit, documentCurrency, 4)
                                 : '-'}
                             </TableCell>
                           )}
@@ -1287,22 +1301,22 @@ export default function EditPurchaseOrderPage() {
                           <TableCell>{item.orderedQuantity}</TableCell>
                           <TableCell>{item.unitOfMeasure || 'EA'}</TableCell>
                           <TableCell>
-                            ${item.unitPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            {formatProcurementMoney(item.unitPrice, documentCurrency)}
                           </TableCell>
                           <TableCell className="font-medium">
-                            ${calculateLineTotal(item.orderedQuantity, item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            {formatProcurementMoney(calculateLineTotal(item.orderedQuantity, item.unitPrice), documentCurrency)}
                           </TableCell>
                           {showLegacyAllocationAndAdditionalCosts && (
                             <TableCell className="font-medium">
                               {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[item.tempId]
-                                ? `$${allocationPreview[item.tempId].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                ? formatProcurementMoney(allocationPreview[item.tempId].allocated, documentCurrency)
                                 : '-'}
                             </TableCell>
                           )}
                           {showLegacyAllocationAndAdditionalCosts && (
                             <TableCell className="font-medium">
                               {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[item.tempId]
-                                ? `$${allocationPreview[item.tempId].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                                ? formatProcurementMoney(allocationPreview[item.tempId].landedUnit, documentCurrency, 4)
                                 : '-'}
                             </TableCell>
                           )}
@@ -1438,19 +1452,19 @@ export default function EditPurchaseOrderPage() {
                         />
                       </TableCell>
                       <TableCell className="font-medium">
-                        ${calculateLineTotal(editingItem.orderedQuantity || 0, editingItem.unitPrice || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {formatProcurementMoney(calculateLineTotal(editingItem.orderedQuantity || 0, editingItem.unitPrice || 0), documentCurrency)}
                       </TableCell>
                       {showLegacyAllocationAndAdditionalCosts && (
                         <TableCell className="font-medium">
                           {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem.tempId]
-                            ? `$${allocationPreview[editingItem.tempId].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            ? formatProcurementMoney(allocationPreview[editingItem.tempId].allocated, documentCurrency)
                             : '-'}
                         </TableCell>
                       )}
                       {showLegacyAllocationAndAdditionalCosts && (
                         <TableCell className="font-medium">
                           {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem.tempId]
-                            ? `$${allocationPreview[editingItem.tempId].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                            ? formatProcurementMoney(allocationPreview[editingItem.tempId].landedUnit, documentCurrency, 4)
                             : '-'}
                         </TableCell>
                       )}
@@ -1589,7 +1603,7 @@ export default function EditPurchaseOrderPage() {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Total Additional:</span>
                         <span className="font-medium">
-                          ${totalAdditionalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(totalAdditionalCost, documentCurrency)}
                         </span>
                       </div>
 
@@ -1612,7 +1626,7 @@ export default function EditPurchaseOrderPage() {
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Subtotal:</span>
                       <span className="font-medium">
-                        ${subTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatProcurementMoney(subTotal, documentCurrency)}
                       </span>
                     </div>
 
@@ -1648,7 +1662,7 @@ export default function EditPurchaseOrderPage() {
                         Total Amount:
                       </span>
                       <span className="text-xl font-bold text-primary">
-                        ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatProcurementMoney(totalAmount, documentCurrency)}
                       </span>
                     </div>
                   </CardContent>
@@ -1669,7 +1683,7 @@ export default function EditPurchaseOrderPage() {
                           value={landedCostPlanCurrency}
                           onChange={(e) => setLandedCostPlanCurrency(e.target.value)}
                           className="w-28 h-8 uppercase"
-                          placeholder="USD"
+                          placeholder={documentCurrency}
                         />
                       </div>
                       <div className="flex-1 min-w-[240px] space-y-1">
@@ -1835,9 +1849,12 @@ export default function EditPurchaseOrderPage() {
                     </div>
 
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Planned landed cost total ({(landedCostPlanCurrency || 'USD').toUpperCase()}):</span>
+                      <span className="text-muted-foreground">Planned landed cost total ({(landedCostPlanCurrency || documentCurrency).toUpperCase()}):</span>
                       <span className="font-medium">
-                        ${landedCostPlanItems.reduce((sum, i) => sum + ((i.amount || 0) * (i.exchangeRate || 1)), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatProcurementMoney(
+                          landedCostPlanItems.reduce((sum, i) => sum + ((i.amount || 0) * (i.exchangeRate || 1)), 0),
+                          landedCostPlanCurrency || documentCurrency
+                        )}
                       </span>
                     </div>
                   </CardContent>

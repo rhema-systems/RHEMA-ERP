@@ -20,9 +20,54 @@ DECLARE @TenantId uniqueidentifier =
 );
 DECLARE @Now datetime2 = SYSUTCDATETIME();
 DECLARE @EffectiveFrom datetime2 = CONVERT(date, @Now);
-DECLARE @AdminId uniqueidentifier = '58cafd8b-42ce-4f67-0dbb-08de862e82ee';
-DECLARE @OfficerId uniqueidentifier = '77af28cf-66d3-49c0-0dbd-08de862e82ee';
-DECLARE @ApproverId uniqueidentifier = '9e475ce9-34ad-4a6d-0dbc-08de862e82ee';
+DECLARE @TenderGuardExists bit=CASE WHEN EXISTS
+(
+    SELECT 1 FROM sys.triggers
+    WHERE name=N'TR_Tenders_SourcingReleaseGuard'
+      AND parent_id=OBJECT_ID(N'dbo.Tenders')
+) THEN 1 ELSE 0 END;
+DECLARE @TenderGuardWasEnabled bit=CASE WHEN EXISTS
+(
+    SELECT 1 FROM sys.triggers
+    WHERE name=N'TR_Tenders_SourcingReleaseGuard'
+      AND parent_id=OBJECT_ID(N'dbo.Tenders')
+      AND is_disabled=0
+) THEN 1 ELSE 0 END;
+DECLARE @AdminId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'admin' AND IsActive = 1
+);
+DECLARE @OfficerId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'employee' AND IsActive = 1
+);
+DECLARE @ApproverId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'manager' AND IsActive = 1
+);
+DECLARE @ReviewerId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'helpdesk.supervisor' AND IsActive = 1
+);
+DECLARE @WorkflowReviewerId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'accounts.officer' AND IsActive = 1
+);
+DECLARE @EngineerId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'helpdesk.manager' AND IsActive = 1
+);
+DECLARE @FinanceValidatorId uniqueidentifier =
+(
+    SELECT TOP (1) Id FROM dbo.Users
+    WHERE TenantId = @TenantId AND UserName = N'finance.manager' AND IsActive = 1
+);
 DECLARE @ExternalContractorUserId uniqueidentifier =
 (
     SELECT TOP (1) Id FROM dbo.Users
@@ -61,7 +106,11 @@ IF @TenantId IS NULL OR @ProjectId IS NULL OR @ProjectTypeId IS NULL OR @Locatio
 IF NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @AdminId AND TenantId = @TenantId AND IsActive = 1)
    OR NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @OfficerId AND TenantId = @TenantId AND IsActive = 1)
    OR NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @ApproverId AND TenantId = @TenantId AND IsActive = 1)
-    THROW 52002, 'QS E2E users admin, employee, and manager must exist and be active in the fixture tenant.', 1;
+   OR NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @ReviewerId AND TenantId = @TenantId AND IsActive = 1)
+   OR NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @WorkflowReviewerId AND TenantId = @TenantId AND IsActive = 1)
+   OR NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @EngineerId AND TenantId = @TenantId AND IsActive = 1)
+   OR NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @FinanceValidatorId AND TenantId = @TenantId AND IsActive = 1)
+    THROW 52002, 'QS E2E maker, reviewer, engineer, Finance validator, approver, and administrator users must exist and be active in the fixture tenant.', 1;
 IF @ExternalContractorUserId IS NULL OR @ExternalConsultantUserId IS NULL
     THROW 52013, 'QS E2E external and helpdesk.agent users must exist and be active for contractor and consultant acceptance.', 1;
 
@@ -92,17 +141,67 @@ BEGIN TRY
 
     /* Security and assigned project scope. Role and permission masters remain owned by the shared seeder. */
     DECLARE @OfficerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_QUANTITY_SURVEYOR');
+    DECLARE @ReviewerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_QS_REVIEWER');
     DECLARE @ApproverRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_SUPERVISING_QUANTITY_SURVEYOR');
     DECLARE @AssistantRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_ASSISTANT_QUANTITY_SURVEYOR');
+    DECLARE @FinanceReviewerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_FINANCE_REVIEWER');
+    DECLARE @ProcurementReviewerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_HEAD_OF_PROCUREMENT');
+    DECLARE @ProjectEngineerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_PROJECT_ENGINEER');
     IF @OfficerRoleId IS NULL OR @ApproverRoleId IS NULL OR @AssistantRoleId IS NULL
         THROW 52003, 'Run the existing QuantitySurveyAccessControlSeeder before the QS E2E fixture.', 1;
+    IF @FinanceReviewerRoleId IS NULL OR @ProcurementReviewerRoleId IS NULL
+        THROW 52016, 'Run the existing ProcurementAccessControlSeeder before the QS E2E fixture so Finance and Procurement review roles are available.', 1;
+
+    /* These test-only roles demonstrate the architecture's independent QS review
+       and engineering/project confirmation stages. They are fixture configuration,
+       not runtime role names hard-coded by the Quantity Survey services. */
+    IF @ReviewerRoleId IS NULL
+    BEGIN
+        SET @ReviewerRoleId=NEWID();
+        INSERT dbo.AspNetRoles
+            (Id,Name,NormalizedName,Description,IsSystemRole,CreatedAt,CreatedBy)
+        VALUES
+            (@ReviewerRoleId,N'TDC_QS_REVIEWER',N'TDC_QS_REVIEWER',
+             N'Non-production QS E2E independent technical-review role.',0,@Now,N'QS E2E Seeder');
+    END;
+    IF @ProjectEngineerRoleId IS NULL
+    BEGIN
+        SET @ProjectEngineerRoleId=NEWID();
+        INSERT dbo.AspNetRoles
+            (Id,Name,NormalizedName,Description,IsSystemRole,CreatedAt,CreatedBy)
+        VALUES
+            (@ProjectEngineerRoleId,N'TDC_PROJECT_ENGINEER',N'TDC_PROJECT_ENGINEER',
+             N'Non-production QS E2E engineering and project confirmation role.',0,@Now,N'QS E2E Seeder');
+    END;
+
+    DECLARE @TransactionApprovalPermissionId uniqueidentifier =
+        (SELECT Id FROM dbo.Permissions WHERE Name=N'quantity-survey.transactions.approve' AND IsDeleted=0);
+    IF @TransactionApprovalPermissionId IS NULL
+        THROW 52017, 'The central Quantity Survey transaction-approval permission must be seeded before the QS E2E fixture.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.RolePermissions WHERE RoleId=@ReviewerRoleId AND PermissionId=@TransactionApprovalPermissionId)
+        INSERT dbo.RolePermissions (RoleId,PermissionId,GrantedAt,GrantedBy)
+        VALUES (@ReviewerRoleId,@TransactionApprovalPermissionId,@Now,N'QS E2E Seeder');
+    IF NOT EXISTS (SELECT 1 FROM dbo.RolePermissions WHERE RoleId=@ProjectEngineerRoleId AND PermissionId=@TransactionApprovalPermissionId)
+        INSERT dbo.RolePermissions (RoleId,PermissionId,GrantedAt,GrantedBy)
+        VALUES (@ProjectEngineerRoleId,@TransactionApprovalPermissionId,@Now,N'QS E2E Seeder');
+    IF NOT EXISTS (SELECT 1 FROM dbo.RolePermissions WHERE RoleId=@FinanceReviewerRoleId AND PermissionId=@TransactionApprovalPermissionId)
+        INSERT dbo.RolePermissions (RoleId,PermissionId,GrantedAt,GrantedBy)
+        VALUES (@FinanceReviewerRoleId,@TransactionApprovalPermissionId,@Now,N'QS E2E Seeder');
 
     IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @OfficerId AND RoleId = @OfficerRoleId)
         INSERT dbo.UserRoles (UserId, RoleId) VALUES (@OfficerId, @OfficerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @ReviewerId AND RoleId = @OfficerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@ReviewerId, @OfficerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @ReviewerId AND RoleId = @ReviewerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@ReviewerId, @ReviewerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @WorkflowReviewerId AND RoleId = @ReviewerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@WorkflowReviewerId, @ReviewerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @EngineerId AND RoleId = @ProjectEngineerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@EngineerId, @ProjectEngineerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @FinanceValidatorId AND RoleId = @FinanceReviewerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@FinanceValidatorId, @FinanceReviewerRoleId);
     IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @ApproverId AND RoleId = @ApproverRoleId)
         INSERT dbo.UserRoles (UserId, RoleId) VALUES (@ApproverId, @ApproverRoleId);
-    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @AdminId AND RoleId = @ApproverRoleId)
-        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@AdminId, @ApproverRoleId);
 
     IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @OfficerId AND Role = N'QuantitySurveyor' AND IsDeleted = 0)
         INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
@@ -110,6 +209,18 @@ BEGIN TRY
     IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @ApproverId AND Role = N'SupervisingQuantitySurveyor' AND IsDeleted = 0)
         INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
         VALUES (NEWID(),@ProjectId,@ApproverId,N'SupervisingQuantitySurveyor',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @ReviewerId AND Role = N'QuantitySurveyReviewer' AND IsDeleted = 0)
+        INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES (NEWID(),@ProjectId,@ReviewerId,N'QuantitySurveyReviewer',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @WorkflowReviewerId AND Role = N'QuantitySurveyWorkflowReviewer' AND IsDeleted = 0)
+        INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES (NEWID(),@ProjectId,@WorkflowReviewerId,N'QuantitySurveyWorkflowReviewer',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @EngineerId AND Role = N'ProjectEngineer' AND IsDeleted = 0)
+        INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES (NEWID(),@ProjectId,@EngineerId,N'ProjectEngineer',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @FinanceValidatorId AND Role = N'FinanceValidator' AND IsDeleted = 0)
+        INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES (NEWID(),@ProjectId,@FinanceValidatorId,N'FinanceValidator',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
     IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @AdminId AND Role = N'QSAdministrator' AND IsDeleted = 0)
         INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
         VALUES (NEWID(),@ProjectId,@AdminId,N'QSAdministrator',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
@@ -231,7 +342,9 @@ BEGIN TRY
             UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId
         WHERE Id=@ConsultantAccessId;
 
-    /* Published shared-workflow definitions, one for each QS-owned entity family. */
+    /* Published shared-workflow definitions, one for each QS-owned entity family.
+       The named roles are non-production acceptance configuration. Runtime QS
+       services resolve the selected shared workflow and do not hard-code them. */
     DECLARE @WorkflowCode nvarchar(80), @WorkflowName nvarchar(200), @EntityTypeId uniqueidentifier, @WorkflowId uniqueidentifier;
     DECLARE workflow_cursor CURSOR LOCAL FAST_FORWARD FOR
         SELECT Code, Name, Id FROM dbo.WorkflowEntityTypes
@@ -241,24 +354,118 @@ BEGIN TRY
     FETCH NEXT FROM workflow_cursor INTO @WorkflowCode,@WorkflowName,@EntityTypeId;
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        SET @WorkflowId = (SELECT TOP (1) Id FROM dbo.WorkflowDefinitions WHERE TenantId=@TenantId AND EntityTypeId=@EntityTypeId AND LifecycleStatus=1 AND IsActive=1 AND IsDeleted=0 ORDER BY Version DESC);
+        SET @WorkflowId = (SELECT TOP (1) Id FROM dbo.WorkflowDefinitions WHERE TenantId=@TenantId AND EntityTypeId=@EntityTypeId AND LifecycleStatus=1 AND IsActive=1 AND IsDeleted=0 AND Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY Version DESC);
         IF @WorkflowId IS NULL
         BEGIN
             SET @WorkflowId = NEWID();
             INSERT dbo.WorkflowDefinitions
                 (Id,Name,Description,EntityTypeId,Version,IsActive,Configuration,ChangeSummary,DefinitionKey,LifecycleStatus,PublishedAt,PublishedById,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
             VALUES
-                (@WorkflowId,N'QS E2E '+@WorkflowName+N' Approval',N'Governed two-stage technical review and independent approval for '+@WorkflowName+N'.',@EntityTypeId,1,1,N'{"fixture":"QS-E2E","makerChecker":true}',N'Controlled QS E2E workflow baseline.',NEWID(),1,@Now,@AdminId,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
-            INSERT dbo.WorkflowSteps
-                (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
-            VALUES
-                (NEWID(),@WorkflowId,N'Technical review',N'QS technical review by an assigned quantity surveyor.',2,1,1,0,N'Role',N'{"role":"TDC_QUANTITY_SURVEYOR"}',1,N'TDC_QUANTITY_SURVEYOR',24,N'{"makerChecker":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
-                (NEWID(),@WorkflowId,N'Independent approval',N'Independent approval by the supervising quantity surveyor.',2,2,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+                (@WorkflowId,N'QS E2E '+@WorkflowName+N' Architecture Approval',N'TDC architecture section 16.4 acceptance workflow for '+@WorkflowName+N'.',@EntityTypeId,1,1,N'{"fixture":"QS-E2E","makerChecker":true,"architectureStages":"tdc-16.4-v1"}',N'Controlled TDC architecture workflow acceptance route.',NEWID(),1,@Now,@AdminId,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+
+            IF @WorkflowCode=N'QS_ESTIMATE'
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'Technical review',N'QS technical validation of the estimate, rate build-ups and assumptions.',2,1,1,0,N'Role',N'{"role":"TDC_QS_REVIEWER"}',1,N'TDC_QS_REVIEWER',24,N'{"makerChecker":true,"architectureStage":"technical-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Finance and budget validation',N'Finance validates funding, approved budget and commitment coverage.',2,2,0,0,N'Role',N'{"role":"TDC_FINANCE_REVIEWER"}',1,N'TDC_FINANCE_REVIEWER',24,N'{"architectureStage":"finance-budget-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Independent approval',N'Independent final approval by the supervising quantity surveyor.',2,3,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true,"architectureStage":"final-approval"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+            ELSE IF @WorkflowCode IN (N'QS_VALUATION',N'QS_PAYMENT_CERTIFICATE')
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'QS review',N'Quantity Survey review of measurements, prior certificates, deductions and retention.',2,1,1,0,N'Role',N'{"role":"TDC_QS_REVIEWER"}',1,N'TDC_QS_REVIEWER',24,N'{"makerChecker":true,"architectureStage":"qs-review"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Engineering and project confirmation',N'Engineering or the responsible project officer confirms measured work.',2,2,0,0,N'Role',N'{"role":"TDC_PROJECT_ENGINEER"}',1,N'TDC_PROJECT_ENGINEER',24,N'{"architectureStage":"engineering-project-confirmation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Finance validation',N'Finance validates budget, commitment, tax, retention and AP readiness.',2,3,0,0,N'Role',N'{"role":"TDC_FINANCE_REVIEWER"}',1,N'TDC_FINANCE_REVIEWER',24,N'{"architectureStage":"finance-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Final independent approval',N'An independent supervising quantity surveyor makes the final decision.',2,4,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true,"architectureStage":"final-approval"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+            ELSE IF @WorkflowCode=N'QS_VARIATION'
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'Engineer source confirmation',N'Confirm the Engineer-initiated variation source record and technical reason.',2,1,1,0,N'Role',N'{"role":"TDC_PROJECT_ENGINEER"}',1,N'TDC_PROJECT_ENGINEER',24,N'{"architectureStage":"engineer-initiation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'QS valuation',N'Quantity Survey validates the variation quantities, rates and cost impact.',2,2,0,0,N'Role',N'{"role":"TDC_QS_REVIEWER"}',1,N'TDC_QS_REVIEWER',24,N'{"architectureStage":"qs-valuation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Procurement contract review',N'Procurement confirms contract scope, clauses and revised contract value.',2,3,0,0,N'Role',N'{"role":"TDC_HEAD_OF_PROCUREMENT"}',1,N'TDC_HEAD_OF_PROCUREMENT',24,N'{"architectureStage":"procurement-contract-review"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Finance budget validation',N'Finance validates budget and commitment coverage for the variation.',2,4,0,0,N'Role',N'{"role":"TDC_FINANCE_REVIEWER"}',1,N'TDC_FINANCE_REVIEWER',24,N'{"architectureStage":"finance-budget-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Final authority approval',N'The configured independent final authority approves or rejects the variation.',2,5,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true,"architectureStage":"final-authority"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+            ELSE
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'Technical review',N'QS technical review by an assigned quantity surveyor.',2,1,1,0,N'Role',N'{"role":"TDC_QS_REVIEWER"}',1,N'TDC_QS_REVIEWER',24,N'{"makerChecker":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Independent approval',N'Independent approval by the supervising quantity surveyor.',2,2,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
         END;
         FETCH NEXT FROM workflow_cursor INTO @WorkflowCode,@WorkflowName,@EntityTypeId;
     END;
     CLOSE workflow_cursor;
     DEALLOCATE workflow_cursor;
+
+    /* Reconcile older copies of this non-production fixture so rerunning it adopts
+       the distinct reviewer role without replacing business-owned workflows. */
+    UPDATE step
+    SET RequiredRole=N'TDC_QS_REVIEWER',
+        AssignmentConfiguration=N'{"role":"TDC_QS_REVIEWER"}',
+        UpdatedAt=@Now,
+        UpdatedBy=N'QS E2E Seeder',
+        LastModifiedById=@AdminId
+    FROM dbo.WorkflowSteps step
+    JOIN dbo.WorkflowDefinitions definition ON definition.Id=step.WorkflowDefinitionId
+    WHERE definition.TenantId=@TenantId
+      AND definition.IsDeleted=0
+      AND definition.Configuration LIKE N'%"fixture":"QS-E2E"%'
+      AND step.IsDeleted=0
+      AND step.RequiredRole=N'TDC_QUANTITY_SURVEYOR'
+      AND step.Name IN (N'Technical review',N'QS review',N'QS valuation');
+
+    /* The shared workflow engine follows explicit transitions; step order alone
+       is display metadata. Reconcile every adjacent architecture stage so a
+       workflow cannot incorrectly complete after its first approval. */
+    ;WITH OrderedFixtureSteps AS
+    (
+        SELECT definition.Id AS WorkflowDefinitionId,
+               step.Id AS FromStepId,
+               LEAD(step.Id) OVER
+                   (PARTITION BY definition.Id ORDER BY step.[Order], step.Id) AS ToStepId,
+               step.[Order] AS FromOrder
+        FROM dbo.WorkflowDefinitions definition
+        JOIN dbo.WorkflowSteps step ON step.WorkflowDefinitionId=definition.Id
+        WHERE definition.TenantId=@TenantId
+          AND definition.IsDeleted=0
+          AND definition.Configuration LIKE N'%"fixture":"QS-E2E"%'
+          AND step.IsDeleted=0
+    )
+    INSERT dbo.WorkflowTransitions
+        (Id,WorkflowDefinitionId,FromStepId,ToStepId,Name,Description,Condition,IsDefault,Priority,
+         CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+    SELECT NEWID(),ordered.WorkflowDefinitionId,ordered.FromStepId,ordered.ToStepId,
+           N'Proceed to next architecture stage',N'Controlled sequential QS architecture approval route.',
+           NULL,1,ordered.FromOrder,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId
+    FROM OrderedFixtureSteps ordered
+    WHERE ordered.ToStepId IS NOT NULL
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM dbo.WorkflowTransitions transitionRow
+          WHERE transitionRow.TenantId=@TenantId
+            AND transitionRow.WorkflowDefinitionId=ordered.WorkflowDefinitionId
+            AND transitionRow.FromStepId=ordered.FromStepId
+            AND transitionRow.ToStepId=ordered.ToStepId
+            AND transitionRow.IsDeleted=0
+      );
+
+    IF EXISTS
+    (
+        SELECT definition.Id
+        FROM dbo.WorkflowDefinitions definition
+        JOIN dbo.WorkflowSteps step ON step.WorkflowDefinitionId=definition.Id AND step.IsDeleted=0
+        LEFT JOIN dbo.WorkflowTransitions transitionRow
+          ON transitionRow.WorkflowDefinitionId=definition.Id AND transitionRow.IsDeleted=0
+        WHERE definition.TenantId=@TenantId
+          AND definition.IsDeleted=0
+          AND definition.Configuration LIKE N'%"fixture":"QS-E2E"%'
+        GROUP BY definition.Id
+        HAVING COUNT(DISTINCT transitionRow.Id) < COUNT(DISTINCT step.Id)-1
+    )
+        THROW 52031, 'A QS architecture workflow is missing one or more sequential transitions.', 1;
 
     IF (SELECT COUNT(*) FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId
         WHERE d.TenantId=@TenantId AND d.IsDeleted=0 AND d.IsActive=1 AND d.LifecycleStatus=1 AND e.Code LIKE N'QS[_]%') < 12
@@ -363,18 +570,18 @@ BEGIN TRY
     /* Publish the existing tenant profile with selector-backed values. */
     DECLARE @ProfileId uniqueidentifier=(SELECT TOP(1) Id FROM dbo.QuantitySurveyConfigurationProfiles WHERE TenantId=@TenantId AND ProfileCode=N'TDC-QUANTITY-SURVEY' AND Version=1 AND IsDeleted=0 ORDER BY CreatedAt);
     IF @ProfileId IS NULL THROW 52007, 'The existing QS configuration profile seeder must run before the E2E fixture.', 1;
-    DECLARE @BoqWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_BOQ' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @EstimateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESTIMATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @EscalationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESCALATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @MeasurementWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MEASUREMENT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @ValuationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VALUATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @CertificateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_PAYMENT_CERTIFICATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @RetentionWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_RETENTION_RELEASE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @MaterialWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MATERIAL_DEDUCTION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @VariationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VARIATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @ClaimWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_CLAIM' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @SubcontractWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_SUBCONTRACT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @FinalWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_FINAL_ACCOUNT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
+    DECLARE @BoqWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_BOQ' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @EstimateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESTIMATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @EscalationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESCALATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @MeasurementWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MEASUREMENT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @ValuationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VALUATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @CertificateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_PAYMENT_CERTIFICATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @RetentionWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_RETENTION_RELEASE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @MaterialWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MATERIAL_DEDUCTION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @VariationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VARIATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @ClaimWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_CLAIM' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @SubcontractWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_SUBCONTRACT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @FinalWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_FINAL_ACCOUNT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
     DECLARE @MeasurementTemplate uniqueidentifier=(SELECT Id FROM dbo.CentralDocumentMetadataTemplates WHERE TenantId=@TenantId AND TemplateCode=N'QS-MEAS-EVD' AND IsDeleted=0);
     DECLARE @ValuationDmsTemplate uniqueidentifier=(SELECT Id FROM dbo.CentralDocumentMetadataTemplates WHERE TenantId=@TenantId AND TemplateCode=N'QS-VAL-EVD' AND IsDeleted=0);
     DECLARE @CertificateDmsTemplate uniqueidentifier=(SELECT Id FROM dbo.CentralDocumentMetadataTemplates WHERE TenantId=@TenantId AND TemplateCode=N'QS-CERT-EVD' AND IsDeleted=0);
@@ -588,6 +795,77 @@ BEGIN TRY
              NULL,N'{"profile":"TDC-PROCUREMENT","decisions":14,"status":"Published"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
     END;
 
+    /* Contract activation stores the effective executable policy and authority rule
+       as immutable lineage. A clean disposable database has configuration profiles
+       and shared workflows after seed-db, but intentionally has no published tenant
+       policy. Create one fixture-owned Works/GHS authority policy only when no
+       published policy with a usable authority rule exists. */
+    DECLARE @FixturePolicyId uniqueidentifier =
+    (
+        SELECT TOP (1) p.Id
+        FROM dbo.ProcurementPolicySets p
+        WHERE p.TenantId=@TenantId AND p.LifecycleStatus=1 AND p.IsDeleted=0
+          AND p.EffectiveFrom<=@Now AND (p.EffectiveTo IS NULL OR p.EffectiveTo>=@Now)
+          AND EXISTS
+          (
+              SELECT 1 FROM dbo.ProcurementPolicyAuthorityRules a
+              WHERE a.PolicySetId=p.Id AND a.TenantId=@TenantId AND a.IsEnabled=1
+                AND a.IsDeleted=0 AND a.CurrencyCode=N'GHS'
+                AND (a.Category IS NULL OR a.Category=1)
+                AND a.EffectiveFrom<=@Now AND (a.EffectiveTo IS NULL OR a.EffectiveTo>=@Now)
+          )
+        ORDER BY p.IsDefault DESC,p.Version DESC
+    );
+    IF @FixturePolicyId IS NULL
+    BEGIN
+        DECLARE @FixturePolicyWorkflowId uniqueidentifier =
+        (
+            SELECT TOP (1) d.Id
+            FROM dbo.WorkflowDefinitions d
+            JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId
+            WHERE d.TenantId=@TenantId AND d.LifecycleStatus=1 AND d.IsActive=1
+              AND d.IsDeleted=0 AND e.TenantId=@TenantId AND e.IsActive=1 AND e.IsDeleted=0
+            ORDER BY CASE WHEN e.Code=N'PROCUREMENT_CONTRACT' THEN 0 WHEN e.Code=N'TENDER_AWARD' THEN 1 ELSE 2 END,
+                     d.Version DESC
+        );
+        IF @FixturePolicyWorkflowId IS NULL
+            THROW 52010, 'A Published shared workflow is required for the QS E2E policy fixture.', 1;
+
+        SET @FixturePolicyId=NEWID();
+        INSERT dbo.ProcurementPolicySets
+            (Id,PolicyKey,Code,Name,Description,Version,LifecycleStatus,ScopeType,
+             SourceConfigurationProfileId,DefaultCurrencyCode,EffectiveFrom,EffectiveTo,
+             ChangeSummary,IsDefault,PublishedAt,PublishedById,CreatedAt,CreatedBy,
+             CreatedById,IsDeleted,TenantId)
+        VALUES
+            (@FixturePolicyId,NEWID(),N'QS-E2E-PROCUREMENT',N'QS E2E Works authority policy',
+             N'Disposable local assurance policy used only to retain contract-activation lineage.',
+             1,1,0,@ProcProfile,N'GHS',@EffectiveFrom,NULL,
+             N'Fixture-owned Works/GHS authority lineage for QS browser acceptance.',0,@Now,
+             @ApproverId,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+
+        INSERT dbo.ProcurementPolicyAuthorityRules
+            (Id,PolicySetId,RuleCode,AuthorityName,AuthorityRoleId,AuthorityRole,Category,
+             CurrencyCode,LowerBound,UpperBound,LowerInclusive,UpperInclusive,Sequence,Quorum,
+             IsObserver,WorkflowDefinitionId,OverrideAction,SourceDecisionKey,Priority,IsEnabled,
+             EffectiveFrom,EffectiveTo,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (NEWID(),@FixturePolicyId,N'QS-E2E-WORKS-AUTHORITY',N'TDC Head of Procurement',
+             @ProcurementReviewerRoleId,N'TDC Head of Procurement',1,N'GHS',0,50000000,1,1,1,1,
+             0,@FixturePolicyWorkflowId,0,N'DEC-002',0,1,@EffectiveFrom,NULL,@Now,
+             N'QS E2E Seeder',@AdminId,0,@TenantId);
+
+        INSERT dbo.ProcurementPolicyRevisions
+            (Id,PolicySetId,RuleId,RuleKind,Action,Result,CorrelationId,ActorUserId,ActorName,
+             ActorRoles,Reason,AfterJson,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (NEWID(),@FixturePolicyId,NULL,NULL,N'Procurement.Policy.SeedE2E',N'Succeeded',
+             N'qs-e2e-procurement-policy-publication',@AdminId,N'admin',N'SuperAdmin',
+             N'Create disposable Works/GHS contract-activation lineage.',
+             N'{"code":"QS-E2E-PROCUREMENT","status":"Published"}',@Now,
+             N'QS E2E Seeder',@AdminId,0,@TenantId);
+    END;
+
     /* Procurement-owned source lineage and active Works contract. */
     DECLARE @TenderId uniqueidentifier=(SELECT Id FROM dbo.Tenders WHERE TenantId=@TenantId AND TenderNumber=N'QS-E2E-TND-001' AND IsDeleted=0);
     DECLARE @BidId uniqueidentifier, @EvaluationId uniqueidentifier, @AwardId uniqueidentifier, @ReadinessId uniqueidentifier, @ContractId uniqueidentifier;
@@ -601,10 +879,12 @@ BEGIN TRY
            source row, then immediately restore the unrelated Procurement source guard. All contract
            commercial-term, award-readiness, activation, QS workflow, and BoQ guards stay enabled.
         */
-        DISABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
+        IF @TenderGuardWasEnabled=1
+            DISABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
         INSERT dbo.Tenders (Id,TenderNumber,Title,Description,TenderType,Status,PublishDate,SubmissionDeadline,OpeningDate,AwardDate,EstimatedValue,Currency,RequiresPrequalification,AllowPartialBids,PriceWeightage,QualityWeightage,DeliveryWeightage,ExperienceWeightage,UseQCBSEvaluation,MinimumTechnicalScore,TechnicalWeight,FinancialWeight,RequiresAcceptanceDeclaration,CreatedById,PublishedById,AwardedById,Notes,CreatedAt,IsDeleted,TenantId)
         VALUES (@TenderId,N'QS-E2E-TND-001',N'Airport Hills Block A Works',N'Golden Works procurement source for QS lifecycle testing.',N'ITB',N'Awarded',DATEADD(day,-90,@Now),DATEADD(day,-60,@Now),DATEADD(day,-59,@Now),DATEADD(day,-45,@Now),6450000,N'GHS',0,0,60,20,10,10,0,80,60,40,1,@AdminId,@AdminId,@AdminId,N'QS E2E governed fixture.',@Now,0,@TenantId);
-        ENABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
+        IF @TenderGuardWasEnabled=1
+            ENABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
         SET @BidId=NEWID();
         INSERT dbo.TenderBids (Id,TenderId,BusinessPartnerId,BidNumber,SubmittedDate,Status,OpenedDate,OpenedById,TotalBidAmount,Currency,DeliveryDays,PaymentTerms,AcceptedDeclaration,DeclarationAcceptedAt,IsCompliant,PriceScore,QualityScore,DeliveryScore,ExperienceScore,TotalScore,Rank,TechnicalScore,FinancialScore,CombinedScore,IsQualifiedTechnically,EvaluatedById,EvaluatedDate,EvaluationNotes,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
         VALUES (@BidId,@TenderId,@ContractorId,N'QS-E2E-BID-001',DATEADD(day,-65,@Now),N'Accepted',DATEADD(day,-59,@Now),@AdminId,6200000,N'GHS',365,N'Net 30 days after certified valuation',1,DATEADD(day,-65,@Now),1,95,90,90,90,92,1,90,100,94,1,@AdminId,DATEADD(day,-50,@Now),N'Approved best evaluated responsive Works bid.',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
@@ -710,7 +990,7 @@ BEGIN TRY
         INSERT dbo.WorkflowInstances (Id,WorkflowDefinitionId,EntityId,EntityTypeId,Status,Priority,InitiatedById,StartedById,CreatedDate,StartedDate,CompletedDate,DataContext,Data,Notes,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
         VALUES (@ActivationWorkflowInstance,@ActivationWorkflow,@ContractId,@ContractEntityType,2,1,@AdminId,@AdminId,@Now,@Now,@Now,N'{"fixture":"QS-E2E"}',N'{"outcome":"Approved"}',N'Completed independent fixture approval.',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
         DECLARE @ProcProfileVersion int=(SELECT Version FROM dbo.ProcurementConfigurationProfiles WHERE Id=@ProcProfile);
-        DECLARE @Policy uniqueidentifier=(SELECT TOP(1) Id FROM dbo.ProcurementPolicySets WHERE TenantId=@TenantId AND LifecycleStatus=1 AND IsDeleted=0 ORDER BY Version DESC);
+        DECLARE @Policy uniqueidentifier=(SELECT TOP(1) p.Id FROM dbo.ProcurementPolicySets p WHERE p.TenantId=@TenantId AND p.LifecycleStatus=1 AND p.IsDeleted=0 AND EXISTS (SELECT 1 FROM dbo.ProcurementPolicyAuthorityRules a WHERE a.PolicySetId=p.Id AND a.TenantId=@TenantId AND a.IsEnabled=1 AND a.IsDeleted=0) ORDER BY p.IsDefault DESC,p.Version DESC);
         DECLARE @PolicyVersion int=(SELECT Version FROM dbo.ProcurementPolicySets WHERE Id=@Policy);
         DECLARE @AuthorityRule uniqueidentifier=(SELECT TOP(1) Id FROM dbo.ProcurementPolicyAuthorityRules WHERE TenantId=@TenantId AND IsEnabled=1 AND IsDeleted=0 ORDER BY Sequence);
         DECLARE @AuthorityName nvarchar(200)=(SELECT AuthorityName FROM dbo.ProcurementPolicyAuthorityRules WHERE Id=@AuthorityRule);
@@ -733,6 +1013,146 @@ BEGIN TRY
         UPDATE dbo.Contracts SET Status=N'Active',ActivatedAt=@Now,UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId WHERE Id=@ContractId;
         EXEC sys.sp_set_session_context @key=N'TDC0407_CONTRACT_ACTIVATION_ID',@value=NULL;
     END;
+
+    /*
+       The QS browser lifecycle begins from an already activated Works contract. Keep the
+       Procurement-owned prerequisite complete: an active contract must carry the exact
+       approved-PR, sourcing-release, reservation, Finance projection, and immutable formal
+       contract-commitment lineage that production activation creates atomically. These rows
+       are fixture snapshots only; every QS valuation, certificate, utilization, and AP record
+       remains API-created during the authenticated acceptance run.
+    */
+    DECLARE @ContractValue decimal(18,2)=(SELECT ContractValue FROM dbo.Contracts WHERE Id=@ContractId);
+    DECLARE @ContractCurrency nvarchar(10)=UPPER((SELECT Currency FROM dbo.Contracts WHERE Id=@ContractId));
+    DECLARE @DepartmentId uniqueidentifier=(SELECT TOP(1) Id FROM dbo.Departments WHERE TenantId=@TenantId AND IsDeleted=0 ORDER BY CreatedAt,Id);
+    IF @DepartmentId IS NULL THROW 52013, 'An active tenant department is required for the QS E2E procurement budget fixture.', 1;
+
+    DECLARE @BudgetId uniqueidentifier=(SELECT Id FROM dbo.ProcurementBudgets WHERE TenantId=@TenantId AND BudgetCode=N'QS-E2E-BUDGET-001' AND IsDeleted=0);
+    DECLARE @SourceRequisitionId uniqueidentifier=(SELECT Id FROM dbo.PurchaseRequisitions WHERE TenantId=@TenantId AND RequisitionNumber=N'QS-E2E-PR-001' AND IsDeleted=0);
+    DECLARE @BudgetCommitmentId uniqueidentifier;
+    DECLARE @SourcingReleaseId uniqueidentifier;
+    DECLARE @FormalContractEntryId uniqueidentifier;
+    DECLARE @BudgetAllocation decimal(18,2)=@ContractValue+1000000;
+    DECLARE @BudgetAvailable decimal(18,2)=@BudgetAllocation-@ContractValue;
+    DECLARE @BudgetCorrelation nvarchar(100)=N'qs-e2e-contract-formal-commitment';
+
+    IF @BudgetId IS NULL
+    BEGIN
+        SET @BudgetId=NEWID();
+        INSERT dbo.ProcurementBudgets
+            (Id,BudgetCode,Title,Description,DepartmentId,FiscalYear,AllocatedAmount,
+             UtilizedAmount,CommittedAmount,ReservedAmount,RemainingAmount,Currency,Status,
+             ControlLevel,WarningThresholdPercent,EffectiveDate,ExpiryDate,ApprovedById,
+             ApprovedDate,Notes,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (@BudgetId,N'QS-E2E-BUDGET-001',N'QS E2E Works contract budget',
+             N'Disposable prerequisite snapshot for authenticated QS certificate utilization.',
+             @DepartmentId,YEAR(@Now),@BudgetAllocation,0,@ContractValue,0,@BudgetAvailable,
+             @ContractCurrency,N'Active',N'Strict',80,DATEFROMPARTS(YEAR(@Now),1,1),
+             DATEFROMPARTS(YEAR(@Now),12,31),@ApproverId,@Now,
+             N'Formal Works contract commitment established before QS certification.',
+             @Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    END;
+
+    IF @SourceRequisitionId IS NULL
+    BEGIN
+        SET @SourceRequisitionId=NEWID();
+        INSERT dbo.PurchaseRequisitions
+            (Id,RequisitionNumber,RequisitionDate,RequestedById,RequiredDate,Status,Priority,
+             Department,Justification,Notes,RequisitionType,BudgetId,BudgetCode,BudgetAllocated,
+             BudgetRemaining,BudgetValidated,ProjectId,ProjectCode,ProjectName,IsAutoGenerated,
+             GeneratedFrom,ProcurementCategory,LinkageRevision,ApprovalLevel,
+             RequiredApprovalLevel,RevisionNumber,Currency,PreferredBusinessPartnerId,
+             ApprovedById,ApprovedAt,TotalAmount,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (@SourceRequisitionId,N'QS-E2E-PR-001',DATEADD(day,-100,@Now),@AdminId,
+             DATEADD(day,-30,@Now),N'Approved',N'High',N'Quantity Survey',
+             N'Approved Works procurement source for the governed QS acceptance lifecycle.',
+             N'Disposable approved requisition prerequisite.',2,@BudgetId,N'QS-E2E-BUDGET-001',
+             @BudgetAllocation,@BudgetAvailable,1,@ProjectId,N'PRJ-DEMO-2001',
+             N'Airport Hills Residences Block A',0,N'QS E2E Procurement prerequisite',2,1,1,1,0,
+             @ContractCurrency,@ContractorId,@ApproverId,DATEADD(day,-95,@Now),@ContractValue,
+             @Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+
+        INSERT dbo.PurchaseRequisitionItems
+            (Id,RequisitionId,ItemDescription,Quantity,UnitOfMeasure,EstimatedUnitPrice,
+             LineTotal,RequiredDate,PreferredBusinessPartnerId,Notes,Specifications,Status,
+             CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (NEWID(),@SourceRequisitionId,N'Airport Hills Residences Block A Works',1,N'LS',
+             @ContractValue,@ContractValue,DATEADD(day,-30,@Now),@ContractorId,
+             N'Approved Works procurement source line.',
+             N'Execute the published BoQ and signed Works contract.',N'Ordered',
+             @Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    END;
+
+    SET @BudgetCommitmentId=(SELECT Id FROM dbo.ProcurementBudgetCommitments WHERE TenantId=@TenantId AND PurchaseRequisitionId=@SourceRequisitionId AND IsDeleted=0);
+    IF @BudgetCommitmentId IS NULL
+    BEGIN
+        SET @BudgetCommitmentId=NEWID();
+        INSERT dbo.ProcurementBudgetCommitments
+            (Id,ProcurementBudgetId,PurchaseRequisitionId,ReservationReference,
+             ReservationSequence,Status,ReservedAmount,FormallyCommittedAmount,UtilizedAmount,
+             Currency,BudgetAllocatedSnapshot,BudgetUtilizedSnapshot,BudgetCommittedBefore,
+             BudgetReservedBefore,BudgetAvailableBefore,BudgetCommittedAfter,
+             BudgetReservedAfter,BudgetAvailableAfter,IsOverride,ReservedAtUtc,ReservedById,
+             ReservedByName,CorrelationId,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (@BudgetCommitmentId,@BudgetId,@SourceRequisitionId,N'QS-E2E-RES-001',1,1,
+             @ContractValue,@ContractValue,0,@ContractCurrency,@BudgetAllocation,0,0,
+             @ContractValue,@BudgetAvailable,@ContractValue,0,@BudgetAvailable,0,
+             DATEADD(day,-94,@Now),@ApproverId,N'manager',@BudgetCorrelation,@Now,
+             N'QS E2E Seeder',@AdminId,0,@TenantId);
+    END;
+
+    SET @SourcingReleaseId=(SELECT Id FROM dbo.ProcurementRequisitionSourcingReleases WHERE TenantId=@TenantId AND PurchaseRequisitionId=@SourceRequisitionId AND ReleaseReference=N'QS-E2E-SRL-001' AND IsDeleted=0);
+    IF @SourcingReleaseId IS NULL
+    BEGIN
+        SET @SourcingReleaseId=NEWID();
+        DECLARE @ReleaseFingerprint char(64)=CONVERT(char(64),HASHBYTES('SHA2_256',CONCAT(@SourceRequisitionId,N'|',@BudgetCommitmentId,N'|QS-E2E-SRL-001')),2);
+        DECLARE @ReleaseSnapshot nvarchar(max)=N'{"source":"QS-E2E-PR-001","budget":"QS-E2E-BUDGET-001","reservation":"QS-E2E-RES-001","status":"Released"}';
+        DECLARE @ReleaseIntegrity char(64)=CONVERT(char(64),HASHBYTES('SHA2_256',CONCAT(@ReleaseFingerprint,N'|',@ReleaseSnapshot)),2);
+        INSERT dbo.ProcurementRequisitionSourcingReleases
+            (Id,PurchaseRequisitionId,AttemptNumber,ReleaseReference,BudgetCommitmentId,
+             BudgetCommitmentReference,ReleasedAtUtc,ReleasedById,ReleasedByName,
+             ReleaseReason,CorrelationId,ControlFingerprint,SnapshotJson,IntegrityHash,
+             CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (@SourcingReleaseId,@SourceRequisitionId,1,N'QS-E2E-SRL-001',
+             @BudgetCommitmentId,N'QS-E2E-RES-001',DATEADD(day,-90,@Now),@ApproverId,
+             N'manager',N'Approved Works demand released to tender.',
+             N'qs-e2e-sourcing-release',@ReleaseFingerprint,@ReleaseSnapshot,
+             @ReleaseIntegrity,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    END;
+
+    SET @FormalContractEntryId=(SELECT Id FROM dbo.ProcurementBudgetCommitmentLedgerEntries WHERE TenantId=@TenantId AND EntryType=1 AND SourceType=N'Contract' AND SourceId=@ContractId AND IsDeleted=0);
+    IF @FormalContractEntryId IS NULL
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM dbo.ProcurementBudgetCommitments WHERE Id=@BudgetCommitmentId AND ProcurementBudgetId=@BudgetId AND PurchaseRequisitionId=@SourceRequisitionId AND Status=1 AND ReservedAmount=@ContractValue AND FormallyCommittedAmount=@ContractValue AND UtilizedAmount=0 AND Currency=@ContractCurrency AND IsDeleted=0)
+            THROW 52014, 'The QS E2E reservation aggregate does not match its formal Works contract exposure.', 1;
+        SET @FormalContractEntryId=NEWID();
+        INSERT dbo.ProcurementBudgetCommitmentLedgerEntries
+            (Id,ProcurementBudgetCommitmentId,ProcurementBudgetId,PurchaseRequisitionId,
+             EntryType,SourceType,SourceId,SourceReference,Amount,Currency,OccurredAtUtc,
+             ActorUserId,ActorName,CorrelationId,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+        VALUES
+            (@FormalContractEntryId,@BudgetCommitmentId,@BudgetId,@SourceRequisitionId,1,
+             N'Contract',@ContractId,N'QS-E2E-WORKS-001',@ContractValue,
+             @ContractCurrency,DATEADD(day,-89,@Now),@ApproverId,N'manager',
+             @BudgetCorrelation,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProcurementBudgetCommitmentLedgerEntries WHERE Id=@FormalContractEntryId AND ProcurementBudgetCommitmentId=@BudgetCommitmentId AND ProcurementBudgetId=@BudgetId AND PurchaseRequisitionId=@SourceRequisitionId AND EntryType=1 AND SourceType=N'Contract' AND SourceId=@ContractId AND Amount=@ContractValue AND Currency=@ContractCurrency AND IsDeleted=0)
+        THROW 52015, 'The QS E2E formal contract commitment lineage is inconsistent.', 1;
+
+    IF @TenderGuardWasEnabled=1
+        DISABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
+    UPDATE dbo.Tenders SET SourcePurchaseRequisitionId=@SourceRequisitionId,
+        SourcingReleaseId=@SourcingReleaseId,UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',
+        LastModifiedById=@AdminId WHERE Id=@TenderId AND
+        (SourcePurchaseRequisitionId IS NULL OR SourcingReleaseId IS NULL);
+    IF @TenderGuardWasEnabled=1
+        ENABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
 
     UPDATE dbo.Projects SET ContractId=COALESCE(ContractId,@ContractId),TenderId=COALESCE(TenderId,@TenderId),BusinessPartnerId=COALESCE(BusinessPartnerId,@ContractorId),UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId WHERE Id=@ProjectId;
     UPDATE dbo.ProjectPackages SET ContractId=COALESCE(ContractId,@ContractId),TenderId=COALESCE(TenderId,@TenderId),BusinessPartnerId=COALESCE(BusinessPartnerId,@ContractorId),UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId WHERE ProjectId=@ProjectId AND IsDeleted=0;
@@ -769,9 +1189,17 @@ BEGIN TRY
     (
         SELECT TOP (1) Id FROM dbo.ProjectInterimValuations
         WHERE TenantId=@TenantId AND ProjectId=@ProjectId AND ContractId=@ContractId
-          AND ValuationNumber LIKE N'QS-E2E-IV-%' AND Status IN (N'Draft',N'Submitted',N'UnderReview')
+          AND ValuationNumber LIKE N'QS-E2E-IV-%'
           AND IsDeleted=0
-        ORDER BY CreatedAt DESC
+        ORDER BY
+            CASE WHEN EXISTS
+            (
+                SELECT 1 FROM dbo.QuantitySurveyValuationWorksheets worksheet
+                WHERE worksheet.TenantId=@TenantId
+                  AND worksheet.ProjectInterimValuationId=ProjectInterimValuations.Id
+                  AND worksheet.IsDeleted=0
+            ) THEN 0 ELSE 1 END,
+            CreatedAt DESC
     );
     IF @InterimValuationId IS NULL
     BEGIN
@@ -785,8 +1213,69 @@ BEGIN TRY
             (@InterimValuationId,@ProjectId,@ContractId,@InterimNumber,N'QS governed E2E interim valuation',N'Draft',CONVERT(date,@Now),250000,0,0,5,12500,0,237500,N'GHS',N'Projects-owned source record for authenticated QS valuation acceptance.',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
     END;
 
-    IF EXISTS (SELECT 1 FROM sys.triggers WHERE name=N'TR_Tenders_SourcingReleaseGuard' AND is_disabled=1)
-        THROW 52012, 'The Procurement tender source guard must be enabled before the QS fixture can commit.', 1;
+    DECLARE @CashPaymentMethodId uniqueidentifier =
+    (
+        SELECT TOP (1) Id FROM dbo.PaymentMethod
+        WHERE TenantId=@TenantId AND IsDeleted=0 AND IsActive=1 AND Code=N'CASH'
+    );
+    DECLARE @UnassignedSameTenantProjectId uniqueidentifier =
+    (
+        SELECT TOP (1) Id FROM dbo.Projects
+        WHERE TenantId=@TenantId AND IsDeleted=0 AND Id<>@ProjectId
+        ORDER BY ProjectCode
+    );
+
+    /* The browser runner consumes the row below. Prove every emitted identifier still
+       belongs to its expected tenant and governed fixture before committing anything. */
+    IF NOT EXISTS (SELECT 1 FROM dbo.Tenants WHERE Id=@TenantId AND IsDeleted=0)
+        THROW 52020, 'QS E2E output validation failed for the fixture tenant.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.Projects WHERE Id=@ProjectId AND TenantId=@TenantId AND ProjectCode=N'PRJ-DEMO-2001' AND IsDeleted=0)
+        THROW 52021, 'QS E2E output validation failed for the fixture project.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.Contracts WHERE Id=@ContractId AND TenantId=@TenantId AND ContractNumber=N'QS-E2E-WORKS-001' AND IsDeleted=0)
+       OR NOT EXISTS (SELECT 1 FROM dbo.Projects WHERE Id=@ProjectId AND TenantId=@TenantId AND ContractId=@ContractId AND IsDeleted=0)
+        THROW 52022, 'QS E2E output validation failed for the governed Works contract.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProjectBoqVersions WHERE Id=@BoqVersionId AND TenantId=@TenantId AND ProjectId=@ProjectId AND IsDeleted=0)
+        THROW 52023, 'QS E2E output validation failed for the approved BoQ version.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.ProjectInterimValuations WHERE Id=@InterimValuationId AND TenantId=@TenantId AND ProjectId=@ProjectId AND ContractId=@ContractId AND IsDeleted=0)
+        THROW 52024, 'QS E2E output validation failed for the interim valuation.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.BusinessPartners WHERE Id=@ContractorId AND TenantId=@TenantId AND IsDeleted=0)
+       OR NOT EXISTS (SELECT 1 FROM dbo.BusinessPartners WHERE Id=@ConsultantId AND TenantId=@TenantId AND IsDeleted=0)
+        THROW 52025, 'QS E2E output validation failed for the contractor or consultant.', 1;
+    IF EXISTS
+    (
+        SELECT actor.UserId
+        FROM (VALUES
+            (@AdminId),(@OfficerId),(@ReviewerId),(@WorkflowReviewerId),(@EngineerId),
+            (@FinanceValidatorId),(@ApproverId),(@ExternalContractorUserId),(@ExternalConsultantUserId)
+        ) actor(UserId)
+        WHERE NOT EXISTS
+        (
+            SELECT 1 FROM dbo.Users
+            WHERE Id=actor.UserId AND TenantId=@TenantId AND IsActive=1
+        )
+    )
+        THROW 52026, 'QS E2E output validation failed for one or more acceptance actors.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.BankAccounts WHERE Id=@FinanceBankAccountId AND TenantId=@TenantId AND IsDeleted=0 AND IsActive=1)
+       OR NOT EXISTS (SELECT 1 FROM dbo.PaymentMethod WHERE Id=@CashPaymentMethodId AND TenantId=@TenantId AND IsDeleted=0 AND IsActive=1)
+        THROW 52027, 'QS E2E output validation failed for Finance settlement lookups.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.Projects WHERE Id=@CrossTenantProjectId AND TenantId=@CrossTenantId AND IsDeleted=0)
+       OR EXISTS (SELECT 1 FROM dbo.Projects WHERE Id=@CrossTenantProjectId AND TenantId=@TenantId)
+        THROW 52028, 'QS E2E output validation failed for the cross-tenant isolation project.', 1;
+    IF @UnassignedSameTenantProjectId IS NULL
+       OR NOT EXISTS (SELECT 1 FROM dbo.Projects WHERE Id=@UnassignedSameTenantProjectId AND TenantId=@TenantId AND IsDeleted=0)
+        THROW 52029, 'QS E2E output validation failed for the unassigned same-tenant project.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.QuantitySurveyConfigurationProfiles WHERE Id=@ProfileId AND TenantId=@TenantId AND IsDeleted=0)
+        THROW 52030, 'QS E2E output validation failed for the configuration profile.', 1;
+
+    IF @TenderGuardExists=1 AND EXISTS
+    (
+        SELECT 1 FROM sys.triggers
+        WHERE name=N'TR_Tenders_SourcingReleaseGuard'
+          AND parent_id=OBJECT_ID(N'dbo.Tenders')
+          AND ((@TenderGuardWasEnabled=1 AND is_disabled=1)
+            OR (@TenderGuardWasEnabled=0 AND is_disabled=0))
+    )
+        THROW 52012, 'The Procurement tender source guard state was not restored before the QS fixture commit.', 1;
 
     COMMIT TRANSACTION;
 
@@ -801,23 +1290,40 @@ BEGIN TRY
         @InterimValuationId AS InterimValuationId,
         @ContractorId AS ContractorBusinessPartnerId,
         @ConsultantId AS ConsultantBusinessPartnerId,
+        @OfficerId AS MakerUserId,
+        @ReviewerId AS ReviewerUserId,
+        @WorkflowReviewerId AS WorkflowReviewerUserId,
+        @EngineerId AS EngineerUserId,
+        @FinanceValidatorId AS FinanceValidatorUserId,
+        @ApproverId AS IndependentApproverUserId,
         @ExternalContractorUserId AS ContractorPortalUserId,
         @ExternalConsultantUserId AS ConsultantPortalUserId,
         @FinanceBankAccountId AS FinanceBankAccountId,
-        (SELECT TOP (1) Id FROM dbo.PaymentMethod
-         WHERE TenantId=@TenantId AND IsDeleted=0 AND IsActive=1 AND Code=N'CASH') AS CashPaymentMethodId,
+        @CashPaymentMethodId AS CashPaymentMethodId,
         @CrossTenantProjectId AS CrossTenantProjectId,
-        (SELECT TOP (1) Id FROM dbo.Projects
-         WHERE TenantId=@TenantId AND IsDeleted=0 AND Id<>@ProjectId
-         ORDER BY ProjectCode) AS UnassignedSameTenantProjectId,
+        @UnassignedSameTenantProjectId AS UnassignedSameTenantProjectId,
         @ProfileId AS ConfigurationProfileId,
         (SELECT COUNT(*) FROM dbo.QuantitySurveyConfigurationDecisions WHERE ProfileId=@ProfileId AND Status=2 AND ApprovalStatus=1 AND EvidenceStatus=2 AND IsDeleted=0) AS ApprovedDecisions,
         (SELECT COUNT(*) FROM dbo.ProjectBoqVersionLines WHERE ProjectBoqVersionId=@BoqVersionId AND IsDeleted=0) AS ApprovedBoqLines;
 END TRY
 BEGIN CATCH
     IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
-    IF EXISTS (SELECT 1 FROM sys.triggers WHERE name=N'TR_Tenders_SourcingReleaseGuard' AND is_disabled=1)
+    IF @TenderGuardExists=1 AND @TenderGuardWasEnabled=1 AND EXISTS
+    (
+        SELECT 1 FROM sys.triggers
+        WHERE name=N'TR_Tenders_SourcingReleaseGuard'
+          AND parent_id=OBJECT_ID(N'dbo.Tenders')
+          AND is_disabled=1
+    )
         ENABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
+    ELSE IF @TenderGuardExists=1 AND @TenderGuardWasEnabled=0 AND EXISTS
+    (
+        SELECT 1 FROM sys.triggers
+        WHERE name=N'TR_Tenders_SourcingReleaseGuard'
+          AND parent_id=OBJECT_ID(N'dbo.Tenders')
+          AND is_disabled=0
+    )
+        DISABLE TRIGGER dbo.TR_Tenders_SourcingReleaseGuard ON dbo.Tenders;
     BEGIN TRY
         EXEC sys.sp_set_session_context @key=N'qs_contract_terms_id',@value=NULL;
         EXEC sys.sp_set_session_context @key=N'qs_contract_terms_actor',@value=NULL;

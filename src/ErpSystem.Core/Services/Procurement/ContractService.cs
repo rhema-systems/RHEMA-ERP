@@ -1,8 +1,10 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -19,6 +21,7 @@ public class ContractService : IContractService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ISupplierValidationService _supplierValidation;
+    private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly ILogger<ContractService> _logger;
 
     public ContractService(
@@ -32,6 +35,7 @@ public class ContractService : IContractService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ISupplierValidationService supplierValidation,
+        IProcurementSourcingCaseService sourcingCases,
         ILogger<ContractService> logger)
     {
         _contractRepository = contractRepository;
@@ -44,6 +48,7 @@ public class ContractService : IContractService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _supplierValidation = supplierValidation;
+        _sourcingCases = sourcingCases;
         _logger = logger;
     }
 
@@ -165,6 +170,11 @@ public class ContractService : IContractService
         {
             var award = await _awardRepository.GetByIdAsync(dto.TenderAwardId)
                 ?? throw new InvalidOperationException($"Award with ID {dto.TenderAwardId} not found");
+            if (award.TenantId != _currentUserProvider.TenantId)
+                throw new InvalidOperationException($"Award with ID {dto.TenderAwardId} not found");
+            if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"A contract can be created only from a finalized award (current status: '{award.Status}').");
 
             // Check if contract already exists for this award
             var existingContract = await _contractRepository.GetByAwardIdAsync(dto.TenderAwardId);
@@ -175,8 +185,13 @@ public class ContractService : IContractService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            if (tender.TenantId != award.TenantId)
+                throw new InvalidOperationException(
+                    "The award and tender tenant lineage does not match.");
             EnsureExactAwardCommercials(
                 dto.ContractValue, dto.Currency, award.AwardedAmount, award.Currency);
+
+            await RecoverTenderSourceLineageAsync(tender, dto.TenderAwardId);
 
             await _supplierValidation.EnforceEligibilityAsync(new SupplierEligibilityEvaluationRequest
             {
@@ -327,6 +342,39 @@ public class ContractService : IContractService
         }
     }
 
+    private async Task RecoverTenderSourceLineageAsync(
+        Tender tender,
+        Guid awardId)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue)
+            return;
+
+        var gate = await _sourcingCases.RecoverTenderSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            tender.SourcingReleaseId,
+            tender.Id,
+            tender.TenderNumber,
+            $"contract-award-{awardId:N}",
+            ProcurementTenderSourceRecoveryBoundary.ContractCreation);
+        if (tender.SourcingCaseId.HasValue &&
+            tender.SourcingCaseId != gate.SourcingCaseId)
+        {
+            throw new ProcurementRequisitionSourcingValidationException(
+                "SOURCING_CASE_LINEAGE_MISMATCH",
+                "The tender does not match the sourcing case that owns its current immutable release.");
+        }
+
+        if (tender.SourcingReleaseId == gate.SourcingReleaseId &&
+            tender.SourcingCaseId == gate.SourcingCaseId)
+            return;
+
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        tender.UpdatedAt = DateTime.UtcNow;
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
     public async Task DeleteAsync(Guid id)
     {
         try
@@ -367,6 +415,15 @@ public class ContractService : IContractService
 
             var contract = await _contractRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Contract with ID {id} not found");
+
+            if (string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(dto.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsureNoGovernedContractExitAsync(
+                    contract,
+                    "change status",
+                    CancellationToken.None);
+            }
 
             contract.Status = dto.Status;
 
@@ -415,6 +472,11 @@ public class ContractService : IContractService
                 throw new InvalidOperationException($"Cannot complete contract in {contract.Status} status");
             }
 
+            await EnsureNoGovernedContractExitAsync(
+                contract,
+                "complete",
+                CancellationToken.None);
+
             // Check if all milestones are completed or paid
             var incompleteMilestones = contract.Milestones.Where(m => !m.IsDeleted && m.Status != "Completed" && m.Status != "Paid").ToList();
             if (incompleteMilestones.Any())
@@ -458,6 +520,14 @@ public class ContractService : IContractService
                 throw new InvalidOperationException($"Contract is already {contract.Status}");
             }
 
+            if (string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsureNoGovernedContractExitAsync(
+                    contract,
+                    "terminate",
+                    CancellationToken.None);
+            }
+
             contract.Status = "Terminated";
             contract.TerminatedAt = DateTime.UtcNow;
             contract.TerminationReason = reason;
@@ -478,6 +548,28 @@ public class ContractService : IContractService
     }
 
     #endregion
+
+    private async Task EnsureNoGovernedContractExitAsync(
+        Contract contract,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        var hasFormalCommitment = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == contract.TenantId &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == "Contract" &&
+                item.SourceId == contract.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .AnyAsync(cancellationToken);
+        if (hasFormalCommitment)
+        {
+            throw new InvalidOperationException(
+                $"CONTRACT_COMMITMENT_CLOSE_LIFECYCLE_REQUIRED: Cannot {operation} an active governed contract until a dedicated serializable close or termination lifecycle atomically reconciles its formal commitment, allocations, and utilization.");
+        }
+    }
 
     #region Milestones
 
@@ -639,6 +731,29 @@ public class ContractService : IContractService
             {
                 throw new InvalidOperationException("Amendments can only be created for active contracts");
             }
+            var requestedAmendmentType = dto.AmendmentType?.Trim();
+            var amendmentType = string.Equals(
+                requestedAmendmentType,
+                "TimeExtension",
+                StringComparison.OrdinalIgnoreCase)
+                ? "TimelineExtension"
+                : requestedAmendmentType;
+            if (amendmentType is not ("ValueChange" or "TimelineExtension" or "ScopeChange"))
+                throw new InvalidOperationException(
+                    "Amendment type must be ValueChange, TimeExtension (or TimelineExtension), or ScopeChange.");
+            if (amendmentType == "ValueChange" &&
+                (!dto.NewValue.HasValue || dto.NewValue.Value <= 0m ||
+                 dto.NewValue.Value == contract.ContractValue))
+                throw new InvalidOperationException(
+                    "A value-change amendment requires a positive new value different from the current contract value.");
+            if (amendmentType == "TimelineExtension" &&
+                (!dto.NewEndDate.HasValue ||
+                 (contract.EndDate.HasValue && dto.NewEndDate.Value <= contract.EndDate.Value)))
+                throw new InvalidOperationException(
+                    "A timeline extension requires a new end date after the current end date.");
+            if (amendmentType == "ScopeChange" && string.IsNullOrWhiteSpace(dto.ScopeChanges))
+                throw new InvalidOperationException(
+                    "A scope-change amendment requires the changed scope.");
 
             var existingAmendments = await _amendmentRepository.GetByContractIdAsync(contractId);
             var nextSequence = existingAmendments.Any() ? existingAmendments.Max(a => a.SequenceNumber) + 1 : 1;
@@ -648,7 +763,7 @@ public class ContractService : IContractService
                 ContractId = contractId,
                 AmendmentNumber = await _amendmentRepository.GenerateAmendmentNumberAsync(contractId),
                 SequenceNumber = nextSequence,
-                AmendmentType = dto.AmendmentType,
+                AmendmentType = amendmentType,
                 Reason = dto.Reason,
                 Description = dto.Description,
                 Status = "PendingApproval",
@@ -659,7 +774,7 @@ public class ContractService : IContractService
             };
 
             // Set change-specific fields
-            switch (dto.AmendmentType)
+            switch (amendmentType)
             {
                 case "ValueChange":
                     amendment.PreviousValue = contract.ContractValue;
@@ -704,6 +819,9 @@ public class ContractService : IContractService
             {
                 throw new InvalidOperationException($"Amendment is already {amendment.Status}");
             }
+            if (dto.Approved && amendment.RequestedById == _currentUserProvider.UserId)
+                throw new UnauthorizedAccessException(
+                    "The amendment requester cannot approve the same amendment.");
 
             amendment.ApprovedById = _currentUserProvider.UserId;
             amendment.ApprovedDate = DateTime.UtcNow;
@@ -716,6 +834,29 @@ public class ContractService : IContractService
                 // Apply the amendment to the contract
                 var contract = await _contractRepository.GetByIdAsync(amendment.ContractId)
                     ?? throw new InvalidOperationException("Contract not found");
+                if (!string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        "The contract must remain active when an amendment is approved.");
+
+                if (string.Equals(
+                        amendment.AmendmentType,
+                        "ValueChange",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        contract.Status,
+                        "Active",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    await _unitOfWork
+                        .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+                        .GetQueryable(item =>
+                            item.TenantId == contract.TenantId &&
+                            item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                            item.SourceType == "Contract" &&
+                            item.SourceId == contract.Id &&
+                            !item.IsDeleted)
+                        .AnyAsync())
+                    throw new InvalidOperationException(
+                        "CONTRACT_VALUE_AMENDMENT_BUDGET_LEDGER_REQUIRED: A governed active contract value cannot change until an atomic contract commitment-adjustment ledger is available.");
 
                 switch (amendment.AmendmentType)
                 {

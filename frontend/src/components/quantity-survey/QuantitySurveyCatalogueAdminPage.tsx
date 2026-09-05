@@ -6,6 +6,7 @@ import { Edit3, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import {
   Dialog,
@@ -76,6 +77,8 @@ export default function QuantitySurveyCatalogueAdminPage() {
   const [effectiveAt, setEffectiveAt] = useState('');
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] =
+    useState<ProjectCatalogEntryDto | null>(null);
   const [form, setForm] = useState<CreateProjectCatalogEntryDto>(() =>
     emptyForm('qs-sections')
   );
@@ -360,19 +363,38 @@ export default function QuantitySurveyCatalogueAdminPage() {
                   label: 'Remove entry',
                   icon: Trash2,
                   variant: 'destructive',
-                  onClick: (row) => {
-                    if (
-                      window.confirm(
-                        `Remove ${row.original.code} from this catalogue?`
-                      )
-                    ) {
-                      remove.mutate(row.original.id);
-                    }
-                  },
+                  onClick: (row) => setPendingDelete(row.original),
                 },
               ]
             : []
         }
+      />
+
+      <ConfirmationDialog
+        open={pendingDelete !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !remove.isPending) setPendingDelete(null);
+        }}
+        title="Remove catalogue entry?"
+        description={
+          pendingDelete
+            ? `Remove ${pendingDelete.code} from this catalogue? This action cannot be undone.`
+            : undefined
+        }
+        confirmText="Remove entry"
+        variant="destructive"
+        isLoading={remove.isPending}
+        onConfirm={async () => {
+          if (!pendingDelete) return false;
+
+          try {
+            await remove.mutateAsync(pendingDelete.id);
+            setPendingDelete(null);
+            return true;
+          } catch {
+            return false;
+          }
+        }}
       />
 
       <Dialog open={open} onOpenChange={setOpen}>

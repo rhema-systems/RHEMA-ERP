@@ -80,6 +80,38 @@ export interface UpdateUserRequest {
   roles: string[];
 }
 
+export interface ResetUserPasswordRequest {
+  newPassword: string;
+  reason: string;
+}
+
+type AdminProblemDetails = {
+  detail?: string;
+  title?: string;
+  message?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
+export const getAdminProblemMessage = (
+  error: unknown,
+  fallback: string
+) => {
+  const candidate = error as {
+    message?: string;
+    response?: AdminProblemDetails;
+  };
+  const problem = candidate?.response;
+  const message =
+    problem?.detail ||
+    problem?.message ||
+    problem?.title ||
+    candidate?.message ||
+    fallback;
+  const code = problem?.code || problem?.extensions?.code;
+  return code && !message.includes(code) ? `${message} (${code})` : message;
+};
+
 export interface Role {
   id: string;
   name: string;
@@ -330,6 +362,25 @@ class AdminApiService {
     } catch (error) {
       console.error('Failed to delete user:', id, error);
       throw error;
+    }
+  }
+
+  async resetUserPassword(
+    id: string,
+    request: ResetUserPasswordRequest
+  ): Promise<void> {
+    try {
+      await apiService.request(`/user/${encodeURIComponent(id)}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify(request),
+      });
+    } catch (error) {
+      throw new Error(
+        getAdminProblemMessage(
+          error,
+          'The temporary password could not be set.'
+        )
+      );
     }
   }
 

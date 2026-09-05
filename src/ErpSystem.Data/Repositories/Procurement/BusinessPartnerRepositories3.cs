@@ -303,29 +303,18 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
     {
         _logger.LogInformation("GetRegistrationsByUserAsync called for userId: {UserId}", userId);
 
-        // First, check total count without filters to diagnose
-        var totalInDb = await _dbSet.IgnoreQueryFilters().CountAsync(r => !r.IsDeleted);
-        _logger.LogInformation("Total non-deleted registrations in DB (ignoring filters): {Count}", totalInDb);
-
-        var matchingCreatedById = await _dbSet.IgnoreQueryFilters()
-            .Where(r => r.CreatedById == userId && !r.IsDeleted)
-            .ToListAsync();
-        _logger.LogInformation("Registrations matching CreatedById={UserId} (ignoring filters): {Count}", userId, matchingCreatedById.Count);
-
-        if (matchingCreatedById.Any())
-        {
-            foreach (var reg in matchingCreatedById)
-            {
-                _logger.LogInformation("Found registration: Id={Id}, TenantId={TenantId}, CreatedById={CreatedById}, Status={Status}",
-                    reg.Id, reg.TenantId, reg.CreatedById, reg.Status);
-            }
-        }
-
-        // Use IgnoreQueryFilters to bypass tenant filtering for external registrations
-        // External users may not have tenant context properly set during registration
         var results = await _dbSet
-            .IgnoreQueryFilters()
-            .Where(r => r.CreatedById == userId && !r.IsDeleted)
+            .AsNoTracking()
+            .Where(registration =>
+                !registration.IsDeleted &&
+                (registration.CreatedById == userId ||
+                 (registration.BusinessPartnerId.HasValue &&
+                  _context.BusinessPartnerUsers.Any(link =>
+                      !link.IsDeleted &&
+                      link.IsActive &&
+                      link.UserId == userId &&
+                      link.TenantId == registration.TenantId &&
+                      link.BusinessPartnerId == registration.BusinessPartnerId.Value))))
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync();
 

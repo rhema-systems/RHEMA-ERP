@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -871,7 +872,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         string permissionCode, string reference, string correlationId, CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permissionCode, SourceType = SourceType, SourceReference = reference
@@ -984,10 +985,9 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.IsExternalUser ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
-        throw new ProcurementPrequalificationAuthorizationException("A supplier, TDC procurement, audit, or tenant-administration role is required.");
+        if (_currentUser.IsExternalUser || HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
+        throw new ProcurementPrequalificationAuthorizationException("The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -1012,7 +1012,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             throw Conflict("PREQUAL_VERSION_CONFLICT", "The prequalification record changed. Reload before continuing.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static DateTime EnsureUtc(DateTime value) => value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
     private static string SerializeGuidList(IEnumerable<Guid> values) => JsonSerializer.Serialize(values.Distinct().OrderBy(value => value).ToList(), JsonOptions);

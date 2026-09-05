@@ -30,7 +30,6 @@ import * as tenderBidService from '@/services/tenderBidService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   type CreateTenderBidDto,
-  type CreateTenderBidItemDto,
   type TenderBidDocumentDto,
 } from '@/services/tenderBidService';
 
@@ -41,6 +40,13 @@ import BidDocumentsStep from '@/components/external-portal/bid-submission/BidDoc
 import BidReviewStep from '@/components/external-portal/bid-submission/BidReviewStep';
 import { QuantitySurveyTenderBoqSubmissionPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqSubmissionPanel';
 import type { TenderBoqLine } from '@/services/quantity-survey-tender-boq.service';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import {
+  buildDraftUpdate,
+  getDraftSelectedLotIds,
+  getItemsForSelectedLots,
+  mapDraftToEditableBid,
+} from '@/lib/tender-bid-draft';
 
 const STEPS = [
   { id: 1, name: 'Select Lots', description: 'Choose lots to bid for' },
@@ -80,6 +86,7 @@ export default function SubmitBidPage() {
     warrantyTerms: '',
     technicalProposal: '',
     commercialProposal: '',
+    selectedLotIds: [],
     items: [],
     associationType: undefined,
     acceptedDeclaration: false,
@@ -117,46 +124,22 @@ export default function SubmitBidPage() {
     }
   }, [createdBidId]);
 
-  // Re-initialize items when selected lots change
+  // Reconcile the editable lines with the selected lots without replacing
+  // values already entered in a saved draft.
   useEffect(() => {
     if (tender && selectedLotIds.length > 0) {
-      // Get all items from selected lots
-      const selectedLots =
-        tender.lots?.filter((lot) => selectedLotIds.includes(lot.id)) || [];
-      const itemsToInclude = selectedLots.flatMap((lot) => lot.items || []);
-
-      // Only initialize items that don't already exist in bidData
-      const newItems: CreateTenderBidItemDto[] = [];
-
-      itemsToInclude.forEach((item) => {
-        const existingItem = bidData.items.find(
-          (bi) => bi.tenderItemId === item.id
+      setBidData((prev) => {
+        const items = getItemsForSelectedLots(
+          tender,
+          selectedLotIds,
+          prev.items
         );
-        if (existingItem) {
-          // Keep existing item data
-          newItems.push(existingItem);
-        } else {
-          // Create new item with default values
-          newItems.push({
-            tenderItemId: item.id,
-            offeredQuantity: item.quantity,
-            unitPrice: 0,
-            deliveryDays: undefined,
-            specifications: '',
-            brand: '',
-            model: '',
-            technicalDetails: '',
-          });
-        }
+        const currentIds = prev.items.map((item) => item.tenderItemId);
+        const nextIds = items.map((item) => item.tenderItemId);
+        return JSON.stringify(currentIds) === JSON.stringify(nextIds)
+          ? prev
+          : { ...prev, selectedLotIds, items };
       });
-
-      // Only update if items have changed
-      if (
-        JSON.stringify(newItems.map((i) => i.tenderItemId).sort()) !==
-        JSON.stringify(bidData.items.map((i) => i.tenderItemId).sort())
-      ) {
-        setBidData((prev) => ({ ...prev, items: newItems }));
-      }
     }
   }, [selectedLotIds, tender]);
 
@@ -189,46 +172,18 @@ export default function SubmitBidPage() {
       const draftBid = await tenderBidService.getMyDraftBidByTenderId(tenderId);
       if (draftBid) {
         const draftItems = draftBid.items ?? [];
+        const editableDraft = mapDraftToEditableBid(draftBid, data);
+        const selectedLotIdsFromDraft = getDraftSelectedLotIds(draftBid, data);
         // Load existing draft bid
         setCreatedBidId(draftBid.id);
-        setBidData({
-          tenderId: draftBid.tenderId,
-          deliveryDays: draftBid.deliveryDays,
-          paymentTerms: draftBid.paymentTerms || '',
-          warrantyTerms: draftBid.warrantyTerms || '',
-          technicalProposal: draftBid.technicalProposal || '',
-          commercialProposal: draftBid.commercialProposal || '',
-          items: draftItems.map((item) => ({
-            tenderItemId: item.tenderItemId,
-            offeredQuantity: item.offeredQuantity,
-            unitPrice: item.unitPrice,
-            deliveryDays: item.deliveryDays,
-            brand: item.brand,
-            model: item.model,
-            specifications: item.specifications,
-            technicalDetails: item.technicalDetails,
-          })),
-        });
-
-        // Extract selected lot IDs from the draft bid items
-        // Map bid items back to their lot IDs by finding the tender items
-        const selectedLotIdsFromDraft = new Set<string>();
-        draftItems.forEach((bidItem) => {
-          // Find the tender item to get its lotId
-          const tenderItem = data.items?.find(
-            (ti) => ti.id === bidItem.tenderItemId
-          );
-          if (tenderItem?.lotId) {
-            selectedLotIdsFromDraft.add(tenderItem.lotId);
-          }
-        });
-        setSelectedLotIds(Array.from(selectedLotIdsFromDraft));
+        setBidData(editableDraft);
+        setSelectedLotIds(selectedLotIdsFromDraft);
 
         // Determine which step to start on based on progress
         let startStep = 1;
 
         // If lots are selected, move to step 2
-        if (selectedLotIdsFromDraft.size > 0) {
+        if (selectedLotIdsFromDraft.length > 0) {
           startStep = 2;
         }
 
@@ -344,7 +299,7 @@ export default function SubmitBidPage() {
         }
         return true;
 
-      case 4: // Review
+      case 5: // Review
         return true;
 
       default:
@@ -358,36 +313,38 @@ export default function SubmitBidPage() {
     }
 
     // Auto-save when moving from Step 1 (lot selection) to Step 2
-    if (currentStep === 1 && !createdBidId) {
+    if (currentStep === 1) {
       try {
         setSubmitting(true);
 
         // Create initial bid items from selected lots
-        const selectedLots =
-          tender?.lots?.filter((lot) => selectedLotIds.includes(lot.id)) || [];
-        const itemsToInclude = selectedLots.flatMap((lot) => lot.items || []);
-        const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(
-          (item) => ({
-            tenderItemId: item.id,
-            offeredQuantity: item.quantity,
-            unitPrice: 0,
-            deliveryDays: undefined,
-            specifications: '',
-            brand: '',
-            model: '',
-            technicalDetails: '',
-          })
-        );
+        const initialItems = tender
+          ? getItemsForSelectedLots(tender, selectedLotIds, bidData.items)
+          : [];
 
         const draftData = {
           ...bidData,
+          selectedLotIds,
           items: initialItems,
         };
 
-        // Create the bid as draft
-        const createdBid = await tenderBidService.createBid(draftData);
-        setCreatedBidId(createdBid.id);
-        setBidData((prev) => ({ ...prev, items: initialItems }));
+        if (createdBidId) {
+          await tenderBidService.updateBid(
+            createdBidId,
+            buildDraftUpdate(
+              { ...bidData, selectedLotIds, items: initialItems },
+              selectedLotIds
+            )
+          );
+        } else {
+          const createdBid = await tenderBidService.createBid(draftData);
+          setCreatedBidId(createdBid.id);
+        }
+        setBidData((prev) => ({
+          ...prev,
+          selectedLotIds,
+          items: initialItems,
+        }));
         toast.success(
           'Lot selection saved. You can now enter pricing details.'
         );
@@ -414,25 +371,10 @@ export default function SubmitBidPage() {
         }
 
         // Update the existing draft
-        const updateDto = {
-          deliveryDays: bidData.deliveryDays,
-          paymentTerms: bidData.paymentTerms,
-          warrantyTerms: bidData.warrantyTerms,
-          technicalProposal: bidData.technicalProposal,
-          commercialProposal: bidData.commercialProposal,
-          items: bidData.items.map((item) => ({
-            tenderItemId: item.tenderItemId,
-            offeredQuantity: item.offeredQuantity,
-            unitPrice: item.unitPrice,
-            deliveryDays: item.deliveryDays,
-            specifications: item.specifications,
-            brand: item.brand,
-            model: item.model,
-            technicalDetails: item.technicalDetails,
-          })),
-        };
-
-        await tenderBidService.updateBid(createdBidId, updateDto);
+        await tenderBidService.updateBid(
+          createdBidId,
+          buildDraftUpdate(bidData, selectedLotIds)
+        );
         toast.success('Progress saved.');
       } catch (error: any) {
         console.error('Error auto-saving bid:', error);
@@ -465,34 +407,37 @@ export default function SubmitBidPage() {
 
         if (!createdBidId) {
           // Create initial bid items from selected lots
-          const selectedLots =
-            tender?.lots?.filter((lot) => selectedLotIds.includes(lot.id)) ||
-            [];
-          const itemsToInclude = selectedLots.flatMap((lot) => lot.items || []);
-          const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(
-            (item) => ({
-              tenderItemId: item.id,
-              offeredQuantity: item.quantity,
-              unitPrice: 0,
-              deliveryDays: undefined,
-              specifications: '',
-              brand: '',
-              model: '',
-              technicalDetails: '',
-            })
-          );
+          const initialItems = tender
+            ? getItemsForSelectedLots(tender, selectedLotIds, bidData.items)
+            : [];
 
           const draftData = {
             ...bidData,
+            selectedLotIds,
             items: initialItems,
           };
 
           const createdBid = await tenderBidService.createBid(draftData);
           setCreatedBidId(createdBid.id);
-          setBidData((prev) => ({ ...prev, items: initialItems }));
+          setBidData((prev) => ({
+            ...prev,
+            selectedLotIds,
+            items: initialItems,
+          }));
           toast.success('Lot selection saved as draft');
         } else {
-          toast.success('Lot selection already saved');
+          const items = tender
+            ? getItemsForSelectedLots(tender, selectedLotIds, bidData.items)
+            : bidData.items;
+          await tenderBidService.updateBid(
+            createdBidId,
+            buildDraftUpdate(
+              { ...bidData, selectedLotIds, items },
+              selectedLotIds
+            )
+          );
+          setBidData((prev) => ({ ...prev, selectedLotIds, items }));
+          toast.success('Lot selection saved as draft');
         }
         return;
       }
@@ -505,28 +450,17 @@ export default function SubmitBidPage() {
 
       if (createdBidId) {
         // Update existing draft
-        const updateDto = {
-          deliveryDays: bidData.deliveryDays,
-          paymentTerms: bidData.paymentTerms,
-          warrantyTerms: bidData.warrantyTerms,
-          technicalProposal: bidData.technicalProposal,
-          commercialProposal: bidData.commercialProposal,
-          items: bidData.items.map((item) => ({
-            tenderItemId: item.tenderItemId,
-            offeredQuantity: item.offeredQuantity,
-            unitPrice: item.unitPrice,
-            deliveryDays: item.deliveryDays,
-            specifications: item.specifications,
-            brand: item.brand,
-            model: item.model,
-            technicalDetails: item.technicalDetails,
-          })),
-        };
-        await tenderBidService.updateBid(createdBidId, updateDto);
+        await tenderBidService.updateBid(
+          createdBidId,
+          buildDraftUpdate(bidData, selectedLotIds)
+        );
         toast.success('Bid draft updated successfully');
       } else {
         // Create new draft (shouldn't happen if lot selection was done properly)
-        const createdBid = await tenderBidService.createBid(bidData);
+        const createdBid = await tenderBidService.createBid({
+          ...bidData,
+          selectedLotIds,
+        });
         setCreatedBidId(createdBid.id);
         toast.success('Bid saved as draft successfully');
       }
@@ -585,7 +519,13 @@ export default function SubmitBidPage() {
 
   const handleSubmitClick = () => {
     // Validate all steps including documents
-    if (!validateStep(1) || !validateStep(2) || !validateStep(3)) {
+    if (
+      !validateStep(1) ||
+      !validateStep(2) ||
+      !validateStep(3) ||
+      !validateStep(4) ||
+      !validateStep(5)
+    ) {
       toast.error(
         'Please complete all required steps and upload required documents'
       );
@@ -604,11 +544,17 @@ export default function SubmitBidPage() {
 
       if (!bidId) {
         // Create the bid if not already created
-        const createdBid = await tenderBidService.createBid(bidData);
+        const createdBid = await tenderBidService.createBid({
+          ...bidData,
+          selectedLotIds,
+        });
         bidId = createdBid.id;
       } else {
         // Update existing draft
-        await tenderBidService.updateBid(bidId, bidData);
+        await tenderBidService.updateBid(
+          bidId,
+          buildDraftUpdate(bidData, selectedLotIds)
+        );
       }
 
       // Submit the bid
@@ -619,7 +565,8 @@ export default function SubmitBidPage() {
       router.push(`/external-portal/my-bids/${bidId}`);
     } catch (error) {
       console.error('Error submitting bid:', error);
-      toast.error('Failed to submit bid');
+      toast.error(getProcurementProblemMessage(error, 'Failed to submit bid'));
+      return false;
     } finally {
       setSubmitting(false);
     }

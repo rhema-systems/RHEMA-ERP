@@ -255,12 +255,35 @@ StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment=true
 CorsSettings__AllowedOrigins__0=https://149.102.145.190:8443
 ```
 
+Syncfusion licensing is held in the protected API service configuration, not
+in a deployed `appsettings.json` or `.env` file. The service XML must contain a
+non-empty `Syncfusion__LicenseKey` environment entry. The release pipeline
+reuses that protected value over SSH to run the local Syncfusion frontend
+license activator before the Next.js production build. The value is retained
+only in process memory and must never be printed, written to a release manifest,
+or committed. Preflight and post-deployment verification report only
+`SYNCFUSION_LICENSE|CONFIGURED` and fail closed when it is missing.
+
+The key must be compatible with the deployed Syncfusion package version and
+cover both the server document SDK and browser UI/PDF Viewer editions. Adding
+the key only to the API service does not license an already-built React bundle;
+a new licensed frontend artifact must be built and deployed.
+
 Rules:
 
 - Keep only the HTTPS CORS origin. Remove any HTTP origin.
 - Keep both development-seeding settings `true` only while this host is explicitly an isolated test server.
 - Set `SeedDevelopmentData=false` and remove or set `AllowDevelopmentDataSeedingOutsideDevelopment=false` before production promotion.
 - Remove `.svg` and `image/svg+xml` from applicant-upload allowlists unless uploads are moved to a separate, forced-download origin.
+- Provision a real ClamAV `clamd` endpoint before release. The default is the
+  private loopback endpoint `127.0.0.1:3310`; if an approved central scanner is
+  used instead, set `FileVirusScan__ClamAv__Host` and
+  `FileVirusScan__ClamAv__Port` in the protected API service configuration.
+  Never expose the unauthenticated clamd protocol publicly.
+- Treat a non-healthy `file-virus-scanner` entry on `/health/ready` as a release
+  blocker. It intentionally blocks clean-scan-required DMS uploads rather than
+  accepting unscanned content. Do not replace it with the no-op scanner to
+  obtain a green health response.
 - Preserve the existing database, JWT, email/SMS, NextAuth, and other secrets.
 - `Security__RequireHttps=false` is expected behind the current TLS-terminating proxy; browser traffic is still HTTPS at port `8443`.
 

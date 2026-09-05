@@ -8,12 +8,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText, Loader2, ChevronsUpDown, Check } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { cn } from '@/lib/utils';
+import { ManualJournalAccountCombobox } from '@/components/finance/journal-entries/manual-journal-account-combobox';
+import { ManualJournalDimensionCell, ManualJournalDimensionDefaults } from '@/components/finance/journal-entries/manual-journal-dimension-editor';
 import type { Account, AccountCurrencyLink, Currency, FinanceDimensionAccountRule, FinanceDimensionDefinition, FinanceSettings, JournalType } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
@@ -38,9 +37,8 @@ import {
     requireFunctionalCurrency,
 } from '@/lib/finance/manual-journal-fx';
 import {
-    getApplicableManualDimensionRules,
-    getDefaultManualDimensionValues,
     getMissingRequiredManualDimension,
+    resolveManualDimensionValues,
 } from '@/lib/finance/manual-journal-dimensions';
 
 interface JournalLine {
@@ -77,6 +75,7 @@ export default function NewJournalEntryPage() {
     const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
     const [dimensionRules, setDimensionRules] = useState<FinanceDimensionAccountRule[]>([]);
     const [dimensionsLoading, setDimensionsLoading] = useState(true);
+    const [defaultDimensions, setDefaultDimensions] = useState<Record<string, string>>({});
     const functionalCurrency = financeSettings ? normalizeCurrencyCode(financeSettings.baseCurrency) : '';
 
     // Header State
@@ -91,7 +90,6 @@ export default function NewJournalEntryPage() {
     const [journalNumber, setJournalNumber] = useState('');
     const journalSequence = useDocumentSequence('Finance', FinanceDocumentTypes.JournalEntry);
     const [saving, setSaving] = useState(false);
-    const [openAccountPopover, setOpenAccountPopover] = useState<string | null>(null);
     const [migrationClearingConfigured, setMigrationClearingConfigured] = useState(true);
     const [openingBalanceAutoRoutingEnabled, setOpeningBalanceAutoRoutingEnabled] = useState(true);
 
@@ -244,7 +242,7 @@ export default function NewJournalEntryPage() {
                 debit: 0,
                 credit: 0,
                 rateStatus: functionalCurrency ? 'ready' : 'idle',
-                dimensions: {},
+                dimensions: { ...defaultDimensions },
             },
         ]);
     };
@@ -253,6 +251,15 @@ export default function NewJournalEntryPage() {
         if (lines.length > 2) {
             setLines(lines.filter(l => l.id !== id));
         }
+    };
+
+    const applyDimensionsToAllLines = (preferredValues: Record<string, string>) => {
+        setLines(current => current.map(line => ({
+            ...line,
+            dimensions: line.accountId
+                ? resolveManualDimensionValues(financeDimensions, dimensionRules, line.accountId, header.entryDate, preferredValues)
+                : { ...preferredValues },
+        })));
     };
 
     const loadAccountCurrencyLinks = async (account: Account): Promise<AccountCurrencyLink[]> => {
@@ -371,7 +378,9 @@ export default function NewJournalEntryPage() {
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
                 debit: currency === functionalCurrency ? line.debit : 0,
                 credit: currency === functionalCurrency ? line.credit : 0,
-                dimensions: getDefaultManualDimensionValues(dimensionRules, accountId, header.entryDate),
+                dimensions: resolveManualDimensionValues(
+                    financeDimensions, dimensionRules, accountId, header.entryDate, defaultDimensions,
+                ),
                 rateStatus: currency === functionalCurrency ? 'ready' : 'idle',
                 rateError: undefined,
             } : line));
@@ -386,6 +395,23 @@ export default function NewJournalEntryPage() {
                 rateError: message,
             } : line));
         }
+    };
+
+    const clearAccount = (lineId: string) => {
+        setLines(current => current.map(line => line.id === lineId ? {
+            ...line,
+            accountId: '',
+            currencyCode: functionalCurrency,
+            exchangeRate: 1,
+            foreignDebit: undefined,
+            foreignCredit: undefined,
+            dimensions: { ...defaultDimensions },
+            rateStatus: 'ready',
+            rateError: undefined,
+            rateSource: undefined,
+            rateDate: undefined,
+            rateRequestKey: undefined,
+        } : line));
     };
 
     const handleCurrencyChange = async (lineId: string, currencyCode: string) => {
@@ -720,6 +746,14 @@ export default function NewJournalEntryPage() {
                     </Button>
                 </CardHeader>
                 <CardContent>
+                    <ManualJournalDimensionDefaults
+                        definitions={financeDimensions}
+                        effectiveDate={header.entryDate}
+                        values={defaultDimensions}
+                        onChange={setDefaultDimensions}
+                        onApplyToAll={() => applyDimensionsToAllLines(defaultDimensions)}
+                        disabled={dimensionsLoading}
+                    />
                     {accountsLoading ? (
                         <div className="flex items-center justify-center py-8">
                             <Loader2 className="h-6 w-6 animate-spin mr-2 text-muted-foreground" />
@@ -727,7 +761,7 @@ export default function NewJournalEntryPage() {
                         </div>
                     ) : (
                         <div className="rounded-md border overflow-x-auto">
-                            <table className="w-full min-w-[1250px]">
+                            <table className="w-full min-w-[1120px]">
                                 <thead>
                                     <tr className="border-b bg-muted/50">
                                         <th className="p-3 text-left font-medium w-[20%]">Account</th>
@@ -738,12 +772,12 @@ export default function NewJournalEntryPage() {
                                         <th className="p-3 text-right font-medium w-[10%]">F. Credit</th>
                                         <th className="p-3 text-right font-medium w-[10%]">Debit ({functionalCurrency || '—'})</th>
                                         <th className="p-3 text-right font-medium w-[10%]">Credit ({functionalCurrency || '—'})</th>
-                                        <th className="p-3 text-left font-medium min-w-[220px]">Coding dimensions</th>
+                                        <th className="p-3 text-left font-medium min-w-[170px]">Coding</th>
                                         <th className="p-3 text-center w-[2%]"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {lines.map((line) => {
+                                    {lines.map((line, lineIndex) => {
                                         const isForeign = normalizeCurrencyCode(line.currencyCode) !== functionalCurrency;
                                         const account = accounts.find(a => a.id === line.accountId);
                                         const allowedCurrencies = getAllowedJournalCurrencies(
@@ -758,70 +792,16 @@ export default function NewJournalEntryPage() {
                                         return (
                                             <tr key={line.id} className="border-b last:border-0">
                                                 <td className="p-3">
-                                                    <Popover
-                                                        open={openAccountPopover === line.id}
-                                                        onOpenChange={(open) => setOpenAccountPopover(open ? line.id : null)}
-                                                    >
-                                                        <PopoverTrigger asChild>
-                                                            <Button
-                                                                variant="outline"
-                                                                role="combobox"
-                                                                aria-expanded={openAccountPopover === line.id}
-                                                                className="w-full justify-between font-normal text-left h-10 truncate"
-                                                            >
-                                                                <span className="truncate">
-                                                                    {line.accountId
-                                                                        ? (() => {
-                                                                            const acc = accounts.find(a => a.id === line.accountId);
-                                                                            return acc ? `${acc.accountNumber} - ${acc.accountName}` : 'Select Account';
-                                                                        })()
-                                                                        : 'Select Account'}
-                                                                </span>
-                                                                <ChevronsUpDown className="ml-1 h-4 w-4 shrink-0 opacity-50" />
-                                                            </Button>
-                                                        </PopoverTrigger>
-                                                        <PopoverContent className="w-[350px] p-0" align="start">
-                                                            <Command>
-                                                                <CommandInput placeholder="Search accounts..." />
-                                                                <CommandList>
-                                                                    <CommandEmpty>No account found.</CommandEmpty>
-                                                                    <CommandGroup>
-                                                                        {accounts.map((acc) => {
-                                                                            const eligible = targetAccountingBooks.length > 0
-                                                                                ? targetAccountingBooks.every(book => isAccountEligibleForBook(acc, book.code))
-                                                                                : isAccountEligibleForBook(acc, header.bookClassification);
-                                                                            return (
-                                                                            <CommandItem
-                                                                                key={acc.id}
-                                                                                value={`${acc.accountNumber} ${acc.accountName}`}
-                                                                                disabled={!eligible}
-                                                                                onSelect={() => {
-                                                                                    if (!eligible) return;
-                                                                                    void handleAccountChange(line.id, acc.id);
-                                                                                    setOpenAccountPopover(null);
-                                                                                }}
-                                                                                className={!eligible ? 'opacity-50 cursor-not-allowed' : undefined}
-                                                                                title={!eligible ? `Not classified for ${targetBookLabel}` : undefined}
-                                                                            >
-                                                                                <Check
-                                                                                    className={cn(
-                                                                                        "mr-2 h-4 w-4",
-                                                                                        line.accountId === acc.id ? "opacity-100" : "opacity-0"
-                                                                                    )}
-                                                                                />
-                                                                                <span className="truncate">{acc.accountNumber} - {acc.accountName}</span>
-                                                                                {!eligible && (
-                                                                                    <span className="ml-2 rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                                                                                        Not classified for {targetBookLabel}
-                                                                                    </span>
-                                                                                )}
-                                                                            </CommandItem>
-                                                                        )})}
-                                                                    </CommandGroup>
-                                                                </CommandList>
-                                                            </Command>
-                                                        </PopoverContent>
-                                                    </Popover>
+                                                    <ManualJournalAccountCombobox
+                                                        accounts={accounts}
+                                                        selectedAccountId={line.accountId}
+                                                        lineNumber={lineIndex + 1}
+                                                        targetAccountingBooks={targetAccountingBooks}
+                                                        fallbackBookCode={header.bookClassification}
+                                                        targetBookLabel={targetBookLabel}
+                                                        onSelect={(accountId) => handleAccountChange(line.id, accountId)}
+                                                        onClear={() => clearAccount(line.id)}
+                                                    />
                                                     {line.accountId && (() => {
                                                         const selected = accounts.find(a => a.id === line.accountId);
                                                         const eligible = selected && targetAccountingBooks.length > 0
@@ -930,48 +910,21 @@ export default function NewJournalEntryPage() {
                                                     />
                                                 </td>
                                                 <td className="p-3 align-top">
-                                                    {dimensionsLoading ? (
-                                                        <span className="text-xs text-muted-foreground">Loading…</span>
-                                                    ) : financeDimensions.length === 0 ? (
-                                                        <span className="text-xs text-muted-foreground">None configured</span>
-                                                    ) : (
-                                                        <div className="space-y-2">
-                                                            {financeDimensions.map(dimension => {
-                                                                const rule = getApplicableManualDimensionRules(
-                                                                    dimensionRules, line.accountId, header.entryDate,
-                                                                ).find(item => item.financeDimensionDefinitionId === dimension.id);
-                                                                if (rule?.ruleType === 'Prohibited') return null;
-                                                                const activeValues = dimension.values.filter(value => {
-                                                                    if (!value.isActive) return false;
-                                                                    const date = header.entryDate;
-                                                                    return value.effectiveDate.slice(0, 10) <= date
-                                                                        && (!value.expiryDate || value.expiryDate.slice(0, 10) >= date);
-                                                                });
-                                                                return (
-                                                                    <div key={dimension.id}>
-                                                                        <Label className="text-xs">{dimension.name}{rule?.ruleType === 'Required' ? ' *' : ''}{rule?.ruleType === 'Fixed' ? ' (fixed)' : ''}</Label>
-                                                                        <Select
-                                                                            value={line.dimensions[dimension.code] || '__none__'}
-                                                                            onValueChange={value => setLines(current => current.map(item =>
-                                                                                item.id === line.id
-                                                                                    ? { ...item, dimensions: { ...item.dimensions, [dimension.code]: value === '__none__' ? '' : value } }
-                                                                                    : item
-                                                                            ))}
-                                                                            disabled={rule?.ruleType === 'Fixed'}
-                                                                        >
-                                                                            <SelectTrigger className="h-8"><SelectValue placeholder="Not assigned" /></SelectTrigger>
-                                                                            <SelectContent>
-                                                                                <SelectItem value="__none__">Not assigned</SelectItem>
-                                                                                {activeValues.map(value => (
-                                                                                    <SelectItem key={value.id} value={value.code}>{value.code} — {value.name}</SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    )}
+                                                    <ManualJournalDimensionCell
+                                                        definitions={financeDimensions}
+                                                        rules={dimensionRules}
+                                                        effectiveDate={header.entryDate}
+                                                        lineNumber={lineIndex + 1}
+                                                        accountId={line.accountId}
+                                                        accountLabel={account ? `${account.accountNumber} - ${account.accountName}` : undefined}
+                                                        values={line.dimensions}
+                                                        defaults={defaultDimensions}
+                                                        previousValues={lineIndex > 0 ? lines[lineIndex - 1].dimensions : undefined}
+                                                        loading={dimensionsLoading}
+                                                        onChange={dimensions => setLines(current => current.map(item =>
+                                                            item.id === line.id ? { ...item, dimensions } : item))}
+                                                        onApplyToAll={applyDimensionsToAllLines}
+                                                    />
                                                 </td>
                                                 <td className="p-3 text-center">
                                                     <Button

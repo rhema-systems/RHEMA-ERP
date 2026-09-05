@@ -365,7 +365,7 @@ export function QuantitySurveyEstimateVersionsDialog({ projectId }: Props) {
                     placeholder="Approval comment or rejection reason"
                   />
                 )}
-                <div className="grid grid-cols-3 gap-3 text-sm">
+                <div className="grid gap-3 text-sm sm:grid-cols-3">
                   <div>
                     <span className="text-muted-foreground">Direct cost</span>
                     <div className="font-semibold">
@@ -382,6 +382,25 @@ export function QuantitySurveyEstimateVersionsDialog({ projectId }: Props) {
                     <span className="text-muted-foreground">Total</span>
                     <div className="font-semibold">
                       {formatMoney(selected.totalAmount, selected.currencyCode)}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 rounded border bg-muted/20 p-3 text-sm md:grid-cols-2">
+                  <div>
+                    <span className="text-muted-foreground">
+                      Funding source
+                    </span>
+                    <div className="font-medium">
+                      {selected.fundingSource || 'Not recorded on the project'}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">
+                      Property reference
+                    </span>
+                    <div className="font-medium">
+                      {selected.propertyReference ||
+                        'No linked property reference'}
                     </div>
                   </div>
                 </div>

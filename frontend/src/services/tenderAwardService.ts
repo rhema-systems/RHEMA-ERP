@@ -1,5 +1,7 @@
 // Tender Award Service - API calls for tender award management
 
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
+
 // ==================== INTERFACES ====================
 
 export interface TenderAwardDto {
@@ -18,7 +20,7 @@ export interface TenderAwardDto {
   isNegotiated: boolean;
   negotiationSavings: number;
   currency?: string;
-  status: string; // Awarded, Cancelled
+  status: string; // PendingApproval, Awarded, Rejected, Cancelled
   awardJustification?: string;
   awardedById?: string;
   awardedByName?: string;
@@ -164,7 +166,7 @@ export async function getAwards(
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch awards');
+    await throwProcurementResponseError(response, 'Failed to fetch awards');
   }
 
   return response.json();
@@ -177,7 +179,7 @@ export async function getAwardById(id: string): Promise<TenderAwardDto> {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch award');
+    await throwProcurementResponseError(response, 'Failed to fetch award');
   }
 
   return response.json();
@@ -194,7 +196,7 @@ export async function getAwardByTenderId(tenderId: string): Promise<TenderAwardD
   }
 
   if (!response.ok) {
-    throw new Error('Failed to fetch award by tender');
+    await throwProcurementResponseError(response, 'Failed to fetch award by tender');
   }
 
   return response.json();
@@ -211,7 +213,7 @@ export async function getAwardByBidId(bidId: string): Promise<TenderAwardDto | n
   }
 
   if (!response.ok) {
-    throw new Error('Failed to fetch award by bid');
+    await throwProcurementResponseError(response, 'Failed to fetch award by bid');
   }
 
   return response.json();
@@ -224,7 +226,7 @@ export async function generateAwardRecommendation(tenderId: string): Promise<Awa
   });
 
   if (!response.ok) {
-    throw new Error('Failed to generate award recommendation');
+    await throwProcurementResponseError(response, 'Failed to generate award recommendation');
   }
 
   return response.json();
@@ -239,7 +241,37 @@ export async function createAward(data: CreateAwardDto): Promise<TenderAwardDto>
   });
 
   if (!response.ok) {
-    throw new Error('Failed to create award');
+    await throwProcurementResponseError(response, 'Failed to create award');
+  }
+
+  return response.json();
+}
+
+// Approve a pending award recommendation
+export async function approveAward(id: string, data: ApproveAwardDto): Promise<TenderAwardDto> {
+  const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/${id}/approve`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    await throwProcurementResponseError(response, 'Failed to approve award recommendation');
+  }
+
+  return response.json();
+}
+
+// Reject a pending award recommendation
+export async function rejectAward(id: string, data: RejectAwardDto): Promise<TenderAwardDto> {
+  const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/${id}/reject`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    await throwProcurementResponseError(response, 'Failed to reject award recommendation');
   }
 
   return response.json();
@@ -254,7 +286,7 @@ export async function updateAward(id: string, data: CreateAwardDto): Promise<Ten
   });
 
   if (!response.ok) {
-    throw new Error('Failed to update award');
+    await throwProcurementResponseError(response, 'Failed to update award');
   }
 
   return response.json();
@@ -269,7 +301,7 @@ export async function cancelAward(id: string, data: CancelAwardDto): Promise<voi
   });
 
   if (!response.ok) {
-    throw new Error('Failed to cancel award');
+    await throwProcurementResponseError(response, 'Failed to cancel award');
   }
 }
 
@@ -282,7 +314,7 @@ export async function sendAwardNotifications(awardId: string, data: AwardNotific
   });
 
   if (!response.ok) {
-    throw new Error('Failed to send award notifications');
+    await throwProcurementResponseError(response, 'Failed to send award notifications');
   }
 }
 
@@ -295,8 +327,7 @@ export async function createPurchaseOrderFromAward(data: CreatePurchaseOrderFrom
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || 'Failed to create purchase order from award');
+    await throwProcurementResponseError(response, 'Failed to create purchase order from award');
   }
 
   return response.json();

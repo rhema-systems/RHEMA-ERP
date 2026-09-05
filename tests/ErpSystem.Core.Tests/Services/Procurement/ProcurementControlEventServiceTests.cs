@@ -46,7 +46,7 @@ public sealed class ProcurementControlEventServiceTests
         });
 
         recorded.ActorUserId.Should().Be(fixture.UserId);
-        recorded.ActorRoles.Should().BeEquivalentTo("TenantAdmin", "TDC_INTERNAL_AUDIT");
+        recorded.ActorRoles.Should().ContainSingle(ProcurementAccessControlRegistry.InternalAuditRole);
         recorded.DecisionKeys.Should().Equal("DEC-002", "DEC-004");
         recorded.BeforeJson.Should().Contain("Submitted");
         recorded.AfterJson.Should().Contain("Approved");
@@ -133,15 +133,15 @@ public sealed class ProcurementControlEventServiceTests
     }
 
     [Fact]
-    public async Task ReaderRoleIsRequiredForQueryButNotForInternalWriterContract()
+    public async Task AuthenticatedActorCanQueryAfterAuditPermissionIsEnforcedAtApiBoundary()
     {
         await using var fixture = new Fixture();
         fixture.SetRoles("TDC_STORES_OFFICER");
         await fixture.Service.RecordAsync(Request("event-writer"));
 
-        var query = () => fixture.Service.GetSummaryAsync();
+        var summary = await fixture.Service.GetSummaryAsync();
 
-        await query.Should().ThrowAsync<ProcurementControlEventAuthorizationException>();
+        summary.TotalCount.Should().Be(1);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public sealed class ProcurementControlEventServiceTests
     {
         private Guid _activeTenantId;
         private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase)
-            { "TenantAdmin", "TDC_INTERNAL_AUDIT" };
+            { ProcurementAccessControlRegistry.InternalAuditRole };
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
         private readonly UnitOfWork _unitOfWork;
 

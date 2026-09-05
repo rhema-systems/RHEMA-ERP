@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,193 +13,116 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class MarketAnalysesController : ControllerBase
 {
     private readonly IMarketAnalysisService _analysisService;
-    private readonly ILogger<MarketAnalysesController> _logger;
 
-    public MarketAnalysesController(
-        IMarketAnalysisService analysisService,
-        ILogger<MarketAnalysesController> logger)
+    public MarketAnalysesController(IMarketAnalysisService analysisService)
     {
         _analysisService = analysisService;
-        _logger = logger;
     }
 
     [HttpGet]
     public async Task<ActionResult<PagedResult<MarketAnalysisDto>>> GetAnalyses(
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null, [FromQuery] string? category = null,
-        [FromQuery] string? itemCategory = null, [FromQuery] string? status = null)
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10,
+        [FromQuery] string? search = null,
+        [FromQuery] string? category = null,
+        [FromQuery] string? itemCategory = null,
+        [FromQuery] string? status = null)
     {
-        try
-        {
-            var effectiveCategory = itemCategory ?? category;
-            var result = await _analysisService.GetAnalysesAsync(page, pageSize, search, effectiveCategory, status);
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting market analyses");
-            return StatusCode(500, "An error occurred while retrieving market analyses");
-        }
+        var effectiveCategory = itemCategory ?? category;
+        return Ok(await _analysisService.GetAnalysesAsync(
+            page, pageSize, search, effectiveCategory, status));
     }
 
-    [HttpGet("{id}")]
+    [HttpGet("{id:guid}")]
     public async Task<ActionResult<MarketAnalysisDetailDto>> GetAnalysis(Guid id)
     {
-        try
-        {
-            var analysis = await _analysisService.GetByIdAsync(id);
-            if (analysis == null) return NotFound($"Market analysis with ID {id} not found");
-            return Ok(analysis);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting market analysis {AnalysisId}", id);
-            return StatusCode(500, "An error occurred while retrieving the market analysis");
-        }
+        var analysis = await _analysisService.GetByIdAsync(id);
+        return analysis == null
+            ? throw new BusinessRuleException(
+                "MARKET_ANALYSIS_NOT_FOUND",
+                "The selected market analysis was not found.",
+                StatusCodes.Status404NotFound)
+            : Ok(analysis);
     }
 
     [HttpGet("category/{category}")]
     public async Task<ActionResult<IEnumerable<MarketAnalysisDto>>> GetByCategory(string category)
-    {
-        try { return Ok(await _analysisService.GetByCategoryAsync(category)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting analyses for category {Category}", category);
-            return StatusCode(500, "An error occurred while retrieving analyses");
-        }
-    }
+        => Ok(await _analysisService.GetByCategoryAsync(category));
 
     [HttpGet("item/{itemName}")]
     public async Task<ActionResult<IEnumerable<MarketAnalysisDto>>> GetByItem(string itemName)
-    {
-        try { return Ok(await _analysisService.GetByItemAsync(itemName)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting analyses for item {ItemName}", itemName);
-            return StatusCode(500, "An error occurred while retrieving analyses");
-        }
-    }
+        => Ok(await _analysisService.GetByItemAsync(itemName));
 
     [HttpGet("recent")]
     public async Task<ActionResult<IEnumerable<MarketAnalysisDto>>> GetRecent([FromQuery] int count = 10)
-    {
-        try { return Ok(await _analysisService.GetRecentAnalysesAsync(count)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting recent analyses");
-            return StatusCode(500, "An error occurred while retrieving recent analyses");
-        }
-    }
+        => Ok(await _analysisService.GetRecentAnalysesAsync(count));
 
     [HttpPost]
     public async Task<ActionResult<MarketAnalysisDetailDto>> CreateAnalysis([FromBody] CreateMarketAnalysisDto dto)
     {
-        try
-        {
-            var analysis = await _analysisService.CreateAsync(dto);
-            return CreatedAtAction(nameof(GetAnalysis), new { id = analysis.Id }, analysis);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating market analysis");
-            return StatusCode(500, "An error occurred while creating the market analysis");
-        }
+        var analysis = await _analysisService.CreateAsync(dto);
+        return CreatedAtAction(nameof(GetAnalysis), new { id = analysis.Id }, analysis);
     }
 
-    [HttpPut("{id}")]
-    public async Task<ActionResult<MarketAnalysisDetailDto>> UpdateAnalysis(Guid id, [FromBody] CreateMarketAnalysisDto dto)
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<MarketAnalysisDetailDto>> UpdateAnalysis(
+        Guid id,
+        [FromBody] CreateMarketAnalysisDto dto)
+        => Ok(await _analysisService.UpdateAsync(id, dto));
+
+    [HttpPost("{id:guid}/publish")]
+    public async Task<ActionResult<MarketAnalysisDetailDto>> PublishAnalysis(Guid id)
+        => Ok(await _analysisService.PublishAsync(id));
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteAnalysis(Guid id)
     {
-        try { return Ok(await _analysisService.UpdateAsync(id, dto)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating market analysis {AnalysisId}", id);
-            return StatusCode(500, "An error occurred while updating the market analysis");
-        }
+        await _analysisService.DeleteAsync(id);
+        return NoContent();
     }
 
-    [HttpDelete("{id}")]
-    public async Task<ActionResult> DeleteAnalysis(Guid id)
+    [HttpPost("{analysisId:guid}/price-history")]
+    public async Task<ActionResult<PriceHistoryDto>> AddPriceHistory(
+        Guid analysisId,
+        [FromBody] CreatePriceHistoryDto dto)
+        => Ok(await _analysisService.AddPriceHistoryAsync(analysisId, dto));
+
+    [HttpPost("{analysisId:guid}/survey-quotes")]
+    public async Task<ActionResult<PriceHistoryDto>> AddSurveyQuote(
+        Guid analysisId,
+        [FromBody] CreatePriceHistoryDto dto)
     {
-        try { await _analysisService.DeleteAsync(id); return NoContent(); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting market analysis {AnalysisId}", id);
-            return StatusCode(500, "An error occurred while deleting the market analysis");
-        }
+        dto.MarketAnalysisId = analysisId;
+        dto.PriceSource = "MarketSurvey";
+        return Ok(await _analysisService.AddPriceHistoryAsync(analysisId, dto));
     }
 
-    [HttpPost("{analysisId}/price-history")]
-    public async Task<ActionResult<PriceHistoryDto>> AddPriceHistory(Guid analysisId, [FromBody] CreatePriceHistoryDto dto)
+    [HttpPut("{analysisId:guid}/survey-quotes/{priceHistoryId:guid}")]
+    public async Task<ActionResult<PriceHistoryDto>> UpdateSurveyQuote(
+        Guid analysisId,
+        Guid priceHistoryId,
+        [FromBody] CreatePriceHistoryDto dto)
     {
-        try { return Ok(await _analysisService.AddPriceHistoryAsync(analysisId, dto)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding price history to analysis {AnalysisId}", analysisId);
-            return StatusCode(500, "An error occurred while adding price history");
-        }
+        dto.MarketAnalysisId = analysisId;
+        dto.PriceSource = "MarketSurvey";
+        return Ok(await _analysisService.UpdatePriceHistoryAsync(analysisId, priceHistoryId, dto));
     }
 
-    [HttpPost("{analysisId}/survey-quotes")]
-    public async Task<ActionResult<PriceHistoryDto>> AddSurveyQuote(Guid analysisId, [FromBody] CreatePriceHistoryDto dto)
-    {
-        try
-        {
-            dto.MarketAnalysisId = analysisId;
-            dto.PriceSource = string.IsNullOrWhiteSpace(dto.PriceSource) ? "MarketSurvey" : dto.PriceSource;
-            return Ok(await _analysisService.AddPriceHistoryAsync(analysisId, dto));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding survey quote to analysis {AnalysisId}", analysisId);
-            return StatusCode(500, "An error occurred while adding survey quote");
-        }
-    }
-
-    [HttpGet("{analysisId}/price-history")]
+    [HttpGet("{analysisId:guid}/price-history")]
     public async Task<ActionResult<IEnumerable<PriceHistoryDto>>> GetPriceHistory(Guid analysisId)
-    {
-        try { return Ok(await _analysisService.GetPriceHistoryAsync(analysisId)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting price history for analysis {AnalysisId}", analysisId);
-            return StatusCode(500, "An error occurred while retrieving price history");
-        }
-    }
+        => Ok(await _analysisService.GetPriceHistoryAsync(analysisId));
 
-    [HttpGet("{analysisId}/survey-summary")]
+    [HttpGet("{analysisId:guid}/survey-summary")]
     public async Task<ActionResult<MarketSurveySummaryDto>> GetSurveySummary(Guid analysisId)
-    {
-        try { return Ok(await _analysisService.GetMarketSurveySummaryAsync(analysisId)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting market survey summary for analysis {AnalysisId}", analysisId);
-            return StatusCode(500, "An error occurred while retrieving market survey summary");
-        }
-    }
+        => Ok(await _analysisService.GetMarketSurveySummaryAsync(analysisId));
 
-    [HttpGet("{analysisId}/price-trend")]
-    public async Task<ActionResult<PriceTrendDto>> GetPriceTrend(Guid analysisId, [FromQuery] int months = 12)
-    {
-        try { return Ok(await _analysisService.GetPriceTrendAsync(analysisId, months)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting price trend for analysis {AnalysisId}", analysisId);
-            return StatusCode(500, "An error occurred while retrieving price trend");
-        }
-    }
+    [HttpGet("{analysisId:guid}/price-trend")]
+    public async Task<ActionResult<PriceTrendDto>> GetPriceTrend(
+        Guid analysisId,
+        [FromQuery] int months = 12)
+        => Ok(await _analysisService.GetPriceTrendAsync(analysisId, months));
 
     [HttpGet("category/{category}/average-price")]
     public async Task<ActionResult<decimal>> GetAveragePrice(string category)
-    {
-        try { return Ok(await _analysisService.GetAveragePriceAsync(category)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting average price for category {Category}", category);
-            return StatusCode(500, "An error occurred while retrieving average price");
-        }
-    }
+        => Ok(await _analysisService.GetAveragePriceAsync(category));
 }

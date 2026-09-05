@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -169,6 +170,48 @@ public class TenderBidConfiguration : IEntityTypeConfiguration<TenderBid>
             .WithOne(i => i.TenderBid)
             .HasForeignKey(i => i.TenderBidId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class TenderFeeConfiguration : IEntityTypeConfiguration<TenderFee>
+{
+    public void Configure(EntityTypeBuilder<TenderFee> builder)
+    {
+        builder.HasIndex(fee => fee.ReceivingAccountId);
+        builder.HasIndex(fee => fee.RevenueAccountId);
+
+        builder.HasOne<Account>()
+            .WithMany()
+            .HasForeignKey(fee => fee.ReceivingAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Account>()
+            .WithMany()
+            .HasForeignKey(fee => fee.RevenueAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class TenderPaymentConfiguration : IEntityTypeConfiguration<TenderPayment>
+{
+    public void Configure(EntityTypeBuilder<TenderPayment> builder)
+    {
+        builder.HasIndex(payment => payment.PostingEventId)
+            .IsUnique()
+            .HasFilter("[PostingEventId] IS NOT NULL");
+        builder.HasIndex(payment => payment.JournalEntryId)
+            .IsUnique()
+            .HasFilter("[JournalEntryId] IS NOT NULL");
+
+        builder.HasOne<FinancePostingEvent>()
+            .WithMany()
+            .HasForeignKey(payment => payment.PostingEventId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<JournalEntry>()
+            .WithMany()
+            .HasForeignKey(payment => payment.JournalEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -511,5 +554,17 @@ public class TenderNegotiationItemConfiguration : IEntityTypeConfiguration<Tende
             .WithMany()
             .HasForeignKey(i => i.TenderBidItemId)
             .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class TenderEvaluationConfiguration : IEntityTypeConfiguration<TenderEvaluation>
+{
+    public void Configure(EntityTypeBuilder<TenderEvaluation> builder)
+    {
+        // SQL Server rejects EF's OUTPUT clause when an enabled trigger exists on
+        // the target table. Declaring the projection trigger keeps draft creates
+        // and governed submission updates compatible with the database control.
+        builder.ToTable("TenderEvaluations", table =>
+            table.HasTrigger("TR_TenderEvaluations_CommitteeScoreProjection"));
     }
 }

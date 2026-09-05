@@ -19,6 +19,21 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementWorksCloseoutServiceTests
 {
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    public void Civil_completion_inspection_applies_only_to_configured_Civil_works(
+        bool hasCivilDesignCase,
+        bool hasCivilInspection,
+        bool expected)
+    {
+        ProcurementWorksCloseoutService.RequiresCivilCompletionInspection(
+                hasCivilDesignCase,
+                hasCivilInspection)
+            .Should().Be(expected);
+    }
+
     [Fact]
     public async Task OverviewIsTenantSafeAndExposesCompleteDecisionRegister()
     {
@@ -150,6 +165,49 @@ public sealed class ProcurementWorksCloseoutServiceTests
             It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
     }
 
+    [Fact]
+    public void TerminalContractStatusIsAppliedOnlyAfterFinanceCommitmentCloseIsSaved()
+    {
+        var source = ReadWorksCloseoutService();
+        foreach (var terminalStatus in new[] { "Terminated", "Completed" })
+        {
+            var status = $"contract.Status = \"{terminalStatus}\";";
+            var statusIndex = source.IndexOf(status, StringComparison.Ordinal);
+            statusIndex.Should().BeGreaterThan(0);
+            var releaseIndex = source.LastIndexOf(
+                "await _budgetCommitments.ReleaseUnusedContractAsync(",
+                statusIndex,
+                StringComparison.Ordinal);
+            var saveIndex = source.LastIndexOf(
+                "await _unitOfWork.SaveChangesAsync(cancellationToken);",
+                statusIndex,
+                StringComparison.Ordinal);
+            releaseIndex.Should().BeGreaterThan(0);
+            saveIndex.Should().BeGreaterThan(releaseIndex,
+                $"the unused Finance commitment must be persisted before {terminalStatus}");
+            statusIndex.Should().BeGreaterThan(saveIndex);
+        }
+    }
+
+    private static string ReadWorksCloseoutService(
+        [System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")
+    {
+        for (var directory = new FileInfo(sourceFile).Directory;
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (!File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+                continue;
+            return File.ReadAllText(Path.Combine(
+                directory.FullName,
+                "src", "ErpSystem.Core", "Services", "Procurement",
+                "ProcurementWorksCloseoutService.cs"));
+        }
+
+        throw new DirectoryNotFoundException(
+            "Repository root containing ErpSystem.sln was not found.");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly UnitOfWork _unitOfWork;
@@ -247,6 +305,7 @@ public sealed class ProcurementWorksCloseoutServiceTests
                     It.IsAny<NotificationTopicEvent>(),
                     It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
+            BudgetCommitments = new Mock<IProcurementBudgetCommitmentLifecycleService>();
 
             Service = new ProcurementWorksCloseoutService(
                 _unitOfWork,
@@ -257,6 +316,7 @@ public sealed class ProcurementWorksCloseoutServiceTests
                 Compliance.Object,
                 Workflow.Object,
                 ControlEvents.Object,
+                BudgetCommitments.Object,
                 notifications.Object,
                 NullLogger<ProcurementWorksCloseoutService>.Instance);
         }
@@ -280,6 +340,7 @@ public sealed class ProcurementWorksCloseoutServiceTests
         public Mock<IWorkflowIntegrationService> Workflow { get; }
         public Mock<IProcurementWorksCloseoutStore> Store { get; }
         public Mock<IProcurementControlEventService> ControlEvents { get; }
+        public Mock<IProcurementBudgetCommitmentLifecycleService> BudgetCommitments { get; }
         public List<ProcurementAccessCapabilityRequest> AccessRequests { get; } = [];
         private List<Guid> EvidenceIds { get; } = [];
 

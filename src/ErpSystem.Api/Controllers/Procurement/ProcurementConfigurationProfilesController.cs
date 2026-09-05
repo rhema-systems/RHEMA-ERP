@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 
 [ApiController]
 [Route("api/procurement/configuration-profiles")]
-[Authorize(Roles = "SuperAdmin,TenantAdmin")]
+[Authorize]
 public sealed class ProcurementConfigurationProfilesController : ControllerBase
 {
     private readonly IProcurementConfigurationService _service;
@@ -19,15 +19,18 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
     }
 
     [HttpGet("schemas")]
+    [Authorize(Policy = "procurement.records.read")]
     public IActionResult GetSchemas() => Ok(_service.GetDecisionSchemas());
 
     [HttpGet]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetProfiles(
         [FromQuery] ProcurementConfigurationProfileListRequest request,
         CancellationToken cancellationToken) => ExecuteAsync(async () =>
             Ok(await _service.GetProfilesAsync(request, cancellationToken)));
 
     [HttpGet("effective")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetEffective(
         [FromQuery] string profileCode = "TDC-PROCUREMENT",
         [FromQuery] DateTime? atUtc = null,
@@ -38,10 +41,12 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
         });
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetProfile(Guid id, CancellationToken cancellationToken) => ExecuteAsync(async () =>
         Ok(await _service.GetProfileAsync(id, cancellationToken)));
 
     [HttpPost]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Create(
         [FromBody] CreateProcurementConfigurationProfileRequest request,
         CancellationToken cancellationToken) => ExecuteAsync(async () =>
@@ -51,6 +56,7 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
         });
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Update(
         Guid id,
         [FromBody] UpdateProcurementConfigurationProfileRequest request,
@@ -58,6 +64,7 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
             Ok(await _service.UpdateProfileAsync(id, request, CorrelationId, cancellationToken)));
 
     [HttpPut("{id:guid}/decisions/{decisionKey}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> SaveDecision(
         Guid id,
         string decisionKey,
@@ -66,10 +73,12 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
             Ok(await _service.SaveDecisionAsync(id, decisionKey, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/validate")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Validate(Guid id, CancellationToken cancellationToken) => ExecuteAsync(async () =>
         Ok(await _service.ValidateProfileAsync(id, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/publish")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Publish(
         Guid id,
         [FromBody] ProcurementConfigurationLifecycleRequest request,
@@ -77,6 +86,7 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
             Ok(await _service.PublishProfileAsync(id, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/retire")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Retire(
         Guid id,
         [FromBody] ProcurementConfigurationLifecycleRequest request,
@@ -84,6 +94,7 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
             Ok(await _service.RetireProfileAsync(id, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/clone-draft")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> CloneDraft(
         Guid id,
         [FromBody] CloneProcurementConfigurationProfileRequest request,
@@ -94,6 +105,7 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
         });
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> DeleteDraft(
         Guid id,
         [FromBody] ProcurementConfigurationLifecycleRequest request,
@@ -104,10 +116,12 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
         });
 
     [HttpGet("{id:guid}/history")]
+    [Authorize(Policy = "procurement.audit.read")]
     public Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) => ExecuteAsync(async () =>
         Ok(await _service.GetHistoryAsync(id, cancellationToken)));
 
     [HttpPost("{id:guid}/decisions/{decisionKey}/evidence")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> LinkEvidence(
         Guid id,
         string decisionKey,
@@ -119,6 +133,7 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
         });
 
     [HttpDelete("{id:guid}/decisions/{decisionKey}/evidence/{evidenceId:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> UnlinkEvidence(
         Guid id,
         string decisionKey,

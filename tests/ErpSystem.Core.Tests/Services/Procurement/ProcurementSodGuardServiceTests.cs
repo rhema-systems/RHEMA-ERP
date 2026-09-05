@@ -1,8 +1,10 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using FluentAssertions;
@@ -124,19 +126,27 @@ public sealed class ProcurementSodGuardServiceTests
     }
 
     [Fact]
-    public async Task MissingOrCrossTenantPolicyFailsClosedAndAuditsTheAttempt()
+    public async Task MissingPolicyUsesSharedBaselineAndStillBlocksAndAuditsIdentityConflicts()
     {
         await using var fixture = new GuardFixture();
         await fixture.AddCompletePolicyAsync();
         fixture.SwitchTenant(Guid.NewGuid());
 
-        var result = await fixture.Service.EnforceAsync(
+        var allowed = await fixture.Service.EnforceAsync(
+            Request(ProcurementSodRequiredControlRegistry.Definitions[0].Code, Guid.NewGuid()), "trace-tenant-allowed");
+        allowed.Allowed.Should().BeTrue();
+        allowed.Code.Should().Be("SOD_ALLOWED");
+        allowed.PolicySetId.Should().BeNull();
+        allowed.Message.Should().Contain("shared maker-checker baseline");
+
+        var blocked = await fixture.Service.EnforceAsync(
             Request(ProcurementSodRequiredControlRegistry.Definitions[0].Code, fixture.UserId), "trace-tenant");
 
-        result.Allowed.Should().BeFalse();
-        result.Code.Should().Be("SOD_POLICY_INCOMPLETE");
-        result.PolicySetId.Should().BeNull();
-        result.WasAudited.Should().BeTrue();
+        blocked.Allowed.Should().BeFalse();
+        blocked.Code.Should().Be("SOD_CONFLICT");
+        blocked.PolicySetId.Should().BeNull();
+        blocked.WasAudited.Should().BeTrue();
+        (await fixture.Context.AuditLogs.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -174,6 +184,32 @@ public sealed class ProcurementSodGuardServiceTests
             "trace-provision", It.IsAny<CancellationToken>()), Times.Exactly(6));
     }
 
+    [Fact]
+    public async Task ApplyingRequiredControlsPreflightsAllActiveTenantRolesBeforeCreatingAnyRule()
+    {
+        await using var fixture = new GuardFixture();
+        var policyId = Guid.NewGuid();
+        fixture.PolicyService.Setup(item => item.GetPolicySetAsync(policyId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPolicySetDto
+            {
+                Id = policyId,
+                LifecycleStatus = ProcurementPolicyLifecycleStatus.Draft,
+                EffectiveFrom = Moment.AddDays(-1),
+                EffectiveTo = Moment.AddYears(1)
+            });
+        fixture.SetActiveTenantRoles("Initiator", "Approver");
+
+        var action = () => fixture.Service.ApplyRequiredControlsAsync(policyId,
+            new ApplyRequiredProcurementSodControlsRequest { Reason = "Apply SRS controls" }, "trace-preflight");
+
+        var exception = await action.Should().ThrowAsync<ProcurementSodRequestValidationException>();
+        exception.Which.Code.Should().Be("SOD_TENANT_ROLES_REQUIRED");
+        exception.Which.Message.Should().Contain("AwardApprover").And.Contain("No controls were created");
+        fixture.PolicyService.Verify(item => item.SaveRuleAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<SaveProcurementPolicyRuleRequest>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     public static IEnumerable<object[]> RequiredControlCodes() =>
         ProcurementSodRequiredControlRegistry.Definitions.Select(item => new object[] { item.Code });
 
@@ -189,8 +225,10 @@ public sealed class ProcurementSodGuardServiceTests
     {
         private Guid _activeTenantId;
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
+        private readonly Mock<IRoleService> _roleService = new();
         private readonly UnitOfWork _unitOfWork;
-        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TenantAdmin" };
+        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase)
+            { ProcurementAccessControlRegistry.IctAdministratorRole };
 
         public GuardFixture()
         {
@@ -212,10 +250,15 @@ public sealed class ProcurementSodGuardServiceTests
                 .Returns((string role) => _roles.Contains(role));
             _unitOfWork = new UnitOfWork(Context);
             PolicyService = new Mock<IProcurementPolicyService>();
+            SetActiveTenantRoles(ProcurementSodRequiredControlRegistry.Definitions
+                .SelectMany(item => new[] { item.InitiatorRole, item.ConflictingRole })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
             var controlEvents = new ProcurementControlEventService(_unitOfWork, _currentUser.Object,
                 NullLogger<ProcurementControlEventService>.Instance);
             Service = new ProcurementSodGuardService(_unitOfWork, _currentUser.Object,
-                PolicyService.Object, controlEvents, NullLogger<ProcurementSodGuardService>.Instance);
+                PolicyService.Object, _roleService.Object, controlEvents,
+                NullLogger<ProcurementSodGuardService>.Instance);
         }
 
         public Guid TenantId { get; }
@@ -224,6 +267,15 @@ public sealed class ProcurementSodGuardServiceTests
         public Mock<IProcurementPolicyService> PolicyService { get; }
         public ProcurementSodGuardService Service { get; }
         public void SwitchTenant(Guid tenantId) => _activeTenantId = tenantId;
+        public void SetActiveTenantRoles(params string[] roleNames) =>
+            _roleService.Setup(item => item.GetRolesForTenantAsync(
+                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(roleNames.Select(roleName => new ApplicationRole
+                {
+                    Id = Guid.NewGuid(),
+                    Name = roleName,
+                    NormalizedName = roleName.ToUpperInvariant()
+                }).ToList());
 
         public async Task AddCompletePolicyAsync()
         {

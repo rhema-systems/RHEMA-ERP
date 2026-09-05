@@ -15,6 +15,7 @@ import {
 } from '@/components/procurement/evaluation-committee/EvaluationCommitteeActionDialogs';
 import { EvaluationCommitteeRegister } from '@/components/procurement/evaluation-committee/EvaluationCommitteeRegister';
 import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementEvaluationCommitteeService as service } from '@/services/procurement-evaluation-committee.service';
 import type {
   ProcurementEvaluationPhase,
@@ -42,19 +43,31 @@ export function EvaluationCommitteeWorkspace({
   const canApprove = hasPermission('procurement.tender.approve');
 
   const readiness = useQuery({
-    queryKey: ['procurement-evaluation-committee-readiness', sourceType, sourceId],
+    queryKey: [
+      'procurement-evaluation-committee-readiness',
+      sourceType,
+      sourceId,
+    ],
     queryFn: () => service.readiness(sourceType, sourceId),
     enabled: Boolean(sourceId),
     retry: false,
   });
   const control = useQuery({
-    queryKey: ['procurement-evaluation-committee-control', sourceType, sourceId],
+    queryKey: [
+      'procurement-evaluation-committee-control',
+      sourceType,
+      sourceId,
+    ],
     queryFn: () => service.get(sourceType, sourceId),
     enabled: Boolean(readiness.data?.hasControl),
     retry: false,
   });
   const options = useQuery({
-    queryKey: ['procurement-evaluation-committee-options', sourceType, sourceId],
+    queryKey: [
+      'procurement-evaluation-committee-options',
+      sourceType,
+      sourceId,
+    ],
     queryFn: () => service.options(sourceType, sourceId),
     enabled:
       Boolean(sourceId) &&
@@ -70,9 +83,7 @@ export function EvaluationCommitteeWorkspace({
       'Technical',
     ],
     queryFn: () => service.scorerEligibility(sourceType, sourceId, 'Technical'),
-    enabled:
-      canEvaluate &&
-      control.data?.status === 'Active',
+    enabled: canEvaluate && control.data?.status === 'Active',
     retry: false,
   });
   const financialEligibility = useQuery({
@@ -83,9 +94,7 @@ export function EvaluationCommitteeWorkspace({
       'Financial',
     ],
     queryFn: () => service.scorerEligibility(sourceType, sourceId, 'Financial'),
-    enabled:
-      canEvaluate &&
-      control.data?.status === 'Active',
+    enabled: canEvaluate && control.data?.status === 'Active',
     retry: false,
   });
   const combinedEligibility = useQuery({
@@ -96,9 +105,7 @@ export function EvaluationCommitteeWorkspace({
       'Combined',
     ],
     queryFn: () => service.scorerEligibility(sourceType, sourceId, 'Combined'),
-    enabled:
-      canEvaluate &&
-      control.data?.status === 'Active',
+    enabled: canEvaluate && control.data?.status === 'Active',
     retry: false,
   });
 
@@ -106,6 +113,11 @@ export function EvaluationCommitteeWorkspace({
     Technical: technicalEligibility.data,
     Financial: financialEligibility.data,
     Combined: combinedEligibility.data,
+  };
+  const scorerEligibilityErrors = {
+    Technical: technicalEligibility.error ?? undefined,
+    Financial: financialEligibility.error ?? undefined,
+    Combined: combinedEligibility.error ?? undefined,
   };
 
   const refresh = async () => {
@@ -169,9 +181,10 @@ export function EvaluationCommitteeWorkspace({
             Evaluation committee controls are unavailable
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-            {readiness.error instanceof Error
-              ? readiness.error.message
-              : 'The source was not found in this tenant or the current user is not authorized to view it.'}
+            {getProcurementProblemMessage(
+              readiness.error,
+              'The source was not found in this tenant or the current user is not authorized to view it.'
+            )}
           </p>
           <Button asChild variant="outline" className="mt-5">
             <Link href={backHref}>Return to {sourceLabel.toLowerCase()}</Link>
@@ -204,19 +217,14 @@ export function EvaluationCommitteeWorkspace({
             )}
           </div>
           <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-            {readiness.data.sourceReference} · history-first composition,
-            appointment acceptance, COI, signed attendance, server-derived quorum,
-            scorer eligibility, immutable score locks, and independently approved
-            recall.
+            {readiness.data.sourceReference}
           </p>
         </div>
         <Button
           variant="outline"
           onClick={() => void refresh()}
           disabled={
-            readiness.isFetching ||
-            control.isFetching ||
-            options.isFetching
+            readiness.isFetching || control.isFetching || options.isFetching
           }
         >
           <RefreshCw
@@ -227,17 +235,6 @@ export function EvaluationCommitteeWorkspace({
           Refresh controls
         </Button>
       </div>
-
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Shared-control boundary</AlertTitle>
-        <AlertDescription>
-          Reusable committee membership stays in Access &amp; Committees. Shared
-          workflow, evidence, identity, responsibility, notification, SOD, and
-          audit services remain authoritative. This workspace retains only the
-          exact source-specific execution history.
-        </AlertDescription>
-      </Alert>
 
       {control.isError && readiness.data.hasControl ? (
         <Alert variant="destructive">
@@ -257,12 +254,14 @@ export function EvaluationCommitteeWorkspace({
           readiness={readiness.data}
           control={control.data}
           scorerEligibility={scorerEligibility}
+          scorerEligibilityErrors={scorerEligibilityErrors}
           currentUserId={user?.id}
           canAdminister={canAdminister}
           canEvaluate={canEvaluate}
           canApprove={canApprove}
           onBind={() => setAction({ type: 'bind' })}
           onActivate={() => setAction({ type: 'activate' })}
+          onRetireDraft={() => setAction({ type: 'retireDraft' })}
           onAppointment={(member, accept) =>
             setAction({ type: 'appointment', member, accept })
           }
@@ -271,9 +270,7 @@ export function EvaluationCommitteeWorkspace({
           onSignAttendance={(meeting, member) =>
             setAction({ type: 'attendance', meeting, member })
           }
-          onConfirmQuorum={(meeting) =>
-            setAction({ type: 'quorum', meeting })
-          }
+          onConfirmQuorum={(meeting) => setAction({ type: 'quorum', meeting })}
           onRequestRecall={(scoreSheet) =>
             setAction({ type: 'recall', scoreSheet })
           }

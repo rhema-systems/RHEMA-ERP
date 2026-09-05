@@ -15,8 +15,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { rfqService, type CreatePurchaseOrdersFromRfqResponseDto, type RfqDetailDto } from '@/services/rfqService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { purchasingService, type SuggestedSupplierDto } from '@/services/purchasingService';
+import { procurementSupplierEligibilityService } from '@/services/procurement-supplier-eligibility.service';
+import type { SupplierEligibilityResult } from '@/types/procurement-supplier-eligibility';
+import { buildSplitAwardLines, getAwardableRfqQuotes } from '@/lib/rfq-award';
+import { documentOutputService } from '@/services/document-output.service';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, FileText, Loader2, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Loader2, LockKeyhole, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
 
 export default function EditRfqPage() {
   const params = useParams();
@@ -51,9 +55,12 @@ export default function EditRfqPage() {
 
   const [partnersLoading, setPartnersLoading] = useState(false);
   const [partners, setPartners] = useState<BusinessPartnerDto[]>([]);
+  const [partnersReady, setPartnersReady] = useState(false);
   const [partnerSearch, setPartnerSearch] = useState('');
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [suggestedSuppliers, setSuggestedSuppliers] = useState<SuggestedSupplierDto[]>([]);
+  const [eligibilityBySupplierId, setEligibilityBySupplierId] = useState<Record<string, SupplierEligibilityResult>>({});
+  const [validatingSupplierIds, setValidatingSupplierIds] = useState<string[]>([]);
 
   const filteredPartners = useMemo(() => {
     const list = partners.filter((p) => p.partnerType === 'Supplier' || p.partnerType === 'Both');
@@ -66,6 +73,11 @@ export default function EditRfqPage() {
     if (!rfq || !selectedQuoteId) return null;
     return (rfq.quotes || []).find((q) => q.id === selectedQuoteId) || null;
   }, [rfq, selectedQuoteId]);
+
+  const awardableQuotes = useMemo(
+    () => getAwardableRfqQuotes(rfq?.quotes),
+    [rfq?.quotes]
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -84,15 +96,16 @@ export default function EditRfqPage() {
         // Default award selections (for convenience):
         // - Winner takes all: pick lowest total quote
         // - Split award: pick lowest unit price per line
-        if ((data.quotes || []).length > 0) {
-          const sortedByTotal = [...data.quotes].sort((a, b) => (a.totalAmount ?? 0) - (b.totalAmount ?? 0));
+        const submittedQuotes = getAwardableRfqQuotes(data.quotes);
+        if (data.quoteDetailsVisible && submittedQuotes.length > 0) {
+          const sortedByTotal = [...submittedQuotes].sort((a, b) => (a.totalAmount ?? 0) - (b.totalAmount ?? 0));
           setWinnerQuoteId(sortedByTotal[0]?.id ?? null);
 
           const byItem: Record<string, string> = {};
           for (const item of data.items || []) {
             let bestQuoteId: string | null = null;
             let bestUnitPrice = Number.POSITIVE_INFINITY;
-            for (const q of data.quotes || []) {
+            for (const q of submittedQuotes) {
               const qi = (q.items || []).find((x) => x.rfqItemId === item.id);
               if (!qi) continue;
               const price = Number(qi.unitPrice ?? 0);
@@ -124,8 +137,7 @@ export default function EditRfqPage() {
     const loadPartners = async () => {
       try {
         setPartnersLoading(true);
-        const partnerResult = await businessPartnerService.getPartners({ page: 1, pageSize: 1000 });
-        const list = partnerResult.items || [];
+        const list = await businessPartnerService.getActivePartners();
 
         let suggested: SuggestedSupplierDto[] = [];
         if (fromRequisitionId) {
@@ -151,6 +163,7 @@ export default function EditRfqPage() {
         });
 
         setPartners(sorted);
+        setPartnersReady(true);
       } catch (e: any) {
         console.error(e);
         toast.error(e.message || 'Failed to load suppliers');
@@ -162,8 +175,69 @@ export default function EditRfqPage() {
      
   }, [fromRequisitionId]);
 
-  const toggleSupplier = (id: string) => {
-    setSelectedSupplierIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  useEffect(() => {
+    if (!rfq || !partnersReady || rfq.status !== 'Draft') return;
+
+    const activeIds = new Set(partners.map((partner) => partner.id));
+    const inactiveSelections = (rfq.suppliers || [])
+      .map((supplier) => supplier.businessPartnerId)
+      .filter((id) => !activeIds.has(id));
+    if (inactiveSelections.length > 0) {
+      setSelectedSupplierIds((current) => current.filter((id) => activeIds.has(id)));
+      toast.warning(
+        `${inactiveSelections.length} suspended, inactive, unapproved, or blacklisted supplier(s) were removed from this draft selection.`
+      );
+    }
+
+    const selectedActiveIds = (rfq.suppliers || [])
+      .map((supplier) => supplier.businessPartnerId)
+      .filter((id) => activeIds.has(id));
+    if (selectedActiveIds.length === 0) return;
+
+    let cancelled = false;
+    void Promise.all(selectedActiveIds.map(async (id) => {
+      try {
+        const result = await procurementSupplierEligibilityService.evaluate({
+          businessPartnerId: id,
+          boundary: 'Invitation',
+        });
+        if (!cancelled) {
+          setEligibilityBySupplierId((current) => ({ ...current, [id]: result }));
+        }
+      } catch (error) {
+        console.error(`Failed to evaluate supplier ${id}`, error);
+      }
+    }));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rfq, partners, partnersReady]);
+
+  const toggleSupplier = async (id: string) => {
+    if (selectedSupplierIds.includes(id)) {
+      setSelectedSupplierIds((current) => current.filter((value) => value !== id));
+      return;
+    }
+
+    try {
+      setValidatingSupplierIds((current) => [...current, id]);
+      const eligibility = await procurementSupplierEligibilityService.evaluate({
+        businessPartnerId: id,
+        boundary: 'Invitation',
+      });
+      setEligibilityBySupplierId((current) => ({ ...current, [id]: eligibility }));
+      if (!eligibility.isValid) {
+        toast.error(eligibility.errors[0] || 'This supplier is not eligible for an RFQ invitation.');
+        return;
+      }
+      setSelectedSupplierIds((current) => current.includes(id) ? current : [...current, id]);
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message || 'Supplier eligibility could not be checked.');
+    } finally {
+      setValidatingSupplierIds((current) => current.filter((value) => value !== id));
+    }
   };
 
   const handleSave = async () => {
@@ -193,6 +267,23 @@ export default function EditRfqPage() {
     if (!rfq) return;
     try {
       setSending(true);
+      const eligibilityResults = await Promise.all(selectedSupplierIds.map((businessPartnerId) =>
+        procurementSupplierEligibilityService.evaluate({
+          businessPartnerId,
+          boundary: 'Invitation',
+        })
+      ));
+      setEligibilityBySupplierId((current) => ({
+        ...current,
+        ...Object.fromEntries(eligibilityResults.map((result) => [result.businessPartnerId, result])),
+      }));
+      const blocked = eligibilityResults.filter((result) => !result.isValid);
+      if (blocked.length > 0) {
+        toast.error(
+          blocked.map((result) => `${result.partnerCode}: ${result.errors[0] || 'Not eligible'}`).join('; ')
+        );
+        return;
+      }
       await rfqService.sendRfq(rfq.id, {
         supplierIds: selectedSupplierIds,
         externalRecipientEmails: externalEmails || undefined,
@@ -212,8 +303,11 @@ export default function EditRfqPage() {
   const handlePrintPdf = async () => {
     try {
       const blob = await rfqService.getRfqPdf(rfqId);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      await documentOutputService.printRenderedFile({
+        blob,
+        fileName: `${rfq?.rfqNumber || 'RFQ'}.pdf`,
+        contentType: blob.type || 'application/pdf',
+      });
     } catch (e: any) {
       console.error(e);
       toast.error(e.message || 'Failed to generate RFQ PDF');
@@ -221,11 +315,15 @@ export default function EditRfqPage() {
   };
 
   const openQuote = (quoteId: string) => {
+    if (!rfq?.quoteDetailsVisible) {
+      toast.info('Quotation prices remain sealed until the submission deadline or controlled opening.');
+      return;
+    }
     setSelectedQuoteId(quoteId);
     setQuoteOpen(true);
   };
 
-  const canAward = rfq?.status === 'Sent' && (rfq?.quotes || []).length > 0;
+  const canAward = rfq?.quoteDetailsVisible === true && rfq?.status === 'Sent' && awardableQuotes.length > 0;
 
   const isSplitComplete = useMemo(() => {
     if (!rfq) return false;
@@ -256,11 +354,12 @@ export default function EditRfqPage() {
         }
         result = await rfqService.awardAndCreatePurchaseOrders(rfq.id, {
           mode: 'SplitAward',
-          lines: (rfq.items || []).map((i) => ({
-            rfqItemId: i.id,
-            quoteId: splitAwardByItemId[i.id],
-            awardReason: splitAwardReasonByItemId[i.id] || undefined,
-          })),
+          lines: buildSplitAwardLines(
+            rfq.items || [],
+            rfq.quotes || [],
+            splitAwardByItemId,
+            splitAwardReasonByItemId
+          ),
         });
       }
 
@@ -307,7 +406,7 @@ export default function EditRfqPage() {
     );
   }
 
-  const isSent = rfq.status === 'Sent';
+  const isLocked = rfq.status !== 'Draft';
 
   return (
     <div className="space-y-6">
@@ -347,7 +446,7 @@ export default function EditRfqPage() {
               Committee controls
             </Link>
           </Button>
-          <Button onClick={handleSave} disabled={saving || sending || isSent} variant="outline">
+          <Button onClick={handleSave} disabled={saving || sending || isLocked} variant="outline">
             {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
             Save
           </Button>
@@ -355,9 +454,12 @@ export default function EditRfqPage() {
             <Printer className="h-4 w-4 mr-2" />
             Print PDF
           </Button>
-          <Button onClick={() => setConfirmSendOpen(true)} disabled={sending || selectedSupplierIds.length === 0 && !externalEmails.trim()}>
+          <Button
+            onClick={() => setConfirmSendOpen(true)}
+            disabled={isLocked || sending || (selectedSupplierIds.length === 0 && !externalEmails.trim())}
+          >
             {sending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-            Send RFQ
+            {isLocked ? 'RFQ Dispatched' : 'Send RFQ'}
           </Button>
         </div>
       </div>
@@ -372,24 +474,24 @@ export default function EditRfqPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Title</label>
-                <Input value={title} onChange={(e) => setTitle(e.target.value)} disabled={isSent} />
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} disabled={isLocked} />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Submission Deadline</label>
-                <Input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} disabled={isSent} />
+                <Input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} disabled={isLocked} />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Currency</label>
-                <Input value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={isSent} />
+                <Input value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={isLocked} />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Estimated Value</label>
-                <Input value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} disabled={isSent} />
+                <Input value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} disabled={isLocked} />
               </div>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Description</label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} disabled={isSent} />
+              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} disabled={isLocked} />
             </div>
           </CardContent>
         </Card>
@@ -408,7 +510,7 @@ export default function EditRfqPage() {
               onChange={(e) => setExternalEmails(e.target.value)}
               rows={6}
               placeholder="supplierA@example.com; supplierB@example.com"
-              disabled={isSent}
+              disabled={isLocked}
             />
             <p className="text-xs text-muted-foreground">
               You can separate emails with comma, semicolon, or new line.
@@ -445,13 +547,16 @@ export default function EditRfqPage() {
               <div className="divide-y">
                 {filteredPartners.map((p) => {
                   const checked = selectedSupplierIds.includes(p.id);
+                  const eligibility = eligibilityBySupplierId[p.id];
+                  const validating = validatingSupplierIds.includes(p.id);
+                  const blocked = eligibility?.isValid === false;
                   return (
                     <button
                       type="button"
                       key={p.id}
-                      onClick={() => toggleSupplier(p.id)}
-                      className={`w-full text-left px-4 py-3 hover:bg-muted/50 flex items-start justify-between gap-3 ${checked ? 'bg-muted' : ''}`}
-                      disabled={isSent}
+                      onClick={() => void toggleSupplier(p.id)}
+                      className={`w-full text-left px-4 py-3 hover:bg-muted/50 flex items-start justify-between gap-3 ${checked ? 'bg-muted' : ''} ${blocked && !checked ? 'opacity-70' : ''}`}
+                      disabled={isLocked || validating || (blocked && !checked)}
                     >
                       <div className="min-w-0">
                         <div className="font-medium truncate">
@@ -461,11 +566,18 @@ export default function EditRfqPage() {
                           {p.email || p.phone || ''}
                         </div>
                         <div className="text-xs text-muted-foreground truncate">
-                          Status: {p.approvalStatus || p.status || '—'}
+                          Status: {p.status || p.approvalStatus || 'Active'}
                         </div>
+                        {blocked && (
+                          <div className="mt-1 text-xs text-destructive">
+                            {eligibility.errors[0] || 'Not eligible for RFQ invitation.'}
+                          </div>
+                        )}
                       </div>
                       <div className="shrink-0">
-                        <Badge variant={checked ? 'default' : 'outline'}>{checked ? 'Selected' : 'Select'}</Badge>
+                        <Badge variant={blocked ? 'destructive' : checked ? 'default' : 'outline'}>
+                          {validating ? 'Checking…' : blocked ? 'Ineligible' : checked ? 'Selected' : 'Select'}
+                        </Badge>
                       </div>
                     </button>
                   );
@@ -515,6 +627,17 @@ export default function EditRfqPage() {
               <Separator />
               <div className="space-y-3">
                 <div className="text-sm font-medium">Quotes</div>
+                {!rfq.quoteDetailsVisible && (
+                  <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                    <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <div className="font-medium">Quotation prices are sealed</div>
+                      <div className="mt-1 text-sm">
+                        Supplier submissions are recorded, but commercial values remain hidden until the deadline or controlled opening. Selection and award are disabled until then.
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {rfq.quotes.map((q) => (
                     <Card key={q.id}>
@@ -529,7 +652,9 @@ export default function EditRfqPage() {
                         <div className="flex items-center justify-between">
                           <span>Total</span>
                           <span className="font-medium">
-                            {q.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {rfq.quoteDetailsVisible
+                              ? `${q.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${rfq.currency}`
+                              : 'Sealed until opening'}
                           </span>
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-2">
@@ -548,7 +673,13 @@ export default function EditRfqPage() {
                             <span />
                           )}
 
-                          <Button type="button" variant="outline" size="sm" onClick={() => openQuote(q.id)}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openQuote(q.id)}
+                            disabled={!rfq.quoteDetailsVisible}
+                          >
                             View Quote
                           </Button>
                         </div>
@@ -572,6 +703,8 @@ export default function EditRfqPage() {
                     <div className="text-sm text-muted-foreground">
                       {rfq.status === 'Awarded'
                         ? 'This RFQ has already been awarded.'
+                        : !rfq.quoteDetailsVisible
+                          ? 'Quotation prices are sealed until the deadline or controlled opening.'
                         : rfq.status !== 'Sent'
                           ? 'RFQ must be Sent before you can award it.'
                           : 'No submitted quotes available.'}
@@ -629,7 +762,7 @@ export default function EditRfqPage() {
                             </thead>
                             <tbody>
                               {(rfq.items || []).map((item) => {
-                                const selectedQuote = (rfq.quotes || []).find((q) => q.id === splitAwardByItemId[item.id]);
+                                const selectedQuote = awardableQuotes.find((q) => q.id === splitAwardByItemId[item.id]);
                                 const selectedQuoteItem = selectedQuote?.items?.find((x) => x.rfqItemId === item.id);
                                 const unitPrice = Number(selectedQuoteItem?.unitPrice ?? 0);
                                 const lineTotal = unitPrice * Number(item.quantity ?? 0);
@@ -652,7 +785,7 @@ export default function EditRfqPage() {
                                           <SelectValue placeholder="Select supplier..." />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          {(rfq.quotes || []).map((q) => {
+                                          {awardableQuotes.map((q) => {
                                             const qi = (q.items || []).find((x) => x.rfqItemId === item.id);
                                             const price = qi ? Number(qi.unitPrice ?? 0) : 0;
                                             return (

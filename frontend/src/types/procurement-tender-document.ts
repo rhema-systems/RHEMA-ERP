@@ -84,6 +84,7 @@ export interface ProcurementTenderDocumentTemplate
   sourceConfigurationProfileId: string;
   contentReference: string;
   contentWorkflowEvidenceDocumentId?: string;
+  eligibleContentEvidenceDocumentIds?: string[];
   contentFileUploadRecordId?: string;
   contentChecksumSha256: string;
   workflowDefinitionId: string;
@@ -161,6 +162,29 @@ export interface ProcurementTenderDocumentPolicyOption {
   version: number;
   sourceConfigurationProfileId: string;
   sourceConfigurationProfileCode: string;
+}
+
+export interface AttachProcurementTenderDocumentTemplateContentRequest {
+  contentWorkflowEvidenceDocumentId: string;
+  rowVersion: string;
+}
+
+export interface ProcurementTenderDocumentContentArtifactOption {
+  id: string;
+  documentName?: string;
+  documentType?: string;
+  fileName: string;
+  filePath: string;
+  sha256: string;
+  version: number;
+  isCurrent: boolean;
+  verificationStatus: number;
+  malwareScanStatus: number;
+  workflowInstanceId: string;
+  workflowName: string;
+  entityType: string;
+  entityId: string;
+  stepName: string;
 }
 
 export interface ProcurementTenderDocumentReadiness {

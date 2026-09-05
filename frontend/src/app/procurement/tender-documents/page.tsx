@@ -81,7 +81,7 @@ const emptyForm = (): SaveProcurementTenderDocumentTemplate => ({
   name: '',
   description: '',
   documentTypeCode: 'TENDER-DOCUMENT',
-  effectiveFromUtc: localInput(new Date(Date.now() + 60 * 60 * 1000)),
+  effectiveFromUtc: localInput(new Date(Date.now() - 60 * 1000)),
   policySetId: '',
   policySetCode: '',
   policySetVersion: 0,
@@ -157,7 +157,9 @@ export default function TenderDocumentTemplatesPage() {
     }));
 
   const create = async () => {
-    const validation = validateTenderDocumentTemplate(form);
+    const validation = validateTenderDocumentTemplate(form, {
+      requireContent: false,
+    });
     if (validation) {
       toast.error(validation);
       return;
@@ -453,8 +455,9 @@ export default function TenderDocumentTemplatesPage() {
           <DialogHeader>
             <DialogTitle>Create controlled tender-document Draft</DialogTitle>
             <DialogDescription>
-              Store shared content references and immutable lineage only. Upload
-              and workflow execution remain owned by the shared platforms.
+              Create the controlled metadata first. Submission starts the exact
+              approval workflow where the tender document is uploaded and
+              independently verified before publication.
             </DialogDescription>
           </DialogHeader>
 
@@ -547,30 +550,11 @@ export default function TenderDocumentTemplatesPage() {
                 </Select>
               </Field>
             </div>
-            <div className="md:col-span-2">
-              <Field label="Shared content reference">
-                <Input
-                  value={form.contentReference}
-                  onChange={(event) =>
-                    setForm({ ...form, contentReference: event.target.value })
-                  }
-                  placeholder="Workflow evidence, file-upload, or governed external reference"
-                />
-              </Field>
-            </div>
-            <div className="md:col-span-2">
-              <Field label="Content SHA-256 checksum">
-                <Input
-                  value={form.contentChecksumSha256}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      contentChecksumSha256: event.target.value,
-                    })
-                  }
-                  maxLength={64}
-                />
-              </Field>
+            <div className="md:col-span-2 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              After creation, submit this Draft to start the exact approval
+              workflow. Upload the tender document on that workflow task; a
+              different authorized reviewer must verify it before the content
+              can be attached and published.
             </div>
             <div className="md:col-span-2 space-y-2">
               <Label>Applicable procurement methods</Label>

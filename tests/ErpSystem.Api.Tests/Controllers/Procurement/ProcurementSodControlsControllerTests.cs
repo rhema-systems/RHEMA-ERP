@@ -24,15 +24,15 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementSodControlsControllerTests
 {
     [Fact]
-    public void RuntimeGuardRequiresAuthenticationAndAdministrationEndpointsRequireAdministratorRole()
+    public void RuntimeGuardRequiresAuthenticationAndAdministrationEndpointsUsePermissions()
     {
         typeof(ProcurementSodControlsController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(ProcurementSodControlsController).GetMethod(nameof(ProcurementSodControlsController.GetCoverage))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.audit.read");
         typeof(ProcurementSodControlsController).GetMethod(nameof(ProcurementSodControlsController.ApplyRequired))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
         typeof(ProcurementSodControlsController).GetMethod(nameof(ProcurementSodControlsController.GetBlockedAttempts))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.audit.read");
         typeof(ProcurementSodControlsController).GetMethod(nameof(ProcurementSodControlsController.Enforce))!
             .GetCustomAttribute<AuthorizeAttribute>().Should().BeNull();
     }

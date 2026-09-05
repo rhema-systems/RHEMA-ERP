@@ -248,6 +248,13 @@ public class HRDataSeeder
             }
         };
 
+        // Keep the generated development employee numbers unique within this seeding run.
+        // CountAsync does not include newly tracked employees until SaveChangesAsync, so
+        // calculating it inside the loop previously assigned the same number to every
+        // new sample employee and prevented a blank development database from seeding.
+        var nextEmployeeSequence = await _context.Employees
+            .CountAsync(e => e.TenantId == tenantId);
+
         foreach (var emp in sampleEmployees)
         {
             var exists = await _context.Employees.AnyAsync(e => e.TenantId == tenantId && e.EmailAddress == emp.Email);
@@ -255,8 +262,7 @@ public class HRDataSeeder
             {
                 // Generate employee number
                 var currentYear = DateTime.Now.Year.ToString();
-                var count = await _context.Employees.CountAsync(e => e.TenantId == tenantId) + 1;
-                var employeeNumber = $"{currentYear}{count:D4}";
+                var employeeNumber = $"{currentYear}{++nextEmployeeSequence:D4}";
 
                 var employee = new Employee
                 {

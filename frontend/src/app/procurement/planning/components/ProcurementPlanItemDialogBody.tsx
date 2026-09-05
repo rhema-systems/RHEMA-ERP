@@ -1,6 +1,6 @@
 'use client';
 
-import type { Dispatch, SetStateAction } from 'react';
+import React, { type Dispatch, type SetStateAction } from 'react';
 import { Loader2, Plus, Search, Trash2, Users } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ import type {
   CreateProcurementPlanItemSupplierDto,
   InventoryItemDto,
   MarketAnalysisDto,
+  ProcurementBudgetAllocationDto,
 } from '@/services/procurementPlanningService';
 
 type UnitOfMeasureOption = {
@@ -38,6 +39,9 @@ type ProcurementPlanItemDialogBodyProps = {
   marketAnalyses: MarketAnalysisDto[];
   loadingMarketAnalyses: boolean;
   onMarketAnalysisSelect: (value: string) => void;
+  budgetCode?: string;
+  budgetAllocations: ProcurementBudgetAllocationDto[];
+  loadingBudgetAllocations: boolean;
   suppliers: BusinessPartnerDto[];
   supplierSearchTerm: string;
   onSupplierSearchTermChange: (value: string) => void;
@@ -80,6 +84,9 @@ export function ProcurementPlanItemDialogBody({
   marketAnalyses,
   loadingMarketAnalyses,
   onMarketAnalysisSelect,
+  budgetCode,
+  budgetAllocations,
+  loadingBudgetAllocations,
   suppliers,
   supplierSearchTerm,
   onSupplierSearchTermChange,
@@ -95,9 +102,16 @@ export function ProcurementPlanItemDialogBody({
   onClearCurrentItem,
   onRemovePendingPlanItem,
 }: ProcurementPlanItemDialogBodyProps) {
-  const showInventoryResults = inventorySearchTerm.trim().length >= 2;
+  const selectedInventoryLabel = selectedInventoryItem
+    ? `${selectedInventoryItem.itemCode} - ${selectedInventoryItem.name}`
+    : '';
+  const showInventoryResults =
+    inventorySearchTerm.trim().length >= 2 && inventorySearchTerm.trim() !== selectedInventoryLabel;
   const showSupplierResults = supplierSearchTerm.trim().length >= 2;
   const showBatchQueue = Boolean(onAddCurrentItem && onRemovePendingPlanItem);
+  const selectedBudgetAllocation = budgetAllocations.find(
+    (allocation) => allocation.id === form.procurementBudgetAllocationId,
+  );
   const gridClass = showBatchQueue
     ? 'grid grid-cols-1 gap-4 xl:grid-cols-[minmax(460px,1.15fr)_minmax(330px,0.8fr)_minmax(280px,0.65fr)]'
     : 'grid grid-cols-1 gap-4 xl:grid-cols-[minmax(520px,1.2fr)_minmax(360px,0.8fr)]';
@@ -109,6 +123,19 @@ export function ProcurementPlanItemDialogBody({
   const handleSelectInventoryItem = (item: InventoryItemDto) => {
     onSelectInventoryItem(item);
     onInventorySearchTermChange(`${item.itemCode} - ${item.name}`);
+  };
+
+  const handleBudgetAllocationSelect = (allocationId: string) => {
+    const allocation = budgetAllocations.find((item) => item.id === allocationId);
+    if (!allocation) return;
+
+    setForm((current) => ({
+      ...current,
+      procurementBudgetId: allocation.procurementBudgetId,
+      procurementBudgetAllocationId: allocation.id,
+      budgetCategoryName: allocation.categoryName,
+      approvedBudgetAmount: current.approvedBudgetAmount ?? getItemEstimatedTotal(current),
+    }));
   };
 
   return (
@@ -258,20 +285,6 @@ export function ProcurementPlanItemDialogBody({
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="procurementMethod">Method</Label>
-                <Select value={form.procurementMethod || 'DirectPurchase'} onValueChange={(value) => updateForm('procurementMethod', value)}>
-                  <SelectTrigger id="procurementMethod" className="h-9">
-                    <SelectValue placeholder="Select method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
-                    <SelectItem value="RFQ">RFQ</SelectItem>
-                    <SelectItem value="Tender">Tender</SelectItem>
-                    <SelectItem value="Framework">Framework</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
                 <Label>Market Analysis</Label>
                 <Select value={form.marketAnalysisId || 'none'} onValueChange={onMarketAnalysisSelect}>
                   <SelectTrigger className="h-9">
@@ -288,35 +301,71 @@ export function ProcurementPlanItemDialogBody({
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="budgetLineCode">Budget Line</Label>
-                <Input
-                  id="budgetLineCode"
-                  className="h-9"
-                  value={form.budgetLineCode || ''}
-                  onChange={(event) => updateForm('budgetLineCode', event.target.value)}
-                />
+                <Label htmlFor="procurementBudgetAllocationId">Budget Allocation</Label>
+                <Select
+                  value={form.procurementBudgetAllocationId || undefined}
+                  onValueChange={handleBudgetAllocationSelect}
+                  disabled={loadingBudgetAllocations || budgetAllocations.length === 0}
+                >
+                  <SelectTrigger id="procurementBudgetAllocationId" className="h-9">
+                    <SelectValue
+                      placeholder={
+                        loadingBudgetAllocations
+                          ? 'Loading allocations...'
+                          : budgetAllocations.length === 0
+                            ? 'No allocations configured'
+                            : 'Select budget allocation'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {budgetAllocations.map((allocation) => (
+                      <SelectItem key={allocation.id} value={allocation.id}>
+                        {allocation.categoryName} - {formatCurrency(allocation.remainingAmount, currency)} remaining
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {budgetCode
+                    ? budgetAllocations.length > 0
+                      ? `Controlled by ${budgetCode}`
+                      : `${budgetCode} has no category allocations configured`
+                    : 'Link an approved budget to the plan before selecting an allocation'}
+                </p>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="budgetCategoryName">Budget Category</Label>
-                <Input
-                  id="budgetCategoryName"
-                  className="h-9"
-                  value={form.budgetCategoryName || ''}
-                  onChange={(event) => updateForm('budgetCategoryName', event.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="approvedBudgetAmount">Approved Budget</Label>
+                <Label htmlFor="approvedBudgetAmount">Item Budget Amount</Label>
                 <Input
                   id="approvedBudgetAmount"
                   type="number"
                   min={0}
+                  max={selectedBudgetAllocation?.remainingAmount}
                   step={0.01}
                   className="h-9"
-                  value={form.approvedBudgetAmount ?? ''}
+                  value={form.approvedBudgetAmount ?? getItemEstimatedTotal(form)}
                   onChange={(event) => updateForm('approvedBudgetAmount', event.target.value ? parseFloat(event.target.value) || 0 : undefined)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Defaults to the item total and becomes approved with the plan.
+                </p>
               </div>
+              {selectedBudgetAllocation && (
+                <div className="grid grid-cols-3 gap-2 rounded-md border bg-muted/40 p-2 text-xs md:col-span-2">
+                  <div>
+                    <span className="block text-muted-foreground">Allocated</span>
+                    <span className="font-medium">{formatCurrency(selectedBudgetAllocation.allocatedAmount, currency)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground">Utilized</span>
+                    <span className="font-medium">{formatCurrency(selectedBudgetAllocation.utilizedAmount, currency)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground">Remaining</span>
+                    <span className="font-medium">{formatCurrency(selectedBudgetAllocation.remainingAmount, currency)}</span>
+                  </div>
+                </div>
+              )}
               <div className="space-y-1 md:col-span-2">
                 <Label htmlFor="specifications">Specifications</Label>
                 <Textarea
@@ -394,6 +443,7 @@ export function ProcurementPlanItemDialogBody({
                           onMouseDown={(event) => {
                             event.preventDefault();
                             onAddSupplier(supplier);
+                            onSupplierSearchTermChange('');
                           }}
                         >
                           <span className="min-w-0">

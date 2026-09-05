@@ -83,6 +83,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
             .Include(t => t.Bids)
             .Include(t => t.Invitations)
             .Include(t => t.CreatedBy)
+            .Include(t => t.SourcingCase)
             .OrderByDescending(t => t.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -103,6 +104,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
             .Where(t => !t.IsDeleted && t.Status == "Published" && t.PublishDate <= DateTime.UtcNow)
             .Include(t => t.Items)
             .Include(t => t.Documents.Where(d => d.IsPublic))
+            .Include(t => t.SourcingCase)
             .OrderByDescending(t => t.PublishDate)
             .ToListAsync();
     }
@@ -116,6 +118,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
                        t.PublishDate <= now &&
                        t.SubmissionDeadline > now)
             .Include(t => t.Items)
+            .Include(t => t.SourcingCase)
             .OrderBy(t => t.SubmissionDeadline)
             .ToListAsync();
     }
@@ -125,6 +128,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
         return await _dbSet
             .Where(t => !t.IsDeleted && t.Status == status)
             .Include(t => t.Items)
+            .Include(t => t.SourcingCase)
             .OrderByDescending(t => t.CreatedAt)
             .ToListAsync();
     }
@@ -392,6 +396,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return await query
             .Include(b => b.BusinessPartner)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .FirstOrDefaultAsync();
     }
 
@@ -406,6 +415,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
             .Include(b => b.Tender)
             .Include(b => b.BusinessPartner)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .Include(b => b.Documents)
             .Include(b => b.Evaluations)
                 .ThenInclude(e => e.TenderEvaluator)
@@ -420,6 +434,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
             .Where(b => b.BidNumber == bidNumber && !b.IsDeleted)
             .Include(b => b.BusinessPartner)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .FirstOrDefaultAsync();
     }
 
@@ -428,6 +447,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return await _dbSet
             .Where(b => b.TenderId == tenderId && b.BusinessPartnerId == businessPartnerId && !b.IsDeleted)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .Include(b => b.Documents)
             .FirstOrDefaultAsync();
     }
@@ -462,7 +486,7 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
             .ToListAsync();
     }
 
-    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<TenderBid>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null)
+    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<TenderBid>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null, Guid? tenderId = null)
     {
         var query = _dbSet.Where(b => !b.IsDeleted);
 
@@ -480,6 +504,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(b => b.Status == status);
+        }
+
+        if (tenderId.HasValue)
+        {
+            query = query.Where(b => b.TenderId == tenderId.Value);
         }
 
         var totalCount = await query.CountAsync();
@@ -506,10 +535,20 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return bid;
     }
 
-    public new async Task<TenderBid> UpdateAsync(TenderBid bid)
+    public new Task<TenderBid> UpdateAsync(TenderBid bid)
     {
-        _dbSet.Update(bid);
-        return await Task.FromResult(bid);
+        // Update only the aggregate root. DbSet.Update traverses the complete bid
+        // graph and changes a newly-added bid lot with a client-generated Guid to
+        // Modified. The subsequent bid-item insert then points at a lot row that
+        // was never inserted and SQL Server rejects it through
+        // FK_TenderBidItems_TenderBidLots_BidLotId.
+        var entry = _context.Entry(bid);
+        if (entry.State != EntityState.Added)
+        {
+            entry.State = EntityState.Modified;
+        }
+
+        return Task.FromResult(bid);
     }
 
     public override async Task DeleteAsync(Guid id)
@@ -1827,10 +1866,18 @@ public class TenderBidLotRepository : GenericRepository<TenderBidLot>, ITenderBi
         return bidLot;
     }
 
-    public new async Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
+    public new Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
     {
-        _dbSet.Update(bidLot);
-        return await Task.FromResult(bidLot);
+        // Preserve Added so a selected lot is inserted before its bid items.
+        // DbSet.Update treats a client-generated Guid as evidence that the row
+        // already exists and incorrectly changes a new lot to Modified.
+        var entry = _context.Entry(bidLot);
+        if (entry.State != EntityState.Added)
+        {
+            entry.State = EntityState.Modified;
+        }
+
+        return Task.FromResult(bidLot);
     }
 
     public override async Task DeleteAsync(Guid id)

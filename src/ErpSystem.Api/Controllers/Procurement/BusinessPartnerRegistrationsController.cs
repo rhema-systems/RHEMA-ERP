@@ -5,6 +5,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -190,6 +191,22 @@ public class BusinessPartnerRegistrationsController : ControllerBase
     {
         try
         {
+            if (_currentUser.IsInRole(Constants.Roles.ExternalUser))
+            {
+                if (!Guid.TryParse(_currentUser.UserId, out var externalUserId))
+                {
+                    return Forbid();
+                }
+
+                var ownedRegistrations = await _registrationService
+                    .GetMyRegistrationsAsync(externalUserId);
+                if (!ownedRegistrations.Any(item => item.Id == id))
+                {
+                    // Do not reveal whether another supplier's registration exists.
+                    return NotFound();
+                }
+            }
+
             var registration = await _registrationService.GetByIdAsync(id);
             if (registration == null)
             {

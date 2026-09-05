@@ -28,14 +28,54 @@ export const validateProcurementAppExport = (
   value: RecordProcurementAppExport
 ) => {
   if (!value.procurementPlanId) return 'Select a published plan version.';
-  if (!value.exportFileName.trim()) return 'Export file name is required.';
-  if (!value.exportFormat.trim()) return 'Export format is required.';
-  if (!value.exportTemplateVersion.trim())
-    return 'Export template version is required.';
-  if (!/^[0-9a-f]{64}$/i.test(value.exportChecksumSha256.trim()))
-    return 'SHA-256 checksum must contain exactly 64 hexadecimal characters.';
+  if (!['CSV', 'JSON', 'XML'].includes(value.exportFormat.toUpperCase()))
+    return 'Select CSV, JSON or XML.';
   return undefined;
 };
+
+export const toProcurementAppEventInputValue = (
+  minimumAtUtc?: string,
+  now = new Date()
+) => {
+  const minimum = minimumAtUtc ? new Date(minimumAtUtc).getTime() : 0;
+  const minimumMilliseconds = Number.isFinite(minimum) ? minimum : 0;
+  const safeInstant = new Date(
+    Math.ceil((Math.max(now.getTime(), minimumMilliseconds) + 1) / 1000) *
+      1000
+  );
+  const localValue = new Date(
+    safeInstant.getTime() - safeInstant.getTimezoneOffset() * 60_000
+  );
+  return localValue.toISOString().slice(0, 19);
+};
+
+export async function readProcurementAppExportFile(file: Blob & { name: string }) {
+  const bytes = typeof file.arrayBuffer === 'function'
+    ? await file.arrayBuffer()
+    : await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error('Unable to read export package.'));
+        reader.onload = () => {
+          if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+          else reject(new Error('Unable to read export package.'));
+        };
+        reader.readAsArrayBuffer(file);
+      });
+  const digest = await globalThis.crypto.subtle.digest(
+    'SHA-256',
+    new Uint8Array(bytes)
+  );
+  const exportChecksumSha256 = Array.from(new Uint8Array(digest), (value) =>
+    value.toString(16).padStart(2, '0')
+  ).join('');
+  const extension = file.name.split('.').pop()?.trim().toUpperCase();
+
+  return {
+    exportFileName: file.name,
+    exportFormat: extension || 'FILE',
+    exportChecksumSha256,
+  };
+}
 
 export const procurementAppSubmissionStatusTone = (
   status: ProcurementAppSubmissionStatus

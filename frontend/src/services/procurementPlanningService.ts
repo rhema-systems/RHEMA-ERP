@@ -154,6 +154,7 @@ export interface UpdateProcurementPlanDto {
   planEndDate: string;
   planDurationYears?: number;
   totalEstimatedBudget?: number;
+  budgetId?: string;
   currency?: string;
   notes?: string;
 }
@@ -583,6 +584,8 @@ export interface ProcurementBudgetRevisionDto {
   newAmount: number;
   changeAmount: number;
   reason?: string;
+  requestedById?: string;
+  requestedByName?: string;
   approvedByName?: string;
   approvedDate?: string;
   status: string;
@@ -590,9 +593,9 @@ export interface ProcurementBudgetRevisionDto {
 }
 
 export interface CreateProcurementBudgetRevisionDto {
-  revisionType: string;
+  revisionType?: string;
   newAmount: number;
-  reason?: string;
+  reason: string;
 }
 
 // ============================================================================
@@ -1081,7 +1084,7 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to update procurement plan');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update procurement plan'));
     return response.json();
   },
 
@@ -1210,7 +1213,7 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to add item');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to add item'));
     return response.json();
   },
 
@@ -1219,7 +1222,7 @@ export const procurementPlanService = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to remove item');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to remove item'));
   },
 
   async updateItem(itemId: string, dto: UpdateProcurementPlanItemDto): Promise<ProcurementPlanItemDto> {
@@ -1228,7 +1231,7 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(dto),
     });
-    if (!response.ok) throw new Error('Failed to update item');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update item'));
     return response.json();
   },
 
@@ -1381,8 +1384,17 @@ export const procurementBudgetService = {
     return response.json();
   },
 
-  async getAvailableBudgetsForLinking(departmentId: string, fiscalYear: number): Promise<ProcurementBudgetDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/available-for-linking?departmentId=${departmentId}&fiscalYear=${fiscalYear}`, {
+  async getAvailableBudgetsForLinking(
+    departmentId: string,
+    fiscalYear: number,
+    includeLinked = false,
+  ): Promise<ProcurementBudgetDto[]> {
+    const queryParams = new URLSearchParams({
+      departmentId,
+      fiscalYear: fiscalYear.toString(),
+      includeLinked: includeLinked.toString(),
+    });
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/available-for-linking?${queryParams}`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to get available budgets'));
@@ -1395,7 +1407,27 @@ export const procurementBudgetService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create budget revision');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to create budget revision'));
+    return response.json();
+  },
+
+  async approveRevision(revisionId: string, comments?: string): Promise<ProcurementBudgetRevisionDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/revisions/${revisionId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ isApproved: true, comments: comments || undefined }),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to approve budget revision'));
+    return response.json();
+  },
+
+  async rejectRevision(revisionId: string, comments: string): Promise<ProcurementBudgetRevisionDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/revisions/${revisionId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ isApproved: false, comments }),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to reject budget revision'));
     return response.json();
   },
 };
@@ -1509,7 +1541,7 @@ export const marketAnalysisService = {
     const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses?${queryParams}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch market analyses');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to fetch market analyses'));
     return response.json();
   },
 
@@ -1517,7 +1549,7 @@ export const marketAnalysisService = {
     const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${id}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch market analysis');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to fetch market analysis'));
     return response.json();
   },
 
@@ -1527,7 +1559,7 @@ export const marketAnalysisService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create market analysis');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to create market analysis'));
     return response.json();
   },
 
@@ -1537,7 +1569,16 @@ export const marketAnalysisService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to update market analysis');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update market analysis'));
+    return response.json();
+  },
+
+  async publishAnalysis(id: string): Promise<MarketAnalysisDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${id}/publish`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to publish market analysis'));
     return response.json();
   },
 
@@ -1546,7 +1587,7 @@ export const marketAnalysisService = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to delete market analysis');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to delete market analysis'));
   },
 
   async addPriceHistory(analysisId: string, data: CreatePriceHistoryDto): Promise<PriceHistoryDto> {
@@ -1555,7 +1596,7 @@ export const marketAnalysisService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to add price history');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to add price history'));
     return response.json();
   },
 
@@ -1565,7 +1606,24 @@ export const marketAnalysisService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to add survey quote');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to add survey quote'));
+    return response.json();
+  },
+
+  async updateSurveyQuote(
+    analysisId: string,
+    priceHistoryId: string,
+    data: CreatePriceHistoryDto
+  ): Promise<PriceHistoryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/marketanalyses/${analysisId}/survey-quotes/${priceHistoryId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update survey quote'));
     return response.json();
   },
 
@@ -1573,7 +1631,7 @@ export const marketAnalysisService = {
     const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/price-history`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch price history');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to fetch price history'));
     return response.json();
   },
 
@@ -1581,7 +1639,7 @@ export const marketAnalysisService = {
     const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/price-trend?months=${months}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch price trend');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to fetch price trend'));
     return response.json();
   },
 
@@ -1589,7 +1647,7 @@ export const marketAnalysisService = {
     const response = await fetch(`${API_BASE_URL}/procurement/marketanalyses/${analysisId}/survey-summary`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch market survey summary');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to fetch market survey summary'));
     return response.json();
   },
 };

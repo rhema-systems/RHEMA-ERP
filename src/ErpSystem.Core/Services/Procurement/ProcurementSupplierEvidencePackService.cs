@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -63,6 +64,8 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         _unitOfWork.Repository<ProcurementSupplierRegistrationEvidencePackBinding>();
     private IGenericRepository<BusinessPartnerRegistration> Registrations =>
         _unitOfWork.Repository<BusinessPartnerRegistration>();
+    private IGenericRepository<ProcurementSupplierApplicantAccess> ApplicantAccesses =>
+        _unitOfWork.Repository<ProcurementSupplierApplicantAccess>();
     private IGenericRepository<ProcurementConfigurationProfile> ConfigurationProfiles =>
         _unitOfWork.Repository<ProcurementConfigurationProfile>();
     private IGenericRepository<WorkflowDefinition> WorkflowDefinitions =>
@@ -557,7 +560,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
     {
         EnsureAuthenticatedTenant();
         var registration = await LoadRegistrationAsync(registrationId, cancellationToken);
-        EnsureRegistrationReader(registration);
+        await EnsureRegistrationReaderAsync(registration, cancellationToken);
         return await EvaluateRegistrationAsync(registration, cancellationToken);
     }
 
@@ -573,7 +576,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
                 "The authenticated actor must submit the supplier registration.");
         var correlation = NormalizeCorrelation(correlationId);
         var registration = await LoadRegistrationAsync(registrationId, cancellationToken);
-        EnsureRegistrationReader(registration);
+        await EnsureRegistrationReaderAsync(registration, cancellationToken);
         var readiness = await EvaluateRegistrationAsync(registration, cancellationToken);
         if (!readiness.IsReady)
             throw Validation("SUPPLIER_REGISTRATION_EVIDENCE_INCOMPLETE",
@@ -1251,7 +1254,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierEvidencePackAuthorizationException(
                 "Supplier portal users cannot administer evidence-pack configuration.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -1268,19 +1271,97 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierEvidencePackAuthorizationException(
                 "Supplier portal users cannot access evidence-pack administration.");
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementSupplierEvidencePackAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
-    private void EnsureRegistrationReader(BusinessPartnerRegistration registration)
+    private async Task EnsureRegistrationReaderAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
     {
         if (!_currentUser.IsExternalUser) return;
-        if (registration.CreatedById != _currentUser.UserId)
-            throw new ProcurementSupplierEvidencePackAuthorizationException(
-                "Supplier applicants can access only their own registration evidence status.");
+        if (registration.CreatedById == _currentUser.UserId) return;
+
+        // Retained applications preserve their original audit creator. A verified
+        // applicant-token session is instead authorized by its signed registration,
+        // token, and active session binding.
+        if (string.Equals(
+                _currentUser.AuthenticationProvider,
+                "ApplicantToken",
+                StringComparison.OrdinalIgnoreCase) &&
+            await HasRestrictedApplicantAccessAsync(registration, cancellationToken))
+        {
+            return;
+        }
+
+        // Approval replaces the temporary applicant identity with the supplier account.
+        // The approved supplier owner and its active delegated users must therefore be
+        // able to read the evidence lineage that now governs their eligibility.
+        if (registration.BusinessPartnerId.HasValue)
+        {
+            var businessPartnerId = registration.BusinessPartnerId.Value;
+            var ownsPartner = await _unitOfWork.Repository<BusinessPartner>()
+                .ExistsAsync(item => item.Id == businessPartnerId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    item.UserId == _currentUser.UserId &&
+                    !item.IsDeleted);
+            if (ownsPartner) return;
+
+            var isActiveDelegate = await _unitOfWork.Repository<BusinessPartnerUser>()
+                .ExistsAsync(item => item.BusinessPartnerId == businessPartnerId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    item.UserId == _currentUser.UserId &&
+                    item.IsActive &&
+                    !item.IsDeleted);
+            if (isActiveDelegate) return;
+        }
+
+        throw new ProcurementSupplierEvidencePackAuthorizationException(
+            "Supplier applicants can access only their own or linked approved supplier registration evidence status.");
+    }
+
+    private async Task<bool> HasRestrictedApplicantAccessAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.Claims is null ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_registration",
+                out var registrationClaim) ||
+            !Guid.TryParse(registrationClaim, out var claimedRegistrationId) ||
+            claimedRegistrationId != registration.Id ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_token",
+                out var tokenClaim) ||
+            !Guid.TryParse(tokenClaim, out var claimedTokenId) ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_session",
+                out var sessionClaim) ||
+            !Guid.TryParse(sessionClaim, out var claimedSessionReference))
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        return await ApplicantAccesses.GetQueryable(item =>
+                item.Id == _currentUser.UserId &&
+                item.TenantId == registration.TenantId &&
+                item.RegistrationId == registration.Id &&
+                item.TokenId == claimedTokenId &&
+                item.Status ==
+                    ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
+                !item.TerminalAtUtc.HasValue &&
+                !item.IsDeleted &&
+                item.Sessions.Any(session =>
+                    session.TenantId == registration.TenantId &&
+                    session.SessionReference == claimedSessionReference &&
+                    session.Status == ProcurementSupplierApplicantSessionStatus.Active &&
+                    session.ExpiresAtUtc > now &&
+                    !session.IsDeleted))
+            .AnyAsync(cancellationToken);
     }
 
     private void EnsureAuthenticatedTenant()
@@ -1291,9 +1372,8 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") || _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task RecordEventAsync(
         ProcurementSupplierEvidencePackVersion entity,

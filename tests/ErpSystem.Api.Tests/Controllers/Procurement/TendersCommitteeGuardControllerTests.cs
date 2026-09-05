@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -14,6 +15,22 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 
 public sealed class TendersCommitteeGuardControllerTests
 {
+    [Fact]
+    public async Task ReleaseOnlyTenderEvaluatorAssignmentReturnsSuccess()
+    {
+        var service = new Mock<ITenderService>();
+        var tenderId = Guid.NewGuid();
+        var request = new AssignEvaluatorsDto();
+        service.Setup(item => item.AssignEvaluatorsAsync(tenderId, request))
+            .Returns(Task.CompletedTask);
+        var controller = Controller(service.Object);
+
+        var result = await controller.AssignEvaluators(tenderId, request);
+
+        result.Should().BeOfType<OkObjectResult>();
+        service.Verify(item => item.AssignEvaluatorsAsync(tenderId, request), Times.Once);
+    }
+
     [Fact]
     public async Task StandaloneEvaluatorAssignmentAndRemovalReturnControlledConflict()
     {
@@ -27,8 +44,45 @@ public sealed class TendersCommitteeGuardControllerTests
             .ThrowsAsync(new ProcurementEvaluationCommitteeConflictException(
                 "EVALUATION_COMMITTEE_MEMBERSHIP_REQUIRED",
                 "Use the exact controlled committee."));
-        var controller = new TendersController(
-            service.Object,
+        var controller = Controller(service.Object);
+
+        var assign = await controller.AssignEvaluators(
+            Guid.NewGuid(), new AssignEvaluatorsDto());
+        var remove = await controller.RemoveEvaluator(
+            Guid.NewGuid(), Guid.NewGuid());
+
+        assign.Should().BeOfType<ConflictObjectResult>()
+            .Which.Value.Should().BeAssignableTo<ProblemDetails>()
+            .Which.Extensions["code"].Should()
+            .Be("EVALUATION_COMMITTEE_MEMBERSHIP_REQUIRED");
+        remove.Should().BeOfType<ConflictObjectResult>();
+    }
+
+    [Fact]
+    public async Task EvaluatorCandidatesUseTenderAdministerPolicyAndDedicatedService()
+    {
+        var service = new Mock<ITenderService>();
+        var tenderId = Guid.NewGuid();
+        var candidates = new List<TenderEvaluatorCandidateDto>
+        {
+            new() { UserId = Guid.NewGuid(), FullName = "Tender Evaluator" }
+        };
+        service.Setup(item => item.GetEvaluatorCandidatesAsync(tenderId))
+            .ReturnsAsync(candidates);
+        var controller = Controller(service.Object);
+
+        var result = await controller.GetEvaluatorCandidates(tenderId);
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeSameAs(candidates);
+        typeof(TendersController).GetMethod(nameof(TendersController.GetEvaluatorCandidates))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Should().ContainSingle(attribute => attribute.Policy == "procurement.tender.administer");
+    }
+
+    private static TendersController Controller(ITenderService service) => new(
+            service,
             Mock.Of<IWorkflowService>(),
             Mock.Of<ICurrentUserProvider>(),
             Mock.Of<IControlledFileUploadService>(),
@@ -43,16 +97,4 @@ public sealed class TendersCommitteeGuardControllerTests
                 }
             }
         };
-
-        var assign = await controller.AssignEvaluators(
-            Guid.NewGuid(), new AssignEvaluatorsDto());
-        var remove = await controller.RemoveEvaluator(
-            Guid.NewGuid(), Guid.NewGuid());
-
-        assign.Should().BeOfType<ConflictObjectResult>()
-            .Which.Value.Should().BeAssignableTo<ProblemDetails>()
-            .Which.Extensions["code"].Should()
-            .Be("EVALUATION_COMMITTEE_MEMBERSHIP_REQUIRED");
-        remove.Should().BeOfType<ConflictObjectResult>();
-    }
 }

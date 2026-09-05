@@ -10,8 +10,8 @@ const readiness = (
   status: 'Draft',
   isCompliant: false,
   canSubmit: false,
-  decisionCode: 'PR_APP_OR_EXCEPTION_REQUIRED',
-  message: 'Acknowledged APP linkage or approved exception required.',
+  decisionCode: 'PR_REQUIRED_DETAILS_INCOMPLETE',
+  message: 'Required requisition details are incomplete.',
   requiredActions: [],
   ...overrides
 });
@@ -25,20 +25,20 @@ describe('getSubmissionControlPresentation', () => {
     });
   });
 
-  it('labels acknowledged APP readiness as controlled and ready', () => {
+  it('uses required business details as the submission basis', () => {
+    expect(getSubmissionControlPresentation(readiness({
+      isCompliant: true,
+      canSubmit: true,
+      basis: 'BusinessRequirements'
+    }))).toMatchObject({ tone: 'ready', basisLabel: 'Required details complete' });
+  });
+
+  it('does not turn optional APP metadata into the submission basis', () => {
     expect(getSubmissionControlPresentation(readiness({
       isCompliant: true,
       canSubmit: true,
       basis: 'AcknowledgedAPP'
-    }))).toMatchObject({ tone: 'ready', basisLabel: 'Acknowledged APP' });
-  });
-
-  it('labels approved exception readiness without presenting it as an APP acknowledgement', () => {
-    expect(getSubmissionControlPresentation(readiness({
-      isCompliant: true,
-      canSubmit: true,
-      basis: 'ApprovedException'
-    }))).toMatchObject({ tone: 'ready', basisLabel: 'Approved exception' });
+    }))).toMatchObject({ tone: 'ready', basisLabel: 'Required details complete' });
   });
 
   it('keeps a compliant non-Draft requisition non-submittable', () => {
@@ -46,7 +46,15 @@ describe('getSubmissionControlPresentation', () => {
       status: 'Submitted',
       isCompliant: true,
       canSubmit: false,
-      basis: 'AcknowledgedAPP'
+      basis: 'BusinessRequirements'
     }))).toMatchObject({ tone: 'blocked', title: 'Submission no longer available' });
+  });
+
+  it('describes an incomplete draft as missing required details', () => {
+    expect(getSubmissionControlPresentation(readiness())).toMatchObject({
+      tone: 'blocked',
+      title: 'Required details incomplete',
+      basisLabel: 'Action required'
+    });
   });
 });

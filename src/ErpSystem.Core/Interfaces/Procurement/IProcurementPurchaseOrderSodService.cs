@@ -24,7 +24,8 @@ public interface IProcurementPurchaseOrderSodService
         PurchaseOrder purchaseOrder,
         string receiptAction,
         string correlationId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Guid? warehouseId = null);
 
     Task RejectApprovalBypassAsync(
         PurchaseOrder purchaseOrder,

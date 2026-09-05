@@ -77,6 +77,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         return await _dbSet
             .IgnoreQueryFilters()
             .Include(bp => bp.User)
+            .Include(bp => bp.BankAccounts)
             .Where(bp =>
                 bp.TenantId == tenantId &&
                 !bp.IsDeleted &&
@@ -215,6 +216,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         // - Not blacklisted
         var query = _dbSet.Where(bp =>
             !bp.IsDeleted &&
+            bp.IsActive &&
             !bp.IsBlacklisted &&
             bp.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
             (bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
@@ -232,6 +234,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         var query = _dbSet.Where(bp =>
             bp.IsPreferred &&
             !bp.IsDeleted &&
+            bp.IsActive &&
             !bp.IsBlacklisted &&
             bp.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
             (bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
@@ -527,6 +530,20 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             .FirstOrDefaultAsync();
     }
 
+    public async Task<BusinessPartner?> GetWithBankAccountsAsync(Guid id)
+    {
+        var accessiblePartner = await GetByIdAsync(id);
+        if (accessiblePartner == null)
+        {
+            return null;
+        }
+
+        return await _dbSet
+            .Where(bp => bp.Id == accessiblePartner.Id && !bp.IsDeleted)
+            .Include(bp => bp.BankAccounts)
+            .FirstOrDefaultAsync();
+    }
+
     public async Task<BusinessPartner?> GetWithAllRelatedDataAsync(Guid id)
     {
         var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
@@ -534,7 +551,18 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         // External users can only see their own business partner
         if (_currentUserProvider.IsExternalUser)
         {
-            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+            var tenantId = _currentUserProvider.TenantId;
+            var userId = _currentUserProvider.UserId;
+            query = query.Where(bp =>
+                bp.TenantId == tenantId &&
+                (bp.UserId == userId || _context.BusinessPartnerUsers
+                    .IgnoreQueryFilters()
+                    .Any(link =>
+                        link.TenantId == tenantId &&
+                        link.BusinessPartnerId == bp.Id &&
+                        link.UserId == userId &&
+                        link.IsActive &&
+                        !link.IsDeleted)));
         }
 
         return await query
@@ -545,6 +573,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             .Include(bp => bp.Licenses)
                 .ThenInclude(l => l.LicenseType)
             .Include(bp => bp.Contacts)
+            .Include(bp => bp.BankAccounts)
             .Include(bp => bp.Documents)
             .Include(bp => bp.Financials)
             .Include(bp => bp.ApprovedBy)

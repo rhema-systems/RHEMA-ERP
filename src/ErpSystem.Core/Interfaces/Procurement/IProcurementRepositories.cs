@@ -169,7 +169,7 @@ public interface IPurchaseRequisitionRepository : IGenericRepository<PurchaseReq
     Task<IEnumerable<PurchaseRequisition>> GetRequisitionsByDepartmentAsync(string department);
     Task<IEnumerable<PurchaseRequisition>> GetUrgentRequisitionsAsync();
     Task<string> GenerateRequisitionNumberAsync();
-    Task<ErpSystem.Core.DTOs.Common.PagedResult<PurchaseRequisition>> GetRequisitionsAsync(int page, int pageSize, string? search = null, string? status = null, string? priority = null, DateTime? startDate = null, DateTime? endDate = null, string? department = null);
+    Task<ErpSystem.Core.DTOs.Common.PagedResult<PurchaseRequisition>> GetRequisitionsAsync(int page, int pageSize, string? search = null, string? status = null, string? priority = null, DateTime? startDate = null, DateTime? endDate = null, string? department = null, Guid? sourcePlanId = null);
     Task<PurchaseRequisition?> GetRequisitionByIdAsync(Guid id);
     Task<PurchaseRequisition> CreateRequisitionAsync(PurchaseRequisition requisition);
     Task UpdateStatusAsync(Guid requisitionId, string status);

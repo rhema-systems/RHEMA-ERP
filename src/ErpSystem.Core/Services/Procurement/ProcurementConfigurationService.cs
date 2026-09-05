@@ -209,13 +209,13 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             ProcurementConfigurationLifecyclePolicy.EnsureDecisionEditable(profile, decision);
 
         var before = DecisionSnapshot(decision);
-        if (returnToProposed && !_currentUser.HasRole("SuperAdmin"))
+        if (returnToProposed && !CanManageAccess())
         {
             await AddRevisionAsync(profile.Id, decision.Id, "ReturnDecisionToProposed", "Rejected", correlationId,
-                "Only SuperAdmin may return an approved or rejected configuration decision to proposed.", before, null);
+                "The TDC access-management permission is required to return a configuration decision to proposed.", before, null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             throw new ProcurementConfigurationAuthorizationException(
-                "Only SuperAdmin may return an approved or rejected configuration decision to proposed.");
+                "SuperAdmin or the TDC ICT Administrator role is required to return a configuration decision to proposed.");
         }
 
         var definition = ProcurementConfigurationDecisionRegistry.GetRequired(decision.DecisionKey);
@@ -227,12 +227,13 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             throw ValidationException(decision.DecisionKey, valueValidation.Errors);
 
         ValidateDecisionState(request, decision.DecisionKey);
-        if (request.Status == ProcurementConfigurationDecisionStatus.Approved && !_currentUser.HasRole("SuperAdmin"))
+        if (request.Status == ProcurementConfigurationDecisionStatus.Approved && !CanManageAccess())
         {
             await AddRevisionAsync(profile.Id, decision.Id, "ApproveDecision", "Rejected", correlationId,
-                "Only SuperAdmin may approve a configuration decision.", before, null);
+                "The TDC access-management permission is required to approve a configuration decision.", before, null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementConfigurationAuthorizationException("Only SuperAdmin may approve a configuration decision.");
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to approve a configuration decision.");
         }
 
         decision.SchemaVersion = request.SchemaVersion;
@@ -354,12 +355,13 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     {
         EnsureEditor();
         var profile = await FindProfileAsync(id, tracked: true, cancellationToken);
-        if (!_currentUser.HasRole("SuperAdmin"))
+        if (!CanManageAccess())
         {
             await AddRevisionAsync(profile.Id, null, "Publish", "Rejected", correlationId,
-                "Direct publish rejected: SuperAdmin privilege is required.", ProfileSnapshot(profile), null);
+                "Direct publish rejected: TDC access-management permission is required.", ProfileSnapshot(profile), null);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementConfigurationAuthorizationException("Only SuperAdmin may publish procurement configuration profiles.");
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to publish procurement configuration profiles.");
         }
 
         ProcurementConfigurationLifecyclePolicy.EnsureCanPublish(profile);
@@ -991,11 +993,12 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
         string correlationId,
         CancellationToken cancellationToken)
     {
-        if (_currentUser.HasRole("SuperAdmin")) return;
+        if (CanManageAccess()) return;
         await AddRevisionAsync(profile.Id, null, action, "Rejected", correlationId,
-            $"Direct {action.ToLowerInvariant()} rejected: SuperAdmin privilege is required.", ProfileSnapshot(profile), null);
+            $"Direct {action.ToLowerInvariant()} rejected: TDC access-management permission is required.", ProfileSnapshot(profile), null);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        throw new ProcurementConfigurationAuthorizationException($"Only SuperAdmin may {action.ToLowerInvariant()} procurement configuration profiles.");
+        throw new ProcurementConfigurationAuthorizationException(
+            $"SuperAdmin or the TDC ICT Administrator role is required to {action.ToLowerInvariant()} procurement configuration profiles.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -1007,9 +1010,16 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     private void EnsureEditor()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("TenantAdmin"))
-            throw new ProcurementConfigurationAuthorizationException("Procurement configuration administration requires SuperAdmin or TenantAdmin.");
+        if (!CanManageAccess())
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement configuration.");
     }
+
+    private bool CanManageAccess() =>
+        _currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) ||
+        _currentUser.Roles.Any(role =>
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage"));
 
     private static void ValidateDecisionState(
         SaveProcurementConfigurationDecisionRequest request,

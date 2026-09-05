@@ -265,6 +265,8 @@ export interface WorkflowDocumentRequirementDto {
   requirementKey: string;
   documentName: string;
   documentType?: string;
+  providedBy?: 'Customer' | 'Estate' | 'Legal' | 'Finance' | 'Internal';
+  appliesTo?: 'All' | 'Rent' | 'Sale';
   isRequired: boolean;
 }
 
@@ -381,6 +383,7 @@ export interface WorkflowEntitySummaryDto {
   entityType: string;
   entityId: string;
   hasActiveInstance: boolean;
+  approvalRequired: boolean;
   workflowInstanceId?: string;
   workflowName?: string;
   status?: WorkflowInstanceStatus;
@@ -776,6 +779,7 @@ export interface WorkflowEvidenceDocumentDto {
   documentName?: string;
   documentType?: string;
   fileName: string;
+  filePath: string;
   sha256: string;
   documentOwnerId: string;
   issueDate?: string;
@@ -788,6 +792,8 @@ export interface WorkflowEvidenceDocumentDto {
   verifiedById?: string;
   verifiedAt?: string;
   verificationNotes?: string;
+  canVerify?: boolean;
+  verificationBlockedReason?: string;
   malwareScanStatus: number;
   retainUntil: string;
   isLegalHold: boolean;

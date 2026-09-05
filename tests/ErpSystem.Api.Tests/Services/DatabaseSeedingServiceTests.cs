@@ -274,6 +274,45 @@ public class DatabaseSeedingServiceTests
         (await context.ProjectCatalogEntries.CountAsync(entry => entry.TenantId == tenant.Id)).Should().Be(initialCount);
     }
 
+    [Fact]
+    public async Task SeedDefaultTenantModulesAsync_ShouldEnableProjectsForQsAndCivilReports()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = "Default Test Tenant",
+            Code = "DEFAULT",
+            Status = TenantStatus.Active,
+            ContactEmail = "default@test.local",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        context.Tenants.Add(tenant);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+        var seedMethod = typeof(DatabaseSeedingService)
+            .GetMethod("SeedDefaultTenantModulesAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        seedMethod.Should().NotBeNull();
+        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
+
+        var projects = await context.TenantModules.SingleAsync(module =>
+            module.TenantId == tenant.Id && module.ModuleName == "Project Management");
+        projects.Status.Should().Be(ModuleStatus.Enabled);
+        projects.IsDeleted.Should().BeFalse();
+
+        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+        (await context.TenantModules.CountAsync(module =>
+            module.TenantId == tenant.Id && module.ModuleName == "Project Management")).Should().Be(1);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

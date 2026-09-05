@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { PurchaseOrderSodControl } from './PurchaseOrderSodControl';
 
 describe('PurchaseOrderSodControl receipt scope', () => {
-  it('shows only the receipt decision and every enforced receipt action', () => {
+  it('shows professional receipt guidance without internal control metadata', () => {
     const markup = renderToStaticMarkup(
       <PurchaseOrderSodControl
         purchaseOrderId="po-0503"
@@ -59,13 +59,14 @@ describe('PurchaseOrderSodControl receipt scope', () => {
       />
     );
 
-    expect(markup).toContain('Receipt segregation of duties');
-    expect(markup).toContain('Independent goods receiver');
-    expect(markup).not.toContain('Independent PO approver');
-    expect(markup).toContain('ApproveReceiptInspection');
-    expect(markup).toContain('ConfirmReplacementReceipt');
-    expect(markup).toContain('PostGoodsReceiptNoteToInventory');
-    expect(markup).toContain('DEC-001');
-    expect(markup).toContain('DEC-014');
+    expect(markup).toContain('Receiving responsibility');
+    expect(markup).toContain('Goods receipt');
+    expect(markup).toContain('You may record receipt for this purchase order.');
+    expect(markup).not.toContain('Approval is restricted.');
+    expect(markup).not.toContain('SOD-PO-CREATOR-RECEIVER');
+    expect(markup).not.toContain('ApproveReceiptInspection');
+    expect(markup).not.toContain('PostGoodsReceiptNoteToInventory');
+    expect(markup).not.toContain('DEC-001');
+    expect(markup).not.toContain('DEC-014');
   });
 });

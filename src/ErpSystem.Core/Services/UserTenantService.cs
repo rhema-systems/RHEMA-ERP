@@ -66,21 +66,52 @@ public class UserTenantService : IUserTenantService
     {
         _logger.LogInformation("Granting user {UserId} access to tenant {TenantId} with level {AccessLevel}",
             userId, tenantId, accessLevel);
+        var normalizedNotes = NormalizeNotes(notes);
 
-        // Check if relationship already exists
-        var existingRelationship = await GetUserTenantRelationshipAsync(userId, tenantId);
+        var userTenantRepo = _unitOfWork.Repository<UserTenant>();
+        // Include a previously soft-deleted relationship so a repeated grant restores the
+        // authoritative row instead of creating a duplicate user/tenant mapping.
+        var existingRelationship = await userTenantRepo
+            .GetQueryableIncludingDeleted(item => item.UserId == userId && item.TenantId == tenantId)
+            .FirstOrDefaultAsync();
 
         if (existingRelationship != null)
         {
-            // Reactivate existing relationship
+            var actor = grantedBy ?? _currentUserService.UserName;
+            var actorId = Guid.TryParse(_currentUserService.UserId, out var currentUserId)
+                ? currentUserId
+                : (Guid?)null;
+            var alreadyMatches = !existingRelationship.IsDeleted &&
+                                 existingRelationship.Status == UserTenantStatus.Active &&
+                                 existingRelationship.AccessLevel == accessLevel &&
+                                 existingRelationship.ExpiresAt == expiresAt;
+            if (alreadyMatches)
+            {
+                _logger.LogInformation(
+                    "User {UserId} already has the requested access to tenant {TenantId}",
+                    userId, tenantId);
+                return existingRelationship;
+            }
+
+            var wasInactive = existingRelationship.IsDeleted ||
+                              existingRelationship.Status != UserTenantStatus.Active;
+            var changedAt = DateTime.UtcNow;
             existingRelationship.Status = UserTenantStatus.Active;
             existingRelationship.AccessLevel = accessLevel;
             existingRelationship.ExpiresAt = expiresAt;
-            existingRelationship.ReactivatedAt = DateTime.UtcNow;
-            existingRelationship.StatusChangedBy = grantedBy ?? _currentUserService.UserName;
-            existingRelationship.UpdatedAt = DateTime.UtcNow;
-            existingRelationship.UpdatedBy = grantedBy ?? _currentUserService.UserName;
-            existingRelationship.Notes = notes;
+            if (wasInactive)
+            {
+                existingRelationship.ReactivatedAt = changedAt;
+                existingRelationship.StatusChangedBy = actor;
+            }
+            existingRelationship.UpdatedAt = changedAt;
+            existingRelationship.UpdatedBy = actor;
+            existingRelationship.LastModifiedById = actorId;
+            existingRelationship.Notes = AppendAuditNote(
+                existingRelationship.Notes,
+                wasInactive ? "REACTIVATED" : "ACCESS UPDATED",
+                changedAt,
+                normalizedNotes ?? (wasInactive ? "Access reactivated" : "Access updated"));
 
             // If previously soft-deleted, restore it
             if (existingRelationship.IsDeleted)
@@ -96,6 +127,10 @@ public class UserTenantService : IUserTenantService
         }
 
         // Create new relationship
+        var createdBy = grantedBy ?? _currentUserService.UserName;
+        var createdById = Guid.TryParse(_currentUserService.UserId, out var actorUserId)
+            ? actorUserId
+            : (Guid?)null;
         var userTenant = new UserTenant
         {
             Id = Guid.NewGuid(),
@@ -104,14 +139,14 @@ public class UserTenantService : IUserTenantService
             AccessLevel = accessLevel,
             Status = UserTenantStatus.Active,
             GrantedAt = DateTime.UtcNow,
-            GrantedBy = grantedBy ?? _currentUserService.UserName,
+            GrantedBy = createdBy,
             ExpiresAt = expiresAt,
-            Notes = notes,
+            Notes = normalizedNotes,
             CreatedAt = DateTime.UtcNow,
-            CreatedBy = grantedBy ?? _currentUserService.UserName
+            CreatedBy = createdBy,
+            CreatedById = createdById
         };
 
-        var userTenantRepo = _unitOfWork.Repository<UserTenant>();
         await userTenantRepo.AddAsync(userTenant);
         await _unitOfWork.SaveChangesAsync();
 
@@ -123,22 +158,80 @@ public class UserTenantService : IUserTenantService
     {
         _logger.LogInformation("Revoking user {UserId} access from tenant {TenantId}", userId, tenantId);
 
-        var relationship = await GetUserTenantRelationshipAsync(userId, tenantId);
+        // Query the relationship directly by its business key. Revoke does not need
+        // navigation loading, and a missing related navigation must never turn a
+        // persisted mapping into a false "not found" result.
+        var relationship = await _unitOfWork.Repository<UserTenant>()
+            .GetQueryableIncludingDeleted(item => item.UserId == userId && item.TenantId == tenantId)
+            .FirstOrDefaultAsync();
         if (relationship == null)
         {
             _logger.LogWarning("No relationship found between user {UserId} and tenant {TenantId}", userId, tenantId);
             return;
         }
 
+        if (relationship.IsDeleted || relationship.Status == UserTenantStatus.Revoked)
+        {
+            _logger.LogInformation(
+                "User {UserId} access to tenant {TenantId} is already revoked",
+                userId, tenantId);
+            return;
+        }
+
         // Update status to revoked instead of soft delete
+        var actor = revokedBy ?? _currentUserService.UserName;
+        var revokedAt = DateTime.UtcNow;
         relationship.Status = UserTenantStatus.Revoked;
-        relationship.StatusChangedBy = revokedBy ?? _currentUserService.UserName;
-        relationship.UpdatedAt = DateTime.UtcNow;
-        relationship.UpdatedBy = revokedBy ?? _currentUserService.UserName;
-        relationship.Notes = $"{relationship.Notes}\n[REVOKED] {DateTime.UtcNow}: {reason ?? "Access revoked"}".Trim();
+        relationship.StatusChangedBy = actor;
+        relationship.UpdatedAt = revokedAt;
+        relationship.UpdatedBy = actor;
+        relationship.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var actorUserId)
+            ? actorUserId
+            : null;
+        relationship.Notes = AppendAuditNote(
+            relationship.Notes,
+            "REVOKED",
+            revokedAt,
+            reason ?? "Access revoked");
 
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Revoked user-tenant relationship: {UserId} -> {TenantId}", userId, tenantId);
+    }
+
+    private static string AppendAuditNote(
+        string? existing,
+        string action,
+        DateTime occurredAt,
+        string detail)
+    {
+        const int maxNotesLength = 500;
+        var prefix = $"[{action}] {occurredAt:O}: ";
+        var normalizedDetail = detail.Trim();
+        if (prefix.Length + normalizedDetail.Length > maxNotesLength)
+            normalizedDetail = normalizedDetail[..(maxNotesLength - prefix.Length)];
+
+        var entry = prefix + normalizedDetail;
+        if (string.IsNullOrWhiteSpace(existing))
+            return entry;
+
+        var availableForExisting = maxNotesLength - entry.Length - Environment.NewLine.Length;
+        if (availableForExisting <= 0)
+            return entry;
+
+        var preservedExisting = existing.Trim();
+        if (preservedExisting.Length > availableForExisting)
+            preservedExisting = preservedExisting[..availableForExisting];
+        return $"{preservedExisting}{Environment.NewLine}{entry}";
+    }
+
+    private static string? NormalizeNotes(string? notes)
+    {
+        const int maxNotesLength = 500;
+        if (string.IsNullOrWhiteSpace(notes)) return null;
+        var normalized = notes.Trim();
+        return normalized.Length <= maxNotesLength
+            ? normalized
+            : normalized[..maxNotesLength];
     }
 
     public async Task<bool> SuspendUserFromTenantAsync(Guid userId, Guid tenantId, string? suspendedBy = null, string? reason = null)

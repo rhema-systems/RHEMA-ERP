@@ -27,6 +27,7 @@ import { Loader2, Users, DollarSign, Check, AlertCircle, Save } from 'lucide-rea
 import { toast } from 'sonner';
 import * as negotiationService from '@/services/negotiationService';
 import { TenderNegotiationDto, TenderNegotiationItemDto } from '@/services/negotiationService';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 interface NegotiationInviteDialogProps {
   open: boolean;
@@ -96,7 +97,7 @@ export default function NegotiationInviteDialog({
       setHasUnsavedChanges(false);
     } catch (error) {
       console.error('Error loading negotiation:', error);
-      toast.error('Failed to load negotiation details');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load negotiation details'));
     } finally {
       setLoading(false);
     }
@@ -147,7 +148,7 @@ export default function NegotiationInviteDialog({
       toast.success('Draft saved successfully!');
     } catch (error) {
       console.error('Error saving draft:', error);
-      toast.error('Failed to save draft');
+      toast.error(getProcurementProblemMessage(error, 'Failed to save draft'));
     } finally {
       setSavingDraft(false);
     }
@@ -182,12 +183,12 @@ export default function NegotiationInviteDialog({
       });
 
       await negotiationService.completeNegotiation(negotiation.id, { items, notes });
-      toast.success('Negotiation completed successfully!');
+      toast.success('Negotiation completed. The negotiated award now requires independent reapproval.');
       onNegotiationComplete?.(calculateTotal());
       onOpenChange(false);
     } catch (error) {
       console.error('Error completing negotiation:', error);
-      toast.error('Failed to complete negotiation');
+      toast.error(getProcurementProblemMessage(error, 'Failed to complete negotiation'));
     } finally {
       setSubmitting(false);
     }

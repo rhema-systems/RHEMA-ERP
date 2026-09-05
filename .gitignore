@@ -90,6 +90,7 @@ pids
 *.seed
 *.pid.lock
 src/ErpSystem.Api/secure-file-storage/
+/secure-file-storage/
 
 # Coverage directory used by tools like istanbul
 coverage/

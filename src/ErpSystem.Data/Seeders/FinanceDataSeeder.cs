@@ -2015,6 +2015,31 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-4110-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "4110",
+                AccountNumber = "4110",
+                AccountName = "Rental Income",
+                AccountType = AccountType.Revenue,
+                AccountCategory = "Operating Revenue",
+                AccountSubCategory = "Property Rental",
+                Description = "Rental income from Estate and Property Management lease billing.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = true,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = true,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-4210-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "4210",

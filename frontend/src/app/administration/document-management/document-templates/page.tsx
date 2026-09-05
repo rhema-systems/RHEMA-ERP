@@ -2,7 +2,15 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { BookTemplate, Edit3, FileText, Loader2, Save } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  BookTemplate,
+  FileText,
+  Loader2,
+  Save,
+  Search,
+  Upload,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +30,8 @@ const splitCsv = (value: string) =>
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+
+const TEMPLATE_PICKER_LIMIT = 8;
 
 type TemplateForm = {
   templateCode: string;
@@ -67,11 +77,55 @@ export default function DmsDocumentTemplatesSetupPage() {
   const [form, setForm] = React.useState<TemplateForm | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isUploadingTemplate, setIsUploadingTemplate] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [templateSearch, setTemplateSearch] = React.useState('');
+  const [selectedModule, setSelectedModule] = React.useState<string>('all');
+  const uploadInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const selectedTemplate = React.useMemo(
     () => templates.find((template) => template.templateCode === selectedCode),
     [selectedCode, templates]
+  );
+
+  const modules = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          templates
+            .map((template) => template.module)
+            .filter((module) => module.trim().length > 0)
+        )
+      ).sort((left, right) => left.localeCompare(right)),
+    [templates]
+  );
+
+  const filteredTemplates = React.useMemo(() => {
+    const query = templateSearch.trim().toLowerCase();
+
+    return templates.filter((template) => {
+      const matchesModule =
+        selectedModule === 'all' || template.module === selectedModule;
+      const matchesQuery =
+        !query ||
+        [
+          template.title,
+          template.templateCode,
+          template.module,
+          template.documentType,
+          template.metadataTemplateCode,
+          template.sourceLabel,
+        ]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(query));
+
+      return matchesModule && matchesQuery;
+    });
+  }, [selectedModule, templateSearch, templates]);
+
+  const visibleTemplates = React.useMemo(
+    () => filteredTemplates.slice(0, TEMPLATE_PICKER_LIMIT),
+    [filteredTemplates]
   );
 
   const loadTemplates = React.useCallback(async () => {
@@ -123,6 +177,8 @@ export default function DmsDocumentTemplatesSetupPage() {
       return;
     }
 
+    const useUploadedBody = selectedTemplate?.hasWordTemplate === true;
+
     setIsSaving(true);
     setError(null);
     try {
@@ -137,7 +193,7 @@ export default function DmsDocumentTemplatesSetupPage() {
           metadataTemplateCode: form.metadataTemplateCode,
           accessProfile: form.accessProfile,
           mergeFields: splitCsv(form.mergeFields),
-          body: form.body,
+          body: useUploadedBody ? selectedTemplate?.body : form.body,
           isActive: form.isActive,
           requiresApproval: form.requiresApproval,
           approvalRole: form.approvalRole || null,
@@ -145,17 +201,70 @@ export default function DmsDocumentTemplatesSetupPage() {
           defaultDispatchChannel: form.defaultDispatchChannel || null,
         }
       );
+      setTemplates((current) => {
+        const exists = current.some(
+          (template) => template.templateCode === saved.templateCode
+        );
+
+        if (!exists) {
+          return [saved, ...current];
+        }
+
+        return current.map((template) =>
+          template.templateCode === saved.templateCode ? saved : template
+        );
+      });
+      setSelectedCode(saved.templateCode);
+      setForm(toForm(saved));
+      toast.success('Document template saved');
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Could not save the document template.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const uploadWordTemplate = async (file: File) => {
+    if (!form) {
+      return;
+    }
+
+    setIsUploadingTemplate(true);
+    setError(null);
+    try {
+      const saved =
+        await documentManagementService.uploadGenerationTemplateWordFile(
+          form.templateCode,
+          file
+        );
       setTemplates((current) =>
         current.map((template) =>
           template.templateCode === saved.templateCode ? saved : template
         )
       );
       setForm(toForm(saved));
-    } catch {
-      setError('Could not save the document template.');
+      toast.success('Word template uploaded', {
+        description: saved.templateFileName ?? file.name,
+      });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Could not upload the Word template.';
+      setError(message);
+      toast.error(message);
     } finally {
-      setIsSaving(false);
+      setIsUploadingTemplate(false);
     }
+  };
+
+  const openUploadPicker = () => {
+    uploadInputRef.current?.click();
   };
 
   return (
@@ -176,6 +285,19 @@ export default function DmsDocumentTemplatesSetupPage() {
               Metadata Templates
             </Link>
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={openUploadPicker}
+            disabled={!form || isUploadingTemplate}
+          >
+            {isUploadingTemplate ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
+            Upload Document
+          </Button>
           <Button asChild>
             <Link href="/document-management/records">
               <FileText className="mr-2 h-4 w-4" />
@@ -191,75 +313,110 @@ export default function DmsDocumentTemplatesSetupPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_460px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
         <Card className="border-border bg-card text-card-foreground">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              Central Template Registry
+              Template Picker
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               ) : null}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[920px] text-left text-sm">
-                <thead className="border-b text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Template</th>
-                    <th className="px-3 py-2 font-medium">Module</th>
-                    <th className="px-3 py-2 font-medium">Metadata</th>
-                    <th className="px-3 py-2 font-medium">Approval</th>
-                    <th className="px-3 py-2 font-medium">Source</th>
-                    <th className="px-3 py-2 font-medium"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {templates.map((template) => (
-                    <tr key={template.templateCode} className="border-b">
-                      <td className="px-3 py-3 align-top">
-                        <div className="font-medium">{template.title}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
+            <div className="space-y-4">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  value={templateSearch}
+                  onChange={(event) => setTemplateSearch(event.target.value)}
+                  placeholder="Search code, title, module"
+                  aria-label="Search document templates"
+                />
+              </div>
+
+              {modules.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={selectedModule === 'all' ? 'default' : 'outline'}
+                    onClick={() => setSelectedModule('all')}
+                  >
+                    All
+                  </Button>
+                  {modules.slice(0, 10).map((module) => (
+                    <Button
+                      key={module}
+                      type="button"
+                      size="sm"
+                      variant={
+                        selectedModule === module ? 'default' : 'outline'
+                      }
+                      onClick={() => setSelectedModule(module)}
+                    >
+                      {module}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="text-xs text-muted-foreground">
+                Showing {visibleTemplates.length} of {filteredTemplates.length}
+                {templates.length !== filteredTemplates.length
+                  ? ` matched from ${templates.length}`
+                  : ''}{' '}
+                templates.
+              </div>
+
+              <div className="space-y-2">
+                {visibleTemplates.map((template) => (
+                  <button
+                    key={template.templateCode}
+                    type="button"
+                    className={`w-full rounded-md border p-3 text-left transition-colors ${
+                      selectedCode === template.templateCode
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:bg-muted/60'
+                    }`}
+                    onClick={() => setSelectedCode(template.templateCode)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {template.title}
+                        </div>
+                        <div className="mt-1 truncate text-xs text-muted-foreground">
                           {template.templateCode}
                         </div>
-                      </td>
-                      <td className="px-3 py-3 align-top">{template.module}</td>
-                      <td className="px-3 py-3 align-top">
-                        <Badge variant="outline">
-                          {template.metadataTemplateCode}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        {template.requiresApproval ? (
-                          <Badge variant="secondary">
-                            {template.approvalRole || 'Approval required'}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">No approval</Badge>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 align-top text-xs">
-                        {template.sourceLabel}
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        <Button
-                          size="sm"
-                          variant={
-                            selectedCode === template.templateCode
-                              ? 'default'
-                              : 'outline'
-                          }
-                          className="gap-2"
-                          onClick={() => setSelectedCode(template.templateCode)}
-                        >
-                          <Edit3 className="h-4 w-4" />
-                          Edit
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                      {template.hasWordTemplate ? (
+                        <Badge variant="outline">Word</Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      <Badge variant="secondary">{template.module}</Badge>
+                      <Badge variant="outline">
+                        {template.metadataTemplateCode}
+                      </Badge>
+                    </div>
+                  </button>
+                ))}
+
+                {!isLoading && filteredTemplates.length === 0 ? (
+                  <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No document templates match the current search.
+                  </div>
+                ) : null}
+              </div>
+
+              {filteredTemplates.length > TEMPLATE_PICKER_LIMIT ? (
+                <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  Narrow the search or choose a module to see the remaining{' '}
+                  {filteredTemplates.length - TEMPLATE_PICKER_LIMIT} templates.
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -279,7 +436,9 @@ export default function DmsDocumentTemplatesSetupPage() {
                   <Label>Module</Label>
                   <Input
                     value={form.module}
-                    onChange={(event) => updateForm('module', event.target.value)}
+                    onChange={(event) =>
+                      updateForm('module', event.target.value)
+                    }
                   />
                 </div>
               </div>
@@ -338,12 +497,53 @@ export default function DmsDocumentTemplatesSetupPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Template body</Label>
+                <Label>
+                  {selectedTemplate?.hasWordTemplate
+                    ? 'Template body from uploaded document'
+                    : 'Template body'}
+                </Label>
                 <Textarea
                   className="min-h-[320px] font-mono text-xs"
                   value={form.body}
+                  readOnly={selectedTemplate?.hasWordTemplate === true}
                   onChange={(event) => updateForm('body', event.target.value)}
                 />
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <Label>Upload document template</Label>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {selectedTemplate?.templateFileName ||
+                        'No .docx source uploaded'}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={openUploadPicker}
+                    disabled={isUploadingTemplate}
+                  >
+                    {isUploadingTemplate ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    Upload Document
+                  </Button>
+                  <input
+                    ref={uploadInputRef}
+                    className="sr-only"
+                    type="file"
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadWordTemplate(file);
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">

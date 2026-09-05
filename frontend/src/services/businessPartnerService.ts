@@ -52,6 +52,7 @@ export interface BusinessPartnerDto {
   creditLimit?: number;
   outstandingBalance?: number;
   isOnCreditHold?: boolean;
+  categories?: string[];
 
   // Workflow display helpers (optional)
   currentWorkflowStepName?: string;
@@ -120,12 +121,26 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   creditHoldDate?: string;
   // Related Data
   contacts?: BusinessPartnerContactDto[];
+  bankAccounts?: BusinessPartnerBankAccountDto[];
   licenses?: BusinessPartnerLicenseDto[];
   documents?: BusinessPartnerDocumentDto[];
   financialRecords?: BusinessPartnerFinancialDto[];
   financialInfo?: BusinessPartnerFinancialDto[]; // Alias for financialRecords
-  categories?: PartnerCategoryDto[];
   specializations?: ContractorSpecializationDto[];
+}
+
+export interface BusinessPartnerBankAccountDto {
+  id: string;
+  businessPartnerId?: string;
+  bankName: string;
+  branchName?: string;
+  accountName?: string;
+  accountNumber: string;
+  swiftCode?: string;
+  iban?: string;
+  currency?: string;
+  isPrimary: boolean;
+  isActive: boolean;
 }
 
 export interface BusinessPartnerContactDto {

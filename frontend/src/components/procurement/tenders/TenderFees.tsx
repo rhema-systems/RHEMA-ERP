@@ -1,7 +1,7 @@
  
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type TenderFormData } from '@/app/procurement/tenders/new/page';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Trash2, DollarSign, Edit2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type CreateTenderFeeDto, type TenderFeeDto } from '@/services/tenderService';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import type { Account } from '@/types/finance';
 
 interface TenderFeesProps {
   formData: TenderFormData;
@@ -29,6 +31,8 @@ interface FeeFormData {
   dueDate: string;
   description: string;
   bankAccountDetails: string;
+  receivingAccountId: string;
+  revenueAccountId: string;
 }
 
 const FEE_TYPES = [
@@ -61,11 +65,66 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
     dueDate: '',
     description: '',
     bankAccountDetails: '',
+    receivingAccountId: '',
+    revenueAccountId: '',
   });
+
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      setAccountsLoading(true);
+      setAccountsError(null);
+      const result = await financeDataService.getAccounts({
+        status: 'Active',
+        pageSize: 1000,
+      });
+      setAccounts(result);
+    } catch (error) {
+      console.error('Failed to load GL accounts for tender fees:', error);
+      setAccountsError('Finance GL accounts could not be loaded.');
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
+
+  const postingAccounts = useMemo(
+    () => accounts.filter(account =>
+      account.status === 'Active' &&
+      account.allowDirectPosting &&
+      account.isPostingAllowed !== false &&
+      !account.isControlAccount),
+    [accounts],
+  );
+  const receivingAccounts = useMemo(
+    () => postingAccounts.filter(account => account.accountType === 'Asset'),
+    [postingAccounts],
+  );
+  const revenueAccounts = useMemo(
+    () => postingAccounts.filter(account => account.accountType === 'Revenue'),
+    [postingAccounts],
+  );
+  const accountLabel = (accountId?: string) => {
+    const account = accounts.find(item => item.id === accountId);
+    return account
+      ? `${account.accountNumber || account.accountCode} — ${account.accountName}`
+      : 'Not configured';
+  };
 
   const handleAddFee = async () => {
     if (!currentFee.feeType || !currentFee.amount || currentFee.amount <= 0) {
       toast.error('Fee type and amount are required');
+      return;
+    }
+
+    if (!currentFee.receivingAccountId || !currentFee.revenueAccountId) {
+      toast.error('Select the receiving and fee revenue GL accounts');
       return;
     }
 
@@ -87,6 +146,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
           dueDate: currentFee.dueDate || undefined,
           description: currentFee.description || undefined,
           bankAccountDetails: currentFee.bankAccountDetails || undefined,
+          receivingAccountId: currentFee.receivingAccountId,
+          revenueAccountId: currentFee.revenueAccountId,
         };
 
         if (editingIndex !== null && currentFee.id) {
@@ -104,6 +165,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
             dueDate: updated.dueDate ? new Date(updated.dueDate).toISOString().slice(0, 16) : '',
             description: updated.description || '',
             bankAccountDetails: updated.bankAccountDetails || '',
+            receivingAccountId: updated.receivingAccountId || '',
+            revenueAccountId: updated.revenueAccountId || '',
           };
           updateFormData({ fees: updatedFees });
           toast.success('Fee updated successfully');
@@ -122,6 +185,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
               dueDate: created.dueDate ? new Date(created.dueDate).toISOString().slice(0, 16) : '',
               description: created.description || '',
               bankAccountDetails: created.bankAccountDetails || '',
+              receivingAccountId: created.receivingAccountId || '',
+              revenueAccountId: created.revenueAccountId || '',
             }]
           });
           toast.success('Fee added successfully');
@@ -161,6 +226,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
       dueDate: '',
       description: '',
       bankAccountDetails: '',
+      receivingAccountId: '',
+      revenueAccountId: '',
     });
     setEditingIndex(null);
   };
@@ -183,6 +250,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
       dueDate: fee.dueDate || '',
       description: fee.description || '',
       bankAccountDetails: fee.bankAccountDetails || '',
+      receivingAccountId: fee.receivingAccountId || '',
+      revenueAccountId: fee.revenueAccountId || '',
     };
 
     console.log('TenderFees - newCurrentFee:', newCurrentFee);
@@ -225,6 +294,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
         dueDate: '',
         description: '',
         bankAccountDetails: '',
+        receivingAccountId: '',
+        revenueAccountId: '',
       });
     }
   };
@@ -240,6 +311,8 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
       dueDate: '',
       description: '',
       bankAccountDetails: '',
+      receivingAccountId: '',
+      revenueAccountId: '',
     });
   };
 
@@ -395,6 +468,75 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
             />
           </div>
 
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="receivingAccountId">Receiving GL Account *</Label>
+              <Select
+                value={currentFee.receivingAccountId || '__none__'}
+                disabled={accountsLoading || Boolean(accountsError)}
+                onValueChange={(value) => setCurrentFee({
+                  ...currentFee,
+                  receivingAccountId: value === '__none__' ? '' : value,
+                })}
+              >
+                <SelectTrigger id="receivingAccountId">
+                  <SelectValue placeholder={accountsLoading ? 'Loading accounts…' : 'Select an Asset account'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Not selected</SelectItem>
+                  {receivingAccounts.map(account => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.accountNumber || account.accountCode} — {account.accountName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!accountsLoading && !accountsError && receivingAccounts.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No active direct-posting Asset account is available.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="revenueAccountId">Fee Revenue GL Account *</Label>
+              <Select
+                value={currentFee.revenueAccountId || '__none__'}
+                disabled={accountsLoading || Boolean(accountsError)}
+                onValueChange={(value) => setCurrentFee({
+                  ...currentFee,
+                  revenueAccountId: value === '__none__' ? '' : value,
+                })}
+              >
+                <SelectTrigger id="revenueAccountId">
+                  <SelectValue placeholder={accountsLoading ? 'Loading accounts…' : 'Select a Revenue account'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Not selected</SelectItem>
+                  {revenueAccounts.map(account => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.accountNumber || account.accountCode} — {account.accountName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!accountsLoading && !accountsError && revenueAccounts.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No active direct-posting Revenue account is available.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {accountsError && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-sm text-destructive">{accountsError}</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadAccounts()}>
+                Retry
+              </Button>
+            </div>
+          )}
+
           <div className="flex gap-2">
             <Button type="button" onClick={handleAddFee} className="flex-1">
               <Plus className="h-4 w-4 mr-2" />
@@ -448,6 +590,14 @@ export default function TenderFees({ formData, updateFormData, tenderId }: Tende
                             <span className="font-medium">Bank Details:</span> {fee.bankAccountDetails}
                           </p>
                         )}
+                        <p>
+                          <span className="font-medium">Receiving GL:</span>{' '}
+                          {accountLabel(fee.receivingAccountId)}
+                        </p>
+                        <p>
+                          <span className="font-medium">Revenue GL:</span>{' '}
+                          {accountLabel(fee.revenueAccountId)}
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-2">

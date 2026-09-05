@@ -121,12 +121,18 @@ export const evaluationTemplateService = {
     return response.json();
   },
 
-  async getForDropdown(): Promise<EvaluationTemplateListItem[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/EvaluationTemplates/dropdown`, {
+  async getForDropdown(category?: string, tenderType?: string): Promise<EvaluationTemplateListItem[]> {
+    const query = new URLSearchParams();
+    if (category?.trim()) query.set('category', category.trim());
+    if (tenderType?.trim()) query.set('tenderType', tenderType.trim());
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : '';
+    const response = await fetch(`${API_BASE_URL}/procurement/EvaluationTemplates/dropdown${suffix}`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
-      throw new Error('Failed to fetch evaluation templates for dropdown');
+      const detail = await response.text();
+      throw new Error(detail || `Failed to fetch evaluation templates (${response.status})`);
     }
     return response.json();
   },

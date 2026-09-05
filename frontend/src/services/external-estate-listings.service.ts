@@ -44,6 +44,16 @@ export interface ExternalListingRequest {
   currentStageName: string;
   currentAssignedRole?: string | null;
   createdAt: string;
+  documents?: ExternalListingRequestDocument[];
+}
+
+export interface ExternalListingRequestDocument {
+  id: string;
+  name: string;
+  requiredFrom?: string | null;
+  providedBy: string;
+  isMandatory: boolean;
+  fileName?: string | null;
 }
 
 export interface CreateExternalListingRequest {
@@ -107,6 +117,19 @@ class ExternalEstateListingsService {
       payload
     );
     return response.data;
+  }
+
+  async uploadCustomerIntakeDocument(
+    requestId: string,
+    documentId: string,
+    file: File
+  ): Promise<void> {
+    const form = new FormData();
+    form.append('file', file);
+    await rawApiService.request(
+      `/estate/external/requests/${requestId}/customer-intake-documents/${documentId}/upload`,
+      { method: 'POST', body: form }
+    );
   }
 }
 

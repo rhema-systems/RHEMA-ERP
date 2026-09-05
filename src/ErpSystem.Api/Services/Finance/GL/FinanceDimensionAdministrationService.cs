@@ -2,11 +2,19 @@ using System.Security.Cryptography;
 using System.Text;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.GL;
+
+public sealed record FinanceSourceLineResolution(
+    FinanceDimensionSet? DimensionSet,
+    IReadOnlyList<string> ReadinessWarnings,
+    IReadOnlyList<string> ReadOnlyDimensionCodes,
+    IReadOnlyList<FinanceDimensionAccountRule> AppliedRules);
 
 /// <summary>
 /// Finance-owned control plane for transaction dimensions. The first certified producer is the
@@ -206,18 +214,26 @@ public sealed class FinanceDimensionAdministrationService
         var sourceModule = OptionalUpper(dto.SourceModule, 50);
         var sourceDocumentType = Optional(dto.SourceDocumentType, 100);
         var postingAction = Optional(dto.PostingAction, 50);
+        FinanceDimensionRouteDefinition? route = null;
+        if (dto.RouteId.HasValue)
+        {
+            route = FinanceDimensionRouteCatalog.GetRequired(dto.RouteId.Value);
+            sourceModule = route.PostingSourceModule;
+            sourceDocumentType = route.DocumentType;
+            postingAction = "Post";
+        }
         if (ruleType != "Optional" && sourceDocumentType is null)
-            throw new InvalidOperationException("Required, Fixed, and Prohibited rules must name a certified source document type.");
+            throw new InvalidOperationException("Required, Fixed, and Prohibited rules must select a recognized Finance dimension route.");
         if (sourceDocumentType is not null
             && string.Equals(sourceDocumentType, "ManualJournalEntry", StringComparison.OrdinalIgnoreCase))
         {
+            route ??= FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.ManualJournalEntry);
             sourceModule = "GL";
             sourceDocumentType = "ManualJournalEntry";
             postingAction = "Post";
         }
-        if (ruleType != "Optional"
-            && (sourceModule != "GL" || sourceDocumentType != "ManualJournalEntry" || postingAction != "Post"))
-            throw new InvalidOperationException("This source is not yet certified for mandatory Finance dimension enforcement.");
+        if (ruleType != "Optional" && route is null)
+            throw new InvalidOperationException("Mandatory Finance dimension rules require a compiled route identity.");
         if (dto.EffectiveDate == default) throw new InvalidOperationException("Rule effective date is required.");
         if (dto.ExpiryDate.HasValue && dto.ExpiryDate.Value.Date < dto.EffectiveDate.Date)
             throw new InvalidOperationException("Rule expiry date cannot precede its effective date.");
@@ -238,22 +254,51 @@ public sealed class FinanceDimensionAdministrationService
         if (ruleType == "Prohibited" && defaultValue is not null)
             throw new InvalidOperationException("A Prohibited dimension rule cannot have a default value.");
 
-        var duplicate = await _context.FinanceDimensionAccountRules.AnyAsync(item =>
-            item.TenantId == tenantId && !item.IsDeleted && item.Id != id
-            && item.AccountId == dto.AccountId && item.FinanceDimensionDefinitionId == definition.Id
-            && item.SourceModule == sourceModule && item.SourceDocumentType == sourceDocumentType
-            && item.PostingAction == postingAction, cancellationToken);
-        if (duplicate) throw new InvalidOperationException("The same account, dimension, and source scope already has a rule.");
-
-        var entity = id.HasValue
+        var current = id.HasValue
             ? await _context.FinanceDimensionAccountRules.SingleOrDefaultAsync(item =>
                     item.Id == id.Value && item.TenantId == tenantId && !item.IsDeleted, cancellationToken)
                 ?? throw new KeyNotFoundException("Finance dimension account rule was not found.")
+            : null;
+        var createsSuccessor = current?.IsEvidenceLocked == true;
+        if (createsSuccessor && dto.EffectiveDate.Date <= current!.EffectiveDate.Date)
+            throw new InvalidOperationException("A used Finance dimension rule must be superseded by a later effective-dated version.");
+
+        var candidateStart = dto.EffectiveDate.Date;
+        var candidateEnd = dto.ExpiryDate?.Date;
+        var duplicate = await _context.FinanceDimensionAccountRules.AnyAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted && item.Id != id && item.IsActive
+            && item.AccountId == dto.AccountId && item.FinanceDimensionDefinitionId == definition.Id
+            && item.RouteId == (route == null ? null : route.Id)
+            && item.SourceRoute == (route == null ? null : route.SourceRoute)
+            && item.ContractVersion == (route == null ? null : route.ContractVersion)
+            && item.SourceModule == sourceModule && item.SourceDocumentType == sourceDocumentType
+            && item.PostingAction == postingAction
+            && (!createsSuccessor || item.RuleFamilyId != current!.RuleFamilyId)
+            && item.EffectiveDate.Date <= (candidateEnd ?? DateTime.MaxValue)
+            && (!item.ExpiryDate.HasValue || item.ExpiryDate.Value.Date >= candidateStart), cancellationToken);
+        if (duplicate)
+            throw new InvalidOperationException("The same account, dimension, and source scope has an overlapping effective rule.");
+
+        if (createsSuccessor)
+        {
+            current!.ExpiryDate = dto.EffectiveDate.Date.AddDays(-1);
+            current.UpdatedAt = DateTime.UtcNow;
+            current.UpdatedBy = _currentUser.UserName;
+            current.LastModifiedById = UserId();
+        }
+
+        var entity = current is not null && !createsSuccessor
+            ? current
             : new FinanceDimensionAccountRule
             {
-                Id = Guid.NewGuid(), TenantId = tenantId, CreatedAt = DateTime.UtcNow,
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                RuleFamilyId = current?.RuleFamilyId ?? Guid.Empty,
+                RuleVersion = (current?.RuleVersion ?? 0) + 1,
+                SupersedesRuleId = createsSuccessor ? current!.Id : null,
+                CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.UserName, CreatedById = UserId()
             };
+        if (entity.RuleFamilyId == Guid.Empty) entity.RuleFamilyId = entity.Id;
         entity.AccountId = account.Id;
         entity.FinanceDimensionDefinitionId = definition.Id;
         entity.RuleType = ruleType;
@@ -261,13 +306,16 @@ public sealed class FinanceDimensionAdministrationService
         entity.SourceModule = sourceModule;
         entity.SourceDocumentType = sourceDocumentType;
         entity.PostingAction = postingAction;
+        entity.RouteId = route?.Id;
+        entity.SourceRoute = route?.SourceRoute;
+        entity.ContractVersion = route?.ContractVersion;
         entity.EffectiveDate = dto.EffectiveDate;
         entity.ExpiryDate = dto.ExpiryDate;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.UserName;
         entity.LastModifiedById = UserId();
-        if (!id.HasValue) _context.FinanceDimensionAccountRules.Add(entity);
+        if (current is null || createsSuccessor) _context.FinanceDimensionAccountRules.Add(entity);
         await _context.SaveChangesAsync(cancellationToken);
         entity.Account = account;
         entity.FinanceDimensionDefinition = definition;
@@ -279,14 +327,120 @@ public sealed class FinanceDimensionAdministrationService
         Guid accountId,
         DateTime postingDate,
         IReadOnlyList<FinancePostingDimensionValueDto>? supplied,
+        CancellationToken cancellationToken = default) =>
+        (await ResolveSourceLineAsync(
+            new FinancePostingProducerContext(FinanceDimensionRouteId.ManualJournalEntry),
+            accountId,
+            postingDate,
+            supplied,
+            FinanceDimensionCertificationState.Enforced,
+            refreshPersistedFixedValues: false,
+            cancellationToken)).DimensionSet;
+
+    public async Task<FinanceDimensionSet?> ResolveSourceDocumentDefaultAsync(
+        DateTime documentDate,
+        IReadOnlyList<FinancePostingDimensionValueDto>? supplied,
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
         var inputs = NormalizeInputs(supplied);
-        var userSuppliedCodes = inputs.Keys.ToHashSet(StringComparer.Ordinal);
-        var rules = await ApplicableRulesAsync(tenantId, accountId, postingDate, cancellationToken);
-        ApplyRules(inputs, rules);
         if (inputs.Count == 0) return null;
+
+        var codes = inputs.Keys.ToArray();
+        var definitions = await _context.FinanceDimensionDefinitions.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive
+                && codes.Contains(item.Code))
+            .ToListAsync(cancellationToken);
+        if (definitions.Count != inputs.Count)
+            throw new InvalidOperationException("One or more Finance dimensions were not found or are inactive for this tenant.");
+        var derived = definitions.FirstOrDefault(item => item.Classification == "Derived");
+        if (derived is not null)
+            throw new InvalidOperationException($"Derived dimension {derived.Code} cannot be used as a document default.");
+
+        var resolved = new List<(FinanceDimensionDefinition Definition, FinanceDimensionValue Value)>();
+        foreach (var definition in definitions)
+            resolved.Add((definition, await ResolveValueAsync(
+                tenantId, definition, inputs[definition.Code], documentDate, cancellationToken)));
+        resolved = resolved.OrderBy(item => item.Definition.DisplayOrder)
+            .ThenBy(item => item.Definition.Code).ToList();
+        var canonical = string.Join("|", resolved.Select(item => $"{item.Definition.Id:N}:{item.Value.Id:N}"));
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        var idBytes = SHA256.HashData(Encoding.UTF8.GetBytes($"FIN-DIMSET|{tenantId:N}|{hash}"));
+        var setId = new Guid(idBytes.AsSpan(0, 16));
+        var existing = _context.FinanceDimensionSets.Local.FirstOrDefault(item => item.Id == setId)
+            ?? await _context.FinanceDimensionSets.Include(item => item.Items).SingleOrDefaultAsync(item =>
+                item.TenantId == tenantId && !item.IsDeleted
+                && (item.Id == setId || item.CombinationHash == hash), cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.Id != setId || existing.CombinationHash != hash)
+                throw new InvalidOperationException("Finance dimension-set identity collision detected.");
+            return existing;
+        }
+
+        var set = new FinanceDimensionSet
+        {
+            Id = setId,
+            TenantId = tenantId,
+            CombinationHash = hash,
+            DisplayValue = string.Join(" · ", resolved.Select(item => $"{item.Definition.Code}={item.Value.Code}")),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUser.UserName,
+            CreatedById = UserId()
+        };
+        foreach (var item in resolved)
+        {
+            set.Items.Add(new FinanceDimensionSetItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FinanceDimensionSetId = set.Id,
+                FinanceDimensionDefinitionId = item.Definition.Id,
+                FinanceDimensionValueId = item.Value.Id,
+                DimensionCodeSnapshot = item.Definition.Code,
+                DimensionNameSnapshot = item.Definition.Name,
+                DimensionValueCodeSnapshot = item.Value.Code,
+                DimensionValueNameSnapshot = item.Value.Name,
+                SnapshotSource = "CanonicalResolution",
+                SnapshotCapturedAt = DateTime.UtcNow,
+                SnapshotQuality = "Exact",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUser.UserName,
+                CreatedById = UserId()
+            });
+        }
+        _context.FinanceDimensionSets.Add(set);
+        return set;
+    }
+
+    /// <summary>
+    /// Resolves a producer line during draft capture.  Fixed values are always server-applied;
+    /// CaptureOptional reports missing required values without weakening any supplied/prohibited
+    /// or tenant/master-data validation.
+    /// </summary>
+    public async Task<FinanceSourceLineResolution> ResolveSourceLineAsync(
+        FinancePostingProducerContext producer,
+        Guid accountId,
+        DateTime postingDate,
+        IReadOnlyList<FinancePostingDimensionValueDto>? supplied,
+        FinanceDimensionCertificationState certificationState,
+        bool refreshPersistedFixedValues = false,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var route = producer?.Definition ?? throw new ArgumentNullException(nameof(producer));
+        if (!await _context.Accounts.AsNoTracking().AnyAsync(item =>
+                item.Id == accountId && item.TenantId == tenantId && !item.IsDeleted
+                && item.Status == AccountStatus.Active,
+                cancellationToken))
+            throw new KeyNotFoundException("The source-line account was not found for this tenant.");
+        var inputs = NormalizeInputs(supplied);
+        var userSuppliedCodes = inputs.Keys.ToHashSet(StringComparer.Ordinal);
+        var rules = await ApplicableRulesAsync(tenantId, accountId, postingDate, route, cancellationToken);
+        var warnings = ApplyRules(inputs, rules, certificationState, route, refreshPersistedFixedValues);
+        if (inputs.Count == 0)
+            return new FinanceSourceLineResolution(
+                null, warnings, Array.Empty<string>(), rules);
 
         var codes = inputs.Keys.ToArray();
         var definitions = await _context.FinanceDimensionDefinitions.AsNoTracking()
@@ -297,7 +451,7 @@ public sealed class FinanceDimensionAdministrationService
         var suppliedDerived = definitions.FirstOrDefault(item =>
             item.Classification == "Derived" && userSuppliedCodes.Contains(item.Code));
         if (suppliedDerived is not null)
-            throw new InvalidOperationException($"Derived dimension {suppliedDerived.Code} must be resolved by Finance, not entered on a manual journal line.");
+            throw new InvalidOperationException($"Derived dimension {suppliedDerived.Code} must be resolved by Finance, not supplied by a producer.");
 
         var resolved = new List<(FinanceDimensionDefinition Definition, FinanceDimensionValue Value)>();
         foreach (var definition in definitions)
@@ -319,7 +473,12 @@ public sealed class FinanceDimensionAdministrationService
         {
             if (existing.Id != setId || existing.CombinationHash != hash)
                 throw new InvalidOperationException("Finance dimension-set identity collision detected.");
-            return existing;
+            return new FinanceSourceLineResolution(
+                existing,
+                warnings,
+                rules.Where(item => item.RuleType == "Fixed")
+                    .Select(item => item.FinanceDimensionDefinition.Code).ToArray(),
+                rules);
         }
 
         var set = new FinanceDimensionSet
@@ -334,17 +493,38 @@ public sealed class FinanceDimensionAdministrationService
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, FinanceDimensionSetId = set.Id,
                 FinanceDimensionDefinitionId = item.Definition.Id, FinanceDimensionValueId = item.Value.Id,
-                DimensionCodeSnapshot = item.Definition.Code, DimensionValueCodeSnapshot = item.Value.Code,
-                DimensionValueNameSnapshot = item.Value.Name, CreatedAt = DateTime.UtcNow,
+                DimensionCodeSnapshot = item.Definition.Code, DimensionNameSnapshot = item.Definition.Name,
+                DimensionValueCodeSnapshot = item.Value.Code, DimensionValueNameSnapshot = item.Value.Name,
+                SnapshotSource = "CanonicalResolution", SnapshotCapturedAt = DateTime.UtcNow,
+                SnapshotQuality = "Exact", CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.UserName, CreatedById = UserId()
             });
         }
         _context.FinanceDimensionSets.Add(set);
-        return set;
+        return new FinanceSourceLineResolution(
+            set,
+            warnings,
+            rules.Where(item => item.RuleType == "Fixed")
+                .Select(item => item.FinanceDimensionDefinition.Code).ToArray(),
+            rules);
+    }
+
+    public async Task<IReadOnlyList<FinanceDimensionAccountRule>> GetSourceLineRulesAsync(
+        FinancePostingProducerContext producer,
+        Guid accountId,
+        DateTime documentDate,
+        CancellationToken cancellationToken = default)
+    {
+        var route = producer?.Definition ?? throw new ArgumentNullException(nameof(producer));
+        return await ApplicableRulesAsync(TenantId, accountId, documentDate, route, cancellationToken);
     }
 
     private async Task<List<FinanceDimensionAccountRule>> ApplicableRulesAsync(
-        Guid tenantId, Guid accountId, DateTime date, CancellationToken cancellationToken)
+        Guid tenantId,
+        Guid accountId,
+        DateTime date,
+        FinanceDimensionRouteDefinition route,
+        CancellationToken cancellationToken)
     {
         var candidates = await _context.FinanceDimensionAccountRules.AsNoTracking()
             .Include(item => item.FinanceDimensionDefinition)
@@ -352,26 +532,35 @@ public sealed class FinanceDimensionAdministrationService
             .Where(item => item.TenantId == tenantId && item.AccountId == accountId && !item.IsDeleted && item.IsActive
                            && item.EffectiveDate.Date <= date.Date
                            && (!item.ExpiryDate.HasValue || item.ExpiryDate.Value.Date >= date.Date)
-                           && (item.SourceModule == null || item.SourceModule == "GL")
-                           && (item.SourceDocumentType == null || item.SourceDocumentType == "ManualJournalEntry")
+                           && (!item.RouteId.HasValue || item.RouteId == route.Id)
+                           && (item.SourceModule == null || item.SourceModule == route.PostingSourceModule)
+                           && (item.SourceDocumentType == null || item.SourceDocumentType == route.DocumentType)
                            && (item.PostingAction == null || item.PostingAction == "Post"))
             .ToListAsync(cancellationToken);
         return candidates.GroupBy(item => item.FinanceDimensionDefinitionId).Select(group =>
         {
-            var ordered = group.OrderByDescending(Specificity).ToList();
-            if (ordered.Count > 1 && Specificity(ordered[0]) == Specificity(ordered[1]))
+            var ordered = group.OrderByDescending(item => Specificity(item, route.Id))
+                .ThenByDescending(item => item.RuleVersion).ToList();
+            if (ordered.Count > 1 && Specificity(ordered[0], route.Id) == Specificity(ordered[1], route.Id))
                 throw new InvalidOperationException($"Ambiguous Finance dimension rules exist for {ordered[0].FinanceDimensionDefinition.Code}.");
             return ordered[0];
         }).ToList();
     }
 
-    private static int Specificity(FinanceDimensionAccountRule rule)
-        => (rule.SourceModule is null ? 0 : 1) + (rule.SourceDocumentType is null ? 0 : 1) + (rule.PostingAction is null ? 0 : 1);
+    private static int Specificity(FinanceDimensionAccountRule rule, FinanceDimensionRouteId routeId)
+        => (rule.RouteId.HasValue && rule.RouteId == routeId ? 8 : 0)
+           + (rule.SourceModule is null ? 0 : 4)
+           + (rule.SourceDocumentType is null ? 0 : 2)
+           + (rule.PostingAction is null ? 0 : 1);
 
-    private static void ApplyRules(
+    private static IReadOnlyList<string> ApplyRules(
         Dictionary<string, FinancePostingDimensionValueDto> inputs,
-        IEnumerable<FinanceDimensionAccountRule> rules)
+        IEnumerable<FinanceDimensionAccountRule> rules,
+        FinanceDimensionCertificationState certificationState,
+        FinanceDimensionRouteDefinition route,
+        bool refreshPersistedFixedValues)
     {
+        var warnings = new List<string>();
         foreach (var rule in rules)
         {
             var code = rule.FinanceDimensionDefinition.Code;
@@ -379,24 +568,28 @@ public sealed class FinanceDimensionAdministrationService
             switch (rule.RuleType)
             {
                 case "Prohibited" when hasInput:
-                    throw new InvalidOperationException($"Dimension {code} is prohibited for this account and manual-journal source.");
+                    throw new InvalidOperationException($"Dimension {code} is prohibited for this account on route '{route.SourceRoute}'.");
                 case "Fixed":
                     if (rule.DefaultDimensionValue is null)
                         throw new InvalidOperationException($"Fixed dimension rule {code} has no configured value.");
-                    if (hasInput && !Matches(supplied!, rule.DefaultDimensionValue))
+                    if (hasInput && !refreshPersistedFixedValues && !Matches(supplied!, rule.DefaultDimensionValue))
                         throw new InvalidOperationException($"Dimension {code} is fixed at {rule.DefaultDimensionValue.Code}.");
                     inputs[code] = Input(rule.FinanceDimensionDefinition, rule.DefaultDimensionValue);
                     break;
                 case "Required" when !hasInput:
-                    if (rule.DefaultDimensionValue is null)
-                        throw new InvalidOperationException($"Dimension {code} is required for this account and manual-journal source.");
-                    inputs[code] = Input(rule.FinanceDimensionDefinition, rule.DefaultDimensionValue);
+                    if (rule.DefaultDimensionValue is not null)
+                        inputs[code] = Input(rule.FinanceDimensionDefinition, rule.DefaultDimensionValue);
+                    else if (certificationState == FinanceDimensionCertificationState.Enforced)
+                        throw new InvalidOperationException($"Dimension {code} is required for this account on route '{route.SourceRoute}'.");
+                    else
+                        warnings.Add($"Dimension {code} is required for this account before route enforcement.");
                     break;
                 case "Optional" when !hasInput && rule.DefaultDimensionValue is not null:
                     inputs[code] = Input(rule.FinanceDimensionDefinition, rule.DefaultDimensionValue);
                     break;
             }
         }
+        return warnings;
     }
 
     private static Dictionary<string, FinancePostingDimensionValueDto> NormalizeInputs(
@@ -524,6 +717,7 @@ public sealed class FinanceDimensionAdministrationService
         RuleType = item.RuleType, DefaultDimensionValueId = item.DefaultDimensionValueId,
         DefaultValueCode = item.DefaultDimensionValue?.Code, SourceModule = item.SourceModule,
         SourceDocumentType = item.SourceDocumentType, PostingAction = item.PostingAction,
+        RouteId = item.RouteId, SourceRoute = item.SourceRoute, ContractVersion = item.ContractVersion,
         EffectiveDate = item.EffectiveDate, ExpiryDate = item.ExpiryDate, IsActive = item.IsActive
     };
 

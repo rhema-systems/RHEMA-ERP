@@ -29,18 +29,20 @@ public sealed class ProcurementSourcingCaseConfiguration : IEntityTypeConfigurat
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.HasIndex(item => new { item.TenantId, item.CaseNumber }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.PurchaseRequisitionId, item.CaseSequence }).IsUnique();
-        builder.HasIndex(item => new { item.TenantId, item.SourcingReleaseId }).IsUnique();
+        builder.HasIndex(item => new { item.TenantId, item.SourcingReleaseId })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Status] IN (0, 1)");
         builder.HasIndex(item => new { item.TenantId, item.Status });
         builder.HasOne(item => item.PurchaseRequisition).WithMany(item => item.SourcingCases)
             .HasForeignKey(item => item.PurchaseRequisitionId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.SourcingRelease).WithMany(item => item.SourcingCases)
             .HasForeignKey(item => item.SourcingReleaseId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(item => item.SourcePlan).WithMany().HasForeignKey(item => item.SourcePlanId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(item => item.SourcePlanItem).WithMany().HasForeignKey(item => item.SourcePlanItemId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(item => item.SourcePlan).WithMany().HasForeignKey(item => item.SourcePlanId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(item => item.SourcePlanItem).WithMany().HasForeignKey(item => item.SourcePlanItemId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.PolicySet).WithMany().HasForeignKey(item => item.PolicySetId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.MethodRule).WithMany().HasForeignKey(item => item.MethodRuleId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.ThresholdRule).WithMany().HasForeignKey(item => item.ThresholdRuleId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(item => item.AuthorityRoute).WithMany().HasForeignKey(item => item.AuthorityRouteId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(item => item.AuthorityRoute).WithMany().HasForeignKey(item => item.AuthorityRouteId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.ApprovedExceptionRule).WithMany().HasForeignKey(item => item.ApprovedExceptionRuleId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.MethodOverrideWorkflowInstance).WithMany()
             .HasForeignKey(item => item.MethodOverrideWorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);

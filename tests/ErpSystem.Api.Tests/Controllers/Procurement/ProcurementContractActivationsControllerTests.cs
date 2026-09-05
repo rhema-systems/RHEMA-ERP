@@ -14,12 +14,12 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementContractActivationsControllerTests
 {
     [Fact]
-    public void ControllerUsesInternalPolicyAndDedicatedLifecycleRoutes()
+    public void ControllerUsesProcurementPermissionsAndDedicatedLifecycleRoutes()
     {
         var type = typeof(ProcurementContractActivationsController);
 
         type.GetCustomAttribute<AuthorizeAttribute>()!.Policy
-            .Should().Be("InternalOnly");
+            .Should().BeNull();
         type.GetCustomAttribute<RouteAttribute>()!.Template
             .Should().Be("api/procurement/contract-activations");
         type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
@@ -31,6 +31,14 @@ public sealed class ProcurementContractActivationsControllerTests
                 "Decide",
                 "Activate"
             ]);
+        type.GetMethod("GetOverview")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod("Submit")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.contract.manage");
+        type.GetMethod("Decide")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.contract.approve");
+        type.GetMethod("Activate")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.contract.approve");
     }
 
     [Fact]

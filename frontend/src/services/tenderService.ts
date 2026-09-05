@@ -3,6 +3,9 @@
  * Main API service for Tender management
  */
 
+import type { ProcurementMethodType } from '@/types/procurement-policy';
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
@@ -34,7 +37,7 @@ export interface TenderDto {
   sourcePurchaseRequisitionId?: string;
   sourcingReleaseId?: string;
   sourcingCaseId?: string;
-  sourcingMethod?: number;
+  sourcingMethod?: ProcurementMethodType;
   bidCount: number;
   invitationCount: number;
   createdAt: string;
@@ -278,6 +281,8 @@ export interface TenderFeeDto {
   amount: number;
   currency: string;
   paymentMethod: string;
+  receivingAccountId?: string;
+  revenueAccountId?: string;
   isMandatory: boolean;
   dueDate?: string;
   description?: string;
@@ -298,6 +303,14 @@ export interface TenderEvaluatorDto {
   completedDate?: string;
   weightagePercentage?: number;
   evaluationCount?: number;
+}
+
+export interface TenderEvaluatorCandidateDto {
+  userId: string;
+  userName: string;
+  fullName: string;
+  email: string;
+  roleNames: string[];
 }
 
 export interface TenderClarificationDto {
@@ -324,9 +337,19 @@ export interface TenderRevisionDto {
   revisedByName?: string;
   revisionType: string;
   description: string;
+  changes?: string;
   newSubmissionDeadline?: string;
   requiresRebid: boolean;
   notificationSent: boolean;
+}
+
+export interface CreateTenderRevisionDto {
+  revisionType: 'Amendment' | 'Addendum' | 'Corrigendum' | 'DeadlineExtension';
+  description: string;
+  changes?: string;
+  newSubmissionDeadline?: string;
+  requiresRebid: boolean;
+  sendNotifications: boolean;
 }
 
 export interface TenderBidSummaryDto {
@@ -358,6 +381,8 @@ export interface CreateTenderFeeDto {
   amount: number;
   currency?: string;
   paymentMethod: string;
+  receivingAccountId?: string;
+  revenueAccountId?: string;
   isMandatory?: boolean;
   dueDate?: string;
   description?: string;
@@ -1074,6 +1099,41 @@ class TenderService {
   }
 
   /**
+   * Get active users in the current tenant whose Security role grants tender evaluation.
+   */
+  async getEvaluatorCandidates(
+    tenderId: string
+  ): Promise<TenderEvaluatorCandidateDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluator-candidates`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      let message = 'Failed to load authorised tender evaluators';
+      try {
+        const problem = JSON.parse(body) as {
+          detail?: string;
+          code?: string;
+          extensions?: { code?: string };
+        };
+        const code = problem.code || problem.extensions?.code;
+        message = problem.detail || message;
+        if (code) message = `${message} (${code})`;
+      } catch {
+        if (body) message = body;
+      }
+      throw new Error(message);
+    }
+
+    return response.json();
+  }
+
+  /**
    * Assign evaluators
    */
   async assignEvaluators(
@@ -1180,6 +1240,54 @@ class TenderService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to answer clarification');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get the immutable amendment/addendum history for a tender.
+   */
+  async getTenderRevisions(tenderId: string): Promise<TenderRevisionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/revisions`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      await throwProcurementResponseError(
+        response,
+        'Failed to get tender revisions'
+      );
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Issue a governed tender amendment, addendum, corrigendum, or extension.
+   */
+  async createTenderRevision(
+    tenderId: string,
+    data: CreateTenderRevisionDto
+  ): Promise<TenderRevisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/revisions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
+
+    if (!response.ok) {
+      await throwProcurementResponseError(
+        response,
+        'Failed to issue tender amendment'
+      );
     }
 
     return response.json();
@@ -1351,6 +1459,12 @@ export const answerClarification = (
   clarificationId: string,
   data: AnswerClarificationDto
 ) => tenderService.answerClarification(tenderId, clarificationId, data);
+export const getTenderRevisions = (tenderId: string) =>
+  tenderService.getTenderRevisions(tenderId);
+export const createTenderRevision = (
+  tenderId: string,
+  data: CreateTenderRevisionDto
+) => tenderService.createTenderRevision(tenderId, data);
 // QCBS Evaluation functions
 export const configureQCBS = (tenderId: string, data: ConfigureQCBSDto) =>
   tenderService.configureQCBS(tenderId, data);

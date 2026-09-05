@@ -1569,6 +1569,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         requirementKey: item.requirementKey || '',
         documentName: item.documentName || '',
         documentType: item.documentType?.trim() || undefined,
+        providedBy: item.providedBy || 'Internal',
+        appliesTo: item.appliesTo || 'All',
         isRequired: item.isRequired !== false,
       }));
 
@@ -1585,6 +1587,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       id: 'document-1',
       requirementKey: buildRequirementKey(fallbackDocumentName),
       documentName: fallbackDocumentName,
+      providedBy: 'Internal',
+      appliesTo: 'All',
       isRequired: true,
     }];
   };
@@ -2113,6 +2117,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         requirementKey: '',
         documentName: '',
         documentType: '',
+        providedBy: 'Internal',
+        appliesTo: 'All',
         isRequired: true,
       },
     ]);
@@ -2744,7 +2750,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                                             </Button>
                                           </div>
                                         </div>
-                                        <div className="grid gap-3 md:grid-cols-2">
+                                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                           <div className="space-y-1.5">
                                             <Label htmlFor={`task-document-type-${itemId}`}>Document type</Label>
                                             <Input
@@ -2768,6 +2774,42 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                                                 updateDocumentRequirement(itemId, { requirementKey: event.target.value })
                                               }
                                             />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Provided by</Label>
+                                            <Select
+                                              value={requirement.providedBy || 'Internal'}
+                                              disabled={selectedWorkflowHasLiveInstances}
+                                              onValueChange={(value) =>
+                                                updateDocumentRequirement(itemId, { providedBy: value as WorkflowDocumentRequirementDto['providedBy'] })
+                                              }
+                                            >
+                                              <SelectTrigger><SelectValue /></SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="Customer">Customer</SelectItem>
+                                                <SelectItem value="Estate">Estate</SelectItem>
+                                                <SelectItem value="Legal">Legal</SelectItem>
+                                                <SelectItem value="Finance">Finance</SelectItem>
+                                                <SelectItem value="Internal">Other internal team</SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Applies to</Label>
+                                            <Select
+                                              value={requirement.appliesTo || 'All'}
+                                              disabled={selectedWorkflowHasLiveInstances}
+                                              onValueChange={(value) =>
+                                                updateDocumentRequirement(itemId, { appliesTo: value as WorkflowDocumentRequirementDto['appliesTo'] })
+                                              }
+                                            >
+                                              <SelectTrigger><SelectValue /></SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="All">All requests</SelectItem>
+                                                <SelectItem value="Rent">Rental only</SelectItem>
+                                                <SelectItem value="Sale">Sale only</SelectItem>
+                                              </SelectContent>
+                                            </Select>
                                           </div>
                                         </div>
                                         <label className="flex items-center gap-2 text-sm">

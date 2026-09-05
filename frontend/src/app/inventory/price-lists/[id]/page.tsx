@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +20,20 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { priceListService, PriceListDto, PriceListLineDto, CreatePriceListLineDto, PriceListType, PriceListStatus, PriceListApprovalStatus, getPriceListTypeLabel, getPriceListStatusLabel, getPriceListApprovalStatusLabel } from '@/services/priceListService';
 import { inventoryManagementService, InventoryItemDto } from '@/services/inventoryManagementService';
+
+type ProblemDetailsPayload = {
+  detail?: string;
+  title?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  const problem = (error as { response?: { data?: ProblemDetailsPayload } })?.response?.data;
+  const detail = problem?.detail || problem?.title || (error instanceof Error ? error.message : fallback);
+  const code = problem?.code || problem?.extensions?.code;
+  return code ? `${detail} (${code})` : detail;
+};
 
 interface InventoryItemOption {
   id: string;
@@ -52,6 +67,8 @@ export default function PriceListDetailPage() {
   const [isViewLineDialogOpen, setIsViewLineDialogOpen] = useState(false);
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [selectedLine, setSelectedLine] = useState<PriceListLineDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PriceListLineDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [bulkPercentage, setBulkPercentage] = useState<number>(0);
   const [lineFormData, setLineFormData] = useState<PriceListLineFormData>({
     inventoryItemId: '', unitOfMeasure: 'EA', basePrice: 0, discountPercent: 0, minQuantity: 1
@@ -161,15 +178,21 @@ export default function PriceListDetailPage() {
     }
   };
 
-  const handleDeleteLine = async (lineId: string) => {
-    if (!confirm('Are you sure you want to delete this line?')) return;
+  const confirmDeleteLine = async () => {
+    if (!deleteTarget) return false;
+    setDeleting(true);
     try {
-      await priceListService.deletePriceListLine(id, lineId);
+      await priceListService.deletePriceListLine(id, deleteTarget.id);
       toast.success('Line deleted successfully');
-      loadPriceList();
+      setDeleteTarget(null);
+      await loadPriceList();
+      return true;
     } catch (error) {
       console.error('Error deleting line:', error);
-      toast.error('Failed to delete line');
+      toast.error(getErrorMessage(error, 'Failed to delete line'));
+      return false;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -359,7 +382,7 @@ export default function PriceListDetailPage() {
                               <DropdownMenuItem onClick={() => openViewLineDialog(line)}><Eye className="mr-2 h-4 w-4" />View</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEditLineDialog(line)}><Edit className="mr-2 h-4 w-4" />Edit</DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteLine(line.id)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(line)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -567,6 +590,17 @@ export default function PriceListDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}
+        title="Delete price-list line?"
+        description={`Remove ${deleteTarget?.itemCode || deleteTarget?.itemName || 'this item'} from ${priceList?.name || 'the price list'}? This action cannot be undone.`}
+        confirmText="Delete line"
+        variant="destructive"
+        onConfirm={confirmDeleteLine}
+        isLoading={deleting}
+      />
     </div>
   );
 }

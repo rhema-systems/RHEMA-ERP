@@ -48,6 +48,12 @@ namespace ErpSystem.Web.Services
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly HrAwardsReportSeeder? _hrAwardsReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
+        private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
+        private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
+        private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
+        private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
+        private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
@@ -108,7 +114,11 @@ namespace ErpSystem.Web.Services
             string RoleName,
             string Description,
             IReadOnlyList<string> Checklist,
-            IReadOnlyList<string> Documents);
+            IReadOnlyList<string> Documents,
+            string TaskActionType = "estate-sop-example",
+            string DocumentType = "EstateSopEvidence",
+            string? Instructions = null,
+            IReadOnlyList<string>? FieldKeys = null);
 
         public DatabaseSeedingService(
             ApplicationDbContext context,
@@ -123,7 +133,13 @@ namespace ErpSystem.Web.Services
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
-            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null)
+            QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
+            QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
+            QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
+            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null,
+            CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
+            CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
+            CivilEngineeringStatutoryReportSeeder? civilEngineeringStatutoryReportSeeder = null)
         {
             _context = context;
             _userManager = userManager;
@@ -136,6 +152,12 @@ namespace ErpSystem.Web.Services
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _hrAwardsReportSeeder = hrAwardsReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
+            _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
+            _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
+            _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
+            _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
+            _civilEngineeringStatutoryReportSeeder = civilEngineeringStatutoryReportSeeder;
             _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
@@ -213,6 +235,30 @@ namespace ErpSystem.Web.Services
                     await _procurementAccessControlSeeder.SeedAsync();
                 }
 
+                if (_civilEngineeringConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft Civil Engineering configuration profiles are seeded...");
+                    await _civilEngineeringConfigurationProfileSeeder.SeedAsync();
+                }
+
+                if (_civilEngineeringAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring Civil Engineering roles and permissions are seeded...");
+                    await _civilEngineeringAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey access roles, permissions, and workflow entity types are seeded...");
+                    await _quantitySurveyAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft TDC Quantity Survey configuration profiles are seeded...");
+                    await _quantitySurveyConfigurationProfileSeeder.SeedAsync();
+                }
+
                 if (_procurementStatutoryReportSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring TDC procurement statutory report catalogue is seeded...");
@@ -234,6 +280,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC audit and compliance report catalogue is seeded...");
                     await _auditComplianceReportSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey statutory report catalogue is seeded...");
+                    await _quantitySurveyStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_civilEngineeringStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Civil Engineering report catalogue is seeded...");
+                    await _civilEngineeringStatutoryReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
@@ -349,14 +407,34 @@ namespace ErpSystem.Web.Services
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
             await EnsureBusinessPartnerWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring procurement receipt-inspection workflow is seeded...");
+            await EnsureProcurementOperationalWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring project workflows are seeded...");
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR workflows are seeded...");
             await EnsureHrWorkflowsSeededAsync();
+
+            _logger.LogInformation("Ensuring Legal procedure workflows are seeded...");
+            await EnsureLegalProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
+
+            // Program.cs invokes this lightweight path during every permitted VPS
+            // startup. Keep the UAT PO route here so Draft templates are repaired and
+            // published before operators can submit purchase orders.
+            if (_procurementAccessControlSeeder is not null &&
+                StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+                    _environment.EnvironmentName,
+                    _allowDevelopmentDataSeedingOutsideDevelopment))
+            {
+                _logger.LogInformation(
+                    "Ensuring TDC Draft workflow templates and the UAT Purchase Order approval workflow are ready...");
+                await _procurementAccessControlSeeder.SeedAsync();
+                await _procurementAccessControlSeeder
+                    .EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync();
+            }
         }
 
         /// <summary>
@@ -458,6 +536,77 @@ namespace ErpSystem.Web.Services
             await SeedRolePermissionAssignmentsAsync();
         }
 
+        private async Task EnsureProcurementOperationalWorkflowsSeededAsync()
+        {
+            try
+            {
+                const string entityCode = "PROCUREMENT_RECEIPT_INSPECTION";
+                const string definitionName = "Procurement Receipt Inspection Approval";
+                const string approverRole = "TDC_STORES_MANAGER";
+                var stages = new[]
+                {
+                    new WorkflowApprovalStageSeed(
+                        "PendingApproval",
+                        new[] { approverRole },
+                        "Independent Stores Manager approval of accepted, rejected, damaged, and short receipt quantities.")
+                };
+                var tenants = await _context.Tenants
+                    .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                foreach (var tenant in tenants)
+                {
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode,
+                        "Procurement Receipt Inspection",
+                        typeof(ProcurementReceiptInspectionCase).FullName,
+                        definitionName,
+                        "Stores maker-checker approval before accepted receipt quantities become stock and AP eligible.",
+                        stages);
+
+                    // Earlier system seed data assigned this step to Head of Procurement.
+                    // Pending approval rows contain no decision and are safe to realign to
+                    // the corrected Stores Manager workflow role. Completed rows remain immutable.
+                    var pendingApprovals = await _context.WorkflowApprovals
+                        .Include(approval => approval.StepInstance)
+                            .ThenInclude(instance => instance.WorkflowStep)
+                                .ThenInclude(step => step.WorkflowDefinition)
+                        .Where(approval =>
+                            approval.TenantId == tenant.Id &&
+                            !approval.IsDeleted &&
+                            approval.Status == WorkflowApprovalStatus.Pending &&
+                            approval.ApproverId == null &&
+                            approval.ApproverRole != approverRole &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.CreatedBy == "System" &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.Name.StartsWith(definitionName))
+                        .ToListAsync();
+
+                    if (pendingApprovals.Count == 0)
+                        continue;
+
+                    var repairedAt = DateTime.UtcNow;
+                    foreach (var approval in pendingApprovals)
+                    {
+                        approval.ApproverRole = approverRole;
+                        approval.UpdatedAt = repairedAt;
+                        approval.UpdatedBy = "System";
+                    }
+
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation(
+                        "Realigned {Count} pending receipt-inspection approval assignment(s) to {Role} for tenant {TenantId}",
+                        pendingApprovals.Count,
+                        approverRole,
+                        tenant.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed procurement operational workflows");
+            }
+        }
+
         private async Task EnsureProjectWorkflowsSeededAsync()
         {
             try
@@ -515,6 +664,25 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed Estate SOP example workflows");
+            }
+        }
+
+        private async Task EnsureLegalProcedureWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetLegalProcedureWorkflowSeedSpecs())
+                    {
+                        await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, spec);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Legal procedure workflows");
             }
         }
 
@@ -757,18 +925,29 @@ namespace ErpSystem.Web.Services
                         })
                         .ToList()
                 },
+                FormFields = step.FieldKeys?
+                    .Where(field => !string.IsNullOrWhiteSpace(field))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(field => new WorkflowFormFieldDto
+                    {
+                        Name = field.Trim(),
+                        Label = field.Trim(),
+                        FieldType = WorkflowFieldType.Text,
+                        IsRequired = false
+                    })
+                    .ToList(),
                 TaskConfig = new WorkflowTaskConfigDto
                 {
-                    TaskActionType = "estate-sop-example",
+                    TaskActionType = step.TaskActionType,
                     RequiresDocument = false,
-                    Instructions = $"Example SOP step for {step.RoleName}. Replace or refine this in Workflow Setup for the live operating procedure.",
+                    Instructions = step.Instructions ?? $"Example SOP step for {step.RoleName}. Replace or refine this in Workflow Setup for the live operating procedure.",
                     DocumentRequirements = step.Documents
                         .Select((document, index) => new WorkflowDocumentRequirementDto
                         {
                             Id = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-DOC-{index + 1}",
                             RequirementKey = $"{NormalizeWorkflowEntityTypeKey(step.StepName)}-DOC-{index + 1}",
                             DocumentName = document,
-                            DocumentType = "EstateSopEvidence",
+                            DocumentType = step.DocumentType,
                             IsRequired = true
                         })
                         .ToList()
@@ -868,8 +1047,61 @@ namespace ErpSystem.Web.Services
                     ["Approved report pack", "Central DMS reference"])
             };
 
+            var facilitiesMaintenanceSteps = new[]
+            {
+                Step("Facilities Intake", WorkflowStepType.Manual, "Facilities Officer",
+                    ["Requester, contact, property/unit, issue type, and priority are confirmed", "Service impact, target date, and access notes are recorded", "Maintenance job card need is assessed"],
+                    [],
+                    fieldKeys:
+                    [
+                        "issueType",
+                        "priority",
+                        "serviceImpact",
+                        "targetDate",
+                        "preferredVisitDate",
+                        "accessInstructions",
+                        "issueDescription"
+                    ]),
+                Step("Maintenance Handoff Review", WorkflowStepType.Manual, "Facilities Supervisor",
+                    ["Maintenance routing decision is recorded", "Safety, access, and SLA context are confirmed", "Requester update has been issued"],
+                    [],
+                    fieldKeys:
+                    [
+                        "priority",
+                        "serviceImpact",
+                        "targetDate",
+                        "accessInstructions",
+                        "closureNotes"
+                    ]),
+                Step("Maintenance Closeout", WorkflowStepType.Approval, "Facilities Manager",
+                    ["Job card or work order reference is recorded where required", "Inspection, requester feedback, and completion outcome are reviewed", "Facilities case is ready for closeout"],
+                    [],
+                    fieldKeys:
+                    [
+                        "maintenanceJobCardReference",
+                        "maintenanceWorkOrderReference",
+                        "requesterFeedbackStatus",
+                        "closureNotes"
+                    ])
+            };
+
+            var facilitiesComplaintSteps = new[]
+            {
+                Step("Facilities Complaint Intake", WorkflowStepType.Manual, "Facilities Officer",
+                    ["Complainant, property/unit, category, and impact are confirmed", "Complaint details and target response date are recorded", "Helpdesk escalation need is assessed"],
+                    []),
+                Step("Complaint Resolution Review", WorkflowStepType.Manual, "Facilities Supervisor",
+                    ["Resolution action or escalation path is recorded", "Customer communication status is updated", "Evidence and service-impact notes are reviewed"],
+                    []),
+                Step("Complaint Closeout", WorkflowStepType.Approval, "Facilities Manager",
+                    ["Resolution outcome and requester feedback are confirmed", "Any Helpdesk or Maintenance reference is captured", "Facilities complaint is ready for closeout"],
+                    [])
+            };
+
             return
             [
+                Spec("EstateFacilityMaintenance", "Maintenance Intake", facilitiesMaintenanceSteps),
+                Spec("EstateFacilityComplaint", "Complaint Management", facilitiesComplaintSteps),
                 Spec("EstateRegistrySecretariat", "Secretarial and Estates Registry", registryToManager),
                 Spec("EstateRecordsManagement", "Estate Records Management", registryToManager),
                 Spec("EstateInspection", "Land and Landed Property Inspection", registryToManager),
@@ -899,8 +1131,9 @@ namespace ErpSystem.Web.Services
                 WorkflowStepType type,
                 string role,
                 IReadOnlyList<string> checks,
-                IReadOnlyList<string> documents)
-                => new(name, type, role, string.Join(" ", checks), checks, documents);
+                IReadOnlyList<string> documents,
+                IReadOnlyList<string>? fieldKeys = null)
+                => new(name, type, role, string.Join(" ", checks), checks, documents, FieldKeys: fieldKeys);
 
             static EstateSopWorkflowSeedSpec Spec(
                 string entityCode,
@@ -912,6 +1145,76 @@ namespace ErpSystem.Web.Services
                     $"Estate SOP Example - {entityName}",
                     $"Example TDC Estate SOP workflow for {entityName}. It provides practical stages, checklist controls, and document requirements that can be cloned/refined in Workflow Setup.",
                     steps);
+        }
+
+        private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetLegalProcedureWorkflowSeedSpecs()
+        {
+            const string TaskActionType = "legal-property-agreement-review";
+            const string DocumentType = "LegalAgreementReviewEvidence";
+
+            return
+            [
+                new(
+                    "LegalPropertyAgreementReview",
+                    "LegalPropertyAgreementReview",
+                    "Legal Property Agreement Review",
+                    "Workflow for Legal review of draft rental, lease, and sale agreements submitted from Property Management.",
+                    [
+                        LegalStep(
+                            "Legal Intake",
+                            WorkflowStepType.Manual,
+                            "Legal Admin Assistant",
+                            [
+                                "Confirm Estate source reference",
+                                "Confirm draft agreement is attached",
+                                "Assign Legal Officer"
+                            ],
+                            [
+                                "Generated draft agreement"
+                            ]),
+                        LegalStep(
+                            "Agreement Vetting",
+                            WorkflowStepType.Manual,
+                            "Legal Officer",
+                            [
+                                "Verify parties and property",
+                                "Review clauses and schedules",
+                                "Approve or return for correction"
+                            ],
+                            [
+                                "Legal review note"
+                            ]),
+                        LegalStep(
+                            "Head of Legal Release",
+                            WorkflowStepType.Approval,
+                            "Head of Legal",
+                            [
+                                "Confirm Legal Officer recommendation",
+                                "Record release decision",
+                                "Return approved reference to Property Management"
+                            ],
+                            [
+                                "Approved / released agreement"
+                            ])
+                    ])
+            ];
+
+            static EstateSopWorkflowStepSeed LegalStep(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> documents)
+                => new(
+                    name,
+                    type,
+                    role,
+                    string.Join(" ", checks),
+                    checks,
+                    documents,
+                    TaskActionType,
+                    DocumentType,
+                    $"Complete the {name} task for the property agreement review workflow.");
         }
 
         private async Task EnsureFinanceWorkflowsSeededAsync()
@@ -7163,6 +7466,10 @@ namespace ErpSystem.Web.Services
                 new { Department = "Estate Management", Code = "LA-EST", Username = "estate.manager", First = "Akosua", Last = "Manager", Role = "Estate Manager", Number = "LA-EST-003" },
                 new { Department = "Estate Management", Code = "LA-EST", Username = "acquisition.committee", First = "Kwame", Last = "Committee", Role = "Acquisition Committee", Number = "LA-EST-004" },
 
+                new { Department = "Facilities", Code = "FAC", Username = "facilities.officer", First = "Kofi", Last = "Facilities", Role = "Facilities Officer", Number = "FAC-001" },
+                new { Department = "Facilities", Code = "FAC", Username = "facilities.supervisor", First = "Abena", Last = "Supervisor", Role = "Facilities Supervisor", Number = "FAC-002" },
+                new { Department = "Facilities", Code = "FAC", Username = "facilities.manager", First = "Yaw", Last = "Facilities", Role = "Facilities Manager", Number = "FAC-003" },
+
                 new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "survey.officer1", First = "Yaw", Last = "Survey", Role = "Survey Officer", Number = "LA-SUR-001" },
                 new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "survey.officer2", First = "Esi", Last = "Survey", Role = "Survey Officer", Number = "LA-SUR-002" },
                 new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "senior.surveyor1", First = "Kofi", Last = "Surveyor", Role = "Senior Surveyor", Number = "LA-SUR-003" },
@@ -7172,6 +7479,8 @@ namespace ErpSystem.Web.Services
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.officer2", First = "Abena", Last = "Legal", Role = "Legal Officer", Number = "LA-LEG-002" },
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager1", First = "Fiifi", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-003" },
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager2", First = "Mansa", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-004" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.admin", First = "Efua", Last = "Admin", Role = "Legal Admin Assistant", Number = "LA-LEG-005" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.head", First = "Yaw", Last = "Head", Role = "Head of Legal", Number = "LA-LEG-006" },
 
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "finance.officer", First = "Daniel", Last = "Finance", Role = "Finance Officer", Number = "LA-FIN-001" },
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "acquisition.finance.manager", First = "Grace", Last = "Finance", Role = "Finance Manager", Number = "LA-FIN-002" },
@@ -7914,6 +8223,9 @@ namespace ErpSystem.Web.Services
                 new { Name = "Planning Officer", Description = "Planning/site-plan coordination role for Estate SOP handoffs" },
                 new { Name = "Estate Officer", Description = "Captures and submits land identification records" },
                 new { Name = "Estate Manager", Description = "Reviews land suitability assessments" },
+                new { Name = "Facilities Officer", Description = "Captures Facilities intake, maintenance handoffs, site service updates, and case closeout records" },
+                new { Name = "Facilities Supervisor", Description = "Reviews Facilities intake triage, maintenance routing, SLA follow-up, and service completion controls" },
+                new { Name = "Facilities Manager", Description = "Approves Facilities escalations, dashboards, provider decisions, billing coordination, and closeout governance" },
                 new { Name = PropertyManagementRoles.Officer, Description = "Handles Property Management intake, handoffs, and customer updates" },
                 new { Name = PropertyManagementRoles.Supervisor, Description = "Reviews Property Management availability and commercial terms" },
                 new { Name = PropertyManagementRoles.Manager, Description = "Approves Property Management requests and operating decisions" },
@@ -7921,6 +8233,8 @@ namespace ErpSystem.Web.Services
                 new { Name = "Senior Surveyor", Description = "Verifies cadastral surveys" },
                 new { Name = "Legal Officer", Description = "Handles ownership classification and instrument execution" },
                 new { Name = "Legal Manager", Description = "Approves ownership verification and statutory consent" },
+                new { Name = "Legal Admin Assistant", Description = "Records Legal intake, files, dispatch, and matter routing" },
+                new { Name = "Head of Legal", Description = "Approves Legal release, signatures, and final legal decisions" },
                 new { Name = "Acquisition Committee", Description = "Handles land agreement negotiations" },
                 new { Name = "Executive Approver", Description = "Approves negotiated land agreements" },
                 new { Name = "Lands Commission Liaison", Description = "Submits statutory consent applications" },
@@ -8024,6 +8338,7 @@ namespace ErpSystem.Web.Services
                 new { ModuleName = "HR", Description = "HR and employee reports" },
                 new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
+                new { ModuleName = "Project Management", Description = "Projects, Quantity Survey, and Civil Engineering reports" },
                 new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
                 new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };
@@ -8179,6 +8494,83 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Mark Land Project Ready",
                     Description = "Approve verified land demarcations for project management handoff",
                     Category = "Estate - Land Management"
+                },
+                new
+                {
+                    Name = "facilities.access",
+                    DisplayName = "Access Facilities",
+                    Description = "Access Estate / Facilities workspaces and navigation",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.dashboard.read",
+                    DisplayName = "View Facilities Dashboard",
+                    Description = "View Estate / Facilities operating dashboard and handoff status",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.read",
+                    DisplayName = "View Facilities Cases",
+                    Description = "View Facilities procedure cases, stages, documents, and activity",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.create",
+                    DisplayName = "Create Facilities Cases",
+                    Description = "Open new Facilities procedure cases and intake records",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.update",
+                    DisplayName = "Update Facilities Cases",
+                    Description = "Update Facilities intake fields, checklists, documents, and notes",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.case.approve",
+                    DisplayName = "Approve Facilities Cases",
+                    Description = "Approve Facilities stages, exceptions, publishing, and close-out decisions",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.handoff.create",
+                    DisplayName = "Create Facilities Handoffs",
+                    Description = "Create downstream module handoffs from Facilities",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.documents.manage",
+                    DisplayName = "Manage Facilities Documents",
+                    Description = "Manage Facilities document index and DMS readiness controls",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.finance.view",
+                    DisplayName = "View Facilities Finance Context",
+                    Description = "View Facilities billing, arrears, budget, expense, and payment-confirmation context",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "facilities.billing.manage",
+                    DisplayName = "Manage Facilities Billing",
+                    Description = "Prepare Facilities billing instruction packages and follow-up records",
+                    Category = "Estate - Facilities"
+                },
+                new
+                {
+                    Name = "maintenance.access",
+                    DisplayName = "Access Maintenance",
+                    Description = "Access Maintenance Management job cards, work orders, and dashboard handoffs",
+                    Category = "Maintenance"
                 },
                 new
                 {
@@ -8582,16 +8974,88 @@ namespace ErpSystem.Web.Services
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
-                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
+                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants)
+                    .Concat(new[]
+                    {
+                        "facilities.access",
+                        "facilities.dashboard.read",
+                        "facilities.case.read",
+                        "facilities.case.create",
+                        "facilities.case.update",
+                        "facilities.case.approve",
+                        "facilities.handoff.create",
+                        "facilities.documents.manage",
+                        "facilities.finance.view",
+                        "facilities.billing.manage",
+                        "maintenance.access"
+                    })
+                    .ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
-                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
+                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants)
+                    .Concat(new[]
+                    {
+                        "facilities.access",
+                        "facilities.dashboard.read",
+                        "facilities.case.read",
+                        "facilities.case.create",
+                        "facilities.case.update",
+                        "facilities.case.approve",
+                        "facilities.handoff.create",
+                        "facilities.documents.manage",
+                        "facilities.finance.view",
+                        "facilities.billing.manage",
+                        "maintenance.access"
+                    })
+                    .ToArray(),
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
                 [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
                 [PropertyManagementRoles.Manager] = PropertyManagementPermissions.ManagerNames,
+                ["Facilities Officer"] = new[]
+                {
+                    "facilities.access",
+                    "facilities.case.read",
+                    "facilities.case.create",
+                    "facilities.case.update",
+                    "facilities.handoff.create",
+                    "maintenance.access"
+                },
+                ["Facilities Supervisor"] = new[]
+                {
+                    "facilities.access",
+                    "facilities.dashboard.read",
+                    "facilities.case.read",
+                    "facilities.case.create",
+                    "facilities.case.update",
+                    "facilities.handoff.create",
+                    "facilities.billing.manage",
+                    "maintenance.access"
+                },
+                ["Facilities Manager"] = new[]
+                {
+                    "facilities.access",
+                    "facilities.dashboard.read",
+                    "facilities.case.read",
+                    "facilities.case.create",
+                    "facilities.case.update",
+                    "facilities.case.approve",
+                    "facilities.handoff.create",
+                    "facilities.documents.manage",
+                    "facilities.finance.view",
+                    "facilities.billing.manage",
+                    "maintenance.access"
+                },
+                ["Estate Officer"] = new[]
+                {
+                    "estate.land.project-readiness"
+                },
+                ["Estate Manager"] = new[]
+                {
+                    "estate.land.project-readiness"
+                },
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -8674,6 +9138,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
                     FinancePermissions.ManageApSupplierDebitNotes,
                     FinancePermissions.SubmitApSupplierDebitNotes,
                     FinancePermissions.ApproveApSupplierDebitNotes,
@@ -8764,6 +9229,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
                     FinancePermissions.ManageApSupplierDebitNotes,
                     FinancePermissions.SubmitApSupplierDebitNotes,
                     FinancePermissions.ApproveApSupplierDebitNotes,
@@ -9419,6 +9885,15 @@ namespace ErpSystem.Web.Services
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();
+            services.AddScoped<ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ProcurementAccessControlSeeder>();
+            services.AddScoped<ProcurementStatutoryReportSeeder>();
+            services.AddScoped<InventoryStatutoryReportSeeder>();
+            services.AddScoped<AuditComplianceReportSeeder>();
+            services.AddScoped<QuantitySurveyAccessControlSeeder>();
+            services.AddScoped<QuantitySurveyConfigurationProfileSeeder>();
+            services.AddScoped<QuantitySurveyStatutoryReportSeeder>();
+            services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
             return services;
         }
 

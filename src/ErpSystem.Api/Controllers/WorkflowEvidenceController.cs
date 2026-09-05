@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -65,14 +66,22 @@ public sealed class WorkflowEvidenceController : ControllerBase
     [HttpGet("step/{stepInstanceId:guid}")]
     public async Task<IActionResult> GetStepEvidence(Guid stepInstanceId, CancellationToken cancellationToken)
     {
+        var canReview = await CanReviewStepEvidenceAsync(stepInstanceId, cancellationToken);
+        var userId = UserId;
         var rows = await _db.WorkflowEvidenceDocuments.AsNoTracking().Where(item =>
             item.TenantId == TenantId && item.StepInstanceId == stepInstanceId && !item.IsDeleted)
             .OrderBy(item => item.DocumentName).ThenByDescending(item => item.Version)
             .Select(item => new { item.Id, item.AttachmentId, item.DocumentName, item.DocumentType, item.FileName,
-                item.Sha256, item.DocumentOwnerId, item.IssueDate, item.ExpiryDate, IsExpired = item.ExpiryDate < DateTime.UtcNow,
+                item.FilePath, item.Sha256, item.DocumentOwnerId, item.IssueDate, item.ExpiryDate, IsExpired = item.ExpiryDate < DateTime.UtcNow,
                 item.Version, item.ReplacesEvidenceId, item.IsCurrent, item.VerificationStatus, item.VerifiedById,
                 item.VerifiedAt, item.VerificationNotes, item.MalwareScanStatus, item.RetainUntil, item.IsLegalHold,
-                item.LegalHoldReason, item.LegalHoldById, item.LegalHoldAt })
+                item.LegalHoldReason, item.LegalHoldById, item.LegalHoldAt,
+                CanVerify = canReview && item.UploadedById != userId && item.IsCurrent,
+                VerificationBlockedReason = !canReview
+                    ? "Review is assigned to this workflow's approvers or an authorized workflow administrator."
+                    : item.UploadedById == userId
+                        ? "A different authorized reviewer must verify your upload."
+                        : !item.IsCurrent ? "Only the current document version can be reviewed." : null })
             .ToListAsync(cancellationToken);
         return Ok(new { success = true, data = rows });
     }
@@ -80,7 +89,8 @@ public sealed class WorkflowEvidenceController : ControllerBase
     [HttpGet("review/instances")]
     public async Task<IActionResult> ReviewInstances([FromQuery] string? search,
         [FromQuery] string? entityType, [FromQuery] Guid? workflowDefinitionId,
-        [FromQuery] int pageSize = 50, CancellationToken cancellationToken = default)
+        [FromQuery] int pageSize = 50, CancellationToken cancellationToken = default,
+        [FromQuery] Guid? workflowInstanceId = null)
     {
         pageSize = Math.Clamp(pageSize, 10, 100);
         var query = _db.WorkflowInstances.AsNoTracking()
@@ -91,6 +101,8 @@ public sealed class WorkflowEvidenceController : ControllerBase
 
         if (workflowDefinitionId.HasValue)
             query = query.Where(item => item.WorkflowDefinitionId == workflowDefinitionId.Value);
+        if (workflowInstanceId.HasValue)
+            query = query.Where(item => item.Id == workflowInstanceId.Value);
 
         if (!string.IsNullOrWhiteSpace(entityType))
         {
@@ -174,20 +186,33 @@ public sealed class WorkflowEvidenceController : ControllerBase
     }
 
     [HttpPost("{id:guid}/verify")]
-    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager,InternalAudit,Finance Manager,Financial Controller,Chief Accountant,Managing Director")]
     public async Task<IActionResult> Verify(Guid id, [FromBody] VerifyWorkflowEvidenceRequest request,
         CancellationToken cancellationToken)
     {
         var evidence = await Find(id, cancellationToken);
         if (evidence == null) return NotFound();
-        if (request.Accepted && evidence.UploadedById == UserId)
-            return Conflict("The evidence uploader cannot verify the same document. A different authorized reviewer is required.");
+        if (!await CanReviewStepEvidenceAsync(evidence.StepInstanceId, cancellationToken))
+            return EvidenceProblem(403, "WORKFLOW_EVIDENCE_REVIEW_FORBIDDEN",
+                "Review is assigned to this workflow's approvers or an authorized workflow administrator.");
+        if (evidence.UploadedById == UserId)
+            return EvidenceProblem(409, "WORKFLOW_EVIDENCE_INDEPENDENT_REVIEW_REQUIRED",
+                "The evidence uploader cannot review the same document. A different authorized reviewer is required.");
+        if (!evidence.IsCurrent)
+            return EvidenceProblem(409, "WORKFLOW_EVIDENCE_VERSION_SUPERSEDED",
+                "Only the current document version can be reviewed. Refresh the document list.");
         var notes = request.Notes?.Trim();
         if (!request.Accepted && string.IsNullOrWhiteSpace(notes))
-            return BadRequest("A rejection reason is required.");
+            return EvidenceProblem(400, "WORKFLOW_EVIDENCE_REJECTION_REASON_REQUIRED", "A rejection reason is required.");
+        if (notes?.Length > 1000)
+            return EvidenceProblem(400, "WORKFLOW_EVIDENCE_NOTES_TOO_LONG", "Review notes must not exceed 1,000 characters.");
 
-        evidence.VerificationStatus = request.Accepted
+        // Retrying the same decision must not replace its original actor/time or add duplicate audit entries.
+        var desiredStatus = request.Accepted
             ? WorkflowEvidenceVerificationStatus.Verified : WorkflowEvidenceVerificationStatus.Rejected;
+        if (evidence.VerificationStatus == desiredStatus)
+            return Ok(new { success = true, data = evidence });
+
+        evidence.VerificationStatus = desiredStatus;
         evidence.VerifiedById = UserId;
         evidence.VerifiedAt = DateTime.UtcNow;
         evidence.VerificationNotes = notes;
@@ -342,6 +367,49 @@ public sealed class WorkflowEvidenceController : ControllerBase
     private Task<WorkflowEvidenceDocument?> Find(Guid id, CancellationToken cancellationToken) =>
         _db.WorkflowEvidenceDocuments.FirstOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted,
             cancellationToken);
+
+    private async Task<bool> CanReviewStepEvidenceAsync(Guid stepInstanceId, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        var userId = UserId;
+        var now = DateTime.UtcNow;
+        // Read current membership and roles: an old token must not preserve revoked review authority.
+        var actor = await _db.Users.AsNoTracking().Where(user => user.Id == userId && user.IsActive)
+            .Select(user => new { user.TenantId }).SingleOrDefaultAsync(cancellationToken);
+        var memberships = await _db.UserTenants.IgnoreQueryFilters().AsNoTracking()
+            .Where(link => link.UserId == userId && link.TenantId == tenantId)
+            .Select(link => new { link.IsDeleted, link.Status, link.ExpiresAt }).ToListAsync(cancellationToken);
+        // Explicit suspension/revocation (including a tombstone) wins over a legacy primary tenant.
+        var activeMember = actor != null && (memberships.Count == 0
+            ? actor.TenantId == tenantId
+            : memberships.Any(link => !link.IsDeleted && link.Status == UserTenantStatus.Active &&
+                (!link.ExpiresAt.HasValue || link.ExpiresAt > now)));
+        if (!activeMember) return false;
+
+        var step = await _db.WorkflowStepInstances.AsNoTracking().Include(item => item.WorkflowInstance)
+            .FirstOrDefaultAsync(item => item.Id == stepInstanceId && item.TenantId == tenantId && !item.IsDeleted,
+                cancellationToken);
+        if (step?.WorkflowInstance == null || step.WorkflowInstance.TenantId != tenantId || step.WorkflowInstance.IsDeleted)
+            return false;
+
+        var roles = await (from link in _db.UserRoles.AsNoTracking()
+                           join role in _db.Roles.AsNoTracking() on link.RoleId equals role.Id
+                           where link.UserId == userId && role.Name != null
+                           select role.Name!).ToListAsync(cancellationToken);
+        var approvals = await _db.WorkflowApprovals.AsNoTracking().Include(item => item.StepInstance)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted &&
+                item.StepInstance.TenantId == tenantId && !item.StepInstance.IsDeleted &&
+                item.StepInstance.WorkflowInstanceId == step.WorkflowInstanceId)
+            .ToListAsync(cancellationToken);
+        return WorkflowEvidenceReviewAuthorization.CanReview(step.WorkflowInstance, approvals, userId, roles);
+    }
+
+    private ObjectResult EvidenceProblem(int status, string code, string detail)
+    {
+        var problem = new ProblemDetails { Status = status, Title = "Document review could not proceed", Detail = detail };
+        problem.Extensions["code"] = code;
+        return StatusCode(status, problem);
+    }
     private Guid TenantId => _currentUser.TenantId ?? throw new UnauthorizedAccessException("Tenant context is required.");
     private Guid UserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : throw new UnauthorizedAccessException("User context is required.");
 }

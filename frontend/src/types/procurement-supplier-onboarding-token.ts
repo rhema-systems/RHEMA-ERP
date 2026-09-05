@@ -120,6 +120,7 @@ export interface SupplierOnboardingToken extends SupplierOnboardingTokenListItem
   expiryReason?: string;
   reissueReason?: string;
   reissuedAtUtc?: string;
+  applicationTokenDeliveryRecoveryRequired: boolean;
   payments: SupplierOnboardingPayment[];
   exemptions: SupplierOnboardingExemption[];
 }

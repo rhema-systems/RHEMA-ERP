@@ -25,7 +25,7 @@ public class TenderAwardsController : ControllerBase
     /// Get all awards
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderAwardDto>>> GetAwards()
     {
         try
@@ -45,7 +45,7 @@ public class TenderAwardsController : ControllerBase
     /// Get award by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderAwardDto>> GetAward(Guid id)
     {
         try
@@ -69,7 +69,7 @@ public class TenderAwardsController : ControllerBase
     /// Get award by tender ID
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderAwardDto>> GetAwardByTender(Guid tenderId)
     {
         try
@@ -105,6 +105,16 @@ public class TenderAwardsController : ControllerBase
 
             return Ok(award);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Tender award access forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting award for bid {BidId}", bidId);
@@ -116,7 +126,7 @@ public class TenderAwardsController : ControllerBase
     /// Generate award recommendation
     /// </summary>
     [HttpGet("recommendation/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<AwardRecommendationDto>> GenerateAwardRecommendation(Guid tenderId)
     {
         try
@@ -139,7 +149,7 @@ public class TenderAwardsController : ControllerBase
     /// Create award
     /// </summary>
     [HttpPost]
-    [Authorize]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderAwardDto>> CreateAward(
         [FromBody] CreateAwardDto dto,
         CancellationToken cancellationToken)
@@ -169,6 +179,14 @@ public class TenderAwardsController : ControllerBase
         catch (ProcurementAwardReadinessValidationException ex)
         {
             return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "TENDER_SOURCE_RECOVERY_FORBIDDEN", ex.Message));
         }
         catch (InvalidOperationException ex)
         {
@@ -213,16 +231,48 @@ public class TenderAwardsController : ControllerBase
     /// Approve award
     /// </summary>
     [HttpPost("{id}/approve")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public ActionResult<TenderAwardDto> ApproveAward(Guid id, [FromBody] ApproveAwardDto dto)
+    [Authorize(Policy = "procurement.tender.approve")]
+    public async Task<ActionResult<TenderAwardDto>> ApproveAward(
+        Guid id,
+        [FromBody] ApproveAwardDto dto,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // TODO: Service interface doesn't have ApproveAwardAsync method
-            // Commenting out until the method is implemented
-            // var award = await _awardService.ApproveAwardAsync(id, dto);
-            // return Ok(award);
-            return StatusCode(501, "Approve award functionality not yet implemented");
+            return Ok(await _awardService.ApproveAwardAsync(
+                id, dto, CorrelationId, cancellationToken));
+        }
+        catch (ProcurementAwardReadinessNotFoundException ex)
+        {
+            return NotFound(ReadinessProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementAwardReadinessAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "AWARD_READINESS_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementAwardReadinessConflictException ex)
+        {
+            return Conflict(ReadinessProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementAwardReadinessBlockedException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message, ex.Decision));
+        }
+        catch (ProcurementAwardReadinessValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "TENDER_SOURCE_RECOVERY_FORBIDDEN", ex.Message));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -239,16 +289,19 @@ public class TenderAwardsController : ControllerBase
     /// Reject award
     /// </summary>
     [HttpPost("{id}/reject")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public ActionResult<TenderAwardDto> RejectAward(Guid id, [FromBody] RejectAwardDto dto)
+    [Authorize(Policy = "procurement.tender.approve")]
+    public async Task<ActionResult<TenderAwardDto>> RejectAward(
+        Guid id,
+        [FromBody] RejectAwardDto dto,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // TODO: Service interface doesn't have RejectAwardAsync method
-            // Commenting out until the method is implemented
-            // var award = await _awardService.RejectAwardAsync(id, dto);
-            // return Ok(award);
-            return StatusCode(501, "Reject award functionality not yet implemented");
+            return Ok(await _awardService.RejectAwardAsync(id, dto, cancellationToken));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -265,7 +318,7 @@ public class TenderAwardsController : ControllerBase
     /// Cancel award
     /// </summary>
     [HttpPost("{id}/cancel")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public async Task<ActionResult<TenderAwardDto>> CancelAward(Guid id, [FromBody] CancelAwardDto dto)
     {
         try
@@ -289,16 +342,16 @@ public class TenderAwardsController : ControllerBase
     /// Generate award notification
     /// </summary>
     [HttpGet("{id}/notification")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public ActionResult<AwardNotificationDto> GenerateAwardNotification(Guid id)
+    [Authorize(Policy = "procurement.records.read")]
+    public async Task<ActionResult<AwardNotificationDto>> GenerateAwardNotification(Guid id)
     {
         try
         {
-            // TODO: Service interface doesn't have GenerateAwardNotificationAsync method
-            // Commenting out until the method is implemented
-            // var notification = await _awardService.GenerateAwardNotificationAsync(id);
-            // return Ok(notification);
-            return StatusCode(501, "Generate award notification functionality not yet implemented");
+            return Ok(await _awardService.GenerateAwardNotificationAsync(id));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -315,11 +368,13 @@ public class TenderAwardsController : ControllerBase
     /// Send award notifications to supplier (email with PDF + in-app notification)
     /// </summary>
     [HttpPost("{id}/notify")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> SendAwardNotification(Guid id, [FromBody] AwardNotificationDto dto)
     {
         try
         {
+            if (dto.AwardId != id)
+                return BadRequest("The route award ID must match the notification award ID.");
             // Get the award to find the tender ID
             var award = await _awardService.GetAwardByIdAsync(id);
             if (award == null)
@@ -331,6 +386,10 @@ public class TenderAwardsController : ControllerBase
 
             _logger.LogInformation("Sent award notifications for award {AwardId}", id);
             return Ok(new { message = "Award notifications sent successfully" });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -347,7 +406,7 @@ public class TenderAwardsController : ControllerBase
     /// Create a purchase order from a tender award
     /// </summary>
     [HttpPost("create-purchase-order")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.purchase-order.create")]
     public async Task<ActionResult<PurchaseOrderFromAwardResponseDto>> CreatePurchaseOrderFromAward([FromBody] CreatePurchaseOrderFromAwardDto dto)
     {
         try
@@ -379,6 +438,18 @@ public class TenderAwardsController : ControllerBase
                     Request.Headers["X-Correlation-ID"].FirstOrDefault() ??
                     HttpContext.TraceIdentifier
             });
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "TENDER_SOURCE_RECOVERY_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
         }
         catch (InvalidOperationException ex)
         {

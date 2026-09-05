@@ -25,6 +25,14 @@ export interface ProcurementPolicyValidationResult {
   warnings: ProcurementPolicyValidationIssue[];
 }
 
+export interface ProcurementPolicyRoleOption {
+  id: string;
+  name: string;
+  description?: string;
+  isSystemRole: boolean;
+  isAssignedToSelectedWorkflow: boolean;
+}
+
 export interface ProcurementPolicyRuleValue {
   ruleCode: string;
   priority: number;

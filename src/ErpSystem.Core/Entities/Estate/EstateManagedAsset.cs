@@ -135,6 +135,29 @@ public class EstateManagedAsset : TenantEntity
 
     public decimal? ExternalMonthlyRent { get; set; }
 
+    public DateTime? RentBillingActivatedAt { get; set; }
+    public DateTime? NextRentBillingDate { get; set; }
+    public Guid? LastRentInvoiceId { get; set; }
+
+    [MaxLength(80)]
+    public string? LastRentInvoiceNumber { get; set; }
+
+    public bool AutoGenerateRentInvoices { get; set; }
+
+    public int RentGracePeriodDays { get; set; }
+
+    [MaxLength(20)]
+    public string RentPenaltyMethod { get; set; } = "None";
+
+    public decimal RentPenaltyValue { get; set; }
+    public decimal? RentPenaltyCapAmount { get; set; }
+    public Guid? LastRentPenaltyInvoiceId { get; set; }
+
+    [MaxLength(80)]
+    public string? LastRentPenaltyInvoiceNumber { get; set; }
+
+    public Guid? LastRentPenaltySourceInvoiceId { get; set; }
+
     public int? ExternalLeaseTermMonths { get; set; }
 
     [MaxLength(10)]

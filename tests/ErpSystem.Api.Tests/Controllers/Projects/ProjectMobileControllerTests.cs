@@ -114,6 +114,7 @@ public class ProjectMobileControllerTests
         => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseSetting("CandidatePortal:PortalUrl", "https://candidate.test/");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();

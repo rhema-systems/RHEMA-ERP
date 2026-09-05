@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   hasEvaluationCommitteeAction,
+  isEvaluationCommitteeControlError,
   validateCoiDeclaration,
   validateCommitteeBinding,
   validateMeetingReadiness,
@@ -33,10 +34,23 @@ const appointment = (
 });
 
 describe('evaluation committee controls', () => {
+  it('recognizes committee readiness failures that need an actionable handoff', () => {
+    expect(
+      isEvaluationCommitteeControlError(
+        new Error(
+          'No active evaluation committee control exists. (EVALUATION_SCORER_INELIGIBLE)'
+        )
+      )
+    ).toBe(true);
+    expect(
+      isEvaluationCommitteeControlError(new Error('Network request failed'))
+    ).toBe(false);
+  });
+
   it('trusts server actions while normalizing naming style', () => {
-    expect(hasEvaluationCommitteeAction(['ConfirmQuorum'], 'confirm-quorum')).toBe(
-      true
-    );
+    expect(
+      hasEvaluationCommitteeAction(['ConfirmQuorum'], 'confirm-quorum')
+    ).toBe(true);
     expect(hasEvaluationCommitteeAction([], 'ConfirmQuorum')).toBe(false);
   });
 
@@ -73,18 +87,19 @@ describe('evaluation committee controls', () => {
     ).toContain('committee');
   });
 
-  it('requires signed declarations and conflict details when applicable', () => {
+  it('allows system-generated references for no-conflict declarations', () => {
     expect(
       validateCoiDeclaration({
         outcome: 'NoConflict',
         declaration: 'I declare that no conflict exists.',
-        signatureReference: 'SIGN-1',
-        evidenceReference: 'COI-1',
         validFromUtc: '2026-07-23T00:00:00Z',
         appointmentRowVersion: 'AQID',
         idempotencyKey: 'key',
       })
     ).toBeUndefined();
+  });
+
+  it('requires details and supporting references for a declared conflict', () => {
     expect(
       validateCoiDeclaration({
         outcome: 'ConflictDeclared',
@@ -96,6 +111,16 @@ describe('evaluation committee controls', () => {
         idempotencyKey: 'key',
       })
     ).toContain('declared conflict');
+    expect(
+      validateCoiDeclaration({
+        outcome: 'ConflictDeclared',
+        declaration: 'A material conflict exists.',
+        conflictDetails: 'A bidder is controlled by a close relative.',
+        validFromUtc: '2026-07-23T00:00:00Z',
+        appointmentRowVersion: 'AQID',
+        idempotencyKey: 'key',
+      })
+    ).toContain('supporting evidence');
   });
 
   it('distinguishes required Chair and Secretary from voting quorum', () => {

@@ -15,10 +15,14 @@ import * as tenderAwardService from '@/services/tenderAwardService';
 import { type TenderAwardDto } from '@/services/tenderAwardService';
 import { format } from 'date-fns';
 import { Suspense } from 'react';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 function CreateContractForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { hasPermission } = useAuth();
+  const canManageContract = hasPermission('procurement.contract.manage');
   const awardId = searchParams?.get('awardId');
 
   const [award, setAward] = useState<TenderAwardDto | null>(null);
@@ -32,7 +36,7 @@ function CreateContractForm() {
     contractTitle: '',
     contractType: 'Service',
     contractValue: 0,
-    currency: 'USD',
+    currency: 'GHS',
     paymentTerms: 'Net 30',
     retentionPercentage: 5,
     startDate: format(new Date(), 'yyyy-MM-dd'),
@@ -71,12 +75,12 @@ function CreateContractForm() {
           tenderAwardId: id,
           contractTitle: `Contract for ${awardData.tenderTitle}`,
           contractValue: awardData.awardedAmount,
-          currency: awardData.currency || 'USD',
+          currency: awardData.currency || 'GHS',
         }));
       }
     } catch (error) {
       console.error('Error loading award:', error);
-      toast.error('Failed to load award details');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load award details'));
     } finally {
       setLoading(false);
     }
@@ -117,7 +121,7 @@ function CreateContractForm() {
       router.push(`/procurement/contracts/${contract.id}`);
     } catch (error: any) {
       console.error('Error creating contract:', error);
-      toast.error(error.message || 'Failed to create contract');
+      toast.error(getProcurementProblemMessage(error, 'Failed to create contract'));
     } finally {
       setSaving(false);
     }
@@ -144,6 +148,18 @@ function CreateContractForm() {
             <ArrowLeft className="h-4 w-4 mr-2" />Go to Awards
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  if (!canManageContract) {
+    return (
+      <div className="container mx-auto py-6">
+        <Card><CardContent className="py-12 text-center">
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-amber-500" />
+          <p className="font-medium">Contract management permission is required.</p>
+          <Button className="mt-4" variant="outline" onClick={() => router.push('/procurement/awards')}>Back to awards</Button>
+        </CardContent></Card>
       </div>
     );
   }
@@ -232,6 +248,7 @@ function CreateContractForm() {
                   <Select value={formData.currency} onValueChange={(v) => handleInputChange('currency', v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="GHS">GHS</SelectItem>
                       <SelectItem value="USD">USD</SelectItem>
                       <SelectItem value="EUR">EUR</SelectItem>
                       <SelectItem value="GBP">GBP</SelectItem>

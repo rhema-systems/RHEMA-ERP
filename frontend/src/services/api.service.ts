@@ -111,6 +111,13 @@ export interface TenantUserMapping {
   user: TenantUserInfo;
 }
 
+export interface SaveTenantUserMappingRequest {
+  userId: string;
+  tenantId: string;
+  expiresAt?: string | null;
+  reason?: string;
+}
+
 export interface TenantUserInfo {
   id: string;
   username: string;
@@ -733,7 +740,29 @@ class ApiService {
     if (this.isServerSide()) {
       throw new Error('getTenantUsers cannot be called during server-side rendering');
     }
-    return this.privateRequest<TenantUserMapping[]>(`/auth/tenant/${encodeURIComponent(tenantId)}/users`);
+    return this.privateRequest<TenantUserMapping[]>(
+      `/administration/user-tenant-mappings/${encodeURIComponent(tenantId)}/users`
+    );
+  }
+
+  public async addUserToTenant(request: SaveTenantUserMappingRequest): Promise<TenantUserMapping> {
+    if (this.isServerSide()) {
+      throw new Error('addUserToTenant cannot be called during server-side rendering');
+    }
+    return this.privateRequest<TenantUserMapping>('/administration/user-tenant-mappings', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  public async removeUserFromTenant(userId: string, tenantId: string): Promise<void> {
+    if (this.isServerSide()) {
+      throw new Error('removeUserFromTenant cannot be called during server-side rendering');
+    }
+    return this.privateRequest<void>(
+      `/administration/user-tenant-mappings/${encodeURIComponent(tenantId)}/users/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' }
+    );
   }
 
   /**

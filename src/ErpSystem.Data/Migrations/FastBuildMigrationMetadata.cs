@@ -8,6 +8,29 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+// The first five Civil Engineering migrations keep their authoritative attributes in
+// generated designers for full builds. Fast Debug builds omit those designers, so these
+// lightweight partial registrations preserve runtime discovery without duplicating the
+// inline attributes retained by every later Civil migration.
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814205757_AddCivilEngineeringConfigurationLifecycle")] partial class AddCivilEngineeringConfigurationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814234022_AddCivilEngineeringDesignWorkflow")] partial class AddCivilEngineeringDesignWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815005453_AddCivilEngineeringReconnaissance")] partial class AddCivilEngineeringReconnaissance { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815031044_AddCivilEngineeringDesignInputRequests")] partial class AddCivilEngineeringDesignInputRequests { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815135156_AddCivilEngineeringDocumentRegister")] partial class AddCivilEngineeringDocumentRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260820120000_AddDmsGenerationTemplateWordSource")] partial class AddDmsGenerationTemplateWordSource { }
+
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage")] partial class AllowReceiptDocumentDefaultsWithAuditLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster")] partial class AlignRfqCommercialIdentityWithReceiptItemMaster { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827090000_AlignSupplierOnboardingPartnerCategories")] partial class AlignSupplierOnboardingPartnerCategories { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes")] partial class AlignPurchaseOrderSourceTriggerWithSupportedRoutes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826190000_AlignPurchaseOrderCommitmentWithRequisition")] partial class AlignPurchaseOrderCommitmentWithRequisition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826180000_AllowReleaseOnlyPurchaseOrderSourceLineage")] partial class AllowReleaseOnlyPurchaseOrderSourceLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826170000_AllowReleaseOnlyRfqAwardTransition")] partial class AllowReleaseOnlyRfqAwardTransition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825170000_AllowReleaseOnlyProcurementSourceEntry")] partial class AllowReleaseOnlyProcurementSourceEntry { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825143000_HardenProcurementPolicyRoleLineage")] partial class HardenProcurementPolicyRoleLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824183000_SimplifyPurchaseRequisitionControls")] partial class SimplifyPurchaseRequisitionControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824162000_BackfillPlanLinkedPurchaseRequisitionCostCenters")] partial class BackfillPlanLinkedPurchaseRequisitionCostCenters { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825120000_SimplifyProcurementSourcingCaseLineage")] partial class SimplifyProcurementSourcingCaseLineage { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813150000_INVREQFU003AllowPostedFullReturnReversal")] partial class INVREQFU003AllowPostedFullReturnReversal { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813171000_INVREQFU004RequireCleanTransferEvidence")] partial class INVREQFU004RequireCleanTransferEvidence { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813143000_INVREQFU003ReturnReversalAllocationGate")] partial class INVREQFU003ReturnReversalAllocationGate { }
@@ -276,3 +299,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260903232742_AddEmployeeGeoArea")] partial class AddEmployeeGeoArea { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904005351_AddGeoAreaToLocationCompanyAndFacility")] partial class AddGeoAreaToLocationCompanyAndFacility { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904032437_AddSheHazardReporter")] partial class AddSheHazardReporter { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260905011117_MergeFinanceDimensionsAndProcurementTenderLifecycle")] partial class MergeFinanceDimensionsAndProcurementTenderLifecycle { }

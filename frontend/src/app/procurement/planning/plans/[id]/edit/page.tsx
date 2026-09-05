@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,11 +14,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, Package, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
+import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type ProcurementBudgetDto, type ProcurementBudgetDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
 import { ProcurementPlanItemDialogBody } from '@/app/procurement/planning/components/ProcurementPlanItemDialogBody';
+import { applyProcurementPlanBudgetSelection } from '../../../components/procurementPlanBudgetSelection';
 
 const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
   itemDescription: '',
@@ -32,7 +33,6 @@ const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
   requiredDate: '',
   plannedQuarter: '',
   justification: '',
-  procurementMethod: 'DirectPurchase',
   notes: '',
   itemSuppliers: [],
 });
@@ -93,6 +93,10 @@ export default function EditProcurementPlanPage() {
   const [departments, setDepartments] = useState<DepartmentDto[]>([]);
   const [loadingDepartments, setLoadingDepartments] = useState(true);
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
+  const [budgetOptions, setBudgetOptions] = useState<ProcurementBudgetDto[]>([]);
+  const [loadingBudgets, setLoadingBudgets] = useState(false);
+  const [linkedBudget, setLinkedBudget] = useState<ProcurementBudgetDetailDto | null>(null);
+  const [loadingBudgetAllocations, setLoadingBudgetAllocations] = useState(false);
   const [formData, setFormData] = useState<UpdateProcurementPlanDto>({
     title: '',
     description: '',
@@ -132,6 +136,7 @@ export default function EditProcurementPlanPage() {
   const [loadingMarketAnalyses, setLoadingMarketAnalyses] = useState(false);
   const [unitsOfMeasure, setUnitsOfMeasure] = useState<UnitOfMeasureDto[]>([]);
   const [loadingUnitsOfMeasure, setLoadingUnitsOfMeasure] = useState(false);
+  const requestedEditItemOpened = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -160,6 +165,7 @@ export default function EditProcurementPlanPage() {
           planEndDate: planData.planEndDate?.split('T')[0] || '',
           planDurationYears: planData.planDurationYears,
           totalEstimatedBudget: planData.totalEstimatedBudget,
+          budgetId: planData.budgetId,
           currency: planData.currency || 'USD',
           notes: planData.notes || '',
         });
@@ -178,8 +184,73 @@ export default function EditProcurementPlanPage() {
     }
   }, [planId, router]);
 
+  useEffect(() => {
+    if (!formData.departmentId || !formData.fiscalYear) {
+      setBudgetOptions([]);
+      return;
+    }
+
+    let active = true;
+    const loadBudgets = async () => {
+      try {
+        setLoadingBudgets(true);
+        const values = await procurementBudgetService.getAvailableBudgetsForLinking(
+          formData.departmentId,
+          formData.fiscalYear,
+          true,
+        );
+        if (active) setBudgetOptions(values);
+      } catch (error) {
+        console.error('Error fetching procurement budget options:', error);
+        if (active) {
+          setBudgetOptions([]);
+          toast.error(error instanceof Error ? error.message : 'Failed to load approved budgets');
+        }
+      } finally {
+        if (active) setLoadingBudgets(false);
+      }
+    };
+
+    void loadBudgets();
+    return () => { active = false; };
+  }, [formData.departmentId, formData.fiscalYear]);
+
+  useEffect(() => {
+    if (!formData.budgetId) {
+      setLinkedBudget(null);
+      return;
+    }
+
+    const budgetId = formData.budgetId;
+    let active = true;
+    const loadLinkedBudget = async () => {
+      try {
+        setLoadingBudgetAllocations(true);
+        const value = await procurementBudgetService.getBudgetById(budgetId);
+        if (active) setLinkedBudget(value);
+      } catch (error) {
+        console.error('Error loading linked budget allocations:', error);
+        if (active) {
+          setLinkedBudget(null);
+          toast.error('The linked budget allocations could not be loaded');
+        }
+      } finally {
+        if (active) setLoadingBudgetAllocations(false);
+      }
+    };
+
+    void loadLinkedBudget();
+    return () => { active = false; };
+  }, [formData.budgetId]);
+
   const handleInputChange = (field: keyof UpdateProcurementPlanDto, value: string | number) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(!plan?.budgetId && (field === 'departmentId' || field === 'fiscalYear')
+        ? { budgetId: undefined }
+        : {}),
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -201,7 +272,7 @@ export default function EditProcurementPlanPage() {
       router.push(`/procurement/planning/plans/${planId}`);
     } catch (error) {
       console.error('Error updating plan:', error);
-      toast.error('Failed to update procurement plan');
+      toast.error(error instanceof Error ? error.message : 'Failed to update procurement plan');
     } finally {
       setSaving(false);
     }
@@ -326,11 +397,31 @@ export default function EditProcurementPlanPage() {
       requiredDate: item.requiredDate ? item.requiredDate.split('T')[0] : '',
       plannedQuarter: item.plannedQuarter || '',
       justification: item.justification || '',
-      procurementMethod: item.procurementMethod || 'DirectPurchase',
+      procurementMethod: item.procurementMethod || undefined,
       notes: item.notes || '',
       itemSuppliers: existingSuppliers,
     });
   };
+
+  const openEditItemRef = useRef(handleOpenEditItemDialog);
+  openEditItemRef.current = handleOpenEditItemDialog;
+
+  useEffect(() => {
+    if (requestedEditItemOpened.current || !plan?.items?.length) return;
+
+    const requestedItemId = new URLSearchParams(window.location.search).get('itemId');
+    if (!requestedItemId) return;
+
+    const requestedItem = plan.items.find(item => item.id === requestedItemId);
+    if (!requestedItem) {
+      requestedEditItemOpened.current = true;
+      toast.error('The selected plan item could not be found');
+      return;
+    }
+
+    requestedEditItemOpened.current = true;
+    openEditItemRef.current(requestedItem);
+  }, [plan]);
 
   const handleAddSupplierToItem = (supplier: BusinessPartnerDto) => {
     // Check if supplier is already added
@@ -443,6 +534,32 @@ export default function EditProcurementPlanPage() {
     if (!item.unitOfMeasure?.trim()) return 'Unit of measure is required';
     if (Number(item.estimatedQuantity) <= 0) return 'Quantity must be greater than 0';
     if (Number(item.estimatedUnitPrice) < 0) return 'Unit cost cannot be negative';
+    const itemBudgetAmount = item.approvedBudgetAmount ?? getItemEstimatedTotal(item);
+    if (itemBudgetAmount < 0) return 'Item budget amount cannot be negative';
+
+    if (linkedBudget?.allocations.length) {
+      const allocation = linkedBudget.allocations.find(value => value.id === item.procurementBudgetAllocationId);
+      if (!allocation) return 'Select a budget allocation from the linked approved budget';
+
+      const savedExposure = (plan?.items || [])
+        .filter(value => value.id !== editingItem?.id && value.procurementBudgetAllocationId === allocation.id)
+        .reduce((total, value) => total + (value.approvedBudgetAmount ?? value.estimatedTotalCost), 0);
+      const queuedExposure = pendingPlanItems
+        .filter(value => value.procurementBudgetAllocationId === allocation.id)
+        .reduce((total, value) => total + (value.approvedBudgetAmount ?? getItemEstimatedTotal(value)), 0);
+      if (savedExposure + queuedExposure + itemBudgetAmount > allocation.remainingAmount) {
+        return `${allocation.categoryName} has insufficient remaining allocation for this item`;
+      }
+    }
+
+    const savedPlanExposure = (plan?.items || [])
+      .filter(value => value.id !== editingItem?.id)
+      .reduce((total, value) => total + (value.approvedBudgetAmount ?? value.estimatedTotalCost), 0);
+    const queuedPlanExposure = pendingPlanItems
+      .reduce((total, value) => total + (value.approvedBudgetAmount ?? getItemEstimatedTotal(value)), 0);
+    if (plan && savedPlanExposure + queuedPlanExposure + itemBudgetAmount > plan.totalEstimatedBudget) {
+      return 'The item would exceed the procurement plan total budget';
+    }
     return null;
   };
 
@@ -512,7 +629,7 @@ export default function EditProcurementPlanPage() {
       setPlan(updatedPlan);
     } catch (error) {
       console.error('Error adding items:', error);
-      toast.error('Failed to save plan items');
+      toast.error(error instanceof Error ? error.message : 'Failed to save plan items');
     } finally {
       setAddingItem(false);
     }
@@ -546,7 +663,7 @@ export default function EditProcurementPlanPage() {
       setPlan(updatedPlan);
     } catch (error) {
       console.error('Error saving item:', error);
-      toast.error(editingItem ? 'Failed to update item' : 'Failed to add item');
+      toast.error(error instanceof Error ? error.message : editingItem ? 'Failed to update item' : 'Failed to add item');
     } finally {
       setSavingItem(false);
     }
@@ -564,7 +681,7 @@ export default function EditProcurementPlanPage() {
       setPlan(updatedPlan);
     } catch (error) {
       console.error('Error deleting item:', error);
-      toast.error('Failed to delete item');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete item');
     } finally {
       setDeletingItemId(null);
     }
@@ -658,7 +775,7 @@ export default function EditProcurementPlanPage() {
                   <Select
                     value={formData.departmentId}
                     onValueChange={(value) => handleInputChange('departmentId', value)}
-                    disabled={loadingDepartments}
+                    disabled={loadingDepartments || Boolean(plan?.budgetId)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder={loadingDepartments ? "Loading departments..." : "Select department"} />
@@ -700,6 +817,7 @@ export default function EditProcurementPlanPage() {
                   <FiscalYearSelect
                     value={formData.fiscalYear}
                     onValueChange={(year) => handleInputChange('fiscalYear', year)}
+                    disabled={Boolean(plan?.budgetId)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -782,10 +900,48 @@ export default function EditProcurementPlanPage() {
           <Card>
             <CardHeader>
               <CardTitle>Budget</CardTitle>
-              <CardDescription>Define the budget for this plan</CardDescription>
+              <CardDescription>Select the approved budget that controls this plan</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="budgetId">Approved Budget *</Label>
+                  <Select
+                    value={formData.budgetId || '__none__'}
+                    onValueChange={(value) => {
+                      setFormData((previous) =>
+                        applyProcurementPlanBudgetSelection(previous, budgetOptions, value));
+                    }}
+                    disabled={!formData.departmentId || loadingBudgets}
+                  >
+                    <SelectTrigger id="budgetId">
+                      <SelectValue placeholder={
+                        !formData.departmentId
+                          ? 'Select a department first'
+                          : loadingBudgets
+                            ? 'Loading approved budgets...'
+                            : 'Select approved budget'
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {!plan?.budgetId && (
+                        <SelectItem value="__none__">Select later (draft only)</SelectItem>
+                      )}
+                      {budgetOptions.map((budget) => (
+                        <SelectItem
+                          key={budget.id}
+                          value={budget.id}
+                        >
+                          {budget.budgetCode} — {budget.title} ({budget.currency} {budget.allocatedAmount.toLocaleString()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    A budget may fund multiple plans while its controlled planning capacity remains sufficient. Currency
+                    is inherited from the selected budget.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="totalEstimatedBudget">Total Estimated Budget *</Label>
                   <Input
@@ -799,35 +955,15 @@ export default function EditProcurementPlanPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="currency">Currency</Label>
-                  {plan?.budgetId ? (
-                    <Input
-                      id="currency"
-                      value={formData.currency}
-                      readOnly
-                      aria-readonly="true"
-                    />
-                  ) : (
-                    <Select
-                      value={formData.currency}
-                      onValueChange={(value) => handleInputChange('currency', value)}
-                    >
-                      <SelectTrigger id="currency">
-                        <SelectValue placeholder="Select currency" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="USD">USD - US Dollar</SelectItem>
-                        <SelectItem value="EUR">EUR - Euro</SelectItem>
-                        <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                        <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
-                        <SelectItem value="ETB">ETB - Ethiopian Birr</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {plan?.budgetId && (
-                    <p className="text-xs text-muted-foreground">
-                      Currency is inherited from the linked approved budget.
-                    </p>
-                  )}
+                  <Input
+                    id="currency"
+                    value={formData.budgetId ? formData.currency : 'Select an approved budget'}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Currency is inherited from the linked approved budget.
+                  </p>
                 </div>
               </div>
 
@@ -885,7 +1021,7 @@ export default function EditProcurementPlanPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item Description</TableHead>
-                      <TableHead>Budget Line</TableHead>
+                      <TableHead>Budget Allocation</TableHead>
                       <TableHead>Quantity</TableHead>
                       <TableHead>Unit Cost</TableHead>
                       <TableHead>Total</TableHead>
@@ -899,9 +1035,9 @@ export default function EditProcurementPlanPage() {
                         <TableCell className="font-medium">{item.itemDescription}</TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            <div>{item.budgetLineCode || '-'}</div>
-                            {item.budgetCategoryName && (
-                              <div className="text-xs text-gray-500">{item.budgetCategoryName}</div>
+                            <div>{item.budgetCategoryName || '-'}</div>
+                            {item.budgetLineCode && (
+                              <div className="text-xs text-gray-500">Legacy line: {item.budgetLineCode}</div>
                             )}
                           </div>
                         </TableCell>
@@ -985,6 +1121,9 @@ export default function EditProcurementPlanPage() {
             marketAnalyses={marketAnalyses}
             loadingMarketAnalyses={loadingMarketAnalyses}
             onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            budgetCode={linkedBudget?.budgetCode}
+            budgetAllocations={linkedBudget?.allocations || []}
+            loadingBudgetAllocations={loadingBudgetAllocations}
             suppliers={suppliers}
             supplierSearchTerm={supplierSearchTerm}
             onSupplierSearchTermChange={setSupplierSearchTerm}
@@ -1161,23 +1300,6 @@ export default function EditProcurementPlanPage() {
                         <SelectItem value="Q2">Q2</SelectItem>
                         <SelectItem value="Q3">Q3</SelectItem>
                         <SelectItem value="Q4">Q4</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="procurementMethod">Method</Label>
-                    <Select
-                      value={newItemForm.procurementMethod || 'DirectPurchase'}
-                      onValueChange={(value) => setNewItemForm({ ...newItemForm, procurementMethod: value })}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
-                        <SelectItem value="RFQ">RFQ</SelectItem>
-                        <SelectItem value="Tender">Tender</SelectItem>
-                        <SelectItem value="Framework">Framework</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1494,6 +1616,9 @@ export default function EditProcurementPlanPage() {
             marketAnalyses={marketAnalyses}
             loadingMarketAnalyses={loadingMarketAnalyses}
             onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            budgetCode={linkedBudget?.budgetCode}
+            budgetAllocations={linkedBudget?.allocations || []}
+            loadingBudgetAllocations={loadingBudgetAllocations}
             suppliers={suppliers}
             supplierSearchTerm={supplierSearchTerm}
             onSupplierSearchTermChange={setSupplierSearchTerm}

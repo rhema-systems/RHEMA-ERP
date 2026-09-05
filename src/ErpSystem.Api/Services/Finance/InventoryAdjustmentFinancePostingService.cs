@@ -41,14 +41,8 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             ? settings.MigrationClearingAccountId
                 ?? throw new InvalidOperationException("Migration Clearing Account is not configured in Finance Settings.")
             : null;
-        Guid? expense = !isOpeningStock
-            ? settings.WriteOffExpenseAccountId
-                ?? throw new InvalidOperationException("Write-off Expense Account is not configured in Finance Settings.")
-            : null;
-        Guid? recovery = !isOpeningStock
-            ? settings.WriteOffRecoveryAccountId
-                ?? throw new InvalidOperationException("Write-off Recovery Account is not configured in Finance Settings.")
-            : null;
+        Guid? expense = isOpeningStock ? null : settings.WriteOffExpenseAccountId;
+        Guid? recovery = isOpeningStock ? null : settings.WriteOffRecoveryAccountId;
         var currency = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant();
         var lines = new List<FinancePostingLineDto>();
         var number = 1;
@@ -68,16 +62,20 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             }
             else if (item.AdjustmentQuantity < 0)
             {
-                lines.Add(Line(expense!.Value, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
+                var expenseAccount = expense
+                    ?? throw new InvalidOperationException("Write-off Expense Account is not configured in Finance Settings.");
+                lines.Add(Line(expenseAccount, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-EXPENSE", adjustment.AdjustmentDate));
                 lines.Add(Line(inventory, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
             }
             else
             {
+                var recoveryAccount = recovery
+                    ?? throw new InvalidOperationException("Write-off Recovery Account is not configured in Finance Settings.");
                 lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
-                lines.Add(Line(recovery!.Value, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
+                lines.Add(Line(recoveryAccount, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-RECOVERY", adjustment.AdjustmentDate));
             }
         }

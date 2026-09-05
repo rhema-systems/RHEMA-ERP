@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Card,
   CardContent,
@@ -34,6 +35,9 @@ import {
   Download,
   DollarSign,
   AlertCircle,
+  RefreshCw,
+  ShieldCheck,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
@@ -47,8 +51,16 @@ import {
 } from '@/services/tenderBidService';
 import { format } from 'date-fns';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
 import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import {
+  getTenderEvaluationRoute,
+  type TenderEvaluationRoute,
+} from '@/lib/procurement-tender-evaluation-route';
 
 // Interface for criteria scores stored in evaluationCriteriaJson
 interface CriteriaScore {
@@ -61,6 +73,382 @@ interface CriteriaScore {
   weightedScore: number;
 }
 
+export const TENDER_PAYMENT_VERIFY_PERMISSION =
+  'procurement.tender.payment.verify';
+
+type PaymentDecision = {
+  payment: TenderPaymentDto;
+  isApproved: boolean;
+};
+
+interface TenderPaymentVerificationPanelProps {
+  bidId: string;
+  payments: TenderPaymentDto[];
+  canVerifyPayment: boolean;
+  onRefresh: (updatedPayment: TenderPaymentDto) => Promise<void>;
+}
+
+const paymentStatusPresentation = (status: string) => {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'pending') {
+    return {
+      label: 'Pending verification',
+      className: 'border-amber-200 bg-amber-100 text-amber-800',
+    };
+  }
+  if (normalized === 'verified') {
+    return {
+      label: 'Verified',
+      className: 'border-green-200 bg-green-100 text-green-800',
+    };
+  }
+  if (normalized === 'rejected') {
+    return {
+      label: 'Rejected',
+      className: 'border-red-200 bg-red-100 text-red-800',
+    };
+  }
+  return {
+    label: status || 'Unknown',
+    className: 'border-gray-200 bg-gray-100 text-gray-800',
+  };
+};
+
+const formatPaymentDate = (dateString?: string) => {
+  if (!dateString) return 'Not recorded';
+  try {
+    return format(new Date(dateString), 'PPP p');
+  } catch {
+    return dateString;
+  }
+};
+
+const formatPaymentAmount = (amount: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency || 'GHS',
+      currencyDisplay: 'code',
+    }).format(amount);
+  } catch {
+    return `${currency || 'GHS'} ${amount.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+};
+
+export function TenderPaymentVerificationPanel({
+  bidId,
+  payments,
+  canVerifyPayment,
+  onRefresh,
+}: TenderPaymentVerificationPanelProps) {
+  const [decision, setDecision] = useState<PaymentDecision | null>(null);
+  const [notes, setNotes] = useState('');
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const isFinanceRecovery = Boolean(
+    decision?.isApproved &&
+      decision.payment.status.trim().toLowerCase() === 'verified' &&
+      !decision.payment.journalEntryId
+  );
+
+  const openDecision = (payment: TenderPaymentDto, isApproved: boolean) => {
+    setDecision({ payment, isApproved });
+    setNotes('');
+    setDecisionError(null);
+  };
+
+  const closeDecision = () => {
+    if (verifying) return;
+    setDecision(null);
+    setNotes('');
+    setDecisionError(null);
+  };
+
+  const confirmDecision = async () => {
+    if (!decision) return false;
+
+    const trimmedNotes = notes.trim();
+    if (!decision.isApproved && !trimmedNotes) {
+      setDecisionError('A rejection reason is required.');
+      return false;
+    }
+
+    try {
+      setVerifying(true);
+      setDecisionError(null);
+      const updatedPayment = await tenderBidService.verifyBidPayment(
+        bidId,
+        decision.payment.id,
+        {
+          isApproved: decision.isApproved,
+          notes: trimmedNotes || undefined,
+        }
+      );
+
+      let refreshFailed = false;
+      try {
+        await onRefresh(updatedPayment);
+      } catch (refreshError) {
+        refreshFailed = true;
+        console.error('Error refreshing tender fee payments:', refreshError);
+      }
+
+      const action = isFinanceRecovery
+        ? 'posted to Finance'
+        : decision.isApproved
+          ? 'approved'
+          : 'rejected';
+      toast.success(`Tender fee payment ${action}.`);
+      if (refreshFailed) {
+        toast.error(
+          'The decision was saved, but the payment list could not be refreshed. Reload this page to confirm the latest status.'
+        );
+      }
+      setDecision(null);
+      setNotes('');
+      setDecisionError(null);
+      return true;
+    } catch (error) {
+      console.error('Error verifying tender fee payment:', error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Failed to update the tender fee payment.';
+      setDecisionError(message);
+      toast.error(message);
+      return false;
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Tender Fee Payments</CardTitle>
+          <CardDescription>
+            Review the supplier&apos;s recorded tender fee payments and their
+            verification status.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {payments.length === 0 ? (
+            <div className="rounded-lg border border-dashed py-10 text-center text-sm text-gray-500">
+              No tender fee payments have been recorded for this bid.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Payment reference</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Payment date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Finance posting</TableHead>
+                    {canVerifyPayment && (
+                      <TableHead className="text-right">Actions</TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payments.map((payment) => {
+                    const status = paymentStatusPresentation(payment.status);
+                    const isPending =
+                      payment.status.trim().toLowerCase() === 'pending';
+                    const isVerifiedWithoutPosting =
+                      payment.status.trim().toLowerCase() === 'verified' &&
+                      !payment.journalEntryId;
+                    return (
+                      <TableRow key={payment.id}>
+                        <TableCell>
+                          <p className="font-medium">
+                            {payment.paymentReference || 'Not provided'}
+                          </p>
+                          {payment.transactionId && (
+                            <p className="text-xs text-gray-500">
+                              Transaction: {payment.transactionId}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {formatPaymentAmount(
+                            payment.amount,
+                            payment.currency
+                          )}
+                        </TableCell>
+                        <TableCell>{payment.paymentMethod || '—'}</TableCell>
+                        <TableCell>
+                          {formatPaymentDate(payment.paymentDate)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={status.className}>
+                            {status.label}
+                          </Badge>
+                          {payment.verifiedDate && (
+                            <p className="mt-1 text-xs text-gray-500">
+                              {payment.verifiedByName
+                                ? `By ${payment.verifiedByName} · `
+                                : ''}
+                              {formatPaymentDate(payment.verifiedDate)}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {payment.journalEntryId ? (
+                            <div className="space-y-1">
+                              <Badge
+                                variant="outline"
+                                className="border-green-200 bg-green-100 text-green-800"
+                              >
+                                Posted
+                              </Badge>
+                              <a
+                                href={`/finance/journal-entries/${payment.journalEntryId}`}
+                                className="block text-xs font-medium text-primary hover:underline"
+                              >
+                                View journal entry
+                              </a>
+                              {payment.postedAtUtc && (
+                                <p className="text-xs text-gray-500">
+                                  {formatPaymentDate(payment.postedAtUtc)}
+                                </p>
+                              )}
+                            </div>
+                          ) : payment.status.trim().toLowerCase() ===
+                            'verified' ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-200 bg-amber-100 text-amber-800"
+                            >
+                              Posting pending
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </TableCell>
+                        {canVerifyPayment && (
+                          <TableCell className="text-right">
+                            {isPending ? (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => openDecision(payment, true)}
+                                  aria-label={`Approve payment ${payment.paymentReference}`}
+                                >
+                                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => openDecision(payment, false)}
+                                  aria-label={`Reject payment ${payment.paymentReference}`}
+                                >
+                                  <XCircle className="mr-2 h-4 w-4" />
+                                  Reject
+                                </Button>
+                              </div>
+                            ) : isVerifiedWithoutPosting ? (
+                              <Button
+                                size="sm"
+                                onClick={() => openDecision(payment, true)}
+                                aria-label={`Post payment ${payment.paymentReference} to Finance`}
+                              >
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                Post to Finance
+                              </Button>
+                            ) : (
+                              <span className="text-sm text-gray-500">
+                                Decision complete
+                              </span>
+                            )}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <ConfirmationDialog
+        open={Boolean(decision)}
+        onOpenChange={(open) => {
+          if (!open) closeDecision();
+        }}
+        title={
+          isFinanceRecovery
+            ? 'Post tender fee payment to Finance'
+            : decision?.isApproved
+              ? 'Approve tender fee payment'
+              : 'Reject tender fee payment'
+        }
+        description={
+          decision
+            ? `${isFinanceRecovery ? 'Create the missing Finance journal for' : decision.isApproved ? 'Approve' : 'Reject'} payment ${decision.payment.paymentReference || 'without a reference'} for ${formatPaymentAmount(decision.payment.amount, decision.payment.currency)}.`
+            : undefined
+        }
+        confirmText={
+          isFinanceRecovery
+            ? 'Post to Finance'
+            : decision?.isApproved
+              ? 'Approve payment'
+              : 'Reject payment'
+        }
+        cancelText="Cancel"
+        variant={decision?.isApproved ? 'default' : 'destructive'}
+        onConfirm={confirmDecision}
+        isLoading={verifying}
+      >
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="payment-decision-notes">
+              Decision notes{decision?.isApproved ? ' (optional)' : ''}
+            </Label>
+            <Textarea
+              id="payment-decision-notes"
+              value={notes}
+              onChange={(event) => {
+                setNotes(event.target.value);
+                if (decisionError) setDecisionError(null);
+              }}
+              placeholder={
+                isFinanceRecovery
+                  ? 'Add recovery notes for the audit record'
+                  : decision?.isApproved
+                    ? 'Add verification notes for the audit record'
+                    : 'Enter the reason this payment is being rejected'
+              }
+              disabled={verifying}
+            />
+            {!decision?.isApproved && (
+              <p className="text-xs text-gray-500">
+                Required when rejecting a payment.
+              </p>
+            )}
+          </div>
+          {decisionError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Payment decision not completed</AlertTitle>
+              <AlertDescription>{decisionError}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      </ConfirmationDialog>
+    </>
+  );
+}
+
 export default function BidDetailPage() {
   const { hasPermission } = useAuth();
   const params = useParams();
@@ -70,11 +458,48 @@ export default function BidDetailPage() {
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [payments, setPayments] = useState<TenderPaymentDto[]>([]);
   const [template, setTemplate] = useState<EvaluationTemplate | null>(null);
+  const [sourceTender, setSourceTender] = useState<TenderDetailDto | null>(
+    null
+  );
+  const [evaluationRouteError, setEvaluationRouteError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [showOpenDialog, setShowOpenDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const canVetTenderBoq = hasPermission('quantity-survey.transactions.approve');
+  const canVerifyTenderPayment = hasPermission(
+    TENDER_PAYMENT_VERIFY_PERMISSION
+  );
+  const canAdministerTender = hasPermission('procurement.tender.administer');
+
+  const refreshPayments = async (updatedPayment: TenderPaymentDto) => {
+    setPayments((current) =>
+      current.map((payment) =>
+        payment.id === updatedPayment.id ? updatedPayment : payment
+      )
+    );
+    const paymentsData = await tenderBidService.getBidPayments(bidId);
+    setPayments(paymentsData);
+  };
+
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (
+      requestedTab &&
+      [
+        'overview',
+        'items',
+        'proposals',
+        'documents',
+        'payments',
+        'qs-boq',
+        'evaluation',
+        'interviews',
+      ].includes(requestedTab)
+    ) {
+      setActiveTab(requestedTab);
+    }
+  }, []);
 
   useEffect(() => {
     if (bidId) {
@@ -82,11 +507,30 @@ export default function BidDetailPage() {
     }
   }, [bidId]);
 
+  useEffect(() => {
+    if (activeTab !== 'evaluation' || !sourceTender) return;
+    const route = getTenderEvaluationRoute(sourceTender, bidId);
+    if (route.mode === 'controlled') router.replace(route.evaluationHref);
+  }, [activeTab, bidId, router, sourceTender]);
+
   const loadBidDetails = async () => {
     try {
       setLoading(true);
       const data = await tenderBidService.getBidById(bidId);
       setBid(data);
+
+      try {
+        setEvaluationRouteError(undefined);
+        setSourceTender(await tenderService.getTenderById(data.tenderId));
+      } catch (tenderError) {
+        setSourceTender(null);
+        setEvaluationRouteError(
+          getProcurementProblemMessage(
+            tenderError,
+            'The tender evaluation route could not be determined.'
+          )
+        );
+      }
 
       // Load evaluation template if assigned
       if (data.evaluationTemplateId) {
@@ -112,11 +556,19 @@ export default function BidDetailPage() {
   };
 
   const handleOpenBid = () => {
+    if (!canAdministerTender) {
+      toast.error('Tender administration permission is required to open bids.');
+      return;
+    }
     setShowOpenDialog(true);
   };
 
   const confirmOpenBid = async () => {
     if (!bid) return;
+    if (!canAdministerTender) {
+      toast.error('Tender administration permission is required to open bids.');
+      return false;
+    }
 
     try {
       setOpening(true);
@@ -126,7 +578,8 @@ export default function BidDetailPage() {
       toast.success('Bid marked as opened');
     } catch (error) {
       console.error('Error opening bid:', error);
-      toast.error('Failed to open bid');
+      toast.error(getProcurementProblemMessage(error, 'Failed to open bid'));
+      return false;
     } finally {
       setOpening(false);
     }
@@ -214,6 +667,17 @@ export default function BidDetailPage() {
     );
   }
 
+  const evaluationRoute: TenderEvaluationRoute | undefined = sourceTender
+    ? getTenderEvaluationRoute(sourceTender, bidId)
+    : undefined;
+  const handleTabChange = (value: string) => {
+    if (value === 'evaluation' && evaluationRoute?.mode === 'controlled') {
+      router.push(evaluationRoute.evaluationHref);
+      return;
+    }
+    setActiveTab(value);
+  };
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
@@ -221,7 +685,11 @@ export default function BidDetailPage() {
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
-            onClick={() => router.push('/procurement/bids')}
+            onClick={() =>
+              router.push(
+                `/procurement/bids?tenderId=${encodeURIComponent(bid.tenderId)}`
+              )
+            }
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
@@ -232,7 +700,7 @@ export default function BidDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {bid.status === 'Submitted' && (
+          {bid.status === 'Submitted' && canAdministerTender && (
             <Button onClick={handleOpenBid} disabled={opening}>
               <CheckCircle className="h-4 w-4 mr-2" />
               {opening ? 'Opening...' : 'Mark as Opened'}
@@ -311,11 +779,11 @@ export default function BidDetailPage() {
       {/* Tabs */}
       <Tabs
         value={activeTab}
-        onValueChange={setActiveTab}
+        onValueChange={handleTabChange}
         className="space-y-4"
       >
         <TabsList
-          className={`grid w-full ${canVetTenderBoq ? 'grid-cols-7' : 'grid-cols-6'}`}
+          className={`grid w-full ${canVetTenderBoq ? 'grid-cols-8' : 'grid-cols-7'}`}
         >
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
@@ -341,6 +809,10 @@ export default function BidDetailPage() {
                 doc.documentType !== 'CommercialProposal'
             ).length || 0}
             )
+          </TabsTrigger>
+          <TabsTrigger value="payments">
+            <DollarSign className="h-4 w-4 mr-2" />
+            Payments ({payments.length})
           </TabsTrigger>
           {canVetTenderBoq && (
             <TabsTrigger value="qs-boq">
@@ -1078,204 +1550,267 @@ export default function BidDetailPage() {
           </Card>
         </TabsContent>
 
+        {/* Tender Fee Payments Tab */}
+        <TabsContent value="payments" className="space-y-4">
+          <TenderPaymentVerificationPanel
+            bidId={bidId}
+            payments={payments}
+            canVerifyPayment={canVerifyTenderPayment}
+            onRefresh={refreshPayments}
+          />
+        </TabsContent>
+
         {/* Evaluation Tab */}
         <TabsContent value="evaluation" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Evaluations</CardTitle>
-                  <CardDescription>
-                    {bid.evaluations?.length || 0} evaluation(s)
-                  </CardDescription>
-                </div>
+          {evaluationRoute?.mode === 'controlled' ? (
+            <Card className="border-blue-200 bg-blue-50/40">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-blue-700" />
+                  Controlled committee evaluation
+                </CardTitle>
+                <CardDescription>
+                  Open the signed tender evaluation workspace to score this bid.
+                  All bids remain side by side in one controlled committee
+                  record so the comparison and audit history stay complete.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
                 <Button
-                  onClick={() =>
-                    router.push(
-                      `/procurement/evaluations/create?bidId=${bidId}`
-                    )
-                  }
-                  className="gap-2"
+                  variant="outline"
+                  onClick={() => router.push(evaluationRoute.committeeHref)}
                 >
-                  <Award className="h-4 w-4" />
-                  Create Evaluation
+                  <Users className="mr-2 h-4 w-4" />
+                  Committee controls
                 </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {!bid.evaluations || bid.evaluations.length === 0 ? (
-                <div className="text-center py-8">
-                  <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 mb-4">No evaluations yet</p>
+                <Button
+                  onClick={() => router.push(evaluationRoute.evaluationHref)}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {evaluationRoute.evaluationLabel}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : evaluationRoute?.mode === 'legacy' ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Evaluations</CardTitle>
+                    <CardDescription>
+                      {bid.evaluations?.length || 0} evaluation(s)
+                    </CardDescription>
+                  </div>
                   <Button
                     onClick={() =>
                       router.push(
                         `/procurement/evaluations/create?bidId=${bidId}`
                       )
                     }
-                    variant="outline"
+                    className="gap-2"
                   >
-                    <Award className="h-4 w-4 mr-2" />
-                    Create First Evaluation
+                    <Award className="h-4 w-4" />
+                    Create Evaluation
                   </Button>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {bid.evaluations.map((evaluation) => (
-                    <Card key={evaluation.id} className="border">
-                      <CardHeader className="pb-2 pt-3 px-4">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <CardTitle className="text-sm font-semibold">
-                              {evaluation.evaluatorName || 'Unknown Evaluator'}
-                            </CardTitle>
-                            <CardDescription className="text-xs">
-                              {formatDate(evaluation.evaluationDate)}
-                            </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!bid.evaluations || bid.evaluations.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p className="text-gray-500 mb-4">No evaluations yet</p>
+                    <Button
+                      onClick={() =>
+                        router.push(
+                          `/procurement/evaluations/create?bidId=${bidId}`
+                        )
+                      }
+                      variant="outline"
+                    >
+                      <Award className="h-4 w-4 mr-2" />
+                      Create First Evaluation
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {bid.evaluations.map((evaluation) => (
+                      <Card key={evaluation.id} className="border">
+                        <CardHeader className="pb-2 pt-3 px-4">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <CardTitle className="text-sm font-semibold">
+                                {evaluation.evaluatorName ||
+                                  'Unknown Evaluator'}
+                              </CardTitle>
+                              <CardDescription className="text-xs">
+                                {formatDate(evaluation.evaluationDate)}
+                              </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <Badge
+                                variant={
+                                  evaluation.status === 'Submitted'
+                                    ? 'default'
+                                    : 'outline'
+                                }
+                                className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
+                              >
+                                {evaluation.status === 'Submitted'
+                                  ? 'Completed'
+                                  : evaluation.status}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() =>
+                                  router.push(
+                                    `/procurement/evaluations/${evaluation.id}`
+                                  )
+                                }
+                              >
+                                View
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <Badge
-                              variant={
-                                evaluation.status === 'Submitted'
-                                  ? 'default'
-                                  : 'outline'
-                              }
-                              className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
-                            >
-                              {evaluation.status === 'Submitted'
-                                ? 'Completed'
-                                : evaluation.status}
-                            </Badge>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() =>
-                                router.push(
-                                  `/procurement/evaluations/${evaluation.id}`
-                                )
-                              }
-                            >
-                              View
-                            </Button>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-2 pb-3 px-4 space-y-2">
-                        {/* Dynamic Criteria Scores */}
-                        {evaluation.evaluationCriteriaJson ? (
-                          (() => {
-                            try {
-                              const criteriaScores: CriteriaScore[] =
-                                JSON.parse(evaluation.evaluationCriteriaJson);
-                              const colors = [
-                                'text-blue-600',
-                                'text-green-600',
-                                'text-orange-600',
-                                'text-purple-600',
-                                'text-red-600',
-                                'text-cyan-600',
-                                'text-pink-600',
-                                'text-indigo-600',
-                                'text-teal-600',
-                              ];
-                              return (
-                                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                                  {criteriaScores.map((criteria, index) => (
-                                    <div key={criteria.criterionId}>
-                                      <p className="text-xs text-gray-500">
-                                        {criteria.criterionName}
-                                      </p>
-                                      <div className="flex items-baseline gap-1">
-                                        <p
-                                          className={`text-sm font-bold ${colors[index % colors.length]}`}
-                                        >
-                                          {criteria.score}
+                        </CardHeader>
+                        <CardContent className="pt-2 pb-3 px-4 space-y-2">
+                          {/* Dynamic Criteria Scores */}
+                          {evaluation.evaluationCriteriaJson ? (
+                            (() => {
+                              try {
+                                const criteriaScores: CriteriaScore[] =
+                                  JSON.parse(evaluation.evaluationCriteriaJson);
+                                const colors = [
+                                  'text-blue-600',
+                                  'text-green-600',
+                                  'text-orange-600',
+                                  'text-purple-600',
+                                  'text-red-600',
+                                  'text-cyan-600',
+                                  'text-pink-600',
+                                  'text-indigo-600',
+                                  'text-teal-600',
+                                ];
+                                return (
+                                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                                    {criteriaScores.map((criteria, index) => (
+                                      <div key={criteria.criterionId}>
+                                        <p className="text-xs text-gray-500">
+                                          {criteria.criterionName}
                                         </p>
-                                        <span className="text-xs text-gray-400">
-                                          / {criteria.maxScore}
-                                        </span>
+                                        <div className="flex items-baseline gap-1">
+                                          <p
+                                            className={`text-sm font-bold ${colors[index % colors.length]}`}
+                                          >
+                                            {criteria.score}
+                                          </p>
+                                          <span className="text-xs text-gray-400">
+                                            / {criteria.maxScore}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-gray-400">
+                                          Weighted:{' '}
+                                          {criteria.weightedScore.toFixed(1)}%
+                                        </p>
                                       </div>
-                                      <p className="text-xs text-gray-400">
-                                        Weighted:{' '}
-                                        {criteria.weightedScore.toFixed(1)}%
+                                    ))}
+                                    <div className="border-l pl-2">
+                                      <p className="text-xs text-gray-500 font-medium">
+                                        Total
+                                      </p>
+                                      <p className="text-sm font-bold text-indigo-600">
+                                        {evaluation.totalScore !== undefined &&
+                                        evaluation.totalScore !== null
+                                          ? `${evaluation.totalScore.toFixed(1)}%`
+                                          : criteriaScores
+                                              .reduce(
+                                                (sum, c) =>
+                                                  sum + c.weightedScore,
+                                                0
+                                              )
+                                              .toFixed(1) + '%'}
                                       </p>
                                     </div>
-                                  ))}
-                                  <div className="border-l pl-2">
-                                    <p className="text-xs text-gray-500 font-medium">
-                                      Total
-                                    </p>
-                                    <p className="text-sm font-bold text-indigo-600">
-                                      {evaluation.totalScore !== undefined &&
-                                      evaluation.totalScore !== null
-                                        ? `${evaluation.totalScore.toFixed(1)}%`
-                                        : criteriaScores
-                                            .reduce(
-                                              (sum, c) => sum + c.weightedScore,
-                                              0
-                                            )
-                                            .toFixed(1) + '%'}
-                                    </p>
                                   </div>
+                                );
+                              } catch {
+                                return (
+                                  <p className="text-xs text-gray-500">
+                                    Could not parse evaluation criteria
+                                  </p>
+                                );
+                              }
+                            })()
+                          ) : (
+                            <p className="text-xs text-gray-500">
+                              No detailed criteria scores available
+                            </p>
+                          )}
+                          {(evaluation.technicalComments ||
+                            evaluation.commercialComments ||
+                            evaluation.recommendation) && (
+                            <div className="text-xs space-y-1 pt-1 border-t">
+                              {evaluation.technicalComments && (
+                                <div>
+                                  <p className="font-medium text-gray-600">
+                                    Technical:
+                                  </p>
+                                  <p className="text-gray-700 line-clamp-2">
+                                    {evaluation.technicalComments}
+                                  </p>
                                 </div>
-                              );
-                            } catch {
-                              return (
-                                <p className="text-xs text-gray-500">
-                                  Could not parse evaluation criteria
-                                </p>
-                              );
-                            }
-                          })()
-                        ) : (
-                          <p className="text-xs text-gray-500">
-                            No detailed criteria scores available
-                          </p>
-                        )}
-                        {(evaluation.technicalComments ||
-                          evaluation.commercialComments ||
-                          evaluation.recommendation) && (
-                          <div className="text-xs space-y-1 pt-1 border-t">
-                            {evaluation.technicalComments && (
-                              <div>
-                                <p className="font-medium text-gray-600">
-                                  Technical:
-                                </p>
-                                <p className="text-gray-700 line-clamp-2">
-                                  {evaluation.technicalComments}
-                                </p>
-                              </div>
-                            )}
-                            {evaluation.commercialComments && (
-                              <div>
-                                <p className="font-medium text-gray-600">
-                                  Commercial:
-                                </p>
-                                <p className="text-gray-700 line-clamp-2">
-                                  {evaluation.commercialComments}
-                                </p>
-                              </div>
-                            )}
-                            {evaluation.recommendation && (
-                              <div className="bg-blue-50 p-2 rounded">
-                                <p className="font-medium text-blue-900">
-                                  Recommendation:
-                                </p>
-                                <p className="text-blue-800 line-clamp-2">
-                                  {evaluation.recommendation}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                              )}
+                              {evaluation.commercialComments && (
+                                <div>
+                                  <p className="font-medium text-gray-600">
+                                    Commercial:
+                                  </p>
+                                  <p className="text-gray-700 line-clamp-2">
+                                    {evaluation.commercialComments}
+                                  </p>
+                                </div>
+                              )}
+                              {evaluation.recommendation && (
+                                <div className="bg-blue-50 p-2 rounded">
+                                  <p className="font-medium text-blue-900">
+                                    Recommendation:
+                                  </p>
+                                  <p className="text-blue-800 line-clamp-2">
+                                    {evaluation.recommendation}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Evaluation route unavailable</AlertTitle>
+              <AlertDescription className="space-y-3">
+                <p>
+                  {evaluationRouteError ??
+                    'The tender evaluation route could not be determined.'}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    router.push(`/procurement/tenders/${bid.tenderId}`)
+                  }
+                >
+                  Return to tender
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
         </TabsContent>
 
         {/* Interviews Tab */}
@@ -1362,7 +1897,7 @@ export default function BidDetailPage() {
 
       {/* Open Bid Confirmation Dialog */}
       <ConfirmationDialog
-        open={showOpenDialog}
+        open={showOpenDialog && canAdministerTender}
         onOpenChange={setShowOpenDialog}
         title="Mark Bid as Opened"
         description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."

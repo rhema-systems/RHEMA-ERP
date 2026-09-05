@@ -142,6 +142,7 @@ public sealed class ProcurementReceiptInspectionDto
 public sealed class ProcurementReceiptInspectionOverviewDto
 {
     public Guid PurchaseOrderReceiptId { get; init; }
+    public Guid? WarehouseId { get; init; }
     public string ReceiptNumber { get; init; } = string.Empty;
     public string PurchaseOrderNumber { get; init; } = string.Empty;
     public string SupplierName { get; init; } = string.Empty;

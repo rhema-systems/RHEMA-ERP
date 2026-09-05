@@ -1,9 +1,9 @@
  
 // Service Worker for ERP System PWA
-const CACHE_NAME = 'erp-system-v2026-08-09-supplier-contact-confirmation'
-const STATIC_CACHE_NAME = 'erp-static-v2026-08-09-supplier-contact-confirmation'
-const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-08-09-supplier-contact-confirmation'
-const MOBILE_SHELL_CACHE_NAME = 'erp-mobile-shell-v2026-08-09-supplier-contact-confirmation'
+const CACHE_NAME = 'erp-system-v2026-08-25-procurement-policy-sourcing'
+const STATIC_CACHE_NAME = 'erp-static-v2026-08-25-procurement-policy-sourcing'
+const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-08-25-procurement-policy-sourcing'
+const MOBILE_SHELL_CACHE_NAME = 'erp-mobile-shell-v2026-08-25-procurement-policy-sourcing'
 const OFFLINE_PAGE = '/offline'
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const IS_LOCAL_DEV = LOCAL_DEV_HOSTS.has(self.location.hostname)

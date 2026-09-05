@@ -65,6 +65,9 @@ public sealed class QuantitySurveyEstimateVersionDto
     public DateTime EstimateDate { get; init; }
     public Guid CurrencyId { get; init; }
     public string CurrencyCode { get; init; } = string.Empty;
+    public string? FundingSource { get; init; }
+    public string? PropertyReference { get; init; }
+    public int SourceSnapshotSchemaVersion { get; init; }
     public decimal DirectCost { get; init; }
     public decimal MarkupTotal { get; init; }
     public decimal TotalAmount { get; init; }

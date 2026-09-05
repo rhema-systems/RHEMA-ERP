@@ -30,7 +30,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, Role } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home } from 'lucide-react';
+import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home, Search } from 'lucide-react';
 import { FACILITIES_PERMISSIONS } from '@/lib/facilities-permissions';
 import { PROPERTY_MANAGEMENT_PERMISSIONS } from '@/lib/property-management-permissions';
 
@@ -172,6 +172,7 @@ export default function RolesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [deleteRole, setDeleteRole] = useState<Role | null>(null);
+  const [permissionSearch, setPermissionSearch] = useState('');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -229,6 +230,38 @@ export default function RolesPage() {
     );
   }, [availablePermissions]);
 
+  const filteredPermissionCategories = React.useMemo(() => {
+    const query = permissionSearch.trim().toLowerCase();
+    if (!query) return permissionCategories;
+
+    return Object.fromEntries(
+      Object.entries(permissionCategories)
+        .map(([category, config]) => {
+          const categoryMatches = category.toLowerCase().includes(query);
+          const permissions = categoryMatches
+            ? config.permissions
+            : config.permissions.filter(permission =>
+                [permission.id, permission.name, permission.description]
+                  .some(value => value.toLowerCase().includes(query))
+              );
+
+          return [category, { ...config, permissions }] as const;
+        })
+        .filter(([, config]) => config.permissions.length > 0)
+    );
+  }, [permissionCategories, permissionSearch]);
+
+  const permissionCount = React.useMemo(
+    () => Object.values(permissionCategories)
+      .reduce((total, category) => total + category.permissions.length, 0),
+    [permissionCategories]
+  );
+  const visiblePermissionCount = React.useMemo(
+    () => Object.values(filteredPermissionCategories)
+      .reduce((total, category) => total + category.permissions.length, 0),
+    [filteredPermissionCategories]
+  );
+
   // Create/Update role mutation
   const createRoleMutation = useMutation({
     mutationFn: (roleData: RoleFormData) => {
@@ -279,18 +312,25 @@ export default function RolesPage() {
 
   const handleAdd = () => {
     setEditingRole(null);
+    setPermissionSearch('');
     form.reset();
     setIsDialogOpen(true);
   };
 
   const handleEdit = (role: Role) => {
     setEditingRole(role);
+    setPermissionSearch('');
     form.reset({
       name: role.name,
       description: role.description || '',
       permissions: role.permissions,
     });
     setIsDialogOpen(true);
+  };
+
+  const handleRoleDialogOpenChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) setPermissionSearch('');
   };
 
   const handleDelete = (role: Role) => {
@@ -440,7 +480,7 @@ export default function RolesPage() {
         />
 
         {/* Add/Edit Role Dialog */}
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={handleRoleDialogOpenChange}>
           <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
@@ -507,6 +547,23 @@ export default function RolesPage() {
                       <FormLabel>Permissions *</FormLabel>
                       <FormControl>
                         <div className="space-y-6">
+                          <div className="space-y-2">
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                aria-label="Search permissions"
+                                placeholder="Search by category, permission name, code or description..."
+                                value={permissionSearch}
+                                onChange={event => setPermissionSearch(event.target.value)}
+                                className="pl-10"
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground" aria-live="polite">
+                              {permissionSearch.trim()
+                                ? `Showing ${visiblePermissionCount} of ${permissionCount} permissions`
+                                : `${permissionCount} permissions available`}
+                            </p>
+                          </div>
                           {permissionsLoading && (
                             <p className="text-sm text-muted-foreground">Loading permissions...</p>
                           )}
@@ -515,7 +572,13 @@ export default function RolesPage() {
                               Permissions could not be loaded. Close the dialog and retry.
                             </p>
                           )}
-                          {Object.entries(permissionCategories).map(([category, config]) => {
+                          {!permissionsLoading && !permissionsFailed &&
+                            Object.keys(filteredPermissionCategories).length === 0 && (
+                              <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                                No permissions match &ldquo;{permissionSearch.trim()}&rdquo;.
+                              </div>
+                            )}
+                          {Object.entries(filteredPermissionCategories).map(([category, config]) => {
                             const Icon = config.icon;
                             return (
                               <div key={category} className="space-y-3">

@@ -253,9 +253,21 @@ export default function PurchaseReceiptsPage() {
                             <h3 className="font-semibold">{receipt.receiptNumber}</h3>
                             {getStatusBadge(receipt.status)}
                             {receipt.requiresInspection && (
-                              <Badge variant="outline" className="bg-yellow-50">
-                                <AlertTriangle className="h-3 w-3 mr-1" />
-                                Inspection Required
+                              <Badge
+                                variant="outline"
+                                className={receipt.inspectionDate && receipt.inspectionResult &&
+                                  receipt.inspectionResult.toLowerCase() !== 'pending'
+                                  ? 'border-green-200 bg-green-50 text-green-800'
+                                  : 'bg-yellow-50'}
+                              >
+                                {receipt.inspectionDate && receipt.inspectionResult &&
+                                receipt.inspectionResult.toLowerCase() !== 'pending'
+                                  ? <CheckCircle className="h-3 w-3 mr-1" />
+                                  : <AlertTriangle className="h-3 w-3 mr-1" />}
+                                {receipt.inspectionDate && receipt.inspectionResult &&
+                                receipt.inspectionResult.toLowerCase() !== 'pending'
+                                  ? 'Inspection Complete'
+                                  : 'Inspection Required'}
                               </Badge>
                             )}
                           </div>

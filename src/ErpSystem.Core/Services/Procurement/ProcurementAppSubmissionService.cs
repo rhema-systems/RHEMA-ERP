@@ -1,4 +1,9 @@
+using ErpSystem.Shared;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
@@ -16,11 +21,13 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
     private const string SourceType = "ProcurementAppSubmission";
     private const string EventType = "AppSubmissionLifecycle";
     private const string PlanPermission = "procurement.plan.manage";
-    private static readonly Regex Sha256Pattern = new("^[0-9a-fA-F]{64}$", RegexOptions.Compiled);
+    private const string ExportTemplateVersion = "TDC-APP-v1";
+    private static readonly HashSet<string> SupportedExportFormats = new(["CSV", "JSON", "XML"], StringComparer.OrdinalIgnoreCase);
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IControlledFileUploadService _controlledFiles;
     private readonly ILogger<ProcurementAppSubmissionService> _logger;
 
     public ProcurementAppSubmissionService(
@@ -28,12 +35,14 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
         ICurrentUserProvider currentUser,
         IProcurementAccessControlService accessControl,
         IProcurementControlEventService controlEvents,
+        IControlledFileUploadService controlledFiles,
         ILogger<ProcurementAppSubmissionService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _accessControl = accessControl;
         _controlEvents = controlEvents;
+        _controlledFiles = controlledFiles;
         _logger = logger;
     }
 
@@ -126,13 +135,44 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
         return Map(entity, await LoadTimelineAsync(entity.TimelineCorrelationId, cancellationToken));
     }
 
+    public async Task<ProcurementAppExportFileDto> GetExportFileAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureReader();
+        _ = await LoadAsync(id, false, cancellationToken);
+        var exportEvent = await Events.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.EventType == EventType && item.SourceId == id &&
+                (item.Action == "ExportRecorded" || item.Action == "ResubmissionRecorded"))
+            .Include(item => item.EvidenceLinks)
+                .ThenInclude(item => item.FileUploadRecord)
+            .AsNoTracking()
+            .OrderByDescending(item => item.OccurredAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        var upload = exportEvent?.EvidenceLinks
+            .FirstOrDefault(item => item.ReferenceKind == ProcurementControlEvidenceReferenceKind.FileUploadRecord &&
+                item.RequirementKey == "APP_EXPORT_PACKAGE")
+            ?.FileUploadRecord;
+        if (upload is null || upload.IsDeleted || string.IsNullOrWhiteSpace(upload.FilePath))
+            throw new ProcurementAppSubmissionNotFoundException("The generated APP export package was not found.");
+
+        return new ProcurementAppExportFileDto
+        {
+            FileUploadRecordId = upload.Id,
+            FileName = upload.OriginalFileName,
+            ContentType = string.IsNullOrWhiteSpace(upload.ContentType) ? "application/octet-stream" : upload.ContentType,
+            FilePath = upload.FilePath
+        };
+    }
+
     public async Task<ProcurementAppSubmissionDto> RecordExportAsync(
         RecordProcurementAppExportRequest request,
         string causationId,
         CancellationToken cancellationToken = default)
     {
         EnsureAuthenticatedTenant();
-        ValidateExport(request.ExportFileName, request.ExportFormat, request.ExportTemplateVersion, request.ExportChecksumSha256);
+        var exportFormat = ValidateExportFormat(request.ExportFormat);
         var plan = await Plans.GetQueryable(item => item.Id == request.ProcurementPlanId &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .Include(item => item.Items.Where(planItem => !planItem.IsDeleted))
@@ -144,6 +184,8 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
                 item.ProcurementPlanId == plan.Id && !item.IsDeleted).AnyAsync(cancellationToken))
             throw new ProcurementAppSubmissionConflictException("This published plan version already has an APP submission register. Continue through its current attempt or resubmit a rejected attempt.");
 
+        var package = BuildExportPackage(plan, exportFormat);
+        var uploaded = await UploadPackageAsync(package, cancellationToken);
         var now = DateTime.UtcNow;
         var entity = new ProcurementAppSubmission
         {
@@ -154,10 +196,10 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             AttemptNumber = 1,
             Status = ProcurementAppSubmissionStatus.Exported,
             TimelineCorrelationId = $"app-{Guid.NewGuid():N}",
-            ExportFileName = request.ExportFileName.Trim(),
-            ExportFormat = request.ExportFormat.Trim().ToUpperInvariant(),
-            ExportTemplateVersion = request.ExportTemplateVersion.Trim(),
-            ExportChecksumSha256 = request.ExportChecksumSha256.Trim().ToUpperInvariant(),
+            ExportFileName = package.FileName,
+            ExportFormat = exportFormat,
+            ExportTemplateVersion = ExportTemplateVersion,
+            ExportChecksumSha256 = uploaded.ChecksumSha256.ToUpperInvariant(),
             ExportedAtUtc = now,
             ExportedById = _currentUser.UserId,
             ExportedByName = ActorName,
@@ -169,8 +211,16 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             ProcurementPlan = plan
         };
 
-        return await ExecuteMutationAsync(entity, true, "ExportRecorded", null, Snapshot(entity), request.Notes,
-            ExportEvidence(request.Evidence, entity), causationId, cancellationToken);
+        try
+        {
+            return await ExecuteMutationAsync(entity, true, "ExportRecorded", null, Snapshot(entity), request.Notes,
+                ExportEvidence(request.Evidence, entity, uploaded.Record.Id), causationId, cancellationToken);
+        }
+        catch
+        {
+            await TryDeleteGeneratedPackageAsync(uploaded.Record.Id, cancellationToken);
+            throw;
+        }
     }
 
     public async Task<ProcurementAppSubmissionDto> SubmitAsync(
@@ -263,7 +313,7 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
         CancellationToken cancellationToken = default)
     {
         EnsureAuthenticatedTenant();
-        ValidateExport(request.ExportFileName, request.ExportFormat, request.ExportTemplateVersion, request.ExportChecksumSha256);
+        var exportFormat = ValidateExportFormat(request.ExportFormat);
         var rejected = await LoadAsync(id, true, cancellationToken);
         await EnsureManagerAsync(rejected.SubmissionNumber, causationId, cancellationToken);
         EnsureRowVersion(rejected.RowVersion, request.RowVersion);
@@ -273,6 +323,13 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             .MaxAsync(item => item.AttemptNumber, cancellationToken);
         if (latestAttempt != rejected.AttemptNumber)
             throw new ProcurementAppSubmissionConflictException("A later APP attempt already exists for this plan version.");
+        var plan = await Plans.GetQueryable(item => item.Id == rejected.ProcurementPlanId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.Items.Where(planItem => !planItem.IsDeleted))
+            .SingleAsync(cancellationToken);
+        EnsurePublishedPlan(plan);
+        var package = BuildExportPackage(plan, exportFormat);
+        var uploaded = await UploadPackageAsync(package, cancellationToken);
         var now = DateTime.UtcNow;
         var entity = new ProcurementAppSubmission
         {
@@ -284,10 +341,10 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             Status = ProcurementAppSubmissionStatus.Exported,
             TimelineCorrelationId = rejected.TimelineCorrelationId,
             SupersedesSubmissionId = rejected.Id,
-            ExportFileName = request.ExportFileName.Trim(),
-            ExportFormat = request.ExportFormat.Trim().ToUpperInvariant(),
-            ExportTemplateVersion = request.ExportTemplateVersion.Trim(),
-            ExportChecksumSha256 = request.ExportChecksumSha256.Trim().ToUpperInvariant(),
+            ExportFileName = package.FileName,
+            ExportFormat = exportFormat,
+            ExportTemplateVersion = ExportTemplateVersion,
+            ExportChecksumSha256 = uploaded.ChecksumSha256.ToUpperInvariant(),
             ExportedAtUtc = now,
             ExportedById = _currentUser.UserId,
             ExportedByName = ActorName,
@@ -296,10 +353,18 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             CreatedBy = _currentUser.Username,
             CreatedById = _currentUser.UserId,
             RowVersion = Guid.NewGuid().ToByteArray(),
-            ProcurementPlan = rejected.ProcurementPlan
+            ProcurementPlan = plan
         };
-        return await ExecuteMutationAsync(entity, true, "ResubmissionRecorded", Snapshot(rejected), Snapshot(entity),
-            request.Notes, ExportEvidence(request.Evidence, entity), causationId, cancellationToken);
+        try
+        {
+            return await ExecuteMutationAsync(entity, true, "ResubmissionRecorded", Snapshot(rejected), Snapshot(entity),
+                request.Notes, ExportEvidence(request.Evidence, entity, uploaded.Record.Id), causationId, cancellationToken);
+        }
+        catch
+        {
+            await TryDeleteGeneratedPackageAsync(uploaded.Record.Id, cancellationToken);
+            throw;
+        }
     }
 
     private async Task<ProcurementAppSubmissionDto> ExecuteMutationAsync(
@@ -487,7 +552,7 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
 
     private async Task EnsureManagerAsync(string sourceReference, string causationId, CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = PlanPermission,
@@ -501,9 +566,9 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
-        throw new ProcurementAppSubmissionAuthorizationException("A TDC procurement role or tenant-administration role is required.");
+        if (HasAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
+        throw new ProcurementAppSubmissionAuthorizationException("The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -512,7 +577,9 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             throw new ProcurementAppSubmissionAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin) ||
+        _currentUser.HasRole(Constants.Roles.TenantAdmin);
     private string ActorName => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
 
     private static void EnsurePublishedPlan(ProcurementPlan plan)
@@ -528,16 +595,177 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
         if (entity.Status != required) throw new ProcurementAppSubmissionConflictException(message);
     }
 
-    private static void ValidateExport(string fileName, string format, string templateVersion, string checksum)
+    private static string ValidateExportFormat(string? value)
     {
-        EnsureRequired(fileName, "EXPORT_FILE_REQUIRED", "ExportFileName is required.");
-        EnsureRequired(format, "EXPORT_FORMAT_REQUIRED", "ExportFormat is required.");
-        EnsureRequired(templateVersion, "EXPORT_TEMPLATE_REQUIRED", "ExportTemplateVersion is required.");
-        if (fileName.Trim().Length > 260 || format.Trim().Length > 30 || templateVersion.Trim().Length > 100)
-            throw new ProcurementAppSubmissionValidationException("EXPORT_METADATA_INVALID", "Export metadata exceeds an allowed field length.");
-        if (!Sha256Pattern.IsMatch(checksum?.Trim() ?? string.Empty))
-            throw new ProcurementAppSubmissionValidationException("EXPORT_CHECKSUM_INVALID", "ExportChecksumSha256 must be a 64-character hexadecimal SHA-256 value.");
+        var format = string.IsNullOrWhiteSpace(value) ? "CSV" : value.Trim().ToUpperInvariant();
+        if (!SupportedExportFormats.Contains(format))
+            throw new ProcurementAppSubmissionValidationException(
+                "EXPORT_FORMAT_INVALID",
+                "APP exports are available as CSV, JSON or XML.");
+        return format;
     }
+
+    private async Task<ControlledFileUploadResult> UploadPackageAsync(
+        AppExportPackage package,
+        CancellationToken cancellationToken) =>
+        await _controlledFiles.UploadAsync(new ControlledFileUploadRequest
+        {
+            TenantId = _currentUser.TenantId,
+            ActorUserId = _currentUser.UserId,
+            ActorName = ActorName,
+            Category = ControlledFileUploadCategories.ProcurementAppExchange,
+            FileName = package.FileName,
+            ContentType = package.ContentType,
+            FileSize = package.Content.LongLength,
+            OpenReadStream = () => new MemoryStream(package.Content, writable: false)
+        }, cancellationToken);
+
+    private async Task TryDeleteGeneratedPackageAsync(Guid uploadId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _controlledFiles.DeleteAsync(_currentUser.TenantId, uploadId, _currentUser.UserId, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Unable to roll back generated APP package {FileUploadRecordId}.", uploadId);
+        }
+    }
+
+    private static AppExportPackage BuildExportPackage(ProcurementPlan plan, string format)
+    {
+        var extension = format.ToLowerInvariant();
+        var fileName = $"APP-{plan.FiscalYear}-{SafeFilePart(plan.PlanNumber)}-R{plan.RevisionNumber}.{extension}";
+        var orderedItems = plan.Items.Where(item => !item.IsDeleted)
+            .OrderBy(item => item.ItemDescription)
+            .ThenBy(item => item.Id)
+            .ToList();
+        return format switch
+        {
+            "JSON" => new AppExportPackage(fileName, "application/json", BuildJson(plan, orderedItems)),
+            "XML" => new AppExportPackage(fileName, "application/xml", BuildXml(plan, orderedItems)),
+            _ => new AppExportPackage(fileName, "text/csv", BuildCsv(plan, orderedItems))
+        };
+    }
+
+    private static byte[] BuildJson(ProcurementPlan plan, IReadOnlyList<ProcurementPlanItem> items) =>
+        JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = "tdc.annual-procurement-plan.v1",
+            templateVersion = ExportTemplateVersion,
+            plan = new
+            {
+                plan.PlanNumber,
+                plan.Title,
+                plan.FiscalYear,
+                plan.RevisionNumber,
+                plan.PlanningCycle,
+                plan.PlanStartDate,
+                plan.PlanEndDate,
+                plan.Currency,
+                plan.TotalEstimatedBudget,
+                plan.ApprovedBudget,
+                plan.PublishedDate
+            },
+            items = items.Select(ItemPayload)
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+
+    private static byte[] BuildXml(ProcurementPlan plan, IReadOnlyList<ProcurementPlanItem> items)
+    {
+        var document = new XDocument(
+            new XElement("AnnualProcurementPlan",
+                new XAttribute("schemaVersion", "tdc.annual-procurement-plan.v1"),
+                new XAttribute("templateVersion", ExportTemplateVersion),
+                new XElement("PlanNumber", plan.PlanNumber),
+                new XElement("Title", plan.Title),
+                new XElement("FiscalYear", plan.FiscalYear),
+                new XElement("RevisionNumber", plan.RevisionNumber),
+                new XElement("PlanningCycle", plan.PlanningCycle),
+                new XElement("PlanStartDate", Iso(plan.PlanStartDate)),
+                new XElement("PlanEndDate", Iso(plan.PlanEndDate)),
+                new XElement("Currency", plan.Currency),
+                new XElement("TotalEstimatedBudget", Number(plan.TotalEstimatedBudget)),
+                new XElement("ApprovedBudget", Number(plan.ApprovedBudget)),
+                new XElement("PublishedDate", Iso(plan.PublishedDate)),
+                new XElement("Items", items.Select(item => new XElement("Item",
+                    new XElement("Description", item.ItemDescription),
+                    new XElement("Category", item.ItemCategory ?? string.Empty),
+                    new XElement("Specifications", item.Specifications ?? string.Empty),
+                    new XElement("Quantity", Number(item.EstimatedQuantity)),
+                    new XElement("UnitOfMeasure", item.UnitOfMeasure),
+                    new XElement("UnitPrice", Number(item.EstimatedUnitPrice)),
+                    new XElement("TotalCost", Number(item.EstimatedTotalCost)),
+                    new XElement("Currency", item.Currency),
+                    new XElement("Priority", item.Priority),
+                    new XElement("RequiredDate", Iso(item.RequiredDate)),
+                    new XElement("Quarter", item.PlannedQuarter ?? string.Empty),
+                    new XElement("ProcurementMethod", item.ProcurementMethod ?? string.Empty),
+                    new XElement("BudgetLine", item.BudgetLineCode ?? string.Empty),
+                    new XElement("BudgetCategory", item.BudgetCategoryName ?? string.Empty),
+                    new XElement("ApprovedBudget", Number(item.ApprovedBudgetAmount)))))));
+        return Encoding.UTF8.GetBytes(document.ToString(SaveOptions.DisableFormatting));
+    }
+
+    private static byte[] BuildCsv(ProcurementPlan plan, IReadOnlyList<ProcurementPlanItem> items)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Plan Number,Plan Title,Fiscal Year,Revision,Published Date,Item Description,Item Category,Specifications,Quantity,UOM,Unit Cost,Total Cost,Currency,Priority,Required By,Quarter,Procurement Method,Budget Line,Budget Category,Approved Budget");
+        foreach (var item in items)
+        {
+            var values = new[]
+            {
+                plan.PlanNumber, plan.Title, plan.FiscalYear.ToString(CultureInfo.InvariantCulture),
+                plan.RevisionNumber.ToString(CultureInfo.InvariantCulture), Iso(plan.PublishedDate),
+                item.ItemDescription, item.ItemCategory, item.Specifications, Number(item.EstimatedQuantity),
+                item.UnitOfMeasure, Number(item.EstimatedUnitPrice), Number(item.EstimatedTotalCost),
+                item.Currency, item.Priority, Iso(item.RequiredDate), item.PlannedQuarter,
+                item.ProcurementMethod, item.BudgetLineCode, item.BudgetCategoryName,
+                Number(item.ApprovedBudgetAmount)
+            };
+            builder.AppendLine(string.Join(',', values.Select(Csv)));
+        }
+        return Encoding.UTF8.GetBytes(builder.ToString());
+    }
+
+    private static object ItemPayload(ProcurementPlanItem item) => new
+    {
+        description = item.ItemDescription,
+        category = item.ItemCategory,
+        item.Specifications,
+        quantity = item.EstimatedQuantity,
+        unitOfMeasure = item.UnitOfMeasure,
+        unitCost = item.EstimatedUnitPrice,
+        totalCost = item.EstimatedTotalCost,
+        item.Currency,
+        item.Priority,
+        requiredBy = item.RequiredDate,
+        quarter = item.PlannedQuarter,
+        procurementMethod = item.ProcurementMethod,
+        budgetLine = item.BudgetLineCode,
+        budgetCategory = item.BudgetCategoryName,
+        approvedBudget = item.ApprovedBudgetAmount
+    };
+
+    private static string SafeFilePart(string value)
+    {
+        var safe = Regex.Replace(value.Trim(), "[^A-Za-z0-9_-]+", "-").Trim('-');
+        return string.IsNullOrWhiteSpace(safe) ? "PLAN" : safe[..Math.Min(safe.Length, 80)];
+    }
+
+    private static string Csv(string? value)
+    {
+        var normalized = value ?? string.Empty;
+        if (normalized.Length > 0 && "=+-@\t\r".Contains(normalized[0]))
+            normalized = $"'{normalized}";
+        return normalized.IndexOfAny([',', '"', '\r', '\n']) < 0
+            ? normalized
+            : $"\"{normalized.Replace("\"", "\"\"")}\"";
+    }
+
+    private static string Number(decimal? value) => value?.ToString("0.####", CultureInfo.InvariantCulture) ?? string.Empty;
+    private static string Iso(DateTime? value) => value?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private sealed record AppExportPackage(string FileName, string ContentType, byte[] Content);
 
     private static void EnsureRequired(string? value, string code, string message)
     {
@@ -589,8 +817,20 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
 
     private static List<ProcurementControlEventEvidenceReference> ExportEvidence(
         IEnumerable<ProcurementControlEventEvidenceReference> supplied,
-        ProcurementAppSubmission entity) => ExternalEvidence(supplied, $"sha256:{entity.ExportChecksumSha256}",
+        ProcurementAppSubmission entity,
+        Guid packageFileUploadRecordId)
+    {
+        var result = ExternalEvidence(supplied, $"sha256:{entity.ExportChecksumSha256}",
             $"{entity.ExportFileName} ({entity.ExportFormat}, template {entity.ExportTemplateVersion})", "APP_EXPORT");
+        result.Add(new ProcurementControlEventEvidenceReference
+        {
+            ReferenceKind = ProcurementControlEvidenceReferenceKind.FileUploadRecord,
+            ReferenceId = packageFileUploadRecordId,
+            Label = "Generated Annual Procurement Plan export package",
+            RequirementKey = "APP_EXPORT_PACKAGE"
+        });
+        return result;
+    }
 
     private static List<ProcurementControlEventEvidenceReference> ExternalEvidence(
         IEnumerable<ProcurementControlEventEvidenceReference> supplied,
