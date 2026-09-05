@@ -251,14 +251,22 @@ rehearsal database or backup remains.
 
 ## Next action
 
-Correct Stage B1 candidate `102c67b9012c2efd7202aa295a62414b3dbc7f84` before integration. Independent
-Sol High review confirmed that the two producers use V2 without enumeration and preserve posting economics,
-but found three blockers: the executable supplier-onboarding seeder cannot adopt its own legacy unsegmented
-1040/4930/2210 rows through the canonical provisioning boundary; raw `SubledgerPostingMode` aliases can emit
-the nonexistent `LOCAL` book and the two producers disagree on missing settings; and the packet added no new
-executable denial/idempotency/canonical-provisioning tests. The Sol Medium correction must add a Finance-owned
-legacy adoption path, one shared explicit single-book resolver with reviewed alias/missing/pseudo/unknown
-behavior, and fresh/legacy/conflict/config/mapping/idempotency tests. Do not put enumeration or applicability
-decisions in Procurement. Re-review the corrected clean handoff before integration, then perform the recorded
-Finance-owned multi-book architecture checkpoint before issuing Inventory. Keep configured `RHEMAERP`
-read-only until the later reset/migration gate is separately reconciled.
+Stage B1 Procurement is complete. Independent GPT-5.6 Sol High review approved corrected candidate
+`8fddb7fd7a8f1cc529f425bc066d3fe15e2b40b5` from exact base `0f88eff2`; the ordered commits were integrated
+locally as `3d6fefa0` and `ce995953`. The final boundary removes the two active Procurement V1 constructors,
+uses one Finance-owned legacy single-book resolver, keeps Procurement out of book enumeration/applicability,
+and routes supplier-onboarding account creation through Finance provisioning. The narrowly gated adoption path
+preserves the IDs of only the former seeder-owned 1040/4930/2210 rows and rejects ambiguous, wrong-type or
+partially governed identities. Independent gates passed 39/39 focused Core tests and 9/9 focused API tests;
+coordinator integration verification passed 39/39 Core and 79/79 expanded Finance tests. `git diff --check`
+passed, the candidate remained clean, and no database or migration command was run. Unrelated primary-worktree
+changes were preserved.
+
+Do not issue Inventory or enable automatic parallel-book posting yet. The Finance-owned architecture checkpoint
+confirmed that current posting-event uniqueness is not book-qualified, journal/transaction/event rows lack
+stable relational `AccountingBookId`, generic `Account.Balance` and account/currency exposure can commingle
+alternative-book representations, and accounting-book lifecycle/initialization/book-period controls do not yet
+support governed parallel posting. The next safe action is to obtain the recorded accounting/product decisions,
+then implement the Finance-owned foundation in reviewed stages before revising the Inventory, Sales and HR/Payroll
+owner packets. Configured `RHEMAERP` remains read-only until the later reset/migration gate is separately
+reconciled.
