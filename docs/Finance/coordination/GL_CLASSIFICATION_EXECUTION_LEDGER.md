@@ -211,6 +211,17 @@ temporarily to Sol High only for an unresolved material defect or unusually diff
 decision. Apply switches only between completed turns after reconciling the task checkpoint; record each
 exception or escalation here.
 
+On 2026-09-05 the user supplied a proposed mature multi-book accounting architecture and authorized the
+coordinator to proceed with its review. Stage B1 Procurement remains bounded to removal of the legacy V1
+contract and direct Finance account writes. It must not make Procurement responsible for enumerating active
+books, deciding book applicability, or duplicating an economic event across books. The current concrete
+`AccountingBookCode` call remains a single-book leaf-executor boundary and must preserve existing economics.
+After Stage B1 is independently reviewed and integrated, the coordinator must complete a Finance-owned
+multi-book architecture checkpoint before issuing the Inventory packet. That checkpoint will reconcile
+governed book lifecycle/types, book-aware balances, stable book IDs, book-period/initialization controls,
+and a neutral `AccountingEvent`/per-book representation orchestrator. Automatic parallel-book posting must
+remain disabled while generic `Account.Balance` can combine alternative book representations.
+
 Independent Sol High re-review of Stage A.1 candidate `0263b16a` found the migration, downgrade,
 owner-comment, guarded-rehearsal, sanitized-evidence and documentation corrections technically sound. One
 P1 integration-control correction remains: the durable handoff/evidence stops at `b85d88b1` and omits the
@@ -244,6 +255,7 @@ Execute the bounded Procurement owner packet from exact base `0f88eff2`: convert
 producers to V2 with explicit governed `AccountingBookCode`, replace the executable supplier-onboarding
 seeder's direct Finance `Account` writes with `IFinanceAccountProvisioningService`, add the required
 owner-facing comments and denial/idempotency/canonical-identity tests, and return a clean structured handoff.
-Do not change Procurement economics or unrelated Procurement behavior. Independently review the packet before
-local integration, then issue the Inventory packet. Keep configured `RHEMAERP` read-only until the later
-reset/migration gate is separately reconciled.
+Do not change Procurement economics or unrelated Procurement behavior, and do not put book enumeration or
+applicability decisions in Procurement. Independently review the packet before local integration, then perform
+the recorded Finance-owned multi-book architecture checkpoint before issuing the Inventory packet. Keep
+configured `RHEMAERP` read-only until the later reset/migration gate is separately reconciled.
