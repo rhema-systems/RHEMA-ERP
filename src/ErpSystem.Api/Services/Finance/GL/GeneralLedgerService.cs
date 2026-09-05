@@ -298,18 +298,24 @@ namespace ErpSystem.Api.Services.Finance.GL
             => throw new InvalidOperationException(
                 "Legacy direct GL posting is disabled. Use the journal entry lifecycle for manual journals or the owning Finance module service through IFinancePostingEngine.");
 
+        [Obsolete("Use the exact-book /api/finance/book-balances inquiry. This compatibility API resolves only the single active default posting book.")]
         public async Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode = null)
         {
             var tenantId = TenantId;
             var account = await _context.Accounts
                 .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted);
             if (account == null) throw new ArgumentException("Account not found");
+            var primaryBooks = await _context.AccountingBooks.AsNoTracking().Where(item =>
+                    item.TenantId == tenantId && item.IsDefault && item.IsActive && item.AllowsPosting && !item.IsDeleted)
+                .Take(2).ToListAsync();
+            if (primaryBooks.Count != 1)
+                throw new InvalidOperationException("PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Legacy balance inquiry requires exactly one active default posting book.");
             var requestedCurrency = string.IsNullOrWhiteSpace(currencyCode)
                 ? await _tenantSettings.GetBaseCurrencyAsync()
                 : currencyCode.Trim().ToUpperInvariant();
 
-            // TODO: Implement multi-currency balance calculation using AccountCurrencyLink and ExchangeRates
-            _ = requestedCurrency;
+            if (!string.Equals(requestedCurrency, await _tenantSettings.GetBaseCurrencyAsync(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Legacy balance inquiry supports only the functional currency. Use exact-book exposure inquiry for foreign currency.");
             return account.Balance;
         }
 

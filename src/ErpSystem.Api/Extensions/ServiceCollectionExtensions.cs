@@ -897,6 +897,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccessScopeService, ErpSystem.Api.Services.Finance.Security.FinanceAccessScopeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReversalPolicyService, ErpSystem.Api.Services.Finance.FinanceReversalPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePostingEngine, ErpSystem.Api.Services.Finance.GL.FinancePostingEngine>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBookBalanceReadModelService, ErpSystem.Api.Services.Finance.GL.BookBalanceReadModelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerSettlementReadModelService, ErpSystem.Api.Services.Finance.SubledgerSettlementReadModelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IOpeningBalanceService, ErpSystem.Api.Services.Finance.Migration.OpeningBalanceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IMigrationSignOffService, ErpSystem.Api.Services.Finance.Migration.MigrationSignOffService>();

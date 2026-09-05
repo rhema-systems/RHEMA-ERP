@@ -25,6 +25,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IFinanceBudgetControlService? _budgetControl;
     private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
+    private readonly IBookBalanceReadModelService _bookBalances;
 
     public FinancePostingEngine(
         ApplicationDbContext context,
@@ -32,7 +33,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         ILogger<FinancePostingEngine> logger,
         IFinanceAuditService? financeAuditService = null,
         IFinanceBudgetControlService? budgetControl = null,
-        IFinanceBudgetCommitmentService? budgetCommitments = null)
+        IFinanceBudgetCommitmentService? budgetCommitments = null,
+        IBookBalanceReadModelService? bookBalances = null)
     {
         _context = context;
         _currentUserService = currentUserService;
@@ -40,6 +42,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         _financeAuditService = financeAuditService;
         _budgetControl = budgetControl;
         _budgetCommitments = budgetCommitments;
+        _bookBalances = bookBalances ?? new BookBalanceReadModelService(context);
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
@@ -187,18 +190,12 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             _context.JournalEntries.Add(journalEntry);
         }
 
-        // Account.Balance is a read-side snapshot used by existing balance APIs; posted journals remain the accounting source of truth.
-        await ApplyAccountBalanceMovementsAsync(
-            tenantId,
-            journalEntry.Transactions,
-            cancellationToken);
-
-        await ApplyAccountCurrencyLinkMovementsAsync(
-            tenantId,
-            journalEntry.Transactions,
-            now,
-            postedByUserId,
-            cancellationToken);
+        // Journal lines are authoritative. Both exact-book projections are updated inside this same
+        // posting transaction; Account.Balance remains a temporary default-book-only compatibility view.
+        await _bookBalances.ApplyPostingAsync(tenantId, validation.AccountingBookId,
+            validation.AccountingBookCode, validation.FiscalPeriod.Id, validation.FunctionalCurrencyCode,
+            journalEntry.Transactions.ToArray(), validation.UpdatesPrimaryCompatibilityBalance,
+            now, postedByUserId, cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
         await _context.SaveChangesAsync(cancellationToken);
@@ -1077,6 +1074,14 @@ WHERE [Id] = {delta.AccountId}
                 tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
             throw new InvalidOperationException("Accounting book is unavailable for posting.");
         }
+        var primaryCompatibilityBooks = await _context.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.IsDefault && !item.IsDeleted
+                && (allowHistoricalMappingException || (item.IsActive && item.AllowsPosting)))
+            .Take(2).ToListAsync(cancellationToken);
+        if (primaryCompatibilityBooks.Count != 1)
+            throw new InvalidOperationException(
+                "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default posting book is required before posting.");
+        var updatesPrimaryCompatibilityBalance = primaryCompatibilityBooks[0].Id == accountingBook.Id;
         var requestedFunctionalCurrency = NormalizeCurrency(request.FunctionalCurrencyCode, "Functional currency");
         var functionalCurrencyConfig = await ResolveTenantFunctionalCurrencyAsync(tenantId, cancellationToken);
         var functionalCurrency = functionalCurrencyConfig.CurrencyCode;
@@ -1524,6 +1529,7 @@ WHERE [Id] = {delta.AccountId}
             budgetReservationSourceDocumentType,
             RequestFingerprintVersion,
             requestFingerprint,
+            updatesPrimaryCompatibilityBalance,
             allowHistoricalMappingException);
     }
 
@@ -3254,6 +3260,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string? BudgetReservationSourceDocumentType,
         string RequestFingerprintVersion,
         string RequestFingerprint,
+        bool UpdatesPrimaryCompatibilityBalance,
         bool AllowsHistoricalMappingException);
 
     private sealed record ValidatedPostingLine(
