@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePathname } from 'next/navigation';
 
 import { ProcurementUatFlowSidebar } from '@/components/procurement/ProcurementUatFlowSidebar';
@@ -9,7 +10,11 @@ import type {
   ProcurementUatStageStates,
 } from '@/lib/procurement-uat-flow';
 import { procurementTenderDocumentService } from '@/services/procurement-tender-document.service';
-import { getTenderById, type TenderDetailDto } from '@/services/tenderService';
+import {
+  getTenderById,
+  tenderDetailQueryKey,
+  type TenderDetailDto,
+} from '@/services/tenderService';
 import type { ProcurementTenderDocumentReadiness } from '@/types/procurement-tender-document';
 
 const stageOrder: readonly ProcurementUatStageId[] = [
@@ -49,7 +54,7 @@ const stageRoles: Record<ProcurementUatStageId, string> = {
   'sourcing-release-case': 'Procurement Officer',
   'tender-rfq-preparation': 'Procurement Officer',
   'tender-documents-publication': 'Procurement Officer',
-  'supplier-bidding': 'Invited suppliers',
+  'supplier-bidding': 'Eligible suppliers',
   'evaluation-committee': 'Committee chair and members',
   'bid-opening-evaluation': 'Evaluation committee',
   award: 'Head of Procurement and award approver',
@@ -231,7 +236,7 @@ function tenderStageStates(
             responsibleRole: 'Procurement Officer',
             context: readiness.effectiveTemplateReference
               ? `Effective template: ${readiness.effectiveTemplateReference}`
-              : 'Controlled documents must be bound and issued before publication.',
+              : 'Approved controlled documents must be bound and available before publication.',
             href: documentHref,
             actionLabel: 'Open document register',
           }
@@ -253,12 +258,24 @@ function tenderStageStates(
         biddingFinished && tender.bidCount === 0
           ? ['Bidding closed without a submitted bid.']
           : undefined,
-      responsibleRole: 'Invited suppliers',
+      responsibleRole: 'Eligible suppliers',
       context: published
         ? `${tender.bidCount} bid${tender.bidCount === 1 ? '' : 's'} recorded.`
         : 'Publication must complete before suppliers can bid.',
-      href: tenderHref,
-      actionLabel: 'Open tender invitations',
+      href: `${tenderHref}?tab=${readiness?.allowsNewRecipient ? 'bids' : 'invitations'}`,
+      actionLabel: readiness?.allowsNewRecipient
+        ? 'View tender bids'
+        : 'Open tender invitations',
+    },
+    'evaluation-committee': {
+      status: published && tender.bidCount > 0 ? 'unknown' : 'not-started',
+      responsibleRole: 'Evaluation committee coordinator',
+      context:
+        'Review member acceptance, attendance and quorum in the source-specific committee.',
+      href: tender.sourcingCaseId
+        ? `${tenderHref}/committee-controls`
+        : `${tenderHref}?tab=evaluators`,
+      actionLabel: 'Open evaluation committee',
     },
     award: {
       status: status === 'awarded' ? 'complete' : 'not-started',
@@ -272,33 +289,18 @@ function tenderStageStates(
 export function ProcurementUatRouteGuide() {
   const pathname = usePathname();
   const route = useMemo(() => resolveProcurementUatRoute(pathname), [pathname]);
-  const [tender, setTender] = useState<TenderDetailDto>();
-  const [readiness, setReadiness] =
-    useState<ProcurementTenderDocumentReadiness>();
-
-  useEffect(() => {
-    let active = true;
-    setTender(undefined);
-    setReadiness(undefined);
-    if (!route?.tenderId)
-      return () => {
-        active = false;
-      };
-
-    void Promise.allSettled([
-      getTenderById(route.tenderId),
-      procurementTenderDocumentService.readiness('Tender', route.tenderId),
-    ]).then(([tenderResult, readinessResult]) => {
-      if (!active) return;
-      if (tenderResult.status === 'fulfilled') setTender(tenderResult.value);
-      if (readinessResult.status === 'fulfilled')
-        setReadiness(readinessResult.value);
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [route?.tenderId]);
+  const tenderId = route?.tenderId ?? '';
+  const { data: tender } = useQuery({
+    queryKey: tenderDetailQueryKey(tenderId),
+    queryFn: () => getTenderById(tenderId),
+    enabled: Boolean(tenderId),
+  });
+  const { data: readiness } = useQuery({
+    queryKey: ['procurement-tender-document-readiness', 'Tender', tenderId, false],
+    queryFn: () =>
+      procurementTenderDocumentService.readiness('Tender', tenderId),
+    enabled: Boolean(tenderId),
+  });
 
   if (!route) return null;
 
@@ -307,6 +309,14 @@ export function ProcurementUatRouteGuide() {
     ...baseStageStates(currentStage),
     ...(tender ? tenderStageStates(tender, readiness) : {}),
   };
+  if (pathname?.endsWith('/document-controls') && tender?.status === 'Approved' &&
+      readiness?.ready && readiness.isSourcePublished === false) {
+    stageStates['tender-documents-publication'] = {
+      ...stageStates['tender-documents-publication'],
+      href: `/procurement/tenders/${tenderId}`,
+      actionLabel: 'Return to tender publication',
+    };
+  }
 
   return (
     <ProcurementUatFlowSidebar

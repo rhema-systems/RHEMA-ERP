@@ -15,6 +15,46 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 
 public sealed class TenderPublicationContractControllerTests
 {
+    [Theory]
+    [InlineData(409)]
+    [InlineData(422)]
+    [InlineData(404)]
+    [InlineData(403)]
+    public async Task Publication_preserves_document_guard_problem_details(int status)
+    {
+        const string code = "TENDER_DOCUMENT_TEST_GUARD";
+        const string detail = "Exact controlled document failure.";
+        Exception exception = status switch
+        {
+            409 => new ProcurementTenderDocumentControlConflictException(code, detail),
+            422 => new ProcurementTenderDocumentControlValidationException(code, detail),
+            404 => new ProcurementTenderDocumentControlNotFoundException(code, detail),
+            _ => new ProcurementTenderDocumentControlAuthorizationException(detail)
+        };
+        var service = new Mock<ITenderService>();
+        service.Setup(item => item.PublishTenderAsync(It.IsAny<Guid>(), It.IsAny<PublishTenderDto>()))
+            .ThrowsAsync(exception);
+        var result = await Controller(service.Object).PublishTender(Guid.NewGuid(), new PublishTenderDto());
+        var failure = result.Result.Should().BeAssignableTo<ObjectResult>().Subject;
+        failure.StatusCode.Should().Be(status);
+        var problem = failure.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Status.Should().Be(status);
+        problem.Detail.Should().Be(detail);
+        problem.Extensions["code"].Should().Be(status == 403 ? "TENDER_DOCUMENT_FORBIDDEN" : code);
+    }
+
+    [Fact]
+    public async Task Publication_preserves_the_structured_control_failure()
+    {
+        var service = new Mock<ITenderService>();
+        service.Setup(item => item.PublishTenderAsync(It.IsAny<Guid>(), It.IsAny<PublishTenderDto>()))
+            .ThrowsAsync(new ProcurementTenderControlValidationException("TENDER_ADVANCED_AUTHORITY_ROUTE_REQUIRED", "Exact authority route required."));
+        var result = await Controller(service.Object).PublishTender(Guid.NewGuid(), new PublishTenderDto());
+        var failure = result.Result.Should().BeOfType<UnprocessableEntityObjectResult>().Subject;
+        var problem = failure.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("TENDER_ADVANCED_AUTHORITY_ROUTE_REQUIRED");
+    }
+
     [Fact]
     public async Task Release_only_itb_read_does_not_invent_an_advanced_method_or_case()
     {

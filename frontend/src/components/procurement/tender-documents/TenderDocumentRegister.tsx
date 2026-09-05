@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import {
   CalendarClock,
   FileCheck2,
@@ -34,6 +35,7 @@ import type {
   ProcurementTenderDocumentReadiness,
   ProcurementTenderDocumentRegister as Register,
 } from '@/types/procurement-tender-document';
+import { TenderDocumentChangeWorkflowReview } from './TenderDocumentChangeWorkflowReview';
 
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleString() : '—';
@@ -51,11 +53,15 @@ export function TenderDocumentRegister({
   canApprove = false,
   onDecision,
   onAcknowledge,
+  onWorkflowUpdated,
+  workflowDisabled = false,
 }: {
   readiness: ProcurementTenderDocumentReadiness;
   register?: Register;
   external?: boolean;
   canApprove?: boolean;
+  onWorkflowUpdated?: () => Promise<unknown>;
+  workflowDisabled?: boolean;
   onDecision?: (
     change: ProcurementTenderDocumentChange,
     action: 'Approve' | 'Reject'
@@ -159,6 +165,8 @@ export function TenderDocumentRegister({
                   label="Effective submission deadline"
                   value={formatDate(register.effectiveSubmissionDeadlineUtc)}
                 />
+                {register.originalOpeningScheduledAtUtc && <Line label="Original opening time" value={formatDate(register.originalOpeningScheduledAtUtc)} />}
+                {register.openingScheduledAtUtc && <Line label="Effective opening time" value={formatDate(register.openingScheduledAtUtc)} />}
                 <Line
                   label="Original bid validity"
                   value={formatDate(register.originalBidValidityUntilUtc)}
@@ -302,6 +310,9 @@ export function TenderDocumentRegister({
                     'RejectChange',
                     'DecideChange',
                   ]);
+                const renderDecisionAction = (action: 'Approve' | 'Reject') => onDecision && (action === 'Approve' ? canApproveChange : canRejectChange) ? (
+                  <Button size="sm" variant={action === 'Approve' ? 'default' : 'destructive'} onClick={() => onDecision(change, action)}>{action === 'Approve' ? 'Approve exact workflow outcome' : 'Reject'}</Button>
+                ) : null;
                 return (
                   <div
                     key={change.id}
@@ -378,6 +389,8 @@ export function TenderDocumentRegister({
                           value={formatDate(change.newValueUtc)}
                         />
                       )}
+                      {change.previousOpeningScheduledAtUtc && <Line label="Previous opening time" value={formatDate(change.previousOpeningScheduledAtUtc)} />}
+                      {change.newOpeningScheduledAtUtc && <Line label="New opening time" value={formatDate(change.newOpeningScheduledAtUtc)} />}
                     </div>
 
                     {change.blockedReasons.length > 0 && (
@@ -387,6 +400,15 @@ export function TenderDocumentRegister({
                           {change.blockedReasons.join(' · ')}
                         </AlertDescription>
                       </Alert>
+                    )}
+
+                    {!external && onWorkflowUpdated && change.status === 'PendingApproval' && change.changeType === 'UnpublishedScheduleReschedule' && (
+                      <TenderDocumentChangeWorkflowReview
+                        change={change}
+                        disabled={workflowDisabled}
+                        onUpdated={onWorkflowUpdated}
+                        renderDecisionAction={renderDecisionAction}
+                      />
                     )}
 
                     {change.recipients.length > 0 && (
@@ -488,28 +510,7 @@ export function TenderDocumentRegister({
                       </div>
                     )}
 
-                    {(canApproveChange || canRejectChange) &&
-                      onDecision && (
-                        <div className="flex gap-2">
-                          {canApproveChange && (
-                            <Button
-                              size="sm"
-                              onClick={() => onDecision(change, 'Approve')}
-                            >
-                              Approve exact workflow outcome
-                            </Button>
-                          )}
-                          {canRejectChange && (
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => onDecision(change, 'Reject')}
-                            >
-                              Reject
-                            </Button>
-                          )}
-                        </div>
-                      )}
+                    {change.changeType !== 'UnpublishedScheduleReschedule' && (canApproveChange || canRejectChange) && onDecision && <div className="flex gap-2">{renderDecisionAction('Approve')}{renderDecisionAction('Reject')}</div>}
                   </div>
                 );
               })}

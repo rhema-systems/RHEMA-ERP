@@ -18,6 +18,141 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class TenderPersistenceRoundTripTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublicationRoutesStandardAndAdvancedCasesWithoutDroppingDocumentChecks(bool advanced)
+    {
+        var fixture = new Fixture(advanced);
+        var tender = fixture.SeedDraftTender();
+        tender.Status = "Approved";
+        tender.SourcePurchaseRequisitionId = fixture.RequisitionId;
+        tender.SourcingReleaseId = fixture.ReleaseId;
+        tender.SourcingCaseId = fixture.SourcingCaseId;
+        tender.EstimatedValue = fixture.EstimatedValue;
+        tender.Currency = fixture.Currency;
+        var result = await fixture.Service.PublishTenderAsync(tender.Id, new PublishTenderDto
+        {
+            SubmissionDeadline = DateTime.UtcNow.AddDays(1),
+            OpeningDate = DateTime.UtcNow.AddDays(1).AddMinutes(5)
+        });
+
+        result.Status.Should().Be("Published");
+        result.SourcingCaseId.Should().Be(fixture.SourcingCaseId);
+        fixture.Documents.Verify(service => service.EnsurePublicationReadyAsync(
+            ProcurementTenderDocumentSourceType.Tender, tender.Id, It.IsAny<DateTime>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Controls.Verify(service => service.PublishAsync(tender.Id,
+            It.IsAny<PublishProcurementTenderRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            advanced ? Times.Once() : Times.Never());
+        fixture.Documents.Verify(service => service.EnsureDispatchReadyAsync(
+            It.IsAny<ProcurementTenderDocumentSourceType>(), It.IsAny<Guid>(),
+            It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<string>>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublicationNoticeDoesNotRequireDocumentReceiptEvenForPrequalifiedTender(bool prequalified)
+    {
+        var fixture = new Fixture();
+        var tender = fixture.SeedDraftTender();
+        tender.Status = "Approved";
+        tender.SourcePurchaseRequisitionId = fixture.RequisitionId;
+        tender.SourcingReleaseId = fixture.ReleaseId;
+        tender.SourcingCaseId = fixture.SourcingCaseId;
+        tender.EstimatedValue = fixture.EstimatedValue;
+        tender.Currency = fixture.Currency;
+        tender.RequiresPrequalification = prequalified;
+        var recipient = new BusinessPartner { Id = Guid.NewGuid(), TenantId = tender.TenantId, IsActive = true, PartnerType = "Supplier" };
+        fixture.Partners.Setup(repository => repository.GetByIdAsync(recipient.Id)).ReturnsAsync(recipient);
+        fixture.Documents.Setup(service => service.EnsureDispatchReadyAsync(
+            It.IsAny<ProcurementTenderDocumentSourceType>(), It.IsAny<Guid>(),
+            It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<string>>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("No document receipt exists yet."));
+
+        var result = await fixture.Service.PublishTenderAsync(tender.Id, new PublishTenderDto
+        {
+            SubmissionDeadline = DateTime.UtcNow.AddDays(1), OpeningDate = DateTime.UtcNow.AddDays(1).AddMinutes(5),
+            InvitedBusinessPartnerIds = [recipient.Id]
+        });
+
+        result.Status.Should().Be("Published");
+        fixture.Notifications.Verify(service => service.SendTenderPublishedNotificationAsync(tender.Id,
+            It.IsAny<List<Guid>>(), It.IsAny<List<string>>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("foreign")]
+    [InlineData("inactive")]
+    [InlineData("blacklisted")]
+    [InlineData("deleted")]
+    [InlineData("customer")]
+    public async Task InvalidNoticeRecipientIsRejectedBeforePublicationOrNotification(string invalid)
+    {
+        var fixture = new Fixture();
+        var tender = fixture.SeedDraftTender();
+        tender.Status = "Approved";
+        var recipient = new BusinessPartner
+        {
+            Id = Guid.NewGuid(), TenantId = invalid == "foreign" ? Guid.NewGuid() : tender.TenantId,
+            IsActive = invalid != "inactive", IsBlacklisted = invalid == "blacklisted",
+            IsDeleted = invalid == "deleted", PartnerType = invalid == "customer" ? "Customer" : "Supplier"
+        };
+        fixture.Partners.Setup(repository => repository.GetByIdAsync(recipient.Id)).ReturnsAsync(recipient);
+        var action = () => fixture.Service.PublishTenderAsync(tender.Id, new PublishTenderDto { InvitedBusinessPartnerIds = [recipient.Id] });
+
+        (await action.Should().ThrowAsync<ProcurementRequisitionSourcingValidationException>()).Which.Code
+            .Should().Be("TENDER_PUBLICATION_RECIPIENT_INVALID");
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(It.IsAny<Tender>()), Times.Never);
+        fixture.Notifications.Verify(service => service.SendTenderPublishedNotificationAsync(It.IsAny<Guid>(),
+            It.IsAny<List<Guid>>(), It.IsAny<List<string>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LegacyRfqPublicationStillRequiresAccessBeforeSendingDocumentAttachments()
+    {
+        var fixture = new Fixture(method: ProcurementMethodType.RequestForQuotation);
+        var tender = fixture.SeedDraftTender();
+        tender.Status = "Approved";
+        tender.TenderType = "RFQ";
+        tender.SourcePurchaseRequisitionId = fixture.RequisitionId;
+        tender.SourcingReleaseId = fixture.ReleaseId;
+        tender.SourcingCaseId = fixture.SourcingCaseId;
+        tender.EstimatedValue = fixture.EstimatedValue;
+        tender.Currency = fixture.Currency;
+        fixture.Documents.Setup(service => service.EnsureDispatchReadyAsync(
+            It.IsAny<ProcurementTenderDocumentSourceType>(), It.IsAny<Guid>(),
+            It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<string>>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementTenderDocumentControlConflictException("TENDER_DOCUMENT_DISPATCH_RECIPIENTS_NOT_ISSUED", "Record controlled RFQ access first."));
+
+        var action = () => fixture.Service.PublishTenderAsync(tender.Id, new PublishTenderDto
+        {
+            SubmissionDeadline = DateTime.UtcNow.AddDays(1), OpeningDate = DateTime.UtcNow.AddDays(1).AddMinutes(5),
+            ExternalRecipientEmails = ["rfq@example.test"]
+        });
+        (await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()).Which.Code
+            .Should().Be("TENDER_DOCUMENT_DISPATCH_RECIPIENTS_NOT_ISSUED");
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(It.IsAny<Tender>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("Draft")]
+    [InlineData("Submitted")]
+    [InlineData("Published")]
+    public async Task PublicationRequiresApprovedStatusAndRejectsReplay(string status)
+    {
+        var fixture = new Fixture();
+        var tender = fixture.SeedDraftTender();
+        tender.Status = status;
+        await fixture.Service.Invoking(service => service.PublishTenderAsync(tender.Id, new PublishTenderDto()))
+            .Should().ThrowAsync<InvalidOperationException>();
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(It.IsAny<Tender>()), Times.Never);
+    }
+
     [Fact]
     public async Task SubmitWithoutActiveWorkflowFailsClosedAndLeavesDraftUnchanged()
     {
@@ -180,13 +315,14 @@ public sealed class TenderPersistenceRoundTripTests
         private readonly Dictionary<Guid, string> _templates = new();
         private Tender? _storedTender;
 
-        public Fixture()
+        public Fixture(bool advanced = false, ProcurementMethodType method = ProcurementMethodType.NationalCompetitiveTendering)
         {
             RequisitionId = Guid.NewGuid();
             EstimatedValue = 125000m;
             Currency = "GHS";
 
             var tenantId = Guid.NewGuid();
+            TenantId = tenantId;
             var userId = Guid.NewGuid();
             ReleaseId = Guid.NewGuid();
             SourcingCaseId = Guid.NewGuid();
@@ -235,7 +371,7 @@ public sealed class TenderPersistenceRoundTripTests
                 {
                     Id = SourcingCaseId,
                     TenantId = tenantId,
-                    SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+                    SelectedMethod = method
                 }
             };
             sourcingCases.Setup(repository => repository.GetQueryable(
@@ -270,7 +406,8 @@ public sealed class TenderPersistenceRoundTripTests
                 {
                     SourcingReleaseId = ReleaseId,
                     SourcingCaseId = SourcingCaseId,
-                    SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering,
+                    HasAdvancedAuthorityRoute = advanced,
+                    SelectedMethod = method,
                     EstimatedValue = EstimatedValue,
                     CurrencyCode = Currency
                 });
@@ -317,8 +454,8 @@ public sealed class TenderPersistenceRoundTripTests
                 Mock.Of<ITenderRevisionRepository>(),
                 Mock.Of<ITenderViewLogRepository>(),
                 lots.Object,
-                Mock.Of<IBusinessPartnerRepository>(),
-                Mock.Of<ITenderNotificationService>(),
+                Partners.Object,
+                Notifications.Object,
                 Workflow.Object,
                 StatusAdapters.Object,
                 UnitOfWork.Object,
@@ -327,14 +464,19 @@ public sealed class TenderPersistenceRoundTripTests
                 currentUser.Object,
                 eventBus.Object,
                 SourcingCases.Object,
-                Mock.Of<IProcurementTenderControlService>(),
-                Mock.Of<IProcurementTenderDocumentControlService>(),
+                Controls.Object,
+                Documents.Object,
                 Mock.Of<IProcurementExceptionalSourcingControlService>(),
                 Mock.Of<IProcurementEvaluationCommitteeControlService>(),
                 NullLogger<TenderService>.Instance);
         }
 
         public TenderService Service { get; }
+        public Guid TenantId { get; }
+        public Mock<IBusinessPartnerRepository> Partners { get; } = new();
+        public Mock<ITenderNotificationService> Notifications { get; } = new();
+        public Mock<IProcurementTenderControlService> Controls { get; } = new();
+        public Mock<IProcurementTenderDocumentControlService> Documents { get; } = new();
         public Guid UserId { get; }
         public Guid RequisitionId { get; }
         public Guid ReleaseId { get; }
@@ -352,7 +494,7 @@ public sealed class TenderPersistenceRoundTripTests
             _storedTender = new Tender
             {
                 Id = Guid.NewGuid(),
-                TenantId = Guid.NewGuid(),
+                TenantId = TenantId,
                 TenderNumber = "TND-2026-9002",
                 Title = "Governed tender",
                 TenderType = "ITB",

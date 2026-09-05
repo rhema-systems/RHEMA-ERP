@@ -4,7 +4,8 @@ export type SupplierEligibilityBoundary =
   | 'Award'
   | 'Contract'
   | 'ManualPurchaseOrder'
-  | 'FrameworkCallOff';
+  | 'FrameworkCallOff'
+  | 'BidParticipation';
 
 export interface SupplierEligibilityEvaluationRequest {
   businessPartnerId: string;

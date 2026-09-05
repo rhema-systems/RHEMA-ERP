@@ -339,6 +339,7 @@ export function WorkflowApprovalActions({
     return getWorkflowChecklistAttachments(item, index, effectiveTaskAttachments).length === 0;
   });
   const taskConfirmDisabled =
+    forwardActionsDisabled ||
     taskProcessing ||
     taskChecklistUploadingKey !== null ||
     missingTaskDocumentRequirements.length > 0 ||

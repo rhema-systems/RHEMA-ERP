@@ -428,6 +428,545 @@ public sealed class ProcurementTenderDocumentControlServiceTests
     };
 
     [Fact]
+    public async Task LegacyRfqMethodKeepsControlledIssueBeforeItsDispatchPublication()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free,
+            ProcurementMethodType.RequestForQuotation, published: false);
+        var register = await fixture.BindAsync("bind-legacy-rfq-prepub");
+        var issued = await fixture.Service.IssueAsync(fixture.Issue(register.RowVersion, 0m), "issue-legacy-rfq-prepub");
+        issued.BusinessPartnerId.Should().Be(fixture.Supplier.Id);
+        register.AllowedActions.Should().Contain("Issue");
+        fixture.SupplierValidation.Verify(item => item.ValidateForTenderAsync(fixture.Supplier.Id, false, null), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Approved", false)]
+    [InlineData("Approved", true)]
+    [InlineData("Published", false)]
+    [InlineData("Draft", false)]
+    public async Task PublishedTemplateDoesNotAllowSupplierIssueBeforeActualTenderPublication(string status, bool publishDate)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        fixture.Tender.Status = status;
+        fixture.Tender.PublishDate = publishDate ? DateTime.UtcNow.AddMinutes(-1) : null;
+        await fixture.Context.SaveChangesAsync();
+        var register = await fixture.BindAsync("bind-prepub-issue");
+        var action = () => fixture.Service.IssueAsync(fixture.Issue(register.RowVersion, 0m), "issue-prepub");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_TENDER_NOT_PUBLISHED");
+        register.IsSourcePublished.Should().BeFalse();
+        register.AllowedActions.Should().NotContain("Issue");
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UnpublishedExpiredScheduleRequiresApprovalThenProjectsBothDatesWithoutReplacingOriginals()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        var originalDeadline = register.OriginalSubmissionDeadlineUtc;
+        var originalOpening = register.OpeningScheduledAtUtc;
+        var originalSnapshot = register.LifecycleSnapshotJson;
+        var originalHash = register.IntegrityHash;
+        var request = fixture.Reschedule(register);
+        var created = await fixture.Service.CreateChangeAsync(request, "schedule-create");
+        var replay = await fixture.Service.CreateChangeAsync(request, "schedule-create");
+        replay.Id.Should().Be(created.Id);
+        created.Status.Should().Be(ProcurementTenderDocumentChangeStatus.PendingApproval);
+        created.RequiresAcknowledgement.Should().BeFalse();
+        fixture.Tender.SubmissionDeadline.Should().Be(originalDeadline);
+        fixture.Tender.OpeningDate.Should().Be(originalOpening);
+        var pendingPublish = () => fixture.Service.EnsurePublicationReadyAsync(
+            ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id, originalDeadline, "publish-pending-schedule");
+        await pendingPublish.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>();
+
+        await fixture.CompleteChangeWorkflowAndSwitchActorAsync(created);
+        var approved = await fixture.Service.DecideChangeAsync(created.Id,
+            new DecideProcurementTenderDocumentChangeRequest
+            {
+                Action = "Approve", ApprovalReference = "TDC-SCHEDULE-APPROVAL",
+                RowVersion = created.RowVersion
+            }, "schedule-approve");
+        var effective = await fixture.Service.GetRegisterAsync(ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id);
+
+        approved.Status.Should().Be(ProcurementTenderDocumentChangeStatus.Approved);
+        approved.PreviousOpeningScheduledAtUtc.Should().Be(originalOpening);
+        approved.NewOpeningScheduledAtUtc.Should().Be(request.NewOpeningScheduledAtUtc);
+        effective.OriginalSubmissionDeadlineUtc.Should().Be(originalDeadline);
+        effective.OriginalOpeningScheduledAtUtc.Should().Be(originalOpening);
+        effective.EffectiveSubmissionDeadlineUtc.Should().Be(request.NewValueUtc!.Value);
+        effective.OpeningScheduledAtUtc.Should().Be(request.NewOpeningScheduledAtUtc);
+        fixture.Tender.SubmissionDeadline.Should().Be(request.NewValueUtc);
+        fixture.Tender.OpeningDate.Should().Be(request.NewOpeningScheduledAtUtc);
+        fixture.Tender.Status.Should().Be("Approved");
+        fixture.Tender.PublishDate.Should().BeNull();
+        register.LifecycleSnapshotJson.Should().Be(originalSnapshot);
+        register.IntegrityHash.Should().Be(originalHash);
+        (await fixture.Context.ProcurementTenderDocumentChanges.CountAsync()).Should().Be(1);
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+        var ready = await fixture.Service.EnsurePublicationReadyAsync(ProcurementTenderDocumentSourceType.Tender,
+            fixture.Tender.Id, request.NewValueUtc.Value, "publish-approved-schedule");
+        ready.Ready.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("published")]
+    [InlineData("historically-published")]
+    [InlineData("prequalified")]
+    [InlineData("bid")]
+    [InlineData("issuance")]
+    [InlineData("legacy-advertisement")]
+    public async Task UnpublishedScheduleRejectsAnyExternalOrRestrictedHistory(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        switch (variant)
+        {
+            case "published": fixture.Tender.Status = "Published"; fixture.Tender.PublishDate = DateTime.UtcNow; break;
+            case "historically-published": fixture.Tender.PublishedById = Guid.NewGuid(); break;
+            case "prequalified": fixture.Tender.RequiresPrequalification = true; break;
+            case "bid": fixture.Context.Add(new TenderBid
+                { Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id, BusinessPartnerId = fixture.Supplier.Id }); break;
+            case "issuance": fixture.Context.Add(new ProcurementTenderDocumentIssuance
+                { Id = Guid.NewGuid(), TenantId = fixture.TenantId, RegisterId = register.Id, TemplateVersionId = fixture.TemplateId }); break;
+            case "legacy-advertisement": fixture.Context.Add(new ProcurementTenderControl
+                { Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id }); break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        var action = () => fixture.Service.CreateChangeAsync(fixture.Reschedule(register), "schedule-history-denied");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED");
+        (await fixture.Context.ProcurementTenderDocumentChanges.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("past-deadline")]
+    [InlineData("opening-before-deadline")]
+    [InlineData("missing-opening")]
+    [InlineData("beyond-validity")]
+    public async Task UnpublishedScheduleRejectsInvalidNewDates(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        var request = fixture.Reschedule(register);
+        switch (variant)
+        {
+            case "past-deadline": request.NewValueUtc = DateTime.UtcNow.AddMinutes(-1); break;
+            case "opening-before-deadline": request.NewOpeningScheduledAtUtc = request.NewValueUtc!.Value.AddMinutes(-1); break;
+            case "missing-opening": request.NewOpeningScheduledAtUtc = null; break;
+            case "beyond-validity": request.NewValueUtc = register.OriginalBidValidityUntilUtc.AddDays(1); request.NewOpeningScheduledAtUtc = request.NewValueUtc.Value.AddHours(1); break;
+        }
+        var action = () => fixture.Service.CreateChangeAsync(request, "schedule-invalid-dates");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_RESCHEDULE_DATES_INVALID");
+    }
+
+    [Theory]
+    [InlineData("published")]
+    [InlineData("source-drift")]
+    public async Task UnpublishedScheduleRechecksSourceAtApproval(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        var created = await fixture.Service.CreateChangeAsync(fixture.Reschedule(register), "schedule-stale-create");
+        await fixture.CompleteChangeWorkflowAndSwitchActorAsync(created);
+        if (variant == "published") { fixture.Tender.Status = "Published"; fixture.Tender.PublishDate = DateTime.UtcNow; }
+        else fixture.Tender.OpeningDate = fixture.Tender.OpeningDate!.Value.AddMinutes(10);
+        await fixture.Context.SaveChangesAsync();
+        var action = () => fixture.Service.DecideChangeAsync(created.Id,
+            new DecideProcurementTenderDocumentChangeRequest { Action = "Approve", ApprovalReference = "STALE", RowVersion = created.RowVersion }, "schedule-stale-decide");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == (variant == "published"
+                ? "TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED" : "TENDER_DOCUMENT_SCHEDULE_BASE_STALE"));
+    }
+
+    [Fact]
+    public async Task UnpublishedScheduleCannotApplyWithoutCompletedSharedWorkflow()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        var created = await fixture.Service.CreateChangeAsync(fixture.Reschedule(register), "schedule-not-completed");
+        await fixture.CompleteChangeWorkflowAndSwitchActorAsync(created, WorkflowInstanceStatus.InProgress);
+        var action = () => fixture.Service.DecideChangeAsync(created.Id,
+            new DecideProcurementTenderDocumentChangeRequest { Action = "Approve", ApprovalReference = "INCOMPLETE", RowVersion = created.RowVersion }, "schedule-decide-incomplete");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_WORKFLOW_NOT_APPROVED");
+        fixture.Tender.SubmissionDeadline.Should().Be(register.OriginalSubmissionDeadlineUtc);
+    }
+
+    [Fact]
+    public async Task UnpublishedScheduleRejectsAnImmediatelyCompletedWorkflow()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        fixture.WorkflowStartStatus = WorkflowInstanceStatus.Completed;
+        var action = () => fixture.Service.CreateChangeAsync(fixture.Reschedule(register), "schedule-instant-workflow");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_RESCHEDULE_APPROVAL_REQUIRED");
+        fixture.Tender.SubmissionDeadline.Should().Be(register.OriginalSubmissionDeadlineUtc);
+        fixture.Tender.OpeningDate.Should().Be(register.OpeningScheduledAtUtc);
+    }
+
+    [Fact]
+    public async Task UnpublishedScheduleRetainsIndependentApproverEnforcement()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        var created = await fixture.Service.CreateChangeAsync(fixture.Reschedule(register), "schedule-sod-create");
+        await fixture.CompleteChangeWorkflowAndSwitchActorAsync(created, switchActor: false);
+        fixture.Sod.Setup(item => item.EnforceAsync(It.IsAny<ProcurementSodGuardRequest>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSodGuardDecisionDto { Allowed = false, Message = "An independent approver is required." });
+        var action = () => fixture.Service.DecideChangeAsync(created.Id,
+            new DecideProcurementTenderDocumentChangeRequest { Action = "Approve", ApprovalReference = "SELF", RowVersion = created.RowVersion }, "schedule-sod-denied");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlAuthorizationException>();
+        fixture.Tender.SubmissionDeadline.Should().Be(register.OriginalSubmissionDeadlineUtc);
+    }
+
+    [Fact]
+    public async Task RescheduleWritesOnlyScheduleFieldsAndNeverMarksPublicationOrImmutableRegisterGraphModified()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var register = await fixture.BindExpiredUnpublishedAsync();
+        fixture.CaptureTenderWrites = true;
+        var created = await fixture.Service.CreateChangeAsync(fixture.Reschedule(register), "schedule-partial-write");
+        await fixture.CompleteChangeWorkflowAndSwitchActorAsync(created);
+        await fixture.Service.DecideChangeAsync(created.Id,
+            new DecideProcurementTenderDocumentChangeRequest { Action = "Approve", ApprovalReference = "PARTIAL-WRITE", RowVersion = created.RowVersion }, "schedule-partial-approve");
+        fixture.ModifiedTenderFields.Should().Contain("SubmissionDeadline").And.Contain("OpeningDate")
+            .And.NotContain("Status").And.NotContain("PublishDate").And.NotContain("PublishedById")
+            .And.NotContain("Title").And.NotContain("IsDeleted");
+        fixture.ModifiedImmutableRegisterGraph.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task OpenNctDocumentAccessDoesNotGrantBidAwardOrPurchaseOrderApproval()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        fixture.Supplier.ApprovalStatus = "Pending";
+        fixture.Supplier.RegistrationStatus = "Pending";
+        fixture.RejectSupplierEligibility();
+        await fixture.Context.SaveChangesAsync();
+        var register = await fixture.BindAsync("bind-open-document");
+
+        var issued = await fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, 0m), "issue-open-document");
+
+        register.AllowsNewRecipient.Should().BeTrue();
+        issued.BusinessPartnerId.Should().Be(fixture.Supplier.Id);
+        issued.TemplateVersionId.Should().Be(register.EffectiveTemplateVersionId);
+        fixture.Supplier.ApprovalStatus.Should().Be("Pending");
+        fixture.Supplier.RegistrationStatus.Should().Be("Pending");
+        fixture.Tender.Status.Should().Be("Published");
+        fixture.SupplierValidation.VerifyNoOtherCalls();
+        (await fixture.Context.Set<TenderInvitation>().CountAsync()).Should().Be(0);
+        (await fixture.Context.Set<TenderBid>().CountAsync()).Should().Be(0);
+        (await fixture.Context.Set<TenderAward>().CountAsync()).Should().Be(0);
+        (await fixture.Context.Set<PurchaseOrder>().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OpenNctAllowsNewInterestedRecipientWithoutCreatingSupplierApproval()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var unbound = await fixture.Service.GetRegisterReadinessAsync(
+            ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id);
+        var register = await fixture.BindAsync("bind-new-recipient");
+        var request = fixture.NewRecipient(register.RowVersion);
+
+        var issued = await fixture.Service.IssueAsync(request, "issue-new-recipient");
+        var ready = await fixture.Service.GetRegisterReadinessAsync(
+            ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id);
+
+        unbound.AllowsNewRecipient.Should().BeTrue();
+        ready.AllowsNewRecipient.Should().BeTrue();
+        issued.BusinessPartnerId.Should().BeNull();
+        issued.RecipientName.Should().Be("New Interested Supplier");
+        issued.RecipientEmail.Should().Be("new.supplier@example.test");
+        (await fixture.Context.Set<BusinessPartner>().CountAsync()).Should().Be(1);
+        fixture.SupplierValidation.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("inactive", "TENDER_DOCUMENT_RECIPIENT_INELIGIBLE")]
+    [InlineData("blacklisted", "TENDER_DOCUMENT_RECIPIENT_INELIGIBLE")]
+    [InlineData("customer-only", "TENDER_DOCUMENT_RECIPIENT_INELIGIBLE")]
+    [InlineData("foreign-tenant", "TENDER_DOCUMENT_RECIPIENT_NOT_FOUND")]
+    [InlineData("deleted", "TENDER_DOCUMENT_RECIPIENT_NOT_FOUND")]
+    public async Task OpenNctRetainsSavedSupplierSafetyChecks(string variant, string code)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        switch (variant)
+        {
+            case "inactive": fixture.Supplier.IsActive = false; break;
+            case "blacklisted": fixture.Supplier.IsBlacklisted = true; break;
+            case "customer-only": fixture.Supplier.PartnerType = "Customer"; break;
+            case "foreign-tenant": fixture.Supplier.TenantId = Guid.NewGuid(); break;
+            case "deleted": fixture.Supplier.IsDeleted = true; break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        var register = await fixture.BindAsync("bind-unsafe-recipient");
+
+        var action = () => fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, 0m), "issue-unsafe-recipient");
+
+        if (code == "TENDER_DOCUMENT_RECIPIENT_NOT_FOUND")
+            await action.Should().ThrowAsync<ProcurementTenderDocumentControlNotFoundException>()
+                .Where(exception => exception.Code == code);
+        else
+            await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+                .Where(exception => exception.Code == code);
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+        fixture.SupplierValidation.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("primary-email")]
+    [InlineData("contact-email")]
+    [InlineData("name")]
+    public async Task NewRecipientCannotHideKnownBlacklistedSupplierIdentity(string match)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        fixture.Supplier.IsBlacklisted = true;
+        fixture.Supplier.PrimaryEmail = match == "primary-email" ? "  New.Supplier@Example.Test  " : null;
+        if (match == "contact-email")
+            fixture.Context.Add(new BusinessPartnerContact
+            {
+                Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+                BusinessPartnerId = fixture.Supplier.Id, ContactName = "Supplier Contact",
+                Email = "  New.Supplier@Example.Test  "
+            });
+        if (match == "name") fixture.Supplier.PartnerName = "  NEW INTERESTED SUPPLIER  ";
+        await fixture.Context.SaveChangesAsync();
+        var register = await fixture.BindAsync("bind-known-recipient");
+
+        var action = () => fixture.Service.IssueAsync(
+            fixture.NewRecipient(register.RowVersion), "issue-known-without-id");
+
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED");
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("foreign-tenant")]
+    [InlineData("deleted")]
+    [InlineData("deleted-contact")]
+    [InlineData("foreign-contact")]
+    public async Task NewRecipientIdentityLookupDoesNotUseForeignOrDeletedRecords(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        if (variant is "foreign-tenant" or "deleted")
+        {
+            fixture.Supplier.PrimaryEmail = "new.supplier@example.test";
+            if (variant == "foreign-tenant") fixture.Supplier.TenantId = Guid.NewGuid();
+            else fixture.Supplier.IsDeleted = true;
+        }
+        else
+        {
+            fixture.Context.Add(new BusinessPartnerContact
+            {
+                Id = Guid.NewGuid(),
+                TenantId = variant == "foreign-contact" ? Guid.NewGuid() : fixture.TenantId,
+                BusinessPartnerId = fixture.Supplier.Id, ContactName = "Unused Contact",
+                Email = "new.supplier@example.test", IsDeleted = variant == "deleted-contact"
+            });
+        }
+        await fixture.Context.SaveChangesAsync();
+        var register = await fixture.BindAsync("bind-unrelated-recipient");
+
+        var issued = await fixture.Service.IssueAsync(
+            fixture.NewRecipient(register.RowVersion), "issue-unrelated-recipient");
+
+        issued.BusinessPartnerId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, true, false)]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, false, true)]
+    [InlineData(ProcurementMethodType.RestrictedTendering, false, false)]
+    [InlineData(ProcurementMethodType.RequestForQuotation, false, false)]
+    [InlineData(ProcurementMethodType.InternationalCompetitiveTendering, false, false)]
+    [InlineData(ProcurementMethodType.SingleSource, false, false)]
+    [InlineData(ProcurementMethodType.QualityBasedSelection, false, false)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection, false, false)]
+    public async Task OtherOrPrequalifiedRoutesRetainEligibilityAndRequireSavedRecipient(
+        ProcurementMethodType method, bool requiresPrequalification, bool useQcbs)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, method);
+        fixture.Tender.RequiresPrequalification = requiresPrequalification;
+        fixture.Tender.UseQCBSEvaluation = useQcbs;
+        fixture.Tender.MinimumPerformanceRating = 4m;
+        fixture.RejectSupplierEligibility();
+        await fixture.Context.SaveChangesAsync();
+        var register = await fixture.BindAsync("bind-restricted-recipient");
+
+        var known = () => fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, 0m), "issue-restricted-known");
+        var unlinked = () => fixture.Service.IssueAsync(
+            fixture.NewRecipient(register.RowVersion), "issue-restricted-new");
+
+        register.AllowsNewRecipient.Should().BeFalse();
+        await known.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_RECIPIENT_INELIGIBLE");
+        await unlinked.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED");
+        fixture.SupplierValidation.Verify(item => item.ValidateForTenderAsync(
+            fixture.Supplier.Id, requiresPrequalification, 4m), Times.Once);
+        fixture.SupplierValidation.VerifyNoOtherCalls();
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UnknownAuthoritativeMethodCannotUseTenderDisplayLabelToEnableDocumentAccess()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, (ProcurementMethodType)999);
+        var register = await fixture.BindAsync("bind-unknown-method");
+        fixture.Tender.TenderType.Should().Be("NCT");
+
+        var action = () => fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, 0m), "issue-unknown-method");
+
+        register.AllowsNewRecipient.Should().BeFalse();
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_METHOD_UNSUPPORTED");
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DocumentIssueRejectsStaleRegisterMethodLineage()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var register = await fixture.BindAsync("bind-stale-lineage");
+        var stored = await fixture.Context.ProcurementTenderDocumentRegisters.SingleAsync();
+        stored.Method = ProcurementMethodType.RestrictedTendering;
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, 0m), "issue-stale-lineage");
+
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_REGISTER_LINEAGE_STALE");
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("missing-email", "TENDER_DOCUMENT_RECIPIENT_CONTACT_REQUIRED")]
+    [InlineData("invalid-email", "TENDER_DOCUMENT_RECIPIENT_EMAIL_INVALID")]
+    [InlineData("paid-fee", "TENDER_DOCUMENT_FEE_MISMATCH")]
+    [InlineData("free-payment", "TENDER_DOCUMENT_FREE_PAYMENT_REFERENCE_INVALID")]
+    public async Task NewRecipientRetainsContactAndFeeChecks(string variant, string code)
+    {
+        await using var fixture = new Fixture(variant == "paid-fee"
+            ? ProcurementTenderDocumentFeeMode.Paid : ProcurementTenderDocumentFeeMode.Free);
+        var register = await fixture.BindAsync("bind-new-recipient-controls");
+        var request = fixture.NewRecipient(register.RowVersion);
+        if (variant == "missing-email") request.RecipientEmail = null;
+        if (variant == "invalid-email") request.RecipientEmail = "not-an-email";
+        if (variant == "free-payment") request.PaymentReference = "NOT-A-FREE-ISSUE";
+
+        var action = () => fixture.Service.IssueAsync(request, "issue-new-recipient-controls");
+
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == code);
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("elapsed", "TENDER_DOCUMENT_ISSUE_WINDOW_CLOSED")]
+    [InlineData("row-version", "TENDER_DOCUMENT_REGISTER_VERSION_CONFLICT")]
+    public async Task OpenDocumentAccessRetainsDeadlineAndConcurrencyGuards(string variant, string code)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var register = await fixture.BindAsync("bind-open-guards");
+        var request = fixture.NewRecipient(register.RowVersion);
+        if (variant == "elapsed")
+        {
+            var stored = await fixture.Context.ProcurementTenderDocumentRegisters.SingleAsync();
+            stored.OriginalSubmissionDeadlineUtc = DateTime.UtcNow.AddMinutes(-1);
+            await fixture.Context.SaveChangesAsync();
+        }
+        else request.RegisterRowVersion = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+
+        var action = () => fixture.Service.IssueAsync(request, "issue-open-guards");
+
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(exception => exception.Code == code);
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RfqPreservesOnlyItsConfiguredEmailRecipientsAndHidesThemFromOtherSuppliers()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free,
+            ProcurementMethodType.RequestForQuotation);
+        var (rfq, register) = await fixture.BindRfqAsync(
+            "  New.Supplier@Example.Test ; other@example.test\nnew.supplier@example.test;not-an-email");
+        var known = fixture.Issue(register.RowVersion, 0m);
+        known.SourceType = ProcurementTenderDocumentSourceType.RequestForQuotation;
+        known.SourceId = rfq.Id;
+        await fixture.Service.IssueAsync(known, "issue-rfq-known");
+        var request = fixture.NewRecipient(register.RowVersion);
+        request.SourceType = ProcurementTenderDocumentSourceType.RequestForQuotation;
+        request.SourceId = rfq.Id;
+        request.ReceiptNumber = "RFQ-EXTERNAL-RECEIPT";
+
+        var issued = await fixture.Service.IssueAsync(request, "issue-rfq-configured-email");
+
+        register.AllowsNewRecipient.Should().BeFalse();
+        register.AllowedExternalRecipientEmails.Should().BeEquivalentTo(
+            ["new.supplier@example.test", "other@example.test"]);
+        issued.BusinessPartnerId.Should().BeNull();
+        issued.RecipientEmail.Should().Be("new.supplier@example.test");
+        fixture.SupplierValidation.Verify(item => item.ValidateForRfqAsync(
+            fixture.Supplier.Id, null, null), Times.Once);
+        fixture.SupplierValidation.VerifyNoOtherCalls();
+
+        await fixture.SwitchToExternalAsync();
+        var external = await fixture.Service.GetRegisterAsync(
+            ProcurementTenderDocumentSourceType.RequestForQuotation, rfq.Id);
+        var externalReadiness = await fixture.Service.GetRegisterReadinessAsync(
+            ProcurementTenderDocumentSourceType.RequestForQuotation, rfq.Id);
+        external.AllowsNewRecipient.Should().BeFalse();
+        external.AllowedExternalRecipientEmails.Should().BeEmpty();
+        externalReadiness.AllowedExternalRecipientEmails.Should().BeEmpty();
+        external.Issuances.Should().ContainSingle(item => item.BusinessPartnerId == fixture.Supplier.Id);
+    }
+
+    [Theory]
+    [InlineData("unknown-email", "TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED")]
+    [InlineData("known-blacklisted-alias", "TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED")]
+    [InlineData("supplier-eligibility", "TENDER_DOCUMENT_RECIPIENT_INELIGIBLE")]
+    public async Task RfqRecipientsCannotBypassSelectionOrExistingEligibility(string variant, string code)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free,
+            ProcurementMethodType.RequestForQuotation);
+        if (variant == "known-blacklisted-alias")
+        {
+            fixture.Supplier.IsBlacklisted = true;
+            fixture.Supplier.PrimaryEmail = "  NEW.SUPPLIER@example.test  ";
+            await fixture.Context.SaveChangesAsync();
+        }
+        fixture.RejectSupplierEligibility();
+        var (rfq, register) = await fixture.BindRfqAsync(variant == "unknown-email"
+            ? "another.selected@example.test" : "new.supplier@example.test");
+        var request = variant == "supplier-eligibility"
+            ? fixture.Issue(register.RowVersion, 0m) : fixture.NewRecipient(register.RowVersion);
+        request.SourceType = ProcurementTenderDocumentSourceType.RequestForQuotation;
+        request.SourceId = rfq.Id;
+
+        var action = () => fixture.Service.IssueAsync(request, "issue-rfq-recipient-checks");
+
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(exception => exception.Code == code);
+        if (variant == "supplier-eligibility")
+            fixture.SupplierValidation.Verify(item => item.ValidateForRfqAsync(
+                fixture.Supplier.Id, null, null), Times.Once);
+        fixture.SupplierValidation.VerifyNoOtherCalls();
+        (await fixture.Context.ProcurementTenderDocumentIssuances.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task PaidIssuanceRequiresExactFeeAndReplaysSameCorrelationWithoutDuplicate()
     {
         await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Paid);
@@ -743,13 +1282,16 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         private bool _external;
         private readonly UnitOfWork _unitOfWork;
 
-        public Fixture(ProcurementTenderDocumentFeeMode feeMode)
+        public Fixture(ProcurementTenderDocumentFeeMode feeMode,
+            ProcurementMethodType method = ProcurementMethodType.NationalCompetitiveTendering,
+            bool published = true)
         {
             TenantId = Guid.NewGuid();
             _tenantId = TenantId;
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
                 .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+                .AddInterceptors(new TenderWriteCaptureInterceptor(this))
                 .Options;
             Context = new ApplicationDbContext(options);
             Context.Tenants.Add(new Tenant
@@ -791,7 +1333,7 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 RuleCode = "M-NCT",
                 Name = "NCT",
                 Category = ProcurementCategoryClass.Goods,
-                Method = ProcurementMethodType.NationalCompetitiveTendering,
+                Method = method,
                 IsAllowed = true,
                 IsEnabled = true,
                 EffectiveFrom = DateTime.UtcNow.AddDays(-10)
@@ -835,7 +1377,9 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 TenderNumber = "TND-001",
                 Title = "Controlled tender",
                 TenderType = "NCT",
-                Status = "Approved",
+                Status = published ? "Published" : "Approved",
+                PublishDate = published ? DateTime.UtcNow.AddMinutes(-1) : null,
+                PublishedById = published ? Guid.NewGuid() : null,
                 SubmissionDeadline = DateTime.UtcNow.AddDays(10),
                 OpeningDate = DateTime.UtcNow.AddDays(10).AddHours(1),
                 EstimatedValue = 1000m,
@@ -935,6 +1479,7 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                     Message = "Allowed"
                 });
             var sod = new Mock<IProcurementSodGuardService>();
+            Sod = sod;
             sod.Setup(item => item.EnforceAsync(It.IsAny<ProcurementSodGuardRequest>(),
                     It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementSodGuardDecisionDto { Allowed = true });
@@ -942,12 +1487,12 @@ public sealed class ProcurementTenderDocumentControlServiceTests
             workflow.Setup(item => item.StartWorkflowAsync(
                     It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(),
                     It.IsAny<object?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new WorkflowInstance { Id = Guid.NewGuid(), TenantId = TenantId });
-            var supplierValidation = new Mock<ISupplierValidationService>();
-            supplierValidation.Setup(item => item.ValidateForTenderAsync(
+                .ReturnsAsync(() => new WorkflowInstance { Id = Guid.NewGuid(), TenantId = TenantId, Status = WorkflowStartStatus });
+            SupplierValidation = new Mock<ISupplierValidationService>();
+            SupplierValidation.Setup(item => item.ValidateForTenderAsync(
                     It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<decimal?>()))
                 .ReturnsAsync(new SupplierValidationResult { IsValid = true });
-            supplierValidation.Setup(item => item.ValidateForRfqAsync(
+            SupplierValidation.Setup(item => item.ValidateForRfqAsync(
                     It.IsAny<Guid>(), It.IsAny<List<Guid>?>(), It.IsAny<decimal?>()))
                 .ReturnsAsync(new SupplierValidationResult { IsValid = true });
             var notifications = new Mock<INotificationTopicPublisher>();
@@ -955,7 +1500,7 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 _unitOfWork, current.Object, NullLogger<ProcurementControlEventService>.Instance);
             Service = new ProcurementTenderDocumentControlService(
                 _unitOfWork, current.Object, access.Object, sod.Object, events,
-                workflow.Object, supplierValidation.Object, notifications.Object,
+                workflow.Object, SupplierValidation.Object, notifications.Object,
                 NullLogger<ProcurementTenderDocumentControlService>.Instance);
         }
 
@@ -969,6 +1514,48 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         public Guid WorkflowDefinitionId { get; }
         public ProcurementTenderDocumentFeeMode FeeMode { get; }
         public ProcurementTenderDocumentControlService Service { get; }
+        public Mock<ISupplierValidationService> SupplierValidation { get; }
+        public Mock<IProcurementSodGuardService> Sod { get; }
+        public WorkflowInstanceStatus WorkflowStartStatus { get; set; } = WorkflowInstanceStatus.Created;
+        public bool CaptureTenderWrites { get; set; }
+        public HashSet<string> ModifiedTenderFields { get; } = new();
+        public bool ModifiedImmutableRegisterGraph { get; set; }
+
+        private sealed class TenderWriteCaptureInterceptor(Fixture fixture) : SaveChangesInterceptor
+        {
+            public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+                InterceptionResult<int> result, CancellationToken cancellationToken = default)
+            {
+                if (fixture.CaptureTenderWrites && eventData.Context is { } context)
+                {
+                    context.ChangeTracker.DetectChanges();
+                    foreach (var entry in context.ChangeTracker.Entries<Tender>())
+                        foreach (var property in entry.Properties.Where(item => item.IsModified))
+                            fixture.ModifiedTenderFields.Add(property.Metadata.Name);
+                    fixture.ModifiedImmutableRegisterGraph |= context.ChangeTracker.Entries().Any(entry =>
+                        entry.State == EntityState.Modified && entry.Entity is ProcurementTenderDocumentRegister or ProcurementTenderDocumentIssuance);
+                }
+                return ValueTask.FromResult(result);
+            }
+        }
+
+        public void RejectSupplierEligibility()
+        {
+            SupplierValidation.Setup(item => item.ValidateForTenderAsync(
+                    It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<decimal?>()))
+                .ReturnsAsync(new SupplierValidationResult
+                {
+                    IsValid = false,
+                    Errors = ["Supplier due diligence and approved-vendor clearance are required."]
+                });
+            SupplierValidation.Setup(item => item.ValidateForRfqAsync(
+                    It.IsAny<Guid>(), It.IsAny<List<Guid>?>(), It.IsAny<decimal?>()))
+                .ReturnsAsync(new SupplierValidationResult
+                {
+                    IsValid = false,
+                    Errors = ["Supplier due diligence and approved-vendor clearance are required."]
+                });
+        }
 
         public SaveProcurementTenderDocumentTemplateRequest DraftTemplateRequest() => new()
         {
@@ -1016,6 +1603,30 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 CurrencyCode = "GHS"
             }, correlation);
 
+        public async Task<(RequestForQuotation Rfq, ProcurementTenderDocumentRegisterDto Register)> BindRfqAsync(
+            string externalRecipientEmails)
+        {
+            var rfq = new RequestForQuotation
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, RfqNumber = "RFQ-001",
+                Title = "Selected RFQ recipients", Status = "Draft",
+                SourcingCaseId = Tender.SourcingCaseId, Currency = "GHS",
+                EstimatedValue = 1000m, SubmissionDeadline = Tender.SubmissionDeadline,
+                ExternalRecipientEmails = externalRecipientEmails
+            };
+            Context.Add(rfq);
+            await Context.SaveChangesAsync();
+            var register = await Service.BindAsync(new BindProcurementTenderDocumentRegisterRequest
+            {
+                SourceType = ProcurementTenderDocumentSourceType.RequestForQuotation,
+                SourceId = rfq.Id, TemplateVersionId = TemplateId,
+                SubmissionDeadlineUtc = rfq.SubmissionDeadline!.Value,
+                BidValidityUntilUtc = rfq.SubmissionDeadline.Value.AddDays(30),
+                FeeMode = FeeMode, FeeAmount = 0m, CurrencyCode = "GHS"
+            }, "bind-rfq");
+            return (rfq, register);
+        }
+
         public IssueProcurementTenderDocumentControlRequest Issue(string rowVersion, decimal amountPaid) => new()
         {
             SourceType = ProcurementTenderDocumentSourceType.Tender,
@@ -1030,6 +1641,50 @@ public sealed class ProcurementTenderDocumentControlServiceTests
             EvidenceReference = "EVID-ISSUE-001",
             RegisterRowVersion = rowVersion
         };
+
+        public IssueProcurementTenderDocumentControlRequest NewRecipient(string rowVersion)
+        {
+            var request = Issue(rowVersion, 0m);
+            request.BusinessPartnerId = null;
+            request.RecipientName = "New Interested Supplier";
+            request.RecipientEmail = "new.supplier@example.test";
+            return request;
+        }
+
+        public async Task<ProcurementTenderDocumentRegister> BindExpiredUnpublishedAsync()
+        {
+            var bound = await BindAsync("bind-unpublished-schedule");
+            var register = await Context.ProcurementTenderDocumentRegisters.SingleAsync(item => item.Id == bound.Id);
+            Tender.SubmissionDeadline = DateTime.UtcNow.AddHours(-2);
+            Tender.OpeningDate = DateTime.UtcNow.AddHours(-1);
+            register.OriginalSubmissionDeadlineUtc = Tender.SubmissionDeadline.Value;
+            register.OpeningScheduledAtUtc = Tender.OpeningDate;
+            await Context.SaveChangesAsync();
+            return register;
+        }
+
+        public CreateProcurementTenderDocumentChangeRequest Reschedule(ProcurementTenderDocumentRegister register) => new()
+        {
+            SourceType = ProcurementTenderDocumentSourceType.Tender, SourceId = Tender.Id,
+            ChangeType = ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule,
+            NewValueUtc = DateTime.UtcNow.AddDays(2), NewOpeningScheduledAtUtc = DateTime.UtcNow.AddDays(2).AddHours(1),
+            Reason = "Reschedule an unpublished tender; no bidders have received documents.",
+            WorkflowDefinitionId = WorkflowDefinitionId, EvidenceReference = "SCHEDULE-REVIEW",
+            RegisterRowVersion = Convert.ToBase64String(register.RowVersion)
+        };
+
+        public async Task CompleteChangeWorkflowAndSwitchActorAsync(ProcurementTenderDocumentChangeDto change,
+            WorkflowInstanceStatus status = WorkflowInstanceStatus.Completed, bool switchActor = true)
+        {
+            var definition = await Context.WorkflowDefinitions.SingleAsync(item => item.Id == WorkflowDefinitionId);
+            Context.Add(new WorkflowInstance
+            {
+                Id = change.WorkflowInstanceId!.Value, TenantId = TenantId, WorkflowDefinitionId = definition.Id,
+                EntityTypeId = definition.EntityTypeId, EntityId = change.Id, InitiatedById = _userId, Status = status
+            });
+            await Context.SaveChangesAsync();
+            if (switchActor) _userId = Guid.NewGuid();
+        }
 
         public async ValueTask DisposeAsync()
         {

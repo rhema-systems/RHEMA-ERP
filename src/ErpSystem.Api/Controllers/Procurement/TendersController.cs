@@ -340,6 +340,34 @@ public class TendersController : ControllerBase
             var tender = await _tenderService.PublishTenderAsync(id, dto);
             return Ok(tender);
         }
+        catch (ProcurementTenderDocumentControlConflictException ex)
+        {
+            return Conflict(SourcingProblem(ex.Code, ex.Message, status: 409));
+        }
+        catch (ProcurementTenderDocumentControlValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementTenderDocumentControlNotFoundException ex)
+        {
+            return NotFound(SourcingProblem(ex.Code, ex.Message, status: 404));
+        }
+        catch (ProcurementTenderDocumentControlAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("TENDER_DOCUMENT_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementTenderControlValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(SourcingProblem(ex.Code, ex.Message, status: 409));
+        }
+        catch (ProcurementTenderControlAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("TENDER_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
         catch (ProcurementRequisitionSourcingBlockedException ex)
         {
             return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));

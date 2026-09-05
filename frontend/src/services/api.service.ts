@@ -817,8 +817,8 @@ class ApiService {
     return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' }, true, true);
   }
 
-  public async post<T = any>(endpoint: string, data?: any): Promise<T> {
-    const options: RequestInit = { method: 'POST' };
+  public async post<T = any>(endpoint: string, data?: any, signal?: AbortSignal): Promise<T> {
+    const options: RequestInit = { method: 'POST', signal };
     if (data instanceof FormData) {
       options.body = data;
     } else if (data !== undefined && data !== null) {

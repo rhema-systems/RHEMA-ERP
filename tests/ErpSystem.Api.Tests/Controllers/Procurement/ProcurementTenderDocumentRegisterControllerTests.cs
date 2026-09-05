@@ -93,6 +93,90 @@ public sealed class ProcurementTenderDocumentRegisterControllerTests
             .Which.Extensions["code"].Should().Be("ACK_INVALID");
     }
 
+    [Theory]
+    [InlineData("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE")]
+    [InlineData("TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED")]
+    [InlineData("TENDER_DOCUMENT_RECIPIENT_CONTACT_REQUIRED")]
+    public async Task IssueValidationRetainsActionableProblemDetailAndCode(string code)
+    {
+        const string detail = "Select the saved supplier record before issuing this document.";
+        var request = new IssueProcurementTenderDocumentControlRequest();
+        var service = new Mock<IProcurementTenderDocumentControlService>();
+        service.Setup(item => item.IssueAsync(request, "trace-issue", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementTenderDocumentControlValidationException(code, detail));
+
+        var result = (ObjectResult)await Controller(service, "trace-issue").Issue(request, default);
+
+        result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        var problem = result.Value.Should().BeAssignableTo<ValidationProblemDetails>().Which;
+        problem.Detail.Should().Be(detail);
+        problem.Extensions["code"].Should().Be(code);
+        service.Verify(item => item.IssueAsync(request, "trace-issue", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("TENDER_DOCUMENT_TENDER_NOT_PUBLISHED")]
+    [InlineData("TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED")]
+    public async Task DocumentStageConflictsRetainCodeAndDetail(string code)
+    {
+        var service = new Mock<IProcurementTenderDocumentControlService>();
+        const string detail = "Complete the required publication stage first.";
+        service.Setup(item => item.IssueAsync(It.IsAny<IssueProcurementTenderDocumentControlRequest>(),
+            "trace-stage", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementTenderDocumentControlConflictException(code, detail));
+        var result = (ObjectResult)await Controller(service, "trace-stage")
+            .Issue(new IssueProcurementTenderDocumentControlRequest(), default);
+        result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = result.Value.Should().BeAssignableTo<ProblemDetails>().Which;
+        problem.Detail.Should().Be(detail);
+        problem.Extensions["code"].Should().Be(code);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RegisterReturnsServerDeterminedNewRecipientCapability(bool allowsNewRecipient)
+    {
+        var sourceId = Guid.NewGuid();
+        var service = new Mock<IProcurementTenderDocumentControlService>();
+        service.Setup(item => item.GetRegisterAsync(ProcurementTenderDocumentSourceType.Tender,
+                sourceId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementTenderDocumentRegisterDto { AllowsNewRecipient = allowsNewRecipient });
+
+        var result = (OkObjectResult)await Controller(service, "trace-capability")
+            .Get(ProcurementTenderDocumentSourceType.Tender, sourceId, default);
+
+        result.Value.Should().BeAssignableTo<ProcurementTenderDocumentRegisterDto>()
+            .Which.AllowsNewRecipient.Should().Be(allowsNewRecipient);
+        typeof(IssueProcurementTenderDocumentControlRequest).GetProperty("AllowsNewRecipient").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RescheduleForwardsPairedDatesThroughExistingGovernedChangeEndpoint()
+    {
+        var service = new Mock<IProcurementTenderDocumentControlService>();
+        var request = new CreateProcurementTenderDocumentChangeRequest
+        {
+            ChangeType = ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule,
+            NewValueUtc = DateTime.UtcNow.AddDays(2),
+            NewOpeningScheduledAtUtc = DateTime.UtcNow.AddDays(2).AddMinutes(5)
+        };
+        service.Setup(item => item.CreateChangeAsync(request, "trace-schedule", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementTenderDocumentChangeDto
+            {
+                ChangeType = request.ChangeType,
+                Status = ProcurementTenderDocumentChangeStatus.PendingApproval,
+                NewValueUtc = request.NewValueUtc,
+                NewOpeningScheduledAtUtc = request.NewOpeningScheduledAtUtc
+            });
+        var result = (ObjectResult)await Controller(service, "trace-schedule").CreateChange(request, default);
+        result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        var change = result.Value.Should().BeAssignableTo<ProcurementTenderDocumentChangeDto>().Which;
+        change.Status.Should().Be(ProcurementTenderDocumentChangeStatus.PendingApproval);
+        change.NewOpeningScheduledAtUtc.Should().Be(request.NewOpeningScheduledAtUtc);
+        service.VerifyAll();
+    }
+
     private static ProcurementTenderDocumentRegisterController Controller(
         Mock<IProcurementTenderDocumentControlService> service,
         string traceIdentifier) =>

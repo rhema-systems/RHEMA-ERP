@@ -49,6 +49,8 @@ public class TenderSummaryDto
 /// </summary>
 public class TenderDetailDto
 {
+    public bool UsesControlledTenderLifecycle { get; set; }
+    public int BidCount { get; set; }
     public Guid Id { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;

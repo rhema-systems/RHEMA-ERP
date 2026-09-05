@@ -261,6 +261,8 @@ public sealed class ProcurementTenderDocumentChange : TenantEntity
     public Guid? NewTemplateVersionId { get; set; }
     public DateTime? PreviousValueUtc { get; set; }
     public DateTime? NewValueUtc { get; set; }
+    public DateTime? PreviousOpeningScheduledAtUtc { get; set; }
+    public DateTime? NewOpeningScheduledAtUtc { get; set; }
     public bool RequiresAcknowledgement { get; set; } = true;
 
     [Required, StringLength(2000)]

@@ -741,6 +741,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             blocked.Add("The locked sourcing-case method rule is no longer valid.");
         return new ProcurementTenderDocumentRegisterReadinessDto
         {
+            SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
+            IsSourcePublished = IsSourcePublished(source),
             SourceType = sourceType,
             SourceId = sourceId,
             SourceReference = source.Reference,
@@ -749,6 +751,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             MethodRuleId = source.SourcingCase.MethodRuleId,
             MethodRuleCode = source.SourcingCase.MethodRuleCode,
             HasRegister = false,
+            AllowsNewRecipient = !_currentUser.IsExternalUser && AllowsOpenDocumentAccess(source),
+            AllowedExternalRecipientEmails = !_currentUser.IsExternalUser ? AllowedExternalRecipientEmails(source) : [],
             EffectiveTemplateVersionId = effectiveTemplate?.Id,
             EffectiveTemplateReference = effectiveTemplate is null
                 ? null
@@ -883,6 +887,13 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (replay is not null)
             return MapIssuance(replay);
         EnsureRowVersion(register.RowVersion, request.RegisterRowVersion, "TENDER_DOCUMENT_REGISTER");
+        RevalidateRegisterLineage(register, source);
+        if (RequiresTenderPublicationForIssue(source) && !IsSourcePublished(source))
+            throw Conflict("TENDER_DOCUMENT_TENDER_NOT_PUBLISHED",
+                "Publish the tender before issuing its documents to suppliers. A Published template is not a published tender.");
+        if (!Enum.IsDefined(source.SourcingCase.SelectedMethod))
+            throw Validation("TENDER_DOCUMENT_METHOD_UNSUPPORTED",
+                "The locked procurement method must be recognised before issuing documents.");
         if (DateTime.UtcNow > EffectiveSubmissionDeadline(register))
             throw Conflict("TENDER_DOCUMENT_ISSUE_WINDOW_CLOSED",
                 "Tender documents cannot be issued after the effective submission deadline.");
@@ -904,20 +915,48 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 partner.PartnerType is not ("Supplier" or "Contractor" or "Both"))
                 throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
                     "The selected business partner is not an active eligible supplier.");
-            var validation = source.Tender is not null
-                ? await _supplierValidation.ValidateForTenderAsync(
-                    partner.Id,
-                    source.Tender.RequiresPrequalification,
-                    source.Tender.MinimumPerformanceRating)
-                : await _supplierValidation.ValidateForRfqAsync(partner.Id);
-            if (!validation.IsValid)
-                throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
-                    string.Join("; ", validation.Errors));
+            // Access to an open NCT document is not a supplier invitation, bid qualification,
+            // award or purchasing approval. Those boundaries retain their own validation.
+            if (!AllowsOpenDocumentAccess(source))
+            {
+                var validation = source.Tender is not null
+                    ? await _supplierValidation.ValidateForTenderAsync(
+                        partner.Id,
+                        source.Tender.RequiresPrequalification,
+                        source.Tender.MinimumPerformanceRating)
+                    : await _supplierValidation.ValidateForRfqAsync(partner.Id);
+                if (!validation.IsValid)
+                    throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
+                        string.Join("; ", validation.Errors));
+            }
         }
-        else if (string.IsNullOrWhiteSpace(request.RecipientEmail))
+        else
         {
-            throw Validation("TENDER_DOCUMENT_RECIPIENT_CONTACT_REQUIRED",
-                "An external recipient must have an email address.");
+            if (string.IsNullOrWhiteSpace(request.RecipientEmail))
+                throw Validation("TENDER_DOCUMENT_RECIPIENT_CONTACT_REQUIRED",
+                    "A new interested supplier must have an email address.");
+            var recipientEmail = request.RecipientEmail.Trim().ToLowerInvariant();
+            if (!IsValidRecipientEmail(recipientEmail))
+                throw Validation("TENDER_DOCUMENT_RECIPIENT_EMAIL_INVALID",
+                    "Enter a valid recipient email address.");
+            if (!AllowsOpenDocumentAccess(source) &&
+                !AllowedExternalRecipientEmails(source).Contains(recipientEmail, StringComparer.OrdinalIgnoreCase))
+                throw Validation("TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED",
+                    "Select a saved supplier or an email-only recipient already configured on this RFQ.");
+
+            // Do not let a known supplier evade identity, blacklist or active-status checks
+            // by omitting its ID. Do not auto-link an ambiguous/shared email to a partner.
+            var recipientName = request.RecipientName.Trim().ToLowerInvariant();
+            var matchesSavedSupplier = await BusinessPartners.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                    (item.PartnerType == "Supplier" || item.PartnerType == "Contractor" || item.PartnerType == "Both"))
+                .AnyAsync(item => item.PartnerName.Trim().ToLower() == recipientName ||
+                    (item.PrimaryEmail != null && item.PrimaryEmail.Trim().ToLower() == recipientEmail) ||
+                    item.Contacts.Any(contact => !contact.IsDeleted && contact.TenantId == _currentUser.TenantId &&
+                        contact.Email != null && contact.Email.Trim().ToLower() == recipientEmail), cancellationToken);
+            if (matchesSavedSupplier)
+                throw Validation("TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED",
+                    "A saved supplier matches this name or email. Select its saved record instead of entering a new recipient.");
         }
         if (register.FeeMode == ProcurementTenderDocumentFeeMode.Paid)
         {
@@ -1025,6 +1064,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (replay is not null)
             return MapChange(replay);
         EnsureRowVersion(register.RowVersion, request.RegisterRowVersion, "TENDER_DOCUMENT_REGISTER");
+        RevalidateRegisterLineage(register, source);
         await EnsureChangeWindowOpenAsync(register, source, request.ChangeType, cancellationToken);
         if (register.Changes.Any(item =>
             !item.IsDeleted && item.Status == ProcurementTenderDocumentChangeStatus.PendingApproval))
@@ -1039,6 +1079,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         var effectiveTemplate = EffectiveTemplate(register);
         DateTime? previousValue = null;
         DateTime? newValue = null;
+        DateTime? previousOpening = null;
+        DateTime? newOpening = null;
         ProcurementTenderDocumentTemplateVersion? newTemplate = null;
         Guid? previousTemplateId = null;
         switch (request.ChangeType)
@@ -1067,10 +1109,17 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 if (newValue <= DateTime.UtcNow)
                     throw Validation("TENDER_DOCUMENT_DEADLINE_EXTENSION_ELAPSED",
                         "The extended submission deadline must be in the future.");
-                if (register.OpeningScheduledAtUtc.HasValue &&
-                    newValue > register.OpeningScheduledAtUtc.Value)
+                if (EffectiveOpening(register).HasValue &&
+                    newValue > EffectiveOpening(register)!.Value)
                     throw Validation("TENDER_DOCUMENT_DEADLINE_AFTER_OPENING",
-                        "The submission deadline cannot be extended beyond the immutable scheduled opening.");
+                        "The submission deadline cannot be extended beyond the effective scheduled opening.");
+                break;
+            case ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule:
+                previousValue = EffectiveSubmissionDeadline(register);
+                previousOpening = EffectiveOpening(register);
+                newValue = request.NewValueUtc.HasValue ? EnsureUtc(request.NewValueUtc.Value) : null;
+                newOpening = request.NewOpeningScheduledAtUtc.HasValue ? EnsureUtc(request.NewOpeningScheduledAtUtc.Value) : null;
+                ValidateUnpublishedSchedule(register, source, previousValue, previousOpening, newValue, newOpening);
                 break;
             case ProcurementTenderDocumentChangeType.BidValidityExtension:
                 if (!request.NewValueUtc.HasValue)
@@ -1105,7 +1154,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             NewTemplateVersionId = newTemplate?.Id,
             PreviousValueUtc = previousValue,
             NewValueUtc = newValue,
-            RequiresAcknowledgement = true,
+            PreviousOpeningScheduledAtUtc = previousOpening,
+            NewOpeningScheduledAtUtc = newOpening,
+            RequiresAcknowledgement = request.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule,
             Reason = request.Reason.Trim(),
             WorkflowDefinitionId = definition.Id,
             EvidenceReference = request.EvidenceReference.Trim(),
@@ -1135,12 +1186,21 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                     change.PreviousTemplateVersionId,
                     change.NewTemplateVersionId,
                     change.PreviousValueUtc,
-                    change.NewValueUtc
+                    change.NewValueUtc,
+                    change.PreviousOpeningScheduledAtUtc,
+                    change.NewOpeningScheduledAtUtc
                 }, cancellationToken);
+            if (change.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule &&
+                instance.Status is WorkflowInstanceStatus.Completed or WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
+                throw Conflict("TENDER_DOCUMENT_RESCHEDULE_APPROVAL_REQUIRED",
+                    "Rescheduling must start a pending shared approval workflow; an immediately completed or terminated route cannot approve schedule changes.");
             change.WorkflowInstanceId = instance.Id;
             Touch(change);
             Capture(change);
-            await Changes.UpdateAsync(change);
+            // This tracked reschedule was just saved above. Let EF detect its changed
+            // scalar fields instead of marking its entire immutable register graph Modified.
+            if (change.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                await Changes.UpdateAsync(change);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordRegisterEventAsync(register, source, "ChangeRequested",
                 ProcurementControlEventResult.ReviewRequired, null, ChangeSnapshot(change), change.Reason,
@@ -1203,12 +1263,15 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         change.DecidedByUserId = _currentUser.UserId;
         if (approving)
         {
-            if (change.ChangeType == ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension)
+            if (change.ChangeType is ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension or
+                ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
             {
                 var extended = change.NewValueUtc!.Value;
                 if (source.Tender is not null)
                 {
                     source.Tender.SubmissionDeadline = extended;
+                    if (change.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                        source.Tender.OpeningDate = change.NewOpeningScheduledAtUtc;
                     Touch(source.Tender, now);
                     var legacy = await LegacyTenderControls.GetQueryable(item =>
                             item.TenantId == _currentUser.TenantId && item.TenderId == source.Tender.Id && !item.IsDeleted)
@@ -1219,7 +1282,11 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                         legacy.UpdatedAt = now;
                         await LegacyTenderControls.UpdateAsync(legacy);
                     }
-                    await Tenders.UpdateAsync(source.Tender);
+                    // LoadSourceAsync tracked this row. For rescheduling, update only dates
+                    // and audit fields; never overwrite concurrently changed publication state.
+                    // The change trigger rechecks the live publication state in this transaction.
+                    if (change.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                        await Tenders.UpdateAsync(source.Tender);
                 }
                 else
                 {
@@ -1250,7 +1317,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         {
             if (approving && change.Recipients.Count > 0)
                 await ChangeRecipients.AddRangeAsync(change.Recipients);
-            await Changes.UpdateAsync(change);
+            if (change.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                await Changes.UpdateAsync(change);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordRegisterEventAsync(change.Register, source,
                 approving ? "ChangeApprovedAndDispatched" : "ChangeRejected",
@@ -1406,6 +1474,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (EnsureUtc(expectedDeadlineUtc) != state.EffectiveSubmissionDeadlineUtc)
             throw Conflict("TENDER_DOCUMENT_PUBLICATION_DEADLINE_MISMATCH",
                 "The source deadline does not match the effective controlled-document deadline.");
+        if (source.Tender is not null && source.OpeningScheduledAtUtc != EffectiveOpening(register))
+            throw Conflict("TENDER_DOCUMENT_PUBLICATION_OPENING_MISMATCH",
+                "The source opening schedule does not match the effective controlled-document opening.");
         if (!state.Ready)
             throw Conflict("TENDER_DOCUMENT_PUBLICATION_BLOCKED", string.Join("; ", state.BlockedReasons));
         await RecordRegisterEventAsync(register, source, "PublicationGuardPassed",
@@ -1752,7 +1823,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 "The source currency no longer matches its locked sourcing case.");
         return new SourceContext(
             sourceType, sourceId, reference, deadline.HasValue ? EnsureUtc(deadline.Value) : null,
-            opening.HasValue ? EnsureUtc(opening.Value) : null, currency, sourcingCase, tender, rfq);
+            opening.HasValue ? EnsureUtc(opening.Value) : null, currency, sourcingCase, tender, rfq,
+            tender is not null && (
+                await TenderBids.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                    item.TenderId == sourceId && !item.IsDeleted).AnyAsync(cancellationToken) ||
+                await LegacyTenderControls.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                    item.TenderId == sourceId && !item.IsDeleted).AnyAsync(cancellationToken)));
     }
 
     private async Task EnsureSourceReaderAsync(SourceContext source, CancellationToken cancellationToken)
@@ -2253,6 +2329,13 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
+        if (changeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+        {
+            if (!CanRescheduleUnpublished(register, source))
+                throw Conflict("TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED",
+                    "Only an approved, never-published open NCT with no issued documents, bids or advertised statutory controls may be rescheduled before publication.");
+            return;
+        }
         var validityExtension = changeType == ProcurementTenderDocumentChangeType.BidValidityExtension;
         if (validityExtension)
         {
@@ -2346,12 +2429,16 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                     EnsureUtc(source.SubmissionDeadlineUtc.Value) != current)
                     throw Conflict("TENDER_DOCUMENT_SOURCE_DEADLINE_STALE",
                         "The procurement source deadline no longer matches the controlled register.");
-                if (change.Register.OpeningScheduledAtUtc.HasValue &&
-                    EnsureUtc(change.NewValueUtc.Value) > change.Register.OpeningScheduledAtUtc.Value)
+                if (EffectiveOpening(change.Register).HasValue &&
+                    EnsureUtc(change.NewValueUtc.Value) > EffectiveOpening(change.Register)!.Value)
                     throw Conflict("TENDER_DOCUMENT_DEADLINE_AFTER_OPENING",
-                        "The submission deadline cannot extend beyond the immutable scheduled opening.");
+                        "The submission deadline cannot extend beyond the effective scheduled opening.");
                 break;
             }
+            case ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule:
+                ValidateUnpublishedSchedule(change.Register, source, change.PreviousValueUtc,
+                    change.PreviousOpeningScheduledAtUtc, change.NewValueUtc, change.NewOpeningScheduledAtUtc);
+                break;
             case ProcurementTenderDocumentChangeType.BidValidityExtension:
             {
                 var current = EffectiveBidValidity(change.Register);
@@ -2474,13 +2561,58 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
     private static DateTime EffectiveSubmissionDeadline(ProcurementTenderDocumentRegister register) =>
         register.Changes.Where(item => !item.IsDeleted &&
                 item.Status == ProcurementTenderDocumentChangeStatus.Approved &&
-                item.ChangeType == ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension &&
+                (item.ChangeType == ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension ||
+                 item.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule) &&
                 item.NewValueUtc.HasValue)
             .OrderByDescending(item => item.Sequence)
             .Select(item => item.NewValueUtc!.Value)
             .FirstOrDefault() is var value && value != default
                 ? value
                 : register.OriginalSubmissionDeadlineUtc;
+
+    private static DateTime? EffectiveOpening(ProcurementTenderDocumentRegister register) =>
+        register.Changes.Where(item => !item.IsDeleted && item.Status == ProcurementTenderDocumentChangeStatus.Approved &&
+                item.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+            .OrderByDescending(item => item.Sequence).Select(item => item.NewOpeningScheduledAtUtc)
+            .FirstOrDefault() ?? register.OpeningScheduledAtUtc;
+
+    private static bool IsSourcePublished(SourceContext source) => source.Tender is not null
+        ? source.Tender.Status == "Published" && source.Tender.PublishDate.HasValue &&
+          EnsureUtc(source.Tender.PublishDate.Value) <= DateTime.UtcNow
+        : source.Rfq!.Status is "Sent" or "Evaluation" or "PendingApproval" or "Approved" or "Awarded";
+
+    private static bool RequiresTenderPublicationForIssue(SourceContext source) =>
+        source.Tender is not null && source.SourcingCase.SelectedMethod != ProcurementMethodType.RequestForQuotation;
+
+    private static bool CanRescheduleUnpublished(ProcurementTenderDocumentRegister register, SourceContext source) =>
+        AllowsOpenDocumentAccess(source) && source.Tender!.Status == "Approved" &&
+        !source.Tender.PublishDate.HasValue && !source.Tender.PublishedById.HasValue &&
+        !source.HasBidsOrStatutoryControls && !register.Issuances.Any(item => !item.IsDeleted);
+
+    private static List<string> RegisterActions(ProcurementTenderDocumentRegister register, SourceContext source)
+    {
+        var actions = new List<string> { "CreateChange" };
+        if ((!RequiresTenderPublicationForIssue(source) || IsSourcePublished(source)) && DateTime.UtcNow <= EffectiveSubmissionDeadline(register))
+            actions.Insert(0, "Issue");
+        if (CanRescheduleUnpublished(register, source) && !register.Changes.Any(item =>
+                !item.IsDeleted && item.Status == ProcurementTenderDocumentChangeStatus.PendingApproval))
+            actions.Add("RescheduleUnpublished");
+        return actions;
+    }
+
+    private static void ValidateUnpublishedSchedule(ProcurementTenderDocumentRegister register, SourceContext source,
+        DateTime? previousDeadline, DateTime? previousOpening, DateTime? newDeadline, DateTime? newOpening)
+    {
+        if (previousDeadline != EffectiveSubmissionDeadline(register) || previousOpening != EffectiveOpening(register) ||
+            source.SubmissionDeadlineUtc != previousDeadline || source.OpeningScheduledAtUtc != previousOpening)
+            throw Conflict("TENDER_DOCUMENT_SCHEDULE_BASE_STALE",
+                "The tender schedule no longer matches the controlled register. Reload before requesting or approving a reschedule.");
+        if (!newDeadline.HasValue || !newOpening.HasValue || newDeadline <= previousDeadline ||
+            newDeadline <= DateTime.UtcNow || newOpening <= newDeadline ||
+            (previousOpening.HasValue && newOpening <= previousOpening) || newDeadline >= EffectiveBidValidity(register))
+            throw Validation("TENDER_DOCUMENT_RESCHEDULE_DATES_INVALID",
+                "Choose a future submission deadline later than the current deadline and before bid-validity expiry, with a later opening strictly after submission.");
+    }
 
     private static DateTime EffectiveBidValidity(ProcurementTenderDocumentRegister register) =>
         register.Changes.Where(item => !item.IsDeleted &&
@@ -2492,6 +2624,27 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             .FirstOrDefault() is var value && value != default
                 ? value
                 : register.OriginalBidValidityUntilUtc;
+
+    private static bool AllowsOpenDocumentAccess(SourceContext source) =>
+        source.SourceType == ProcurementTenderDocumentSourceType.Tender &&
+        source.Tender is { RequiresPrequalification: false, UseQCBSEvaluation: false } &&
+        source.SourcingCase.SelectedMethod == ProcurementMethodType.NationalCompetitiveTendering;
+
+    private static List<string> AllowedExternalRecipientEmails(SourceContext source) =>
+        source.SourceType == ProcurementTenderDocumentSourceType.RequestForQuotation &&
+        source.SourcingCase.SelectedMethod == ProcurementMethodType.RequestForQuotation &&
+        !string.IsNullOrWhiteSpace(source.Rfq?.ExternalRecipientEmails)
+            ? source.Rfq.ExternalRecipientEmails
+                .Split([',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(IsValidRecipientEmail)
+                .Select(email => email.ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : [];
+
+    private static bool IsValidRecipientEmail(string email) =>
+        System.Net.Mail.MailAddress.TryCreate(email, out var address) &&
+        string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase);
 
     private static void RevalidateRegisterLineage(
         ProcurementTenderDocumentRegister register,
@@ -3062,6 +3215,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             .ToList();
         return new ProcurementTenderDocumentRegisterReadinessDto
         {
+            SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
+            IsSourcePublished = IsSourcePublished(source),
             SourceType = register.SourceType,
             SourceId = source.SourceId,
             SourceReference = source.Reference,
@@ -3070,6 +3225,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             MethodRuleId = register.MethodRuleId,
             MethodRuleCode = register.MethodRuleCode,
             HasRegister = true,
+            AllowsNewRecipient = externalPartnerIds is null && AllowsOpenDocumentAccess(source),
+            AllowedExternalRecipientEmails = externalPartnerIds is null ? AllowedExternalRecipientEmails(source) : [],
             RegisterId = register.Id,
             EffectiveTemplateVersionId = state.EffectiveTemplateVersionId,
             EffectiveTemplateReference = state.EffectiveTemplateReference,
@@ -3087,7 +3244,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             Ready = state.Ready,
             BlockedReasons = state.BlockedReasons,
             AllowedActions = externalPartnerIds is null
-                ? ["View", "Issue", "CreateChange"]
+                ? ["View", ..RegisterActions(register, source)]
                 : recipients.Any(item => !item.Acknowledgements.Any(ack => !ack.IsDeleted &&
                     ack.Outcome == ProcurementTenderDocumentAcknowledgementOutcome.Acknowledged))
                     ? ["View", "Acknowledge"]
@@ -3118,7 +3275,11 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 ack.Outcome == ProcurementTenderDocumentAcknowledgementOutcome.Acknowledged));
         return new ProcurementTenderDocumentRegisterDto
         {
+            SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
+            IsSourcePublished = IsSourcePublished(source),
             Id = register.Id,
+            AllowsNewRecipient = externalPartnerIds is null && AllowsOpenDocumentAccess(source),
+            AllowedExternalRecipientEmails = externalPartnerIds is null ? AllowedExternalRecipientEmails(source) : [],
             SourceType = register.SourceType,
             SourceId = source.SourceId,
             TenderId = register.TenderId,
@@ -3136,8 +3297,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             EffectiveTemplateVersionId = state.EffectiveTemplateVersionId,
             EffectiveTemplateReference = state.EffectiveTemplateReference,
             OriginalSubmissionDeadlineUtc = register.OriginalSubmissionDeadlineUtc,
+            OriginalOpeningScheduledAtUtc = register.OpeningScheduledAtUtc,
             EffectiveSubmissionDeadlineUtc = state.EffectiveSubmissionDeadlineUtc,
-            OpeningScheduledAtUtc = register.OpeningScheduledAtUtc,
+            OpeningScheduledAtUtc = EffectiveOpening(register),
             OriginalBidValidityUntilUtc = register.OriginalBidValidityUntilUtc,
             EffectiveBidValidityUntilUtc = state.EffectiveBidValidityUntilUtc,
             FeeMode = register.FeeMode,
@@ -3155,7 +3317,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 .Select(item => MapChange(item, externalPartnerIds)).ToList(),
             BlockedReasons = state.BlockedReasons,
             AllowedActions = externalPartnerIds is null
-                ? ["Issue", "CreateChange"]
+                ? RegisterActions(register, source)
                 : outstandingAcknowledgement ? ["Acknowledge"] : [],
             RowVersion = Convert.ToBase64String(register.RowVersion)
         };
@@ -3210,6 +3372,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             NewTemplateVersionId = item.NewTemplateVersionId,
             PreviousValueUtc = item.PreviousValueUtc,
             NewValueUtc = item.NewValueUtc,
+            PreviousOpeningScheduledAtUtc = item.PreviousOpeningScheduledAtUtc,
+            NewOpeningScheduledAtUtc = item.NewOpeningScheduledAtUtc,
             RequiresAcknowledgement = item.RequiresAcknowledgement,
             Reason = item.Reason,
             WorkflowDefinitionId = item.WorkflowDefinitionId,
@@ -3517,6 +3681,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         entity.NewTemplateVersionId,
         entity.PreviousValueUtc,
         entity.NewValueUtc,
+        entity.PreviousOpeningScheduledAtUtc,
+        entity.NewOpeningScheduledAtUtc,
         entity.RequiresAcknowledgement,
         entity.Reason,
         entity.WorkflowDefinitionId,
@@ -3635,7 +3801,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         string CurrencyCode,
         ProcurementSourcingCase SourcingCase,
         Tender? Tender,
-        RequestForQuotation? Rfq);
+        RequestForQuotation? Rfq,
+        bool HasBidsOrStatutoryControls);
 
     private sealed record RecipientCandidate(
         ProcurementTenderDocumentRecipientSourceType SourceType,

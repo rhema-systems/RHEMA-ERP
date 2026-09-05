@@ -365,6 +365,13 @@ public class ProcurementBudgetService : IProcurementBudgetService
                 throw new InvalidOperationException(
                     $"Revision {pendingRevision.RevisionNumber} is still pending. Complete or reject it before creating another revision.");
 
+            // An amendment to an approved financial envelope must not inherit
+            // the shared optional-workflow direct-approval path.
+            if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(RevisionWorkflowEntityType))
+                throw new InvalidOperationException(
+                    "Budget revisions require a published approval workflow with an independent approver. " +
+                    "Configure the Procurement Budget Revision workflow before submitting a revision. The approved budget has not changed.");
+
             var revision = new ProcurementBudgetRevision
             {
                 ProcurementBudgetId = budgetId,
@@ -392,14 +399,19 @@ public class ProcurementBudgetService : IProcurementBudgetService
                 throw new InvalidOperationException(
                     workflowResult.ExecutionResult.Message ?? "Failed to start the procurement budget revision workflow.");
 
+            // Recheck the outcome: configuration can change after the preflight,
+            // and a published route without a pending approval is not sufficient.
+            // Throw inside the transaction so the revision and workflow roll back.
+            if (!workflowResult.ApprovalRequired || workflowResult.Outcome != WorkflowOutcome.Pending)
+                throw new InvalidOperationException(
+                    "Budget revisions must wait for independent approval. The configured workflow did not create a pending review. " +
+                    "Correct the Procurement Budget Revision workflow and retry. The approved budget has not changed.");
+
             _workflowStatusAdapterRegistry.GetAdapter(RevisionWorkflowEntityType)
                 .ApplySubmitOutcome(revision, workflowResult.Outcome, currentUserId);
             revision.UpdatedAt = DateTime.UtcNow;
             revision.UpdatedBy = _currentUserProvider.Username;
             revision.LastModifiedById = currentUserId;
-
-            if (workflowResult.Outcome == WorkflowOutcome.Approved)
-                await ApplyApprovedRevisionAsync(budget, revision);
 
             await _revisionRepository.UpdateAsync(revision);
             await _unitOfWork.SaveChangesAsync();

@@ -1093,7 +1093,7 @@ export const procurementPlanService = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to delete procurement plan');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to delete procurement plan'));
   },
 
   async submitForApproval(id: string, data: SubmitProcurementPlanDto): Promise<ProcurementPlanDetailDto> {

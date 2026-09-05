@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Search,
@@ -34,6 +36,9 @@ export default function ProcurementPlansPage() {
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [planToDelete, setPlanToDelete] = useState<ProcurementPlanDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     commonService.getDepartments()
@@ -85,16 +90,31 @@ export default function ProcurementPlansPage() {
     router.push('/procurement/planning/plans/new');
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this procurement plan?')) return;
+  const handleDelete = (id: string) => {
+    const selectedPlan = plans.find((plan) => plan.id === id);
+    if (!selectedPlan || deleting) return;
+    setDeleteError(null);
+    setPlanToDelete(selectedPlan);
+  };
 
+  const confirmDelete = async () => {
+    if (!planToDelete || deleting) return false;
     try {
-      await procurementPlanService.deletePlan(id);
+      setDeleting(true);
+      setDeleteError(null);
+      await procurementPlanService.deletePlan(planToDelete.id);
+      setPlans((current) => current.filter((plan) => plan.id !== planToDelete.id));
+      setPlanToDelete(null);
       toast.success('Procurement plan deleted successfully');
-      loadPlans();
+      await loadPlans();
+      return true;
     } catch (error) {
-      console.error('Error deleting procurement plan:', error);
-      toast.error('Failed to delete procurement plan');
+      const message = error instanceof Error ? error.message : 'Failed to delete procurement plan';
+      setDeleteError(message);
+      toast.error(message);
+      return false;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -365,6 +385,23 @@ export default function ProcurementPlansPage() {
           )}
         </CardContent>
       </Card>
+      <ConfirmationDialog
+        open={planToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) {
+            setPlanToDelete(null);
+            setDeleteError(null);
+          }
+        }}
+        title="Delete procurement plan?"
+        description={`Delete draft plan ${planToDelete?.planNumber || ''} - ${planToDelete?.title || ''}? Only this plan will be removed.`}
+        confirmText="Delete plan"
+        variant="destructive"
+        onConfirm={confirmDelete}
+        isLoading={deleting}
+      >
+        {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+      </ConfirmationDialog>
     </div>
   );
 }

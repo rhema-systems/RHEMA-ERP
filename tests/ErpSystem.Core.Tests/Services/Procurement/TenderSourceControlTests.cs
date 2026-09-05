@@ -42,6 +42,7 @@ public sealed class TenderSourceControlTests
         {
             SourcingReleaseId = Guid.NewGuid(),
             SourcingCaseId = Guid.NewGuid(),
+            HasAdvancedAuthorityRoute = true,
             SelectedMethod = method
         }).Should().BeTrue();
     }
@@ -84,6 +85,36 @@ public sealed class TenderSourceControlTests
         var invalidAction = () => TenderService.ValidateReleaseOnlyPublication(tender, invalid, now);
         invalidAction.Should().Throw<ProcurementRequisitionSourcingValidationException>()
             .Where(exception => exception.Code == "TENDER_OPENING_BEFORE_DEADLINE");
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering)]
+    [InlineData(ProcurementMethodType.InternationalCompetitiveTendering)]
+    public void StandardCaseKeepsDocumentControlsWithoutAdvancedPublication(ProcurementMethodType method)
+    {
+        var gate = new ProcurementSourcingCaseEntryGateDto
+        {
+            SourcingReleaseId = Guid.NewGuid(), SourcingCaseId = Guid.NewGuid(),
+            SelectedMethod = method, HasAdvancedAuthorityRoute = false
+        };
+        TenderService.UsesAdvancedSourcingControls(gate).Should().BeTrue();
+        TenderService.RequiresControlledPublication(gate).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.QualityBasedSelection)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection)]
+    public void ConsultingMethodsCannotDowngradeTheirControlledEnvelopeRules(ProcurementMethodType method)
+    {
+        ProcurementTenderRouting.RequiresControlledLifecycle(method, false).Should().BeTrue();
+    }
+
+    [Fact]
+    public void PartialAuthorityMetadataStillRoutesToAdvancedValidation()
+    {
+        ProcurementTenderRouting.HasAdvancedAuthority(Guid.NewGuid(), null).Should().BeTrue();
+        ProcurementTenderRouting.HasAdvancedAuthority(null, "AUTH-1").Should().BeTrue();
+        ProcurementTenderRouting.HasAdvancedAuthority(null, null).Should().BeFalse();
     }
 
     [Fact]

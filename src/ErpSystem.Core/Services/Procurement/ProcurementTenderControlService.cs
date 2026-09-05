@@ -91,14 +91,18 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     public async Task<bool> IsControlledTenderMethodAsync(Guid tenderId, CancellationToken cancellationToken = default)
     {
         EnsureAuthenticatedTenant();
-        return await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+        // Once bound to the advanced lifecycle, never downgrade a retained control.
+        if (await Controls.GetQueryable(item => item.TenderId == tenderId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted).AnyAsync(cancellationToken))
+            return true;
+        var source = await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .Where(item => item.SourcingCaseId.HasValue)
             .Join(Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted),
-                tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id, (_, sourcingCase) => sourcingCase.SelectedMethod)
-            .AnyAsync(method => method == ProcurementMethodType.NationalCompetitiveTendering ||
-                                method == ProcurementMethodType.InternationalCompetitiveTendering ||
-                                method == ProcurementMethodType.QualityBasedSelection ||
-                                method == ProcurementMethodType.QualityAndCostBasedSelection, cancellationToken);
+                tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id,
+                (_, sourcingCase) => new { sourcingCase.SelectedMethod, sourcingCase.AuthorityRouteId, sourcingCase.AuthorityRouteReference })
+            .SingleOrDefaultAsync(cancellationToken);
+        return source is not null && ProcurementTenderRouting.RequiresControlledLifecycle(
+            source.SelectedMethod, ProcurementTenderRouting.HasAdvancedAuthority(source.AuthorityRouteId, source.AuthorityRouteReference));
     }
 
     public async Task<bool> ShouldConcealFinancialProposalAsync(
@@ -412,7 +416,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         EnsureStatus(control, ProcurementTenderControlStatus.Advertised, "TENDER_OPENING_NOT_READY");
         if (DateTime.UtcNow < control.SubmissionDeadlineUtc)
             throw Conflict("TENDER_OPENING_BEFORE_DEADLINE", "Public opening cannot start before the submission deadline.");
-        await EnsureOpeningCommitteeQuorumAsync(control, cancellationToken);
+        await EnsureOpeningCommitteeQuorumAsync(control.TenderId, control.Method, control.SubmissionDeadlineUtc, cancellationToken);
         var onTime = control.SubmissionReceipts.Where(item => !item.IsDeleted &&
             item.Disposition == ProcurementTenderSubmissionDisposition.OnTimeAccepted).OrderBy(item => item.ReceivedAtUtc).ToList();
         var paymentAdmissions = await AssessPaymentAdmissionsAsync(
@@ -534,8 +538,33 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 
+    public async Task EnsureStandardOpeningReadyAsync(Guid tenderId, CancellationToken cancellationToken = default)
+    {
+        var tender = await LoadTenderAsync(tenderId, tracked: false, cancellationToken);
+        if (!tender.SourcingCaseId.HasValue) return;
+        var method = await Cases.GetQueryable(item => item.Id == tender.SourcingCaseId.Value &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Select(item => (ProcurementMethodType?)item.SelectedMethod).SingleOrDefaultAsync(cancellationToken);
+        if (!method.HasValue)
+            throw Validation("TENDER_SOURCING_CASE_NOT_FOUND", "The locked sourcing case is unavailable.");
+        if (method is not (ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering))
+            return;
+        var correlation = Guid.NewGuid().ToString("N");
+        var lineage = await RevalidateAsync(tender, correlation, cancellationToken);
+        if (await IsControlledTenderMethodAsync(tenderId, cancellationToken))
+            throw Conflict("TENDER_STATUTORY_OPENING_REQUIRED", "Use the signed controlled tender opening.");
+        if (!tender.SubmissionDeadline.HasValue || DateTime.UtcNow < EnsureUtc(tender.SubmissionDeadline.Value))
+            throw Conflict("TENDER_OPENING_BEFORE_DEADLINE", "Bids cannot be opened before the submission deadline.");
+        await _tenderDocumentControlService.EnsureOpeningReadyAsync(
+            ProcurementTenderDocumentSourceType.Tender, tenderId, correlation, cancellationToken);
+        await EnsureOpeningCommitteeQuorumAsync(tenderId, lineage.Case.SelectedMethod,
+            EnsureUtc(tender.SubmissionDeadline.Value), cancellationToken);
+    }
+
     private async Task EnsureOpeningCommitteeQuorumAsync(
-        ProcurementTenderControl control,
+        Guid tenderId,
+        ProcurementMethodType method,
+        DateTime submissionDeadlineUtc,
         CancellationToken cancellationToken)
     {
         ProcurementEvaluationCommitteeDto committee;
@@ -543,7 +572,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         {
             committee = await _evaluationCommittee.GetAsync(
                 ProcurementEvaluationSourceType.Tender,
-                control.TenderId,
+                tenderId,
                 cancellationToken);
         }
         catch (ProcurementEvaluationCommitteeNotFoundException)
@@ -553,7 +582,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 "Formal opening requires an active eligible evaluation committee and server-confirmed quorum recorded after the bidding window closed.");
         }
 
-        var permittedPhases = IsQualitySelection(control.Method)
+        var permittedPhases = IsQualitySelection(method)
             ? new[] { ProcurementEvaluationPhase.Technical }
             : new[]
             {
@@ -576,7 +605,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                              meeting.Status == ProcurementEvaluationMeetingStatus.QuorumConfirmed &&
                              meeting.QuorumMet &&
                              meeting.StartedAtUtc.HasValue &&
-                             meeting.StartedAtUtc.Value >= control.SubmissionDeadlineUtc;
+                             meeting.StartedAtUtc.Value >= submissionDeadlineUtc;
         if (!committeeReady)
             throw Conflict(
                 "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED",

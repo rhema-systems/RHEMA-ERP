@@ -101,8 +101,62 @@ public class SupplierValidationService : ISupplierValidationService
         });
     }
 
-    public async Task<SupplierValidationResult> EvaluateEligibilityAsync(
+    public async Task<SupplierValidationResult> ValidateForTenderBidAsync(
+        Guid businessPartnerId,
+        Guid tenderId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        var tender = await _unitOfWork.Repository<Tender>()
+            .GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (tender is null)
+            return SupplierValidationResult.Fail("The tender was not found in the current tenant.", "TENDER_NOT_FOUND");
+        if (!string.Equals(tender.Status, "Published", StringComparison.OrdinalIgnoreCase))
+            return SupplierValidationResult.Fail("Bids require a published tender.", "TENDER_BID_WINDOW_CLOSED");
+
+        var openNctParticipation = false;
+        if (tender.SourcingCaseId.HasValue)
+        {
+            var sourcingCase = await _unitOfWork.Repository<ProcurementSourcingCase>()
+                .GetQueryable(item => item.Id == tender.SourcingCaseId.Value &&
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+            if (sourcingCase is null ||
+                sourcingCase.PurchaseRequisitionId == Guid.Empty ||
+                sourcingCase.SourcingReleaseId == Guid.Empty ||
+                sourcingCase.PurchaseRequisitionId != tender.SourcePurchaseRequisitionId ||
+                sourcingCase.SourcingReleaseId != tender.SourcingReleaseId ||
+                sourcingCase.Status is not (ProcurementSourcingCaseStatus.Ready or ProcurementSourcingCaseStatus.InProgress) ||
+                !Enum.IsDefined(sourcingCase.SelectedMethod))
+                return SupplierValidationResult.Fail(
+                    "The tender's locked sourcing case, requisition and release must match before bidding.",
+                    "TENDER_BID_SOURCE_LINEAGE_INVALID");
+
+            openNctParticipation = sourcingCase.SelectedMethod == ProcurementMethodType.NationalCompetitiveTendering &&
+                !tender.RequiresPrequalification && !tender.UseQCBSEvaluation;
+        }
+
+        return await EvaluateEligibilityCoreAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = businessPartnerId,
+            Boundary = SupplierEligibilityBoundary.BidParticipation,
+            RequiresPrequalification = tender.RequiresPrequalification,
+            MinimumPerformanceRating = tender.MinimumPerformanceRating,
+            SourceType = "Tender",
+            SourceId = tender.Id,
+            SourceReference = tender.TenderNumber
+        }, openNctParticipation, cancellationToken);
+    }
+
+    public Task<SupplierValidationResult> EvaluateEligibilityAsync(
         SupplierEligibilityEvaluationRequest request,
+        CancellationToken cancellationToken = default) =>
+        EvaluateEligibilityCoreAsync(request, openNctParticipation: false, cancellationToken);
+
+    private async Task<SupplierValidationResult> EvaluateEligibilityCoreAsync(
+        SupplierEligibilityEvaluationRequest request,
+        bool openNctParticipation,
         CancellationToken cancellationToken = default)
     {
         EnsureAuthenticatedTenant();
@@ -160,14 +214,36 @@ public class SupplierValidationService : ISupplierValidationService
         AddFinancialWarnings(partner, request, result);
         await AddRegistrationEvidenceAsync(partner.Id, result, cancellationToken);
         await AddPrequalificationAsync(request, result, now, cancellationToken);
-        await AddAvlPolicyLineageAsync(result, now, cancellationToken);
-        await AddDueDiligenceLineageAsync(result, now, cancellationToken);
-        if (!request.SkipFormalAvlMembership)
-            await AddFormalAvlLineageAsync(result, now, cancellationToken);
-        if (!request.SkipPerformanceScorecard)
-            await AddPerformanceScorecardLineageAsync(result, now, cancellationToken);
-        if (!request.SkipRiskAssessment)
-            await AddRiskLineageAsync(result, now, cancellationToken);
+        if (openNctParticipation)
+        {
+            // An absent internal annual review does not bar open participation,
+            // but an already approved adverse finding must never be ignored.
+            var adverseReview = await _unitOfWork.Repository<ProcurementSupplierDueDiligenceReview>()
+                .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                    item.BusinessPartnerId == partner.Id && !item.IsDeleted &&
+                    item.Status == ProcurementSupplierDueDiligenceStatus.Approved)
+                .AnyAsync(item => item.Outcome == ProcurementSupplierDueDiligenceOutcome.Adverse ||
+                    item.Checks.Any(check => !check.IsDeleted && check.TenantId == _currentUser.TenantId &&
+                        check.Status == ProcurementSupplierDueDiligenceCheckStatus.Adverse), cancellationToken);
+            if (adverseReview)
+                result.Block("SUPPLIER_DUE_DILIGENCE_ADVERSE",
+                    "An approved supplier review contains an adverse finding that must be resolved before bidding.");
+            result.Warn("OPEN_NCT_PARTICIPATION_ONLY",
+                "Open NCT participation does not require internal AVL or annual supplier reviews; award, contract and purchase-order controls remain separate.");
+            result.Warn("GHANEPS_REGISTRATION_EXTERNAL_VERIFICATION",
+                "This local eligibility decision does not verify GHANEPS registration or replace the published tender requirements and controlled GHANEPS exchange.");
+        }
+        else
+        {
+            await AddAvlPolicyLineageAsync(result, now, cancellationToken);
+            await AddDueDiligenceLineageAsync(result, now, cancellationToken);
+            if (!request.SkipFormalAvlMembership)
+                await AddFormalAvlLineageAsync(result, now, cancellationToken);
+            if (!request.SkipPerformanceScorecard)
+                await AddPerformanceScorecardLineageAsync(result, now, cancellationToken);
+            if (!request.SkipRiskAssessment)
+                await AddRiskLineageAsync(result, now, cancellationToken);
+        }
 
         result.IsValid = result.Findings.All(item => !item.Blocking);
         result.Errors = result.Findings.Where(item => item.Blocking).Select(item => item.Message).ToList();
@@ -1231,7 +1307,8 @@ public enum SupplierEligibilityBoundary
     Award = 2,
     Contract = 3,
     ManualPurchaseOrder = 4,
-    FrameworkCallOff = 5
+    FrameworkCallOff = 5,
+    BidParticipation = 6
 }
 
 public sealed class SupplierEligibilityEvaluationRequest
@@ -1336,6 +1413,7 @@ public interface ISupplierValidationService
     Task<SupplierValidationResult> ValidateForContractAsync(Guid businessPartnerId, bool requiresLicenses = false);
     Task<SupplierValidationResult> ValidateFinancialHealthAsync(Guid businessPartnerId, decimal? minimumCreditRatingScore = null);
     Task<SupplierValidationResult> ValidateForTenderAsync(Guid businessPartnerId, bool requiresPrequalification, decimal? minimumPerformanceRating = null);
+    Task<SupplierValidationResult> ValidateForTenderBidAsync(Guid businessPartnerId, Guid tenderId, CancellationToken cancellationToken = default);
     Task<SupplierValidationResult> ValidateForFrameworkCallOffAsync(Guid businessPartnerId);
     Task<SupplierValidationResult> EvaluateEligibilityAsync(SupplierEligibilityEvaluationRequest request, CancellationToken cancellationToken = default);
     Task<SupplierValidationResult> EnforceEligibilityAsync(SupplierEligibilityEvaluationRequest request, CancellationToken cancellationToken = default);

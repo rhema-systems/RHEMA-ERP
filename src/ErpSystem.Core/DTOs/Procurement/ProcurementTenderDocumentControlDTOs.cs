@@ -158,6 +158,8 @@ public sealed class CloneProcurementTenderDocumentTemplateRequest
 
 public sealed class ProcurementTenderDocumentRegisterReadinessDto
 {
+    public string SourceStatus { get; set; } = string.Empty;
+    public bool IsSourcePublished { get; set; }
     public ProcurementTenderDocumentSourceType SourceType { get; set; }
     public Guid SourceId { get; set; }
     public string SourceReference { get; set; } = string.Empty;
@@ -166,6 +168,8 @@ public sealed class ProcurementTenderDocumentRegisterReadinessDto
     public Guid? MethodRuleId { get; set; }
     public string? MethodRuleCode { get; set; }
     public bool HasRegister { get; set; }
+    public bool AllowsNewRecipient { get; set; }
+    public List<string> AllowedExternalRecipientEmails { get; set; } = new();
     public Guid? RegisterId { get; set; }
     public Guid? EffectiveTemplateVersionId { get; set; }
     public string? EffectiveTemplateReference { get; set; }
@@ -185,7 +189,11 @@ public sealed class ProcurementTenderDocumentRegisterReadinessDto
 
 public sealed class ProcurementTenderDocumentRegisterDto
 {
+    public string SourceStatus { get; set; } = string.Empty;
+    public bool IsSourcePublished { get; set; }
     public Guid Id { get; set; }
+    public bool AllowsNewRecipient { get; set; }
+    public List<string> AllowedExternalRecipientEmails { get; set; } = new();
     public ProcurementTenderDocumentSourceType SourceType { get; set; }
     public Guid SourceId { get; set; }
     public Guid? TenderId { get; set; }
@@ -203,6 +211,7 @@ public sealed class ProcurementTenderDocumentRegisterDto
     public Guid EffectiveTemplateVersionId { get; set; }
     public string EffectiveTemplateReference { get; set; } = string.Empty;
     public DateTime OriginalSubmissionDeadlineUtc { get; set; }
+    public DateTime? OriginalOpeningScheduledAtUtc { get; set; }
     public DateTime EffectiveSubmissionDeadlineUtc { get; set; }
     public DateTime? OpeningScheduledAtUtc { get; set; }
     public DateTime OriginalBidValidityUntilUtc { get; set; }
@@ -258,6 +267,8 @@ public sealed class ProcurementTenderDocumentChangeDto
     public Guid? NewTemplateVersionId { get; set; }
     public DateTime? PreviousValueUtc { get; set; }
     public DateTime? NewValueUtc { get; set; }
+    public DateTime? PreviousOpeningScheduledAtUtc { get; set; }
+    public DateTime? NewOpeningScheduledAtUtc { get; set; }
     public bool RequiresAcknowledgement { get; set; }
     public string Reason { get; set; } = string.Empty;
     public Guid WorkflowDefinitionId { get; set; }
@@ -354,6 +365,7 @@ public sealed class CreateProcurementTenderDocumentChangeRequest
     public ProcurementTenderDocumentChangeType ChangeType { get; set; }
     public Guid? NewTemplateVersionId { get; set; }
     public DateTime? NewValueUtc { get; set; }
+    public DateTime? NewOpeningScheduledAtUtc { get; set; }
     public bool RequiresAcknowledgement { get; set; } = true;
     [Required, StringLength(2000)] public string Reason { get; set; } = string.Empty;
     public Guid WorkflowDefinitionId { get; set; }

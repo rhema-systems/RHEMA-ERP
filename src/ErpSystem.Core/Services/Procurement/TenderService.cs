@@ -116,6 +116,7 @@ public class TenderService : ITenderService
 
             var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
             result.SourcingMethod = await GetSourcingMethodAsync(tender);
+            result.UsesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
             return result;
         }
         catch (Exception ex)
@@ -144,6 +145,7 @@ public class TenderService : ITenderService
 
             var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
             result.SourcingMethod = await GetSourcingMethodAsync(tender);
+            result.UsesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
             return result;
         }
         catch (Exception ex)
@@ -544,10 +546,20 @@ public class TenderService : ITenderService
             var tender = await _tenderRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Tender with ID {id} not found");
 
-            if (!(string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase)))
+            if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
+            }
+            foreach (var recipientId in (dto.InvitedBusinessPartnerIds ?? []).Where(value => value != Guid.Empty).Distinct())
+            {
+                var recipient = await _businessPartnerRepository.GetByIdAsync(recipientId);
+                if (recipient is null || recipient.IsDeleted ||
+                    recipient.TenantId != _currentUserProvider.TenantId || recipient.TenantId != tender.TenantId ||
+                    !recipient.IsActive || recipient.IsBlacklisted ||
+                    !(recipient.PartnerType is "Supplier" or "Contractor" or "Both"))
+                    throw new ProcurementRequisitionSourcingValidationException(
+                        "TENDER_PUBLICATION_RECIPIENT_INVALID",
+                        "Publication notices require an active, non-blacklisted supplier record in the current tenant.");
             }
             ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
             if (!tender.SourcePurchaseRequisitionId.HasValue)
@@ -576,13 +588,17 @@ public class TenderService : ITenderService
                 await _tenderDocumentControlService.EnsurePublicationReadyAsync(
                     ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
                     documentCorrelationId);
-                await _tenderDocumentControlService.EnsureDispatchReadyAsync(
-                    ProcurementTenderDocumentSourceType.Tender, tender.Id,
-                    dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
-                    dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
-                    documentCorrelationId);
+                // Tender publication is an announcement, not document issuance.
+                // Legacy RFQ publication does attach a document package, so that
+                // separate dispatch boundary must still verify recorded access.
+                if (requestForQuotation)
+                    await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                        ProcurementTenderDocumentSourceType.Tender, tender.Id,
+                        (dto.InvitedBusinessPartnerIds ?? []).Where(item => item != Guid.Empty).Distinct().ToList(),
+                        (dto.ExternalRecipientEmails ?? []).Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                        documentCorrelationId);
             }
-            else
+            if (!RequiresControlledPublication(gate))
             {
                 ValidateReleaseOnlyPublication(tender, dto, DateTime.UtcNow);
             }
@@ -1693,7 +1709,9 @@ public class TenderService : ITenderService
             Invitations = invitations.Select(MapInvitationToDto).ToList(),
             Clarifications = clarifications.Select(MapClarificationToDto).ToList(),
             Evaluators = evaluators.ToList(),
-            Bids = bids.Select(b => MapBidToSummaryDto(b, tender)).ToList()
+            Bids = bids.Select(b => MapBidToSummaryDto(b, tender)).ToList(),
+            BidCount = bids.Count(b => !string.Equals(b.Status, "Draft", StringComparison.OrdinalIgnoreCase) &&
+                                       !string.Equals(b.Status, "Withdrawn", StringComparison.OrdinalIgnoreCase))
         };
     }
 
@@ -1784,10 +1802,7 @@ public class TenderService : ITenderService
 
     internal static bool RequiresControlledPublication(ProcurementSourcingCaseEntryGateDto gate) =>
         UsesAdvancedSourcingControls(gate) &&
-        gate.SelectedMethod is (ProcurementMethodType.NationalCompetitiveTendering or
-            ProcurementMethodType.InternationalCompetitiveTendering or
-            ProcurementMethodType.QualityBasedSelection or
-            ProcurementMethodType.QualityAndCostBasedSelection);
+        ProcurementTenderRouting.RequiresControlledLifecycle(gate.SelectedMethod, gate.HasAdvancedAuthorityRoute);
 
     internal static void ValidateReleaseOnlyPublication(
         Tender tender,
@@ -2152,7 +2167,7 @@ public class TenderService : ITenderService
     {
         if (string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase))
             return;
-        if (await _tenderControlService.IsControlledTenderMethodAsync(tender.Id))
+        if (tender.SourcingCaseId.HasValue || await _tenderControlService.IsControlledTenderMethodAsync(tender.Id))
             throw new ProcurementTenderControlConflictException(
                 "TENDER_STATUTORY_TERMS_LOCKED",
                 "NCT, ICT, QBS, and QCBS tender terms are locked after document approval. Use the controlled tender lifecycle.");

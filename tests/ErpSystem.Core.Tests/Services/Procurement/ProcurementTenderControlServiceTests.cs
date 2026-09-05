@@ -18,6 +18,56 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementTenderControlServiceTests
 {
+    [Fact]
+    public async Task StandardFormalOpeningStillRequiresClosedWindowAndCurrentCommitteeQuorum()
+    {
+        await using var fixture = new Fixture();
+        fixture.Case.AuthorityRouteId = null;
+        fixture.Case.AuthorityRouteReference = null;
+        fixture.Case.AuthorityRoute = null;
+        fixture.Tender.Status = "Published";
+        fixture.Tender.SubmissionDeadline = DateTime.UtcNow.AddHours(1);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Service.Invoking(service => service.EnsureStandardOpeningReadyAsync(fixture.Tender.Id))
+            .Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(error => error.Code == "TENDER_OPENING_BEFORE_DEADLINE");
+
+        fixture.Tender.SubmissionDeadline = DateTime.UtcNow.AddHours(-1);
+        fixture.CommitteeMeetingStartedAtUtc = fixture.Tender.SubmissionDeadline.Value.AddMinutes(-1);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Service.Invoking(service => service.EnsureStandardOpeningReadyAsync(fixture.Tender.Id))
+            .Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(error => error.Code == "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED");
+
+        fixture.CommitteeMeetingStartedAtUtc = DateTime.UtcNow.AddMinutes(-1);
+        await fixture.Service.EnsureStandardOpeningReadyAsync(fixture.Tender.Id);
+        fixture.IncludeStaleLatestMeeting = true;
+        await fixture.Service.Invoking(service => service.EnsureStandardOpeningReadyAsync(fixture.Tender.Id))
+            .Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(error => error.Code == "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED");
+    }
+
+    [Fact]
+    public async Task StandardCaseDoesNotRequireAdvancedLifecycleButRetainedControlCannotDowngrade()
+    {
+        await using var fixture = new Fixture();
+        fixture.Case.AuthorityRouteId = null;
+        fixture.Case.AuthorityRouteReference = null;
+        await fixture.Context.SaveChangesAsync();
+        (await fixture.Service.IsControlledTenderMethodAsync(fixture.Tender.Id)).Should().BeFalse();
+
+        fixture.Case.AuthorityRouteId = fixture.Route.Id;
+        fixture.Case.AuthorityRouteReference = fixture.Route.RouteReference;
+        await fixture.Context.SaveChangesAsync();
+        (await fixture.Service.IsControlledTenderMethodAsync(fixture.Tender.Id)).Should().BeTrue();
+        await fixture.PublishAsync();
+
+        fixture.Case.AuthorityRouteId = null;
+        fixture.Case.AuthorityRouteReference = null;
+        await fixture.Context.SaveChangesAsync();
+        (await fixture.Service.IsControlledTenderMethodAsync(fixture.Tender.Id)).Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(ProcurementMethodType.NationalCompetitiveTendering)]
     [InlineData(ProcurementMethodType.InternationalCompetitiveTendering)]
