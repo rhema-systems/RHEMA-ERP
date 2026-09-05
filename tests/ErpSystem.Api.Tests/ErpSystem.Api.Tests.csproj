@@ -43,6 +43,7 @@
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
+    <Compile Include="Controllers\WorkflowApprovalResponseTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />

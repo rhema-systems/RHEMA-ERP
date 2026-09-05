@@ -72,6 +72,17 @@ const change = (
 });
 
 describe('controlled tender document presentation', () => {
+  it('validates paired unpublished schedule dates without silently extending validity', () => {
+    const register = { effectiveSubmissionDeadlineUtc: '2030-09-05T17:00:00Z', openingScheduledAtUtc: '2030-09-05T17:05:00Z', effectiveBidValidityUntilUtc: '2030-10-05T17:00:00Z' };
+    const schedule = { ...change('UnpublishedScheduleReschedule'), newValueUtc: '2030-09-06T17:00:00Z', newOpeningScheduledAtUtc: '2030-09-06T17:05:00Z' };
+    const now = new Date('2030-09-05T18:00:00Z');
+    expect(validateTenderDocumentChange(schedule, register, now)).toBeUndefined();
+    expect(validateTenderDocumentChange({ ...schedule, newOpeningScheduledAtUtc: undefined }, register, now)).toContain('valid new opening');
+    expect(validateTenderDocumentChange({ ...schedule, newOpeningScheduledAtUtc: schedule.newValueUtc }, register, now)).toContain('after the new submission');
+    expect(validateTenderDocumentChange({ ...schedule, newValueUtc: '2030-09-05T17:00:00Z' }, register, now)).toContain('future and later');
+    expect(validateTenderDocumentChange({ ...schedule, newValueUtc: '2030-10-05T17:00:00Z', newOpeningScheduledAtUtc: '2030-10-05T17:05:00Z' }, register, now)).toContain('before the current bid-validity');
+  });
+
   it('requires exact policy, workflow, method, content, and checksum lineage', () => {
     expect(validateTenderDocumentTemplate(template())).toBeUndefined();
     expect(

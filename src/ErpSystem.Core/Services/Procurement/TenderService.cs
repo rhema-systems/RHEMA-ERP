@@ -550,6 +550,17 @@ public class TenderService : ITenderService
             {
                 throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
             }
+            foreach (var recipientId in (dto.InvitedBusinessPartnerIds ?? []).Where(value => value != Guid.Empty).Distinct())
+            {
+                var recipient = await _businessPartnerRepository.GetByIdAsync(recipientId);
+                if (recipient is null || recipient.IsDeleted ||
+                    recipient.TenantId != _currentUserProvider.TenantId || recipient.TenantId != tender.TenantId ||
+                    !recipient.IsActive || recipient.IsBlacklisted ||
+                    !(recipient.PartnerType is "Supplier" or "Contractor" or "Both"))
+                    throw new ProcurementRequisitionSourcingValidationException(
+                        "TENDER_PUBLICATION_RECIPIENT_INVALID",
+                        "Publication notices require an active, non-blacklisted supplier record in the current tenant.");
+            }
             ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
             if (!tender.SourcePurchaseRequisitionId.HasValue)
                 throw new ProcurementRequisitionSourcingValidationException(
@@ -577,11 +588,15 @@ public class TenderService : ITenderService
                 await _tenderDocumentControlService.EnsurePublicationReadyAsync(
                     ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
                     documentCorrelationId);
-                await _tenderDocumentControlService.EnsureDispatchReadyAsync(
-                    ProcurementTenderDocumentSourceType.Tender, tender.Id,
-                    dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
-                    dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
-                    documentCorrelationId);
+                // Tender publication is an announcement, not document issuance.
+                // Legacy RFQ publication does attach a document package, so that
+                // separate dispatch boundary must still verify recorded access.
+                if (requestForQuotation)
+                    await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                        ProcurementTenderDocumentSourceType.Tender, tender.Id,
+                        (dto.InvitedBusinessPartnerIds ?? []).Where(item => item != Guid.Empty).Distinct().ToList(),
+                        (dto.ExternalRecipientEmails ?? []).Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                        documentCorrelationId);
             }
             if (!RequiresControlledPublication(gate))
             {

@@ -2450,7 +2450,7 @@ public class WorkflowController : ControllerBase
     /// Processes an approval decision
     /// </summary>
     [HttpPost("approvals/{id:guid}/process")]
-    public async Task<ActionResult<WorkflowApproval>> ProcessApproval(Guid id, ProcessApprovalRequest request)
+    public async Task<ActionResult<WorkflowApprovalResponse>> ProcessApproval(Guid id, ProcessApprovalRequest request)
     {
         try
         {
@@ -2618,12 +2618,25 @@ public class WorkflowController : ControllerBase
 
             await TryApplyPostApprovalIntegrationAsync(approval.StepInstanceId, currentUserId.Value, request, HttpContext.RequestAborted);
 
-            // Reload for response (best-effort).
+            // Reload for response (best-effort). Never serialize the tracked entity:
+            // workflow/user navigation cycles can fail after the approval has committed.
             approval = await _workflowApprovalRepository.GetByIdAsync(id) ?? approval;
             return Ok(new
             {
                 success = true,
-                data = approval
+                data = new WorkflowApprovalResponse
+                {
+                    Id = approval.Id,
+                    StepInstanceId = approval.StepInstanceId,
+                    ApproverId = approval.ApproverId,
+                    ApproverRole = approval.ApproverRole,
+                    Status = approval.Status,
+                    RequestedDate = approval.RequestedDate,
+                    ProcessedDate = approval.ProcessedDate,
+                    DueDate = approval.DueDate,
+                    Comments = approval.Comments,
+                    TenantId = approval.TenantId
+                }
             });
         }
         catch (Exception ex)

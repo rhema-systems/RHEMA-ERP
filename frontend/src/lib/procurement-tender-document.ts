@@ -38,6 +38,7 @@ export const tenderDocumentChangeTypeLabel: Record<
   Addendum: 'Addendum',
   SubmissionDeadlineExtension: 'Submission deadline extension',
   BidValidityExtension: 'Bid-validity extension',
+  UnpublishedScheduleReschedule: 'Pre-publication schedule change',
 };
 
 export const procurementMethodLabel: Record<string, string> = {
@@ -167,7 +168,7 @@ export const validateTenderDocumentChange = (
   request: CreateProcurementTenderDocumentChangeRequest,
   register: Pick<
     ProcurementTenderDocumentRegister,
-    'effectiveSubmissionDeadlineUtc' | 'effectiveBidValidityUntilUtc'
+    'effectiveSubmissionDeadlineUtc' | 'effectiveBidValidityUntilUtc' | 'openingScheduledAtUtc'
   >,
   now = new Date()
 ) => {
@@ -178,6 +179,18 @@ export const validateTenderDocumentChange = (
     return 'Shared evidence reference is required.';
   if (request.changeType === 'Addendum' && !request.newTemplateVersionId)
     return 'Addendum requires an exact approved replacement version.';
+  if (request.changeType === 'UnpublishedScheduleReschedule') {
+    const deadline = new Date(request.newValueUtc ?? '');
+    const opening = new Date(request.newOpeningScheduledAtUtc ?? '');
+    if (Number.isNaN(deadline.getTime())) return 'A valid new submission deadline is required.';
+    if (deadline <= now || deadline <= new Date(register.effectiveSubmissionDeadlineUtc))
+      return 'The new submission deadline must be in the future and later than the current deadline.';
+    if (Number.isNaN(opening.getTime())) return 'A valid new opening time is required.';
+    if (opening <= deadline || (register.openingScheduledAtUtc && opening <= new Date(register.openingScheduledAtUtc)))
+      return 'The new opening time must be after the new submission deadline and the current opening time.';
+    if (deadline >= new Date(register.effectiveBidValidityUntilUtc))
+      return 'The new submission deadline must remain before the current bid-validity end.';
+  }
   if (request.changeType === 'SubmissionDeadlineExtension') {
     if (!request.newValueUtc) return 'New submission deadline is required.';
     const next = new Date(request.newValueUtc);

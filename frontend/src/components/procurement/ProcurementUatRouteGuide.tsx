@@ -54,7 +54,7 @@ const stageRoles: Record<ProcurementUatStageId, string> = {
   'sourcing-release-case': 'Procurement Officer',
   'tender-rfq-preparation': 'Procurement Officer',
   'tender-documents-publication': 'Procurement Officer',
-  'supplier-bidding': 'Invited suppliers',
+  'supplier-bidding': 'Eligible suppliers',
   'evaluation-committee': 'Committee chair and members',
   'bid-opening-evaluation': 'Evaluation committee',
   award: 'Head of Procurement and award approver',
@@ -236,7 +236,7 @@ function tenderStageStates(
             responsibleRole: 'Procurement Officer',
             context: readiness.effectiveTemplateReference
               ? `Effective template: ${readiness.effectiveTemplateReference}`
-              : 'Controlled documents must be bound and issued before publication.',
+              : 'Approved controlled documents must be bound and available before publication.',
             href: documentHref,
             actionLabel: 'Open document register',
           }
@@ -258,12 +258,14 @@ function tenderStageStates(
         biddingFinished && tender.bidCount === 0
           ? ['Bidding closed without a submitted bid.']
           : undefined,
-      responsibleRole: 'Invited suppliers',
+      responsibleRole: 'Eligible suppliers',
       context: published
         ? `${tender.bidCount} bid${tender.bidCount === 1 ? '' : 's'} recorded.`
         : 'Publication must complete before suppliers can bid.',
-      href: `${tenderHref}?tab=invitations`,
-      actionLabel: 'Open tender invitations',
+      href: `${tenderHref}?tab=${readiness?.allowsNewRecipient ? 'bids' : 'invitations'}`,
+      actionLabel: readiness?.allowsNewRecipient
+        ? 'View tender bids'
+        : 'Open tender invitations',
     },
     'evaluation-committee': {
       status: published && tender.bidCount > 0 ? 'unknown' : 'not-started',
@@ -294,7 +296,7 @@ export function ProcurementUatRouteGuide() {
     enabled: Boolean(tenderId),
   });
   const { data: readiness } = useQuery({
-    queryKey: ['procurement', 'tender-document-readiness', tenderId],
+    queryKey: ['procurement-tender-document-readiness', 'Tender', tenderId, false],
     queryFn: () =>
       procurementTenderDocumentService.readiness('Tender', tenderId),
     enabled: Boolean(tenderId),
@@ -307,6 +309,14 @@ export function ProcurementUatRouteGuide() {
     ...baseStageStates(currentStage),
     ...(tender ? tenderStageStates(tender, readiness) : {}),
   };
+  if (pathname?.endsWith('/document-controls') && tender?.status === 'Approved' &&
+      readiness?.ready && readiness.isSourcePublished === false) {
+    stageStates['tender-documents-publication'] = {
+      ...stageStates['tender-documents-publication'],
+      href: `/procurement/tenders/${tenderId}`,
+      actionLabel: 'Return to tender publication',
+    };
+  }
 
   return (
     <ProcurementUatFlowSidebar

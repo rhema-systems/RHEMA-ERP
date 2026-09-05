@@ -61,7 +61,7 @@ import TenderEvaluators from '@/components/procurement/tenders/TenderEvaluators'
 import QCBSEvaluationPanel from '@/components/procurement/tenders/QCBSEvaluationPanel';
 import { AwardVerificationResults } from '@/components/procurement/tenders/AwardVerificationResults';
 import { Calculator, Shield } from 'lucide-react';
-import { getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
+import { getTenderPublicationNotificationMessage, getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
 import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
 import { getTenderScheduleError } from '@/lib/tender-schedule';
 import { TenderHeaderControlActions } from '@/components/procurement/tenders/TenderHeaderControlActions';
@@ -2021,18 +2021,14 @@ export default function TenderDetailPage() {
                   <ul className="space-y-1 list-disc list-inside text-xs">
                     <li>Tender status will change to "Published"</li>
                     <li>
-                      Email notifications will be sent to all{' '}
-                      {tender?.invitations?.length || 0} invited supplier(s)
-                      {externalRecipientEmails.length > 0
-                        ? ` + ${externalRecipientEmails.length} public recipient(s)`
-                        : ''}
+                      {getTenderPublicationNotificationMessage(tender?.invitations?.length || 0, externalRecipientEmails.length)}
                     </li>
-                    <li>
+                    {(tender?.invitations?.length || 0) > 0 && <li>
                       In-app notifications will be created for invited suppliers
-                    </li>
+                    </li>}
                     <li>
-                      Suppliers can view the tender and submit bids until the
-                      deadline
+                      Eligible suppliers can access the tender and submit bids
+                      under the configured procurement route until the deadline
                     </li>
                   </ul>
                 </div>

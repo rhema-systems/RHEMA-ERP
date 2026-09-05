@@ -10,7 +10,10 @@ public class TenderConfiguration : IEntityTypeConfiguration<Tender>
     public void Configure(EntityTypeBuilder<Tender> builder)
     {
         builder.ToTable("Tenders", table =>
-            table.HasTrigger("TR_Tenders_SourcingReleaseGuard"));
+        {
+            table.HasTrigger("TR_Tenders_SourcingReleaseGuard");
+            table.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
+        });
 
         builder.HasKey(t => t.Id);
 

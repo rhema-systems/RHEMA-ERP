@@ -123355,11 +123355,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("NewTemplateVersionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("NewOpeningScheduledAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("NewValueUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("PreviousTemplateVersionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PreviousOpeningScheduledAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("PreviousValueUtc")
                         .HasColumnType("datetime2");
@@ -123446,9 +123452,9 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_ProcurementTenderDocumentChanges_Lifecycle");
 
-                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_Kind", "([ChangeType] = 0 AND [PreviousTemplateVersionId] IS NOT NULL AND [NewTemplateVersionId] IS NOT NULL AND [PreviousTemplateVersionId] <> [NewTemplateVersionId] AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL) OR ([ChangeType] IN (1, 2) AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc])");
+                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_Kind", "([ChangeType] = 0 AND [PreviousTemplateVersionId] IS NOT NULL AND [NewTemplateVersionId] IS NOT NULL AND [PreviousTemplateVersionId] <> [NewTemplateVersionId] AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR ([ChangeType] IN (1, 2) AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR ([ChangeType] = 3 AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] AND [NewOpeningScheduledAtUtc] IS NOT NULL AND [NewOpeningScheduledAtUtc] > [NewValueUtc] AND ([PreviousOpeningScheduledAtUtc] IS NULL OR [NewOpeningScheduledAtUtc] > [PreviousOpeningScheduledAtUtc]) AND [RequiresAcknowledgement] = 0)");
 
-                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_State", "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 2 AND [Status] BETWEEN 0 AND 2 AND (([Status] = 0 AND [DecidedAtUtc] IS NULL AND [DecidedByUserId] IS NULL AND [WorkflowOutcome] IS NULL AND [ApprovalReference] IS NULL AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([Status] = 1 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND (([DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([DispatchedAtUtc] IS NOT NULL AND [DispatchedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([DispatchEvidenceReference], '')))) > 0))) OR ([Status] = 2 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL)) AND LEN([CorrelationId]) > 0 AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1 AND ([EvidenceWorkflowDocumentId] IS NULL OR [EvidenceFileUploadRecordId] IS NULL)");
+                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_State", "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 3 AND [Status] BETWEEN 0 AND 2 AND (([Status] = 0 AND [DecidedAtUtc] IS NULL AND [DecidedByUserId] IS NULL AND [WorkflowOutcome] IS NULL AND [ApprovalReference] IS NULL AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([Status] = 1 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND (([DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([DispatchedAtUtc] IS NOT NULL AND [DispatchedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([DispatchEvidenceReference], '')))) > 0))) OR ([Status] = 2 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL)) AND LEN([CorrelationId]) > 0 AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1 AND ([EvidenceWorkflowDocumentId] IS NULL OR [EvidenceFileUploadRecordId] IS NULL)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -127773,6 +127779,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("Tenders", null, t =>
                         {
                             t.HasTrigger("TR_Tenders_SourcingReleaseGuard");
+                            t.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);

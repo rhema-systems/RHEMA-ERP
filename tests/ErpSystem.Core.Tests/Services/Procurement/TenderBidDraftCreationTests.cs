@@ -87,8 +87,8 @@ public sealed class TenderBidDraftCreationTests
         tenderControl.Setup(item => item.IsControlledTenderMethodAsync(
                 tenderId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        supplierValidation.Setup(item => item.ValidateForTenderAsync(
-                partner.Id, false, null))
+        supplierValidation.Setup(item => item.ValidateForTenderBidAsync(
+                partner.Id, tenderId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierValidationResult
             {
                 IsValid = true,
@@ -168,6 +168,10 @@ public sealed class TenderBidDraftCreationTests
         savedItem.TotalPrice.Should().Be(0m);
         result.Status.Should().Be("Draft");
         result.TotalBidAmount.Should().Be(0m);
+        supplierValidation.Verify(item => item.ValidateForTenderBidAsync(
+            partner.Id, tenderId, It.IsAny<CancellationToken>()), Times.Once);
+        supplierValidation.Verify(item => item.ValidateForTenderAsync(
+            It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<decimal?>()), Times.Never);
         result.AssociationType.Should().Be("Self");
         result.AcceptedDeclaration.Should().BeTrue();
         result.BidLots.Should().ContainSingle(lot =>

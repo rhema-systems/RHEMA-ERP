@@ -321,11 +321,8 @@ public class TenderBidService : ITenderBidService
             await _exceptionalSourcingControlService.EnsureBidSupplierAllowedAsync(tender.Id, businessPartner.Id);
 
             // Validate supplier eligibility for this tender
-            var validationResult = await _supplierValidationService.ValidateForTenderAsync(
-                businessPartner.Id,
-                tender.RequiresPrequalification,
-                tender.MinimumPerformanceRating
-            );
+            var validationResult = await _supplierValidationService.ValidateForTenderBidAsync(
+                businessPartner.Id, tender.Id);
 
             if (!validationResult.IsValid)
             {
@@ -782,6 +779,15 @@ public class TenderBidService : ITenderBidService
 
             var tender = await _tenderRepository.GetByIdAsync(bid.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
+
+            // A draft is not an eligibility approval: re-check current registration,
+            // blacklist, published requirements and authoritative method at submission.
+            var eligibility = await _supplierValidationService.ValidateForTenderBidAsync(
+                bid.BusinessPartnerId, tender.Id);
+            if (!eligibility.IsValid)
+                throw new TenderBidInitiationValidationException(
+                    eligibility.ValidationCode,
+                    $"Supplier is not eligible to submit this bid: {string.Join("; ", eligibility.Errors)}");
 
             var submittedAtUtc = DateTime.UtcNow;
             var assignments = (await _assignmentRepository.GetByTenderAndBusinessPartnerAsync(

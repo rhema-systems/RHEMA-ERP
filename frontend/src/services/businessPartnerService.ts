@@ -38,6 +38,7 @@ export interface BusinessPartnerDto {
   status: string; // Active, Inactive, Suspended, Pending
   approvalStatus?: string; // Pending, Approved, Rejected
   isPreferred: boolean;
+  isActive?: boolean;
   isBlacklisted: boolean;
   currency?: string;
   paymentTermId?: string;
@@ -144,6 +145,7 @@ export interface BusinessPartnerBankAccountDto {
 }
 
 export interface BusinessPartnerContactDto {
+  isActive?: boolean;
   id: string;
   businessPartnerId?: string;
   partnerId?: string; // Alias

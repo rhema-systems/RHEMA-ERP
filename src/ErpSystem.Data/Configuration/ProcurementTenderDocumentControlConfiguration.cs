@@ -186,12 +186,19 @@ public sealed class ProcurementTenderDocumentChangeConfiguration :
                 "CK_ProcurementTenderDocumentChanges_Kind",
                 "([ChangeType] = 0 AND [PreviousTemplateVersionId] IS NOT NULL AND [NewTemplateVersionId] IS NOT NULL " +
                 "AND [PreviousTemplateVersionId] <> [NewTemplateVersionId] " +
-                "AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL) OR " +
+                "AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL " +
+                "AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR " +
                 "([ChangeType] IN (1, 2) AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL " +
-                "AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc])");
+                "AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] " +
+                "AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR " +
+                "([ChangeType] = 3 AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL " +
+                "AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] " +
+                "AND [NewOpeningScheduledAtUtc] IS NOT NULL AND [NewOpeningScheduledAtUtc] > [NewValueUtc] " +
+                "AND ([PreviousOpeningScheduledAtUtc] IS NULL OR [NewOpeningScheduledAtUtc] > [PreviousOpeningScheduledAtUtc]) " +
+                "AND [RequiresAcknowledgement] = 0)");
             table.HasCheckConstraint(
                 "CK_ProcurementTenderDocumentChanges_State",
-                "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 2 AND [Status] BETWEEN 0 AND 2 " +
+                "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 3 AND [Status] BETWEEN 0 AND 2 " +
                 "AND (([Status] = 0 AND [DecidedAtUtc] IS NULL AND [DecidedByUserId] IS NULL " +
                 "AND [WorkflowOutcome] IS NULL AND [ApprovalReference] IS NULL " +
                 "AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR " +
