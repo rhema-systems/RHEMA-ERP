@@ -146,6 +146,16 @@ comments explaining the historical conflict, forward/data-preservation behavior,
 and the need to retain the compatibility logic until the full migration-chain gates are rerun. It does not
 authorize broader CRM, Projects or Quantity Survey feature changes.
 
+On 2026-09-05 the user authorized automatic risk-based model routing for all subsequent coordinator
+dispatches. The current Stage A.1 historical migration/rehearsal correction remains on GPT-5.6 Sol Medium,
+and high-risk independent review remains on GPT-5.6 Sol High. After Stage A, routine bounded UI,
+documentation, test-maintenance, adapter and owner-scoped producer-conversion work should use GPT-5.6 Terra
+Medium. Finance accounting logic, migrations, posting/reversal behavior, concurrency, security, schema,
+database rehearsal/cutover and substantive correction cycles use GPT-5.6 Sol Medium. Escalate implementation
+temporarily to Sol High only for an unresolved material defect or unusually difficult accounting/architecture
+decision. Apply switches only between completed turns after reconciling the task checkpoint; record each
+exception or escalation here.
+
 ## Next action
 
 Complete deterministic data-preserving CRM/Projects Up/Down behavior, populated failure-safety and downgrade

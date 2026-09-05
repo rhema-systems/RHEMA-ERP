@@ -13,6 +13,17 @@ This protocol lets a primary Finance coordinator manage isolated implementing an
 
 The coordinator may perform the reviewer role directly. It should request an independent review for high-risk accounting logic, schema changes, security/authorization changes, cross-module contracts, concurrency, reversals, or destructive operations.
 
+## Model routing
+
+The coordinator selects the model and reasoning effort explicitly whenever it creates a worker/reviewer task or sends that task a new phase or correction. Model changes occur only at a safe task boundary after the active turn has finished and its Git/checkpoint evidence has been reconciled; never interrupt an active mutation merely to change models.
+
+- Use **GPT-5.6 Terra Medium** for bounded, routine work such as UI changes, documentation, focused test maintenance, straightforward adapters, inventories, and owner-scoped producer conversions whose accounting contract is already fixed.
+- Use **GPT-5.6 Sol Medium** for Finance business logic, migrations, posting/reversal behavior, concurrency, database rehearsals/cutovers, security, schema design, risky integration, or any correction following a substantive failed review.
+- Use **GPT-5.6 Sol High** for independent review of high-risk work and for temporary implementation escalation when Sol Medium has not resolved a material defect or the task requires unusually difficult architectural/accounting judgment.
+- Keep the primary coordinator/reviewer task on **GPT-5.6 Sol High** when configured by the user. A task cannot change its own active turn's model; the coordinator applies overrides to subsequent worker/reviewer dispatches.
+
+Record the selected tier and any escalation/de-escalation reason in the package ledger. Prefer the least expensive tier appropriate to the risk, but do not downgrade in the middle of a phase or while an unresolved high-risk finding remains.
+
 ## Authoritative state
 
 For each active package, the coordinator maintains a ledger under `docs/Finance/coordination/`. It records:
