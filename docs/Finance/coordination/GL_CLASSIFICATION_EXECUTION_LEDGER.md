@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage B1 — Procurement owner V2/provisioning conversion |
-| Status | `IN_PROGRESS` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `0f88eff289ba563cdd0707166df6b3e10fe585af` |
 | Branch | `codex/procurement-finance-v2-cutover` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Terra Medium; independent contract review: GPT-5.6 Sol High |
-| Review status | Stage A.1 approved and integrated; Stage B1 owner packet issued |
+| Review status | Stage B1 candidate `102c67b9` independently reviewed; corrections issued |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -251,11 +251,14 @@ rehearsal database or backup remains.
 
 ## Next action
 
-Execute the bounded Procurement owner packet from exact base `0f88eff2`: convert the two active posting
-producers to V2 with explicit governed `AccountingBookCode`, replace the executable supplier-onboarding
-seeder's direct Finance `Account` writes with `IFinanceAccountProvisioningService`, add the required
-owner-facing comments and denial/idempotency/canonical-identity tests, and return a clean structured handoff.
-Do not change Procurement economics or unrelated Procurement behavior, and do not put book enumeration or
-applicability decisions in Procurement. Independently review the packet before local integration, then perform
-the recorded Finance-owned multi-book architecture checkpoint before issuing the Inventory packet. Keep
-configured `RHEMAERP` read-only until the later reset/migration gate is separately reconciled.
+Correct Stage B1 candidate `102c67b9012c2efd7202aa295a62414b3dbc7f84` before integration. Independent
+Sol High review confirmed that the two producers use V2 without enumeration and preserve posting economics,
+but found three blockers: the executable supplier-onboarding seeder cannot adopt its own legacy unsegmented
+1040/4930/2210 rows through the canonical provisioning boundary; raw `SubledgerPostingMode` aliases can emit
+the nonexistent `LOCAL` book and the two producers disagree on missing settings; and the packet added no new
+executable denial/idempotency/canonical-provisioning tests. The Sol Medium correction must add a Finance-owned
+legacy adoption path, one shared explicit single-book resolver with reviewed alias/missing/pseudo/unknown
+behavior, and fresh/legacy/conflict/config/mapping/idempotency tests. Do not put enumeration or applicability
+decisions in Procurement. Re-review the corrected clean handoff before integration, then perform the recorded
+Finance-owned multi-book architecture checkpoint before issuing Inventory. Keep configured `RHEMAERP`
+read-only until the later reset/migration gate is separately reconciled.
