@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C2 — book-aware balance and currency-exposure foundation |
-| Status | `CHANGES_REQUIRED` |
+| Status | `APPROVED_AND_INTEGRATED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
 | Branch | `codex/finance-multibook-balance-foundation` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C2 candidate `c182ec26` is under independent Sol High re-review |
+| Review status | Final C2 candidate `c182ec26` approved independently and integrated through primary `dbc7e756` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -387,3 +387,22 @@ account set and fingerprint with every compatibility mutation and adds zero-tran
 idempotency coverage. A final independent GPT-5.6 Sol High re-review is active over the complete seven-commit
 range. Integration remains blocked until approval and coordinator gates; configured `RHEMAERP` remains
 untouched and the C2 migration remains unapplied.
+
+Stage C2 review cycle 4 approved clean candidate
+`c182ec263698fcc6bb3c358655568de9bc65f4d7`. Independent GPT-5.6 Sol High review verified that preview,
+fingerprint, drift detection and Apply share one authoritative account set; mapped zero-transaction accounts
+are governed and deterministically zeroed; ineligible historical balances fail closed; and same-key authority
+changes conflict. All earlier exact-book, currency, migration, deleted-header, concurrency, exposure and
+primary-compatibility findings remain closed. The reviewed seven-commit ancestry is `34085c1a`, `dae894ec`,
+`0467a9eb`, `02488bcc`, `4a79f68a`, `78ab2382`, `c182ec26`. The C1
+`PARALLEL_BOOK_POSTING_DISABLED` gate is byte-identical to the exact base, the worker ledger is unchanged,
+and no cross-module implementation is present.
+
+The coordinator integrated the seven approved commits locally as `5f246eb1`, `f86c9fb0`, `54ccd35c`,
+`1683d538`, `46f79224`, `273e1117` and `dbc7e756`. Expected intermediate worker-ledger edits were excluded
+so that only coordinator-owned ledger history remained; every other integrated file is tree-identical to the
+approved candidate. Primary verification passed a zero-error test-project build, 181 selected C2/posting/
+consumer/FX tests with 16 SQL Server environment-gated skips, EF no-pending-model, candidate-tree equivalence
+and full-range diff checks. Migration `20260905182403_AddBookAwareBalanceFoundation` remains unapplied. The
+configured `RHEMAERP` database was not accessed or mutated, and all unrelated working-tree changes remain
+preserved.
