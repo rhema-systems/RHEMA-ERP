@@ -330,8 +330,10 @@ rebuilt to primary-book-only compatibility; migration preflight does not fully e
 and tenant functional-currency invariants; existing Finance ratio/allocation consumers remain ambiguous or
 IFRS-hardcoded against multi-book rows; and reconciliation evidence is incomplete because its fingerprint,
 drift comparison, and dry-run consistency boundary omit material derivation state. A backdated posting also
-fails to refresh later-period zero/negative flags. The candidate improperly edits this coordinator-owned
-ledger and must restore it to the exact-base version. Candidate gates otherwise passed 142 focused tests with
+fails to preserve the true last-transaction date or refresh later-period zero/negative flags. The live
+AccountCurrencyLink API would continue labelling its now-stale configuration fields as current balances, and
+rebuild idempotency does not bind its persisted reason/maker/checker evidence. The candidate improperly edits
+this coordinator-owned ledger and must restore it to the exact-base version. Candidate gates otherwise passed 142 focused tests with
 two SQL Server tests environment-gated, 65 lifecycle/FX tests, EF no-pending-model, and diff checks; no database
 was mutated. A substantive Sol Medium correction cycle was dispatched with explicit migration, rebuild,
 consumer, concurrency, and regression requirements. Integration and Stage C3 remain blocked.
