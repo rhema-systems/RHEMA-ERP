@@ -409,7 +409,7 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
-        /// Area 25 D5: links a just-provisioned LDAP user to their employee record when — and
+        /// Links a just-provisioned LDAP user to their employee record when — and
         /// only when — exactly one exact match exists (AD mail → Employee.EmailAddress, else
         /// sAMAccountName → EmployeeNumber; unlinked employees only). The Employee role rides
         /// the link because a linked employee IS the portal's audience. Zero or multiple
@@ -514,7 +514,7 @@ namespace ErpSystem.Api.Controllers
                 user = await _userManager.FindByNameAsync(request.Username) ??
                        await _userManager.FindByEmailAsync(request.Username);
 
-                // Area 25 D1: the identifier may be an employee number. Only consulted when no
+                // The identifier may be an employee number. Only consulted when no
                 // username/email matched (that precedence is the contract), and it resolves
                 // through the user↔employee link — an unlinked employee's number is nothing to
                 // authenticate. The resolved user then goes down the NORMAL path for their own
@@ -595,7 +595,7 @@ namespace ErpSystem.Api.Controllers
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
 
-                            // Area 25 D5: exact-match auto-link on provision. One unambiguous
+                            // Exact-match auto-link on provision. One unambiguous
                             // match links the account and grants the Employee role; anything
                             // else leaves the user for the HR unlinked-users queue. Never fails
                             // the login — an unlinked portal beats a locked-out employee.
@@ -1727,8 +1727,8 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
-        /// Self-registration for job candidates on the public careers surface (2026-08-30,
-        /// replacing the retired PortalBearer candidate portal). Mirrors <see cref="Register"/>
+        /// Self-registration for job candidates on the public careers surface (replacing
+        /// the retired PortalBearer candidate portal). Mirrors <see cref="Register"/>
         /// with two deliberate deltas:
         /// (1) the tenant comes from the required <c>X-Tenant-Id</c> header — a candidate arrives
         ///     from a tenant-specific job board, and the host-based fallback of the partner flow

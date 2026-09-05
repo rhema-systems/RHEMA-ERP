@@ -19,7 +19,7 @@ export const isExternalPortalUser = (user: RoleUser) => {
 };
 
 /**
- * A self-registered careers account (Candidate role, 2026-08-30). Deliberately NOT folded into
+ * A self-registered careers account (Candidate role). Deliberately NOT folded into
  * isExternalPortalUser: candidates share the external-portal shell but get the candidate menu,
  * and the server fences them far more narrowly than business partners.
  */
@@ -32,7 +32,7 @@ export const isCandidateUser = (user: RoleUser) => {
 };
 
 /**
- * An HR-invited consultant-client contact (ConsultantClient role, 2026-08-31). Like
+ * An HR-invited consultant-client contact (ConsultantClient role). Like
  * candidates, deliberately NOT folded into isExternalPortalUser: contacts share the
  * external-portal shell but get only the client-timesheets menu, and the server fences
  * them narrower still (ConsultantClientAccessMiddleware).
@@ -46,7 +46,7 @@ export const isConsultantClientUser = (user: RoleUser) => {
 };
 
 /**
- * Area 25 (D2): a user whose ONLY functional role is Employee lands in the self-service
+ * A user whose ONLY functional role is Employee lands in the self-service
  * portal. Anyone with a further role (Manager, HR, admin tiers…) is a desk user who gets
  * the two-way switcher instead.
  */

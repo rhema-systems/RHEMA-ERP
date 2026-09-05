@@ -17,7 +17,7 @@ namespace ErpSystem.Data.Seeders;
 /// fields on the site level.
 ///
 /// Street addresses and Ghana Post digital addresses were not supplied and are left null rather
-/// than invented. Coordinates ARE set (since 2026-09-03): they are approximate town-centre pins for
+/// than invented. Coordinates ARE set: they are approximate town-centre pins for
 /// each site, good enough for the map and for a soft-enforced attendance zone, and they must be
 /// confirmed on site before any zone is switched to hard enforcement. A location's pin can be moved
 /// on its edit screen without touching this seeder.

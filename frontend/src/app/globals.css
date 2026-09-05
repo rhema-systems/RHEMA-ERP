@@ -286,7 +286,7 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
     display: none !important;
   }
 
-  /* HR letters (area 25 slice 12b). Same visibility trick as the payslip, but the letter is
+  /* HR letters. Same visibility trick as the payslip, but the letter is
      NOT pinned to a fixed A4 box: a payslip is one page by construction, whereas a letter is
      flowing prose that may legitimately run onto a second page — clipping it would cut the
      signature off the bottom of a document somebody is about to hand to a bank. */
@@ -367,7 +367,7 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
   }
 
   /*
-   * HR area 16 — the company-asset register report.
+   * The company-asset register report.
    *
    * Same shape as the two above, and for the same reason: a Tailwind `print:hidden` on the page's
    * own header hides the header and nothing else, so the sidebar and the top bar still land on the

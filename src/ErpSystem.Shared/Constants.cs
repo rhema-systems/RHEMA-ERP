@@ -56,7 +56,7 @@ public static class Constants
         /// </summary>
         public const string InternalAudit = "TDC_INTERNAL_AUDIT";
         /// <summary>
-        /// The Safety, Health &amp; Environment desk (SRS DR-10, delivered 2026-09-03). Holds
+        /// The Safety, Health &amp; Environment desk (SRS DR-10). Holds
         /// <c>HR.She.Read</c>/<c>Write</c> and the occupational-health pair so it can work every
         /// SHE register without holding the <see cref="Hr"/> role. HR itself keeps only
         /// <c>HR.She.Read</c> — separation of duties between the people function and the safety
@@ -73,7 +73,7 @@ public static class Constants
         public const string ExternalUser = "ExternalUser";
 
         /// <summary>
-        /// Job applicants who self-registered on the public careers surface (2026-08-30, replacing
+        /// Job applicants who self-registered on the public careers surface (replacing
         /// the retired PortalBearer candidate portal). Deliberately NOT <see cref="ExternalUser"/>:
         /// that role's path allowlist includes procurement/projects/estate surfaces meant for
         /// vetted counterparties, and a candidate is an anonymous member of the public.
@@ -83,7 +83,7 @@ public static class Constants
 
         /// <summary>
         /// A consultant client's contact person, invited by HR from the client screen
-        /// (2026-08-31, replacing the retired PortalBearer consultant-client portal — the
+        /// (replacing the retired PortalBearer consultant-client portal — the
         /// scheme's last tenant). Deliberately NOT <see cref="ExternalUser"/>: that role's
         /// path allowlist includes procurement/projects/estate surfaces meant for vetted
         /// counterparties, and a client contact's world is only the client-portal timesheet
@@ -116,7 +116,7 @@ public static class Constants
                 || string.Equals(normalizedRoleName, HelpdeskAgent, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskSupervisor, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskManager, StringComparison.OrdinalIgnoreCase)
-                // 2026-09-03: the HR-family roles are code-anchored — HrPermissions.RoleGrants,
+                // The HR-family roles are code-anchored — HrPermissions.RoleGrants,
                 // the fallback handler, the role-anchored PIP/separation attributes and the demo
                 // persona cast all key on these exact names — so renaming or deleting one from
                 // the Roles screen would silently strand every holder. Their PERMISSIONS stay

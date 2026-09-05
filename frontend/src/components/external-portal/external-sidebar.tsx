@@ -138,7 +138,7 @@ const menuItems: MenuItem[] = [
   },
 ];
 
-// The careers candidate's menu (Candidate role, 2026-08-30). Candidates share this shell but
+// The careers candidate's menu (Candidate role). Candidates share this shell but
 // never see the partner sections — the server's CandidateAccessMiddleware would 403 every one
 // of them, and a menu of dead links is worse than a short menu.
 const candidateMenuItems: MenuItem[] = [
@@ -169,7 +169,7 @@ const candidateMenuItems: MenuItem[] = [
   },
 ];
 
-// The consultant-client contact's menu (ConsultantClient role, 2026-08-31). Contacts share
+// The consultant-client contact's menu (ConsultantClient role). Contacts share
 // this shell but never see the partner sections — the server's ConsultantClientAccessMiddleware
 // would 403 every one of them, and a menu of dead links is worse than a short menu.
 const consultantClientMenuItems: MenuItem[] = [

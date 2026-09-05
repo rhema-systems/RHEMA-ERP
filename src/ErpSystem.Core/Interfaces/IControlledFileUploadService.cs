@@ -142,7 +142,7 @@ public static class ControlledFileUploadCategories
 
     /// <summary>
     /// Paperwork filed against a company asset — the purchase invoice, the warranty certificate,
-    /// the user manual, and photographs of its condition when issued or taken back (area 16).
+    /// the user manual, and photographs of its condition when issued or taken back.
     /// </summary>
     /// <remarks>
     /// Its own category rather than part of the HR pile because most of it is not personal data at
@@ -175,26 +175,25 @@ public static class ControlledFileUploadCategories
     /// <summary>
     /// Evidence an employee attaches to a personal-data change request — a marriage
     /// certificate behind a name change, a bank letter behind an account change, a Ghana Card
-    /// behind a date-of-birth correction (area 25 slice 12).
+    /// behind a date-of-birth correction.
     /// </summary>
     public const string HrProfileChangeEvidence = "hr-profile-change-evidence";
 
     /// <summary>
     /// A signed HR letter uploaded to fulfil an employee's letter request, where a generated
-    /// document will not do — a wet signature, a stamp, or an embassy's own form
-    /// (area 25 slice 12b).
+    /// document will not do — a wet signature, a stamp, or an embassy's own form.
     /// </summary>
     public const string HrLetterDocuments = "hr-letter-documents";
 
     /// <summary>
     /// A file attached to a staff announcement — the notice, form or circular everybody is
-    /// being pointed at (area 25 slice 12c).
+    /// being pointed at.
     /// </summary>
     public const string HrAnnouncementDocuments = "hr-announcement-documents";
 
     /// <summary>
     /// A company policy in the staff library — the document people are asked to read and, for
-    /// some of them, to sign (area 25 slice 12d).
+    /// some of them, to sign.
     /// </summary>
     public const string HrPolicyDocuments = "hr-policy-documents";
 
@@ -276,7 +275,7 @@ public static class ControlledFileUploadCategories
                 HrEmployeeDocuments,
                 HrEmployeeImportWorkbooks,
                 // ⚠ Declared above AND registered here. A category that is only declared passes the
-                // upload gate unscanned and then fails DMS registration as a 500 — the trap area 11
+                // upload gate unscanned and then fails DMS registration as a 500 — the trap Medical
                 // met with SystemCleanScanRequired. The seal especially: an unscanned image that
                 // every offer letter embeds is not a risk worth a tenant policy toggle.
                 HrExternalAssociatePhotos,
@@ -301,15 +300,15 @@ public static class ControlledFileUploadCategories
                 // category nor the scan. Declaring the constant is half the job.
                 HrMedicalInsuranceProviderDocuments,
                 // Same reason again, one family further on: succession documents had the identical
-                // caller-supplied-path defect (D-14) and are registered here in the same commit
-                // that gives them an upload route, so the D-11 half-job cannot recur.
+                // caller-supplied-path defect and are registered here in the same commit
+                // that gives them an upload route, so the earlier half-job cannot recur.
                 HrSuccessionDocuments,
                 HrAppraisalAttachments,
                 // A nomination attachment is the CASE for giving somebody an award: a citation, a
                 // letter of support, a photograph of the work. It is circulated to a committee and
                 // read by people who did not write it, which is exactly when an unscanned file
                 // matters. Registered in the same commit that gives the family an upload route, so
-                // the D-11 half-job — a category declared but not registered — cannot recur here.
+                // the earlier half-job — a category declared but not registered — cannot recur here.
                 HrAwardAttachments,
                 // A travel attachment is a passport scan, a visa letter or an invitation carrying
                 // a name, a number and an address. A tenant policy should not be able to permit

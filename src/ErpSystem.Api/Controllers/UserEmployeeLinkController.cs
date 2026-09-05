@@ -170,8 +170,8 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
-        /// Area 25 slice 1 — the HR unlinked-users queue. Every user with no employee link,
-        /// each carrying the exact-match candidates the D5 auto-link would have used (same
+        /// The HR unlinked-users queue. Every user with no employee link,
+        /// each carrying the exact-match candidates the auto-link would have used (same
         /// rules, same service), so HR sees both the suggestion and why auto-link held back
         /// (IsExact=false marks an ambiguous rule).
         /// </summary>

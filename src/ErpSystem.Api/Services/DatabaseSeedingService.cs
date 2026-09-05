@@ -8211,8 +8211,8 @@ namespace ErpSystem.Web.Services
                 new { Name = "Managing Director", Description = "Restricted executive approval role for exceptional and high-value finance transactions" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
                 new { Name = Constants.Roles.Hr, Description = "User with access to HR module" },
-                new { Name = Constants.Roles.SafetyOfficer, Description = "Safety, Health & Environment desk: works every SHE register and the occupational-health registers without the HR role (DR-10)" },
-                new { Name = Constants.Roles.SheManager, Description = "SHE desk administrator: everything the Safety Officer holds plus deletion of SHE records (DR-10)" },
+                new { Name = Constants.Roles.SafetyOfficer, Description = "Safety, Health & Environment desk: works every SHE register and the occupational-health registers without the HR role" },
+                new { Name = Constants.Roles.SheManager, Description = "SHE desk administrator: everything the Safety Officer holds plus deletion of SHE records" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
                 new { Name = "Procurement User", Description = "User with access to procurement module" },
@@ -8433,7 +8433,7 @@ namespace ErpSystem.Web.Services
         }
 
         /// <summary>
-        /// The HR module gates (W3). <c>hr.access</c> admits a user to the /hr UI shell —
+        /// The HR module gates. <c>hr.access</c> admits a user to the /hr UI shell —
         /// granted broadly to internal roles because its purpose is excluding ExternalUser, not
         /// rationing HR between staff. <c>admin.hr</c> admits to Administration → HR setup.
         /// Split into two arrays because most roles get the first without the second.
@@ -8869,7 +8869,7 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
-            // HR module-access permissions (W3). These are the platform's lowercase dotted
+            // HR module-access permissions. These are the platform's lowercase dotted
             // module gates (like project.access / admin.maintenance in ApplicationDbContext's
             // HasData block), NOT HR.* policy permissions — the HR role-fallback handler
             // deliberately ignores them, so the frontend route gates they feed have no backend
@@ -8892,7 +8892,7 @@ namespace ErpSystem.Web.Services
                     Description = "Manage HR administration and reference-data settings",
                     Category = "Administration Modules"
                 },
-                // 2026-09-03 (DR-10): SHE gets its own module gate so a tenant can show or hide the
+                // SHE gets its own module gate so a tenant can show or hide the
                 // Safety (SHE) menu and /hr/safety routes per role without touching hr.access.
                 // Frontend-only, like hr.access: the API authorizes on HR.She.* / HR.Medical.*.
                 new
@@ -8922,7 +8922,7 @@ namespace ErpSystem.Web.Services
                 if (existingPermission != null)
                 {
                     // HR-owned rows follow their code definition's display metadata: the roles
-                    // screen groups by Category, and a re-label (SHE -> "Safety (SHE)", 2026-09-03)
+                    // screen groups by Category, and a re-label (SHE -> "Safety (SHE)")
                     // must reach tenants seeded under the old label. Scoped to HR.* and its module
                     // gates so no other team's rows are touched.
                     var hrOwned = permissionInfo.Name.StartsWith(HrPermissions.Prefix, StringComparison.Ordinal)
@@ -9345,8 +9345,8 @@ namespace ErpSystem.Web.Services
                 // ⚠ "Managing Director" and Constants.Roles.ManagingDirector are the SAME string,
                 // and this initializer's [key] = value syntax silently overwrites duplicates. The
                 // Finance and HR grants for the MD therefore live in ONE entry here — a second
-                // entry lower down would erase this one (which is exactly what happened between
-                // area 9b and W3: the HR entry clobbered the Finance set until they were merged).
+                // entry lower down would erase this one (which is exactly what happened once:
+                // the HR entry clobbered the Finance set until they were merged).
                 ["Managing Director"] = new[]
                 {
                     // Deliberately narrow: executive approvers can inspect the finance record and
@@ -9361,7 +9361,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Reports.Export"
                 }
                     // HR side: READ on the separations the MD signs (FR-HR-092) — see the remarks
-                    // on HrPermissions.RoleGrants — plus the hr.access module gate (W3).
+                    // on HrPermissions.RoleGrants — plus the hr.access module gate.
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.ManagingDirector))
                     .Concat(HrModuleAccessGrants).ToArray(),
                 ["Financial Controller"] = FinancePermissions.AllNames,
@@ -9377,7 +9377,7 @@ namespace ErpSystem.Web.Services
                 // HR staff maintain occupational-health records but do not administer them:
                 // deleting a medical record stays with tenant administrators.
                 //
-                // hr.access / admin.hr (W3): HR practitioners get the module gate and the
+                // hr.access / admin.hr: HR practitioners get the module gate and the
                 // Administration → HR reference-data screens (leave types, org structures) —
                 // maintaining their own reference data is HR work, while destructive/decisive
                 // acts stay with the HR.X.Admin permission tier. The legacy "HR User" spelling is
@@ -9391,18 +9391,18 @@ namespace ErpSystem.Web.Services
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.Hr))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
 
-                // DR-10 (2026-09-03): the safety function's own roles. hr.access because the SHE
+                // The safety function's own roles. hr.access because the SHE
                 // routes live under the /hr layout; she.access for the SHE menu itself.
                 [Constants.Roles.SafetyOfficer] = HrPermissions.GrantsFor(Constants.Roles.SafetyOfficer)
                     .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).ToArray(),
                 [Constants.Roles.SheManager] = HrPermissions.GrantsFor(Constants.Roles.SheManager)
                     .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
 
-                // hr.access for the broad internal roles (W3). The /hr layout was previously
+                // hr.access for the broad internal roles. The /hr layout was previously
                 // ungated, and non-HR staff legitimately use surfaces under it (peer evaluations,
                 // team goals, acknowledgements, payroll screens), so the module gate is granted
                 // to every general internal role. Its purpose is excluding ExternalUser — the
-                // self-registering public of the candidate portal (area 26) — not rationing HR
+                // self-registering public of the candidate portal — not rationing HR
                 // between internal staff; per-screen gates and the API keep doing that.
                 // "Admin" is the same bare literal HrPermissions.RoleGrants carries, kept for
                 // any environment that has such a role; the loop skips it where absent.
@@ -9467,7 +9467,7 @@ namespace ErpSystem.Web.Services
             // The loop above is add-only, so a role that SHRINKS in HrPermissions.RoleGrants keeps
             // its old rows on an already-seeded tenant. HrPermissions.RoleRevocations lists what a
             // role must not hold; delete those rows so the seed, the fallback handler and the
-            // database agree (2026-09-03: HR loses HR.She.Write, DR-10).
+            // database agree (HR loses HR.She.Write).
             foreach (var (roleName, revokedNames) in HrPermissions.RoleRevocations)
             {
                 var role = await _roleManager.FindByNameAsync(roleName);

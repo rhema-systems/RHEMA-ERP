@@ -47,7 +47,7 @@ describe('AllSettingsPage', () => {
 
     expect(modules?.cards.map(card => card.title)).toContain('Procurement');
     expect(modules?.cards.map(card => card.title)).toContain('Inventory');
-    // DR-10: SHE configuration is its own module card, ordered right after Human Resources, and
+    // SHE configuration is its own module card, ordered right after Human Resources, and
     // its links never fall into the General Administration bucket.
     const moduleTitles = modules?.cards.map(card => card.title) ?? [];
     expect(moduleTitles.indexOf('Safety (SHE)')).toBe(moduleTitles.indexOf('Human Resources') + 1);

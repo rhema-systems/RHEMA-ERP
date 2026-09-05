@@ -316,7 +316,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityName = travel == null
                     ? null
                     : $"{travel.OriginCity} to {travel.DestinationCity}, {travel.TravelStartDate:dd MMM yyyy}";
-                // Area 25 slice 7: /hr/travel/requests/{id} never existed — the approver's desk
+                // /hr/travel/requests/{id} never existed — the approver's desk
                 // detail is /hr/travel/{id}.
                 info.ActionUrl = $"/hr/travel/{entityId}";
                 return info;
@@ -420,7 +420,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
             // `using ErpSystem.Core.Entities.Finance.FixedAssets`, so a bare `AssetTransfer` here is
             // Finance's, and the key "AssetTransfer" is already claimed by it further down. HR's
             // staff-asset records answer to `HrAssetRequisition` / `HrAssetTransfer` for exactly
-            // that reason — see the build plan §3.3 on the three-level name collision.
+            // that reason — the three-level name collision.
             if (key == Normalize("HrAssetRequisition") || key == Normalize("HR_ASSET_REQUISITION") || key == Normalize("HR Asset Requisition"))
             {
                 var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetRequisition>()
@@ -518,7 +518,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityName = nomination == null
                     ? null
                     : $"{nomination.Employee?.FullName} — {nomProgramName ?? nomination.Schedule?.ScheduleNumber}";
-                // Area 25 slice 6: the old "/hr/training/nominations?nominationId=" pointed at a
+                // The old "/hr/training/nominations?nominationId=" pointed at a
                 // route that never existed. The reader of a workflow item is the APPROVER, so it
                 // lands on the desk nomination detail.
                 info.ActionUrl = $"/hr/training/nominations/{entityId}";

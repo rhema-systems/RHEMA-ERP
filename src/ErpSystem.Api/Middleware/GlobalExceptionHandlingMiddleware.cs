@@ -156,7 +156,7 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)probationStatus;
                 break;
 
-            // Job architecture, competency and manpower budget (areas 17/18). Same shape again —
+            // Job architecture, competency and manpower budget. Same shape again —
             // without this case, all 76 rules in those three services were flattened to one of two
             // fixed strings. See JobArchitectureException.
             case JobArchitectureException jobArchEx:
@@ -178,7 +178,7 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)jobArchStatus;
                 break;
 
-            // Staff awards (area 14). The fifth area to need this shape. Without this case its 38
+            // Staff awards. Without this case its 38
             // service rules were flattened to one fixed string, and — worse — every "not found"
             // among them answered 400, so no caller could tell a deleted award from a bad payload.
             // See AwardsWorkflowException.
@@ -201,11 +201,10 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)awardsStatus;
                 break;
 
-            // Staff / company assets (area 16). The sixth area to need this shape. Without this
+            // Staff / company assets. Without this
             // case its 28 service rules were flattened to two fixed strings, and — worse — the
             // eighteen "not found" among them all answered 400, so no caller could tell a disposed
-            // asset from a bad payload. See AssetsWorkflowException, and defect D-m in the area-16
-            // build plan.
+            // asset from a bad payload. See AssetsWorkflowException.
             case AssetsWorkflowException assetsEx:
                 var assetsStatus = assetsEx.Reason switch
                 {

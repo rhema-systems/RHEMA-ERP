@@ -576,7 +576,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             });
             services.AddScoped<ErpSystem.Api.Services.ICaptchaVerificationService, ErpSystem.Api.Services.CaptchaVerificationService>();
 
-            // Area 25: user↔employee matching rules (D1 login resolver, D5 auto-link, HR unlinked queue)
+            // User↔employee matching rules (login resolver, auto-link, HR unlinked queue)
             services.AddScoped<ErpSystem.Api.Services.IEmployeeLinkResolutionService, ErpSystem.Api.Services.EmployeeLinkResolutionService>();
 
             services.AddScoped<ISecurityService, SecurityService>();
@@ -1039,7 +1039,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeImportService,
                                ErpSystem.Api.Services.HR.EmployeeImport.EmployeeImportService>();
 
-            // Lane 3b reference dimensions: the qualification ladder, certifying bodies, and the
+            // Reference dimensions: the qualification ladder, certifying bodies, and the
             // staff-numbering rules themselves.
             services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
                                ErpSystem.Core.Services.HR.ReferenceDimensionService>();
@@ -1064,12 +1064,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
                                ErpSystem.Core.Services.HR.HealthcareFacilityGeoAreaConsumer>();
 
-            // Lane 3a-ii. The company seal and signature, versioned rather than overwritten.
+            // The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
                                ErpSystem.Core.Services.HR.CompanySealAssetService>();
 
             // The identification-expiry sweep. ⚠ The SERVICE and its HOST are registered together
-            // on purpose: lane 1 found two HR engines that existed, had endpoints, and had never
+            // on purpose: two HR engines existed, had endpoints, and had never
             // run because nothing hosted them.
             services.AddScoped<ErpSystem.Core.Services.HR.IIdentificationExpiryReminderService,
                                ErpSystem.Core.Services.HR.IdentificationExpiryReminderService>();
@@ -1524,7 +1524,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
 
-            // HR leave policies (W3 slice 5). The organisation-wide surface — every request,
+            // HR leave policies. The organisation-wide surface — every request,
             // everyone's balances, the adjustment ledger, the type catalogue's writes and the
             // year-end jobs — authorizes on these. Employee self-service (file, amend, cancel,
             // view OWN leave) deliberately does NOT: those stay on InternalOnly with a
@@ -1545,7 +1545,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerLeave)));
 
-            // HR attendance & time policies (W3 slice 6) — attendance proper plus the consultant
+            // HR attendance & time policies — attendance proper plus the consultant
             // timesheet/engagement/invoicing registers. Same split as leave: org-wide surfaces
             // authorize here, token-actor acts (punch, raising your own regularization) and own-
             // record reads stay on InternalOnly with ownership checks, and approvals stay with
@@ -1564,7 +1564,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerAttendance)));
 
-            // HR compensation & benefits policies (W3 slice 7): emoluments, pay components,
+            // HR compensation & benefits policies: emoluments, pay components,
             // salary structure, benefit policies and enrollments. Money data follows the medical
             // shape — org-wide surfaces authorize here, an employee's own pay makeup, benefits,
             // dependents and beneficiaries are ownership checks on the endpoint, and the benefit
@@ -1584,7 +1584,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerCompensation)));
 
-            // HR training & learning policies (W3 slice 8): programs, plans, schedules,
+            // HR training & learning policies: programs, plans, schedules,
             // nominations, requests, completions, needs assessments, budgets, vendors, trainers,
             // learning paths, mentoring, compliance training and service bonds. Same split as the
             // earlier slices: org-wide surfaces authorize here, an employee's own training record
@@ -1605,7 +1605,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerTraining)));
 
-            // HR recruitment policies (W3 slice 9): requisitions, vacancies, adverts, candidates,
+            // HR recruitment policies: requisitions, vacancies, adverts, candidates,
             // applications, interviews, offers, hires and pre-employment checks. Same split as the
             // earlier slices: org-wide surfaces authorize here, a panelist's own interview surface
             // is a membership check on the endpoint, the anonymous surfaces (public job listings,
@@ -1717,7 +1717,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerProbation)));
 
-            // HR job architecture, competency and manpower budget policies (area 17/18).
+            // HR job architecture, competency and manpower budget policies.
             // Measured 2026-08-19: all five controllers — JobAnalysis, hr/job-architecture,
             // competencies, employee-competencies, position-competencies — carried a bare
             // [Authorize] across 149 endpoints. Any authenticated employee could read every
@@ -1764,7 +1764,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerManpowerBudget)));
 
-            // HR separation, clearance & exit policies (area 9b). Registered ahead of the
+            // HR separation, clearance & exit policies. Registered ahead of the
             // controllers so the seed lands before any gate goes on — permissions resolve from the
             // database, so gating first would 403 every endpoint for all but SuperAdmin.
             //
@@ -1788,7 +1788,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerSeparation)));
 
-            // Area 14 — Staff Awards & Recognition. Same ladder: Administer implies Write implies
+            // Staff Awards & Recognition. Same ladder: Administer implies Write implies
             // Read. What is deliberately NOT gated on this family is the employee's own surface:
             // nominating a colleague and voting for a nominee are acts every employee performs, so
             // they live on the self-service controller behind bare [Authorize] with the actor taken
@@ -1809,7 +1809,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerAwards)));
 
-            // W3 slice 10 — Performance. Same ladder: Administer implies Write implies Read.
+            // Performance. Same ladder: Administer implies Write implies Read.
             // Deliberately NOT gated on this family: every token-actor self surface (self/manager/
             // peer evaluation, acknowledge, appeals, own goals and journal), goal approve/reject
             // (the goal workflow validates the direct manager per goal), PIP approve/reject (the
@@ -1830,7 +1830,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerPerformance)));
 
-            // W3 slice 11 — Employee records & foundation. Same ladder. Deliberately NOT gated on
+            // Employee records & foundation. Same ladder. Deliberately NOT gated on
             // this family: the lean directory reads that feed the shared employee picker (POST
             // paged and the by-unit/level/location, direct-report, management-chain, by-id and
             // by-number reads all return the summary EmployeeDto — no DOB, pay or identifiers),
@@ -1854,10 +1854,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerEmployees)));
 
-            // W3 slice 12 — SHE. Same ladder, converted from the area's SuperAdmin/HR role gates
+            // SHE. Same ladder, converted from the area's SuperAdmin/HR role gates
             // by verb (reads → Read, writes and every desk decision → Write, deletes → Admin), so
             // the SHE desk keeps its exact reach and a future SHE-officer role can be granted the
-            // family without the HR role (residual DR-10). Deliberately NOT gated: incident,
+            // family without the HR role. Deliberately NOT gated: incident,
             // hazard and environmental-incident reporting, stop-work raise, PPE and stop-work
             // "mine" reads, and risk-assessment acknowledgements — any-internal-actor by design.
             // The two SHE health controllers stay on the HR.Medical.* policies (the slice-9
@@ -1876,7 +1876,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerShe)));
 
-            // W3 slice 13 — the four mechanically converted areas (orientation, assets, movements,
+            // The four mechanically converted areas (orientation, assets, movements,
             // discipline & grievance). Every endpoint gate in these areas was HR-desk-shaped
             // (SuperAdmin/HR variants, no decision roles at the attribute level), so the conversion
             // is verb-mechanical per family: reads → Read, desk ops → Write, deletes → Admin. The
@@ -1933,7 +1933,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerDiscipline)));
 
-            // W3 slice 14 — the company/administration tail: the company profile, the HR policy
+            // The company/administration tail: the company profile, the HR policy
             // settings, the external-associate register and the (dormant, UI-less) company
             // schedule. Verb-mechanical as everywhere — reads → Read, desk work → Write,
             // deletes → Admin — with one deliberate exception: writing the HR policy settings is
@@ -2004,7 +2004,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     options.Conventions.Add(new FinancePermissionAuthorizationConvention());
                     options.Filters.AddService<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
 
-                    // Ledger D-17: [Required] on a non-nullable Guid accepts Guid.Empty, so an
+                    // [Required] on a non-nullable Guid accepts Guid.Empty, so an
                     // omitted foreign key passed validation and died on the FK as a 500 naming
                     // nothing. HR DTOs only — see HrRequiredGuidActionFilter.
                     options.Filters.Add<ErpSystem.Api.Filters.HrRequiredGuidActionFilter>();
@@ -2406,23 +2406,23 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Reclaims public CV uploads that were never attached to an application.
             services.AddHostedService<ErpSystem.Api.Services.HR.PublicCvUploadTicketSweeper>();
 
-            // SHE reminder engine (area 10 slice 13): hourly sweep — permit auto-expiry,
+            // SHE reminder engine: hourly sweep — permit auto-expiry,
             // due-date reminder ladders, tiered escalation. Sweep logic is scoped
             // (ISheReminderService) so the run-now endpoint shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.SheReminderBackgroundService>();
 
-            // Staff movement reminder engine (area 8 slice 5): daily sweep — assignments ending,
+            // Staff movement reminder engine: daily sweep — assignments ending,
             // returns and approvals overdue, effective dates reached with nobody implementing.
             // Sweep logic is scoped (IStaffMovementReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffMovementReminderBackgroundService>();
 
-            // Discipline reminder engine (area 9 slice 8): daily sweep — the 48-hour written query,
+            // Discipline reminder engine: daily sweep — the 48-hour written query,
             // the four-week investigation, hearings coming up, both appeal windows, corrective
             // actions, expiring warnings, unpaid fines, and grievances at an unanswered rung.
             // Sweep logic is scoped (IDisciplineReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.DisciplineReminderBackgroundService>();
 
-            // Probation reminder engine (area 15b slice 7): daily sweep — FR-HR-032's confirmation
+            // Probation reminder engine: daily sweep — FR-HR-032's confirmation
             // form a month before the end, FR-HR-140's expiry notice at the tenant's lead time, a
             // probation past its end date with no outcome recorded, overdue reviews, and reviews the
             // employee has never acknowledged. Sweep logic is scoped (IProbationReminderService) so
@@ -2433,7 +2433,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
 
-            // Separation reminder engine (area 9b slice 10, FR-HR-111): daily sweep — a retirement
+            // Separation reminder engine (FR-HR-111): daily sweep — a retirement
             // or a contract expiry approaching with no exit raised, a clearance with mandatory lines
             // unanswered, a settlement sitting with Internal Audit, and a settlement approved and
             // never completed. Sweep logic is scoped (ISeparationReminderService) so run-now shares
@@ -2441,7 +2441,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // which is what FR-HR-093's "advance alerts" actually depended on.
             services.AddHostedService<ErpSystem.Api.Services.HR.SeparationReminderBackgroundService>();
 
-            // Asset reminder engine (area 16 slice 9): daily sweep — maintenance due within
+            // Asset reminder engine: daily sweep — maintenance due within
             // the horizon, maintenance already overdue on the escalation ladder, and assets
             // that require regular servicing with no next date at all. Sweep logic is scoped
             // (IAssetReminderService) so run-now shares it.
