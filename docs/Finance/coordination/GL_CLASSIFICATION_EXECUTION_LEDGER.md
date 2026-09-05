@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C2 — book-aware balance and currency-exposure foundation |
-| Status | `APPROVED_AND_INTEGRATED` |
+| Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
+| Status | `IMPLEMENTATION_ACTIVE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
-| Branch | `codex/finance-multibook-balance-foundation` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-multibook-balance-foundation` |
+| Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
+| Branch | `codex/finance-accounting-book-lifecycle-c3` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-accounting-book-lifecycle-c3` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
+| Primary HEAD at activation | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C2 candidate `c182ec26` approved independently and integrated through primary `dbc7e756` |
+| Review status | C3 implementation active; independent Sol High review pending a clean handoff |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -406,3 +406,15 @@ consumer/FX tests with 16 SQL Server environment-gated skips, EF no-pending-mode
 and full-range diff checks. Migration `20260905182403_AddBookAwareBalanceFoundation` remains unapplied. The
 configured `RHEMAERP` database was not accessed or mutated, and all unrelated working-tree changes remain
 preserved.
+
+Stage C3 was dispatched to the existing implementing task from fresh exact base
+`81ac3dfea300689adc260326d7a97af68ddfc0d1` on GPT-5.6 Sol Medium. Its bounded scope is governed
+AccountingBook type, structure and lifecycle authority: PrimaryFull/ParallelFull/Delta semantics,
+exactly-one primary/default full book, effective dates and functional-currency authority, tenant-consistent
+acyclic Delta base identity, rowversion, maker-checker transitions, structural immutability after use,
+no physical delete, no write-on-GET, governed API/UI and an unapplied fail-closed migration. C3 must expose
+initialization/book-period readiness only as a fail-closed dependency for the later C4 stage. Applicability,
+AccountingEvent orchestration, book enumeration, automatic parallel posting, owner-module changes and
+persistent database operations remain prohibited. The C1 parallel-posting gate and C2 balance/exposure
+authority must remain unchanged. Independent review will use GPT-5.6 Sol High after a clean structured
+handoff.
