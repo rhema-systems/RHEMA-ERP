@@ -150,12 +150,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .GetQueryable(item => item.TenantId == tenantId
                     && !item.IsDeleted
                     && item.AccountId == accountId
+                    && item.AccountingBookId == book.Id
                     && item.BookClassification == book.Code
                     && item.PostingStatus == "Posted")
                 .AsNoTracking();
             var hasInvalidJournalEvidence = await candidateTransactions.AnyAsync(item =>
                 item.JournalEntry.TenantId != tenantId
                 || item.JournalEntry.IsDeleted
+                || item.JournalEntry.AccountingBookId != book.Id
                 || item.JournalEntry.BookClassification != book.Code
                 || item.JournalEntry.PostingStatus != "Posted", cancellationToken);
             if (hasInvalidJournalEvidence)
@@ -164,6 +166,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var transactions = candidateTransactions
                 .Where(item => item.JournalEntry.TenantId == tenantId
                     && !item.JournalEntry.IsDeleted
+                    && item.JournalEntry.AccountingBookId == book.Id
                     && item.JournalEntry.BookClassification == book.Code
                     && item.JournalEntry.PostingStatus == "Posted");
 
@@ -191,6 +194,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 : (await _unitOfWork.Repository<FinancePostingEvent>()
                     .GetQueryable(item => !item.IsDeleted
                         && item.JournalEntryId.HasValue
+                        && item.AccountingBookId == book.Id
                         && journalEntryIds.Contains(item.JournalEntryId.Value))
                     .AsNoTracking()
                     .OrderByDescending(item => item.PostedAt ?? item.PostingDate)
@@ -1153,6 +1157,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var journalRows = rows.Where(row => row.JournalEntryId == journalId).ToList();
             if (group.Any(item => item.TenantId != tenantId
                     || item.JournalEntryId != journalId
+                    || item.AccountingBookId != book.Id
                     || item.BookClassification != book.Code
                     || item.PostingStatus != "Posted"
                     || string.IsNullOrWhiteSpace(item.SourceModule)

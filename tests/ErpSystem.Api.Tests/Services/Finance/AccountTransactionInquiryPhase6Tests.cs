@@ -239,8 +239,8 @@ public sealed class AccountTransactionInquiryPhase6Tests
         var (_, book, account) = SeedAuthority(db, tenantId, enabled: true);
         var transaction = AddLine(db, tenantId, account, book.Code, "JE-EVENT", 1, "Posted", DateTime.UtcNow);
         if (addValidFirst)
-            db.FinancePostingEvents.Add(NewPostingEvent(tenantId, transaction.JournalEntryId, book.Code));
-        db.FinancePostingEvents.Add(NewPostingEvent(tenantId, transaction.JournalEntryId, "OTHER"));
+            db.FinancePostingEvents.Add(NewPostingEvent(tenantId, transaction.JournalEntryId, book.Id, book.Code));
+        db.FinancePostingEvents.Add(NewPostingEvent(tenantId, transaction.JournalEntryId, book.Id, "OTHER"));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         using var unitOfWork = new UnitOfWork(db);
@@ -264,6 +264,7 @@ public sealed class AccountTransactionInquiryPhase6Tests
         var postingEvent = NewPostingEvent(
             corruption == "tenant" ? Guid.NewGuid() : tenantId,
             transaction.JournalEntryId,
+            book.Id,
             book.Code);
         if (corruption == "status")
             postingEvent.PostingStatus = "Failed";
@@ -321,11 +322,13 @@ public sealed class AccountTransactionInquiryPhase6Tests
     private static AccountTransaction AddLine(ApplicationDbContext db, Guid tenantId, Account account, string bookCode,
         string journalNumber, int lineNumber, string status, DateTime date)
     {
+        var bookId = db.AccountingBooks.Local.Single(book =>
+            book.TenantId == tenantId && book.Code == bookCode).Id;
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryNumber = journalNumber,
             Description = journalNumber, EntryDate = date, FiscalPeriodId = Guid.NewGuid(),
-            BookClassification = bookCode, PostingStatus = status
+            AccountingBookId = bookId, BookClassification = bookCode, PostingStatus = status
         };
         db.JournalEntries.Add(journal);
         var transaction = new AccountTransaction
@@ -334,6 +337,7 @@ public sealed class AccountTransactionInquiryPhase6Tests
             JournalEntryId = journal.Id, Account = account, JournalEntry = journal,
             FiscalPeriodId = journal.FiscalPeriodId, TransactionDate = date, PostedDate = date,
             DebitAmount = 10m, FunctionalCurrencyCode = "GHS", BookClassification = bookCode,
+            AccountingBookId = bookId,
             TransactionCurrency = "USD", TransactionDebitAmount = 2m,
             ForeignCurrencyAmount = 2m, ExchangeRate = 5m,
             PostingStatus = status, LineNumber = lineNumber
@@ -342,11 +346,13 @@ public sealed class AccountTransactionInquiryPhase6Tests
         return transaction;
     }
 
-    private static FinancePostingEvent NewPostingEvent(Guid tenantId, Guid journalId, string bookCode) => new()
+    private static FinancePostingEvent NewPostingEvent(
+        Guid tenantId, Guid journalId, Guid accountingBookId, string bookCode) => new()
     {
         Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryId = journalId,
         SourceModule = "AP", SourceDocumentType = "Invoice", SourceDocumentId = Guid.NewGuid(),
         PostingAction = "Post", PostingStatus = "Posted", PostingDate = DateTime.UtcNow,
-        FunctionalCurrencyCode = "GHS", BookClassification = bookCode
+        FunctionalCurrencyCode = "GHS", AccountingBookId = accountingBookId,
+        BookClassification = bookCode
     };
 }

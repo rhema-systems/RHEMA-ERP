@@ -13,6 +13,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
@@ -1065,6 +1066,202 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldPersistStableBookIdentityAndReturnSameBookRetry()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var book = await db.AccountingBooks.SingleAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.IdempotencyKey = "C1|SAME-BOOK|POST";
+        var service = CreateService(db, tenantId);
+
+        var first = await service.PostAsync(request);
+        var retry = await service.PostAsync(request);
+
+        retry.WasDuplicate.Should().BeTrue();
+        retry.PostingEventId.Should().Be(first.PostingEventId);
+        retry.JournalEntryId.Should().Be(first.JournalEntryId);
+        var postingEvent = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
+            .ThenInclude(journal => journal!.Transactions).SingleAsync();
+        postingEvent.AccountingBookId.Should().Be(book.Id);
+        postingEvent.BookClassification.Should().Be(book.Code);
+        postingEvent.JournalEntry!.AccountingBookId.Should().Be(book.Id);
+        postingEvent.JournalEntry.Transactions.Should().OnlyContain(line =>
+            line.AccountingBookId == book.Id && line.BookClassification == book.Code);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldRejectConflictingPayloadForSameBookIdempotencyIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var first = CreateRequest(tenantId, debit.Id, credit.Id);
+        first.IdempotencyKey = "C1|PAYLOAD-CONFLICT|POST";
+        await service.PostAsync(first);
+        var conflicting = CreateRequest(tenantId, debit.Id, credit.Id);
+        conflicting.IdempotencyKey = first.IdempotencyKey;
+        conflicting.SourceDocumentId = Guid.NewGuid();
+        conflicting.Description = "Conflicting economic payload";
+
+        var action = () => service.PostAsync(conflicting);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*conflicting immutable request evidence*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldRejectDifferentBookRepresentationAsParallelDisabled(bool matchByIdempotency)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var localBook = SeedAdditionalBook(db, tenantId, "LOCAL_STATUTORY", debit.Id, credit.Id);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var first = CreateRequest(tenantId, debit.Id, credit.Id);
+        first.IdempotencyKey = "C1|PARALLEL-GATE|POST";
+        await service.PostAsync(first);
+        var second = CreateRequest(tenantId, debit.Id, credit.Id);
+        second.AccountingBookCode = localBook.Code;
+        if (matchByIdempotency)
+        {
+            second.SourceDocumentId = Guid.NewGuid();
+            second.IdempotencyKey = first.IdempotencyKey;
+        }
+        else
+        {
+            second.SourceDocumentId = first.SourceDocumentId;
+            second.IdempotencyKey = "C1|PARALLEL-GATE|LOCAL|POST";
+        }
+
+        var action = () => service.PostAsync(second);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PARALLEL_BOOK_POSTING_DISABLED:*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task ReverseAsync_ShouldPreserveOriginalRelationalBookIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var original = await service.PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+        var reversal = await service.ReverseAsync(original.PostingEventId, "C1 exact reversal", new DateTime(2026, 7, 5));
+
+        var events = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
+            .ThenInclude(journal => journal!.Transactions).OrderBy(item => item.PostingDate).ToListAsync();
+        events.Should().HaveCount(2);
+        events.Should().OnlyContain(item => item.AccountingBookId == events[0].AccountingBookId
+            && item.BookClassification == events[0].BookClassification
+            && item.JournalEntry!.AccountingBookId == events[0].AccountingBookId
+            && item.JournalEntry.Transactions.All(line => line.AccountingBookId == events[0].AccountingBookId));
+        reversal.JournalEntryId.Should().NotBe(original.JournalEntryId);
+    }
+
+    [Theory]
+    [InlineData("event")]
+    [InlineData("transaction")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldFailClosedWhenStoredBookIdentityConflicts(string corruptedEvidence)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var localBook = SeedAdditionalBook(db, tenantId, "LOCAL_STATUTORY", debit.Id, credit.Id);
+        await db.SaveChangesAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        var service = CreateService(db, tenantId);
+        await service.PostAsync(request);
+        var postingEvent = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
+            .ThenInclude(journal => journal!.Transactions).SingleAsync();
+        if (corruptedEvidence == "event")
+            postingEvent.AccountingBookId = localBook.Id;
+        else
+            postingEvent.JournalEntry!.Transactions.First().AccountingBookId = localBook.Id;
+        await db.SaveChangesAsync();
+
+        var action = () => service.PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Finance posting*");
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public void StableBookIdentityMigration_ShouldPreflightBackfillAndCreateBookQualifiedConstraints()
+    {
+        var migration = new TestStablePostingAccountingBookIdentityMigration();
+        var operations = migration.BuildUpOperations();
+        var sql = string.Join("\n", operations.OfType<SqlOperation>().Select(operation => operation.Sql));
+
+        sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_JOURNAL");
+        sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_TRANSACTION");
+        sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_EVENT");
+        sql.Should().Contain("C1_BOOK_ID_BACKFILL_INCOMPLETE");
+        sql.Should().Contain("ALL_ACTIVE_BOOKS");
+        sql.Should().Contain("b.TenantId = j.TenantId");
+        sql.Should().Contain("j.TenantId <> t.TenantId");
+        sql.Should().Contain("j.BookClassification <> e.BookClassification");
+        operations.OfType<AddColumnOperation>().Should().Contain(operation =>
+            operation.Table == "JournalEntries" && operation.Name == "AccountingBookId" && operation.IsNullable);
+        operations.OfType<AlterColumnOperation>().Should().Contain(operation =>
+            operation.Table == "JournalEntries" && operation.Name == "AccountingBookId" && !operation.IsNullable);
+        operations.OfType<CreateIndexOperation>().Should().Contain(operation =>
+            operation.Table == "FinancePostingEvents" && operation.IsUnique
+            && operation.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookId", "IdempotencyKey" }));
+        operations.OfType<AddForeignKeyOperation>().Should().Contain(operation =>
+            operation.Table == "AccountTransactions"
+            && operation.PrincipalTable == "JournalEntries"
+            && operation.Columns.SequenceEqual(new[] { "TenantId", "JournalEntryId", "AccountingBookId" }));
+
+        var downSql = string.Join("\n", migration.BuildDownOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
+        downSql.Should().Contain("C1_BOOK_ID_DOWN_BLOCKED");
+        migration.BuildDownOperations().OfType<CreateIndexOperation>().Should().Contain(operation =>
+            operation.Table == "FinancePostingEvents"
+            && operation.Columns.SequenceEqual(new[] { "TenantId", "IdempotencyKey" }));
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=C1MigrationDiscovery;Trusted_Connection=True")
+            .Options;
+        using var discoveryContext = new ApplicationDbContext(options);
+        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Should()
+            .ContainKey("20260905151918_AddStablePostingAccountingBookIdentity");
+    }
+
+    [Fact]
     [Trait("Category", "FinanceDimensions")]
     public void Migration_ShouldAddDimensionFoundationAndNullablePostedLineLinkage()
     {
@@ -1102,6 +1299,23 @@ public sealed class FinancePostingEngineTests
     }
 
     private sealed class TestFinanceDimensionsMigration : AddFinanceTransactionDimensions
+    {
+        public IReadOnlyList<MigrationOperation> BuildUpOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
+
+        public IReadOnlyList<MigrationOperation> BuildDownOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Down(builder);
+            return builder.Operations;
+        }
+    }
+
+    private sealed class TestStablePostingAccountingBookIdentityMigration : AddStablePostingAccountingBookIdentity
     {
         public IReadOnlyList<MigrationOperation> BuildUpOperations()
         {
@@ -1239,6 +1453,33 @@ public sealed class FinancePostingEngineTests
             IsEnabled = true
         });
         return account;
+    }
+
+    private static AccountingBook SeedAdditionalBook(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string code,
+        params Guid[] accountIds)
+    {
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = code,
+            Name = code,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        foreach (var accountId in accountIds)
+        {
+            db.AccountAccountingBooks.Add(new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = accountId,
+                AccountingBookId = book.Id, IsEnabled = true
+            });
+        }
+        return book;
     }
 
     private static ModuleDefinition SeedModule(

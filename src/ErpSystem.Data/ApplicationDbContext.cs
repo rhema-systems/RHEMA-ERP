@@ -2852,6 +2852,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<AccountingBook>(entity =>
         {
             entity.ToTable("AccountingBooks");
+            // Posting evidence uses tenant-qualified book identity so a corrupt foreign tenant
+            // reference cannot be legitimized merely because GUIDs are globally unique.
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id });
             entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
             entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
@@ -3060,6 +3063,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<JournalEntry>(entity =>
         {
             entity.ToTable("JournalEntries");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id, e.AccountingBookId });
             // The reciprocal flags are useful evidence, but this database invariant is what closes
             // the concurrent double-reversal race for every server-owned reversal path.
             entity.HasIndex(e => new { e.TenantId, e.OriginalJournalEntryId })
@@ -3068,6 +3072,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany(p => p.JournalEntries)
                 .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ReversalJournalEntry)
                 .WithMany()
@@ -3091,22 +3100,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("FinancePostingEvents");
             entity.HasIndex(e => e.TenantId);
-            entity.HasIndex(e => new { e.TenantId, e.SourceModule, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.SourceModule, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
-            entity.HasIndex(e => new { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
-            entity.HasIndex(e => new { e.TenantId, e.IdempotencyKey })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.IdempotencyKey })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0 AND [IdempotencyKey] IS NOT NULL");
             entity.HasIndex(e => e.JournalEntryId);
             entity.HasIndex(e => e.PrimaryExchangeRateId);
             entity.HasIndex(e => new { e.TenantId, e.HasForeignCurrencyLines });
             entity.Property(e => e.PrimaryExchangeRate).HasColumnType("decimal(18,6)");
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
-                .HasForeignKey(e => e.JournalEntryId)
+                .HasForeignKey(e => new { e.TenantId, e.JournalEntryId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id, e.AccountingBookId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.PrimaryExchangeRateRecord)
                 .WithMany()
@@ -3331,7 +3346,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new
             {
                 e.TenantId,
-                e.BookClassification,
+                e.AccountingBookId,
                 e.TransactionDate,
                 e.AccountId
             });
@@ -3357,9 +3372,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.FinanceDimensionSnapshotId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany(j => j.Transactions)
-                .HasForeignKey(e => e.JournalEntryId)
+                .HasForeignKey(e => new { e.TenantId, e.JournalEntryId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id, e.AccountingBookId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany(p => p.Transactions)

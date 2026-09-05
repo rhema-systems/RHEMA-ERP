@@ -2428,6 +2428,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             ReferenceNumber = batch.BatchNumber,
             PostingStatus = request.PreviewOnly ? "Draft" : batch.Status,
             BookClassification = batch.AccountingBookCode,
+            AccountingBookId = batch.AccountingBookId,
             PrimaryCurrency = batch.FunctionalCurrencyCode,
             IsMultiCurrency = batch.Lines.Any(),
             FiscalPeriodId = batch.FiscalPeriodId,

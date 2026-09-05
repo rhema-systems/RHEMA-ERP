@@ -265,6 +265,56 @@ public sealed class JournalBatchSqlServerReleaseGateTests
     }
 
     [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task ConcurrentSameBookSubmissions_ShouldConvergeOnOnePostingEventAndJournal()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+        await using var firstContext = database.CreateRetryingContext();
+        await using var secondContext = database.CreateRetryingContext();
+        var sourceId = Guid.NewGuid();
+
+        FinancePostingRequestV2Dto Request() => new()
+        {
+            SourceModule = "TEST", SourceDocumentType = "C1ConcurrentPosting",
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post", Description = "Concurrent C1 posting",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"C1|CONCURRENT|{sourceId:N}|IFRS|POST", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+
+        var results = await Task.WhenAll(
+            CreateSqlPostingEngine(firstContext, seeded.TenantId).PostAsync(Request()),
+            CreateSqlPostingEngine(secondContext, seeded.TenantId).PostAsync(Request()));
+
+        results.Select(result => result.PostingEventId).Distinct().Should().ContainSingle();
+        results.Select(result => result.JournalEntryId).Distinct().Should().ContainSingle();
+        results.Count(result => result.WasDuplicate).Should().Be(1);
+        await using var verification = database.CreateContext();
+        (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    private static FinancePostingEngine CreateSqlPostingEngine(ApplicationDbContext context, Guid tenantId)
+    {
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(service => service.TenantId).Returns(tenantId);
+        currentUser.SetupGet(service => service.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(service => service.UserName).Returns("sql.c1.poster");
+        currentUser.SetupGet(service => service.Claims).Returns(new Dictionary<string, string>());
+        currentUser.SetupGet(service => service.IpAddress).Returns("127.0.0.1");
+        currentUser.SetupGet(service => service.UserAgent).Returns("sql-c1-release-gate");
+        return new FinancePostingEngine(context, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
+    }
+
+    [SqlServerFact]
     [Trait("Batch", "GeneralLedger")]
     [Trait("Category", "SqlServerTransaction")]
     public async Task ReversalConstructionRollback_ShouldLeaveSourceAndDatabaseUnchanged()
@@ -525,6 +575,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             var batchId = Guid.NewGuid();
             var journalId = Guid.NewGuid();
             var itemId = Guid.NewGuid();
+            var bookId = Guid.NewGuid();
             await using var context = CreateContext();
             context.Tenants.Add(new Tenant
             {
@@ -561,6 +612,11 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 PeriodStatus = "Open",
                 IsOpen = true
             });
+            context.AccountingBooks.Add(new AccountingBook
+            {
+                Id = bookId, TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true
+            });
             var journal = new JournalEntry
             {
                 Id = journalId,
@@ -573,6 +629,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 TotalCreditAmount = 100m,
                 IsBalanced = true,
                 BookClassification = "IFRS",
+                AccountingBookId = bookId,
                 FiscalPeriodId = periodId,
                 PostingStatus = "Approved",
                 ApprovalStatus = "Approved"
@@ -616,6 +673,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             var periodId = Guid.NewGuid();
             var debitAccountId = Guid.NewGuid();
             var creditAccountId = Guid.NewGuid();
+            var bookId = Guid.NewGuid();
 
             await using var context = CreateContext();
             context.Tenants.Add(new Tenant
@@ -663,6 +721,11 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 PeriodStatus = "Open",
                 IsOpen = true
             });
+            context.AccountingBooks.Add(new AccountingBook
+            {
+                Id = bookId, TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true
+            });
             context.Accounts.AddRange(
                 new Account
                 {
@@ -687,6 +750,17 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                     Status = AccountStatus.Active,
                     CurrencyCode = "GHS",
                     AllowDirectPosting = true
+                });
+            context.AccountAccountingBooks.AddRange(
+                new AccountAccountingBook
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccountId,
+                    AccountingBookId = bookId, IsEnabled = true
+                },
+                new AccountAccountingBook
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccountId,
+                    AccountingBookId = bookId, IsEnabled = true
                 });
             await context.SaveChangesAsync();
 

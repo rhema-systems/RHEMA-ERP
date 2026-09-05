@@ -195,8 +195,11 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var fiscalPeriodId = dto.FiscalPeriodId ?? await GetOpenFiscalPeriodIdAsync(dto.TransactionDate, tenantId);
             await EnsureFiscalPeriodOpenAsync(fiscalPeriodId, tenantId, dto.TransactionDate, cancellationToken);
-            var bookClassification = string.IsNullOrWhiteSpace(dto.BookClassification) ? "IFRS" : dto.BookClassification.Trim();
-            EnsureExplicitAccountingBook(bookClassification);
+            var accountingBook = await ResolveAccountingBookAsync(
+                tenantId,
+                string.IsNullOrWhiteSpace(dto.BookClassification) ? "IFRS" : dto.BookClassification,
+                cancellationToken);
+            var bookClassification = accountingBook.Code;
             Guid.TryParse(_currentUserService.UserId, out var currentUserId);
 
             var transactions = dto.Transactions.ToList();
@@ -243,6 +246,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 PrimaryCurrency = currencyMetadata.PrimaryCurrency,
                 TenantId = tenantId,
                 BookClassification = bookClassification,
+                AccountingBookId = accountingBook.Id,
                 FiscalPeriodId = fiscalPeriodId,
                 CreatedById = currentUserId == Guid.Empty ? null : currentUserId,
                 CreatedBy = _currentUserService.UserName
@@ -282,6 +286,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     TenantId = tenantId,
                     FiscalPeriodId = journalEntry.FiscalPeriodId,
                     BookClassification = bookClassification,
+                    AccountingBookId = accountingBook.Id,
                     FinanceDimensionSetId = dimensionSet?.Id,
                     FinanceDimensionSet = dimensionSet
                 };
@@ -327,11 +332,12 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             if (dto.Description != null) entry.Description = dto.Description;
             if (dto.Reference != null) entry.ReferenceNumber = dto.Reference;
-            if (!string.IsNullOrWhiteSpace(dto.BookClassification))
-            {
-                EnsureExplicitAccountingBook(dto.BookClassification);
-                entry.BookClassification = dto.BookClassification.Trim();
-            }
+            var accountingBook = await ResolveAccountingBookAsync(
+                entry.TenantId,
+                string.IsNullOrWhiteSpace(dto.BookClassification) ? entry.BookClassification : dto.BookClassification,
+                cancellationToken);
+            entry.BookClassification = accountingBook.Code;
+            entry.AccountingBookId = accountingBook.Id;
 
             if (dto.Transactions != null)
             {
@@ -357,9 +363,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 var tenantId = entry.TenantId;
                 var fiscalPeriodId = await GetOpenFiscalPeriodIdAsync(transactionDate, tenantId);
-                var bookClassification = string.IsNullOrWhiteSpace(dto.BookClassification)
-                    ? (string.IsNullOrWhiteSpace(entry.BookClassification) ? "IFRS" : entry.BookClassification.Trim())
-                    : dto.BookClassification.Trim();
+                var bookClassification = accountingBook.Code;
                 var currencyMetadata = await ResolveJournalCurrencyMetadataAsync(transactionDtos, tenantId, cancellationToken);
 
                 _context.AccountTransactions.RemoveRange(entry.Transactions);
@@ -398,6 +402,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         TenantId = tenantId,
                         FiscalPeriodId = fiscalPeriodId,
                         BookClassification = bookClassification,
+                        AccountingBookId = accountingBook.Id,
                         FinanceDimensionSetId = dimensionSet?.Id,
                         FinanceDimensionSet = dimensionSet,
                         PostingStatus = "Draft"
@@ -414,6 +419,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 entry.PrimaryCurrency = currencyMetadata.PrimaryCurrency;
                 entry.FiscalPeriodId = fiscalPeriodId;
                 entry.BookClassification = bookClassification;
+            }
+            else
+            {
+                foreach (var transaction in entry.Transactions)
+                {
+                    transaction.BookClassification = accountingBook.Code;
+                    transaction.AccountingBookId = accountingBook.Id;
+                }
             }
 
             await PersistJournalMutationWithAuditAsync(
@@ -1113,6 +1126,24 @@ namespace ErpSystem.Api.Services.Finance.GL
                 throw new InvalidOperationException(
                     "Manual journals require one explicit accounting book. ALL_ACTIVE_BOOKS is retired with the legacy opening-balance process.");
             }
+        }
+
+        private async Task<AccountingBook> ResolveAccountingBookAsync(
+            Guid tenantId,
+            string? requestedCode,
+            CancellationToken cancellationToken)
+        {
+            EnsureExplicitAccountingBook(requestedCode);
+            var normalizedCode = string.IsNullOrWhiteSpace(requestedCode)
+                ? throw new InvalidOperationException("An explicit accounting book is required.")
+                : requestedCode.Trim().ToUpperInvariant();
+            var matches = await _context.AccountingBooks.AsNoTracking()
+                .Where(book => book.TenantId == tenantId && !book.IsDeleted && book.Code == normalizedCode)
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (matches.Count != 1)
+                throw new InvalidOperationException("Accounting book is unavailable or ambiguous for this tenant.");
+            return matches[0];
         }
 
         private static bool IsAllActiveBooks(string? bookClassification)

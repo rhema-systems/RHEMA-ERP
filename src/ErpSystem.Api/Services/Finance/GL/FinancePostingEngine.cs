@@ -73,6 +73,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         var tenantId = _currentUserService.GetRequiredFinanceTenantId();
         var validation = await ValidatePostingRequestAsync(tenantId, request, accountingBookCode, producerContext, allowHistoricalMappingException, cancellationToken);
 
+        await EnsureNoParallelBookPostingAsync(tenantId, validation, acquireLock: false, cancellationToken);
         var existingPosting = await FindExistingPostingAsync(tenantId, validation, cancellationToken);
         if (existingPosting != null)
         {
@@ -125,6 +126,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         FinancePostingCommandDto request,
         CancellationToken cancellationToken)
     {
+        await EnsureNoParallelBookPostingAsync(tenantId, validation, acquireLock: true, cancellationToken);
         var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, cancellationToken);
         if (duplicateInsideTransaction != null)
         {
@@ -246,6 +248,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             throw new InvalidOperationException("Posted finance event was not found for this tenant.");
         }
 
+        EnsureStoredBookEvidence(postingEvent);
+
         var lines = postingEvent.JournalEntry.Transactions
             .OrderBy(t => t.LineNumber)
             .Select(t => new FinancePostingLineDto
@@ -298,6 +302,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             .Include(item => item.JournalEntry)
             .SingleAsync(item => item.Id == postingEventId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
         var journal = original.JournalEntry ?? throw new InvalidOperationException("Original Finance journal evidence is missing.");
+        EnsureStoredBookEvidence(original);
         var request = new FinancePostingRequestV2Dto
         {
             SourceModule = "GL",
@@ -380,6 +385,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             throw new InvalidOperationException("Manual journal entries must be approved before posting.");
         }
 
+        if (journalEntry.AccountingBookId != validation.AccountingBookId
+            || !string.Equals(journalEntry.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal)
+            || journalEntry.Transactions.Any(line => line.TenantId != tenantId
+                || line.AccountingBookId != validation.AccountingBookId
+                || !string.Equals(line.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Existing journal accounting-book evidence does not match the posting request.");
+        }
+
         var existingLines = journalEntry.Transactions
             .OrderBy(t => t.LineNumber)
             .ToList();
@@ -415,6 +429,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         journalEntry.IsMultiCurrency = validation.IsMultiCurrency;
         journalEntry.PrimaryCurrency = validation.PrimaryCurrency;
         journalEntry.BookClassification = validation.AccountingBookCode;
+        journalEntry.AccountingBookId = validation.AccountingBookId;
         journalEntry.FiscalPeriodId = validation.FiscalPeriod.Id;
         journalEntry.PostingDate = now;
         journalEntry.PostedByUserId = postedByUserId;
@@ -433,6 +448,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
             transaction.SourceDocumentType = validation.SourceDocumentType;
             transaction.BookClassification = validation.AccountingBookCode;
+            transaction.AccountingBookId = validation.AccountingBookId;
             transaction.FunctionalCurrencyCode = validation.FunctionalCurrencyCode;
             transaction.TransactionCurrency = requestLine.TransactionCurrency;
             transaction.TransactionDebitAmount = requestLine.TransactionDebitAmount;
@@ -482,6 +498,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             IsMultiCurrency = validation.IsMultiCurrency,
             PrimaryCurrency = validation.PrimaryCurrency,
             BookClassification = validation.AccountingBookCode,
+            AccountingBookId = validation.AccountingBookId,
             FiscalPeriodId = validation.FiscalPeriod.Id,
             PostingDate = now,
             PostedByUserId = postedByUserId,
@@ -526,6 +543,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 SourceDocumentType = validation.SourceDocumentType,
                 SourceReferenceNumber = line.SourceReferenceNumber ?? validation.SourceDocumentReference,
                 BookClassification = validation.AccountingBookCode,
+                AccountingBookId = validation.AccountingBookId,
                 FiscalPeriodId = validation.FiscalPeriod.Id,
                 PostedDate = now,
                 PostingStatus = PostedStatus,
@@ -575,6 +593,19 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         if (original.PostingStatus != PostedStatus)
         {
             throw new InvalidOperationException("Only posted journal entries can be reversed.");
+        }
+
+        if (original.AccountingBookId != validation.AccountingBookId
+            || !string.Equals(original.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Exact reversal accounting-book evidence does not match the original journal entry.");
+        }
+
+        if (original.Transactions.Any(line => line.TenantId != tenantId
+                || line.AccountingBookId != original.AccountingBookId
+                || !string.Equals(line.BookClassification, original.BookClassification, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Original journal transaction accounting-book evidence is inconsistent.");
         }
 
         if (original.IsReversed || original.ReversalJournalEntryId.HasValue)
@@ -691,6 +722,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             PrimaryExchangeRate = validation.PrimaryExchangeRate,
             PrimaryExchangeRateDate = validation.PrimaryExchangeRateDate,
             BookClassification = validation.AccountingBookCode,
+            AccountingBookId = validation.AccountingBookId,
             CreatedAt = now,
             CreatedBy = _currentUserService.UserName,
             CreatedById = postedByUserId
@@ -1019,6 +1051,8 @@ WHERE [Id] = {delta.AccountId}
                 tenantId, request, normalizedAccountingBookCode, "BOOK_CODE_PSEUDO", cancellationToken);
             throw new InvalidOperationException("ALL_ACTIVE_BOOKS must be expanded by source orchestration before single-book posting.");
         }
+        // Resolve the concrete tenant-owned book once. Every persisted row and every duplicate,
+        // retry, and reversal lookup below carries this ID plus the immutable code snapshot.
         var accountingBook = await _context.AccountingBooks.AsNoTracking()
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Code == normalizedAccountingBookCode && !item.IsDeleted, cancellationToken);
         if (accountingBook == null)
@@ -1429,6 +1463,7 @@ WHERE [Id] = {delta.AccountId}
             postingDate,
             journalType,
             normalizedAccountingBookCode,
+            accountingBook.Id,
             functionalCurrency,
             fiscalPeriod,
             normalizedLines,
@@ -1885,11 +1920,13 @@ WHERE [Id] = {delta.AccountId}
         ValidatedPosting validation,
         CancellationToken cancellationToken)
     {
-        return await _context.FinancePostingEvents
+        var matches = await _context.FinancePostingEvents
             .Include(e => e.JournalEntry)
-            .FirstOrDefaultAsync(
+                .ThenInclude(journal => journal!.Transactions)
+            .Where(
                 e => e.TenantId == tenantId
                     && !e.IsDeleted
+                    && e.AccountingBookId == validation.AccountingBookId
                     && (((e.SourceDocumentType == validation.SourceDocumentType
                             && e.SourceDocumentId == validation.SourceDocumentId
                             && e.PostingAction == validation.PostingAction)
@@ -1898,8 +1935,149 @@ WHERE [Id] = {delta.AccountId}
                             && e.SourceDocumentId == validation.SourceDocumentId
                             && e.PostingAction == validation.PostingAction))
                         || (!string.IsNullOrWhiteSpace(validation.IdempotencyKey)
-                            && e.IdempotencyKey == validation.IdempotencyKey)),
-                cancellationToken);
+                            && e.IdempotencyKey == validation.IdempotencyKey)))
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        if (matches.Count > 1)
+            throw new InvalidOperationException("Conflicting Finance posting identity evidence exists for this accounting book.");
+
+        var existing = matches.SingleOrDefault();
+        if (existing is not null)
+            EnsureExistingPostingMatchesRequest(existing, validation);
+        return existing;
+    }
+
+    private async Task EnsureNoParallelBookPostingAsync(
+        Guid tenantId,
+        ValidatedPosting validation,
+        bool acquireLock,
+        CancellationToken cancellationToken)
+    {
+        if (acquireLock && _context.Database.IsSqlServer())
+        {
+            if (_context.Database.CurrentTransaction is null)
+                throw new InvalidOperationException("Parallel-book posting protection requires an active transaction.");
+
+            // The relational indexes intentionally permit future book representations. Until
+            // book-aware balances and Finance orchestration exist, cross-book source/idempotency
+            // locks prevent two leaf requests from racing past this temporary safety gate.
+            var identities = new List<string>
+            {
+                $"SOURCE|{validation.SourceDocumentType}|{validation.SourceDocumentId:N}|{validation.PostingAction}"
+            };
+            if (!string.IsNullOrWhiteSpace(validation.IdempotencyKey))
+                identities.Add($"IDEMPOTENCY|{validation.IdempotencyKey}");
+
+            foreach (var identity in identities.OrderBy(value => value, StringComparer.Ordinal))
+            {
+                var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+                var resource = $"FIN:POSTING-REPRESENTATION:{tenantId:N}:{digest}";
+                await _context.Database.ExecuteSqlInterpolatedAsync($@"
+DECLARE @result int;
+EXEC @result = sys.sp_getapplock
+    @Resource = {resource},
+    @LockMode = 'Exclusive',
+    @LockOwner = 'Transaction',
+    @LockTimeout = 15000;
+IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lock.', 1;", cancellationToken);
+            }
+        }
+
+        var matchingIdentities = await _context.FinancePostingEvents.AsNoTracking()
+            .Where(
+            item => item.TenantId == tenantId && !item.IsDeleted
+                && ((item.SourceDocumentType == validation.SourceDocumentType
+                        && item.SourceDocumentId == validation.SourceDocumentId
+                        && item.PostingAction == validation.PostingAction)
+                    || (!string.IsNullOrWhiteSpace(validation.IdempotencyKey)
+                        && item.IdempotencyKey == validation.IdempotencyKey)))
+            .Select(item => new { item.AccountingBookId, item.BookClassification })
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        // A matching identity in the resolved book is a legitimate retry only when both
+        // relational and snapshot evidence agree. A different book remains representable
+        // in the schema, but is deliberately blocked until Finance owns book-aware balances.
+        if (matchingIdentities.Any(item =>
+                (item.AccountingBookId == validation.AccountingBookId
+                    && !string.Equals(item.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal))
+                || (item.AccountingBookId != validation.AccountingBookId
+                    && string.Equals(item.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal))))
+            throw new InvalidOperationException("Finance posting accounting-book ID/code evidence is inconsistent.");
+
+        if (matchingIdentities.Any(item => item.AccountingBookId != validation.AccountingBookId))
+            throw new InvalidOperationException(
+                "PARALLEL_BOOK_POSTING_DISABLED: A representation of this economic source or idempotency identity already exists in another accounting book.");
+    }
+
+    private static void EnsureStoredBookEvidence(FinancePostingEvent postingEvent)
+    {
+        var journal = postingEvent.JournalEntry
+            ?? throw new InvalidOperationException("Finance posting event is not linked to journal evidence.");
+        if (postingEvent.AccountingBookId == Guid.Empty
+            || journal.TenantId != postingEvent.TenantId
+            || journal.AccountingBookId != postingEvent.AccountingBookId
+            || !string.Equals(journal.BookClassification, postingEvent.BookClassification, StringComparison.Ordinal)
+            || journal.Transactions.Any(line => line.TenantId != postingEvent.TenantId
+                || line.AccountingBookId != postingEvent.AccountingBookId
+                || !string.Equals(line.BookClassification, postingEvent.BookClassification, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Finance posting accounting-book evidence is inconsistent.");
+        }
+    }
+
+    private static void EnsureExistingPostingMatchesRequest(
+        FinancePostingEvent postingEvent,
+        ValidatedPosting validation)
+    {
+        EnsureStoredBookEvidence(postingEvent);
+        var journal = postingEvent.JournalEntry!;
+        if (postingEvent.AccountingBookId != validation.AccountingBookId
+            || !string.Equals(postingEvent.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal)
+            || !string.Equals(postingEvent.SourceModule, validation.SourceModule, StringComparison.Ordinal)
+            || !string.Equals(postingEvent.SourceDocumentType, validation.SourceDocumentType, StringComparison.Ordinal)
+            || postingEvent.SourceDocumentId != validation.SourceDocumentId
+            || !string.Equals(postingEvent.PostingAction, validation.PostingAction, StringComparison.Ordinal)
+            || postingEvent.PostingDate.Date != validation.PostingDate.Date
+            || postingEvent.TotalDebitAmount != validation.TotalDebitAmount
+            || postingEvent.TotalCreditAmount != validation.TotalCreditAmount
+            || !string.Equals(postingEvent.FunctionalCurrencyCode, validation.FunctionalCurrencyCode, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(journal.Description, validation.Description, StringComparison.Ordinal)
+            || !string.Equals(journal.JournalType, validation.JournalType, StringComparison.Ordinal)
+            || !string.Equals(journal.ReferenceNumber, validation.SourceDocumentReference, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Existing Finance posting identity has conflicting immutable request evidence.");
+        }
+
+        var storedLines = journal.Transactions.OrderBy(line => line.LineNumber).ThenBy(line => line.Id).ToList();
+        var requestedLines = validation.Lines.OrderBy(line => line.LineNumber).ToList();
+        if (storedLines.Count != requestedLines.Count)
+            throw new InvalidOperationException("Existing Finance posting identity has conflicting immutable request evidence.");
+
+        for (var index = 0; index < storedLines.Count; index++)
+        {
+            var stored = storedLines[index];
+            var requested = requestedLines[index];
+            if (stored.AccountId != requested.AccountId
+                || stored.SourceDocumentLineId != requested.SourceDocumentLineId
+                || stored.DebitAmount != requested.DebitAmount
+                || stored.CreditAmount != requested.CreditAmount
+                || stored.TransactionDebitAmount != requested.TransactionDebitAmount
+                || stored.TransactionCreditAmount != requested.TransactionCreditAmount
+                || stored.ForeignCurrencyAmount != requested.ForeignCurrencyAmount
+                || stored.ExchangeRateId != requested.ExchangeRateId
+                || stored.ExchangeRate != requested.ExchangeRate
+                || stored.ExchangeRateDate != requested.ExchangeRateDate
+                || stored.FinanceDimensionSetId != requested.DimensionSet?.Id
+                || stored.LineNumber != requested.LineNumber
+                || !string.Equals(stored.TransactionCurrency, requested.TransactionCurrency, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(stored.ExchangeRateSource, requested.ExchangeRateSource, StringComparison.Ordinal)
+                || !string.Equals(stored.SegmentString, requested.SegmentString, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Existing Finance posting identity has conflicting immutable request evidence.");
+            }
+        }
     }
 
     private static FinancePostingResultDto ToResult(FinancePostingEvent postingEvent, bool wasDuplicate)
@@ -1963,6 +2141,7 @@ WHERE [Id] = {delta.AccountId}
                 postingEvent.TotalDebitAmount,
                 postingEvent.TotalCreditAmount,
                 postingEvent.FunctionalCurrencyCode,
+                postingEvent.AccountingBookId,
                 postingEvent.BookClassification
             },
             Context = new
@@ -2008,7 +2187,9 @@ WHERE [Id] = {delta.AccountId}
                 postingEvent.PostingAction,
                 postingEvent.JournalEntryId,
                 postingEvent.PostingStatus,
-                postingEvent.PostingDate
+                postingEvent.PostingDate,
+                postingEvent.AccountingBookId,
+                postingEvent.BookClassification
             },
             Context = new
             {
@@ -2830,6 +3011,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         DateTime PostingDate,
         string JournalType,
         string AccountingBookCode,
+        Guid AccountingBookId,
         string FunctionalCurrencyCode,
         FiscalPeriod FiscalPeriod,
         IReadOnlyList<ValidatedPostingLine> Lines,

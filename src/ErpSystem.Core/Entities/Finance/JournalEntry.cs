@@ -151,6 +151,13 @@ public class JournalEntry : BusinessEntity
     [MaxLength(20)]
     public string BookClassification { get; set; } = "IFRS";
 
+    /// <summary>
+    /// Stable relational identity of the accounting book. BookClassification remains the
+    /// immutable code snapshot used for historical display and audit.
+    /// </summary>
+    [Required]
+    public Guid AccountingBookId { get; set; }
+
     // ========================================================================
     // PERIOD MANAGEMENT
     // ========================================================================
@@ -420,6 +427,9 @@ public class JournalEntry : BusinessEntity
     /// </summary>
     [ForeignKey(nameof(FiscalPeriodId))]
     public virtual FiscalPeriod FiscalPeriod { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountingBookId))]
+    public virtual AccountingBook AccountingBook { get; set; } = null!;
 
     /// <summary>
     /// The reversal journal entry (if this entry was reversed).

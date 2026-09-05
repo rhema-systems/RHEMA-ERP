@@ -784,6 +784,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
         Guid? financeDimensionSetId = null)
     {
         var journalId = Guid.NewGuid();
+        var accountingBookId = context.AccountingBooks.Local.Single(book =>
+            book.TenantId == tenantId && book.Code == "IFRS").Id;
         context.JournalEntries.Add(new JournalEntry
         {
             Id = journalId,
@@ -792,6 +794,7 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             EntryDate = date,
             Description = "Execution test posting",
             PostingStatus = "Posted",
+            AccountingBookId = accountingBookId,
             BookClassification = "IFRS",
             FiscalPeriodId = Guid.NewGuid(),
             TotalDebitAmount = debit,
@@ -808,6 +811,7 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             DebitAmount = debit,
             CreditAmount = credit,
             PostingStatus = "Posted",
+            AccountingBookId = accountingBookId,
             BookClassification = "IFRS",
             FiscalPeriodId = Guid.NewGuid(),
             FunctionalCurrencyCode = "GHS",
