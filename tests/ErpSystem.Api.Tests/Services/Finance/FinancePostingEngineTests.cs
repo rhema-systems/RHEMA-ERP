@@ -1119,9 +1119,96 @@ public sealed class FinancePostingEngineTests
         var action = () => service.PostAsync(conflicting);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*conflicting immutable request evidence*");
+            .WithMessage("*conflicting canonical request evidence*");
         (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
         (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("origin")]
+    [InlineData("source-type")]
+    [InlineData("source-reference")]
+    [InlineData("idempotency")]
+    [InlineData("line-description")]
+    [InlineData("line-reference")]
+    [InlineData("line-notes")]
+    [InlineData("line-tag")]
+    [InlineData("line-source-id")]
+    [InlineData("budget-id")]
+    [InlineData("budget-source")]
+    [InlineData("tax-evidence")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldFingerprintEveryNormalizedProducerEvidenceField(string mutation)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var first = CreateRequest(tenantId, debit.Id, credit.Id);
+        first.IdempotencyKey = "C1|FINGERPRINT|POST";
+        await service.PostAsync(first);
+
+        var retry = CreateRequest(tenantId, debit.Id, credit.Id);
+        retry.SourceDocumentId = first.SourceDocumentId;
+        retry.IdempotencyKey = first.IdempotencyKey;
+        switch (mutation)
+        {
+            case "origin": retry.OriginModuleCode = "PROC"; break;
+            case "source-type": retry.SourceDocumentType = "ChangedDocument"; break;
+            case "source-reference": retry.SourceDocumentReference = "SRC-CHANGED"; break;
+            case "idempotency": retry.IdempotencyKey = "C1|FINGERPRINT|CHANGED"; break;
+            case "line-description": retry.Lines[0].Description = "Changed line"; break;
+            case "line-reference": retry.Lines[0].SourceReferenceNumber = "LINE-CHANGED"; break;
+            case "line-notes": retry.Lines[0].Notes = "Changed notes"; break;
+            case "line-tag": retry.Lines[0].TransactionTag = "Changed tag"; break;
+            case "line-source-id": retry.Lines[0].SourceDocumentLineId = Guid.NewGuid(); break;
+            case "budget-id": retry.BudgetReservationIds = [Guid.NewGuid()]; break;
+            case "budget-source": retry.BudgetReservationSourceDocumentType = "PurchaseOrder"; break;
+            case "tax-evidence": retry.TaxCalculationSnapshots =
+                [
+                    new FinanceTaxCalculationSnapshotDto
+                    {
+                        DocumentType = "Invoice", DocumentId = retry.SourceDocumentId,
+                        TaxId = Guid.NewGuid(), BaseAmount = 100m, TaxableAmount = 100m,
+                        TaxRate = 0.15m, TaxAmount = 15m, CalculationOrder = 1,
+                        CalculationDate = retry.PostingDate
+                    }
+                ]; break;
+        }
+
+        await FluentActions.Invoking(() => service.PostAsync(retry)).Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*conflicting canonical request evidence*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldFailClosedForLegacyEventWithoutCanonicalRequestFingerprint()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        var service = CreateService(db, tenantId);
+        await service.PostAsync(request);
+        var stored = await db.FinancePostingEvents.SingleAsync();
+        stored.RequestFingerprint = null;
+        stored.RequestFingerprintVersion = null;
+        await db.SaveChangesAsync();
+
+        await FluentActions.Invoking(() => service.PostAsync(request)).Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("LEGACY_POSTING_RETRY_UNAVAILABLE:*");
     }
 
     [Theory]
@@ -1234,9 +1321,12 @@ public sealed class FinancePostingEngineTests
         sql.Should().Contain("ALL_ACTIVE_BOOKS");
         sql.Should().Contain("b.TenantId = j.TenantId");
         sql.Should().Contain("j.TenantId <> t.TenantId");
-        sql.Should().Contain("j.BookClassification <> e.BookClassification");
+        sql.Should().Contain("Latin1_General_100_BIN2");
+        sql.Should().Contain("DATALENGTH(j.BookClassification)");
         operations.OfType<AddColumnOperation>().Should().Contain(operation =>
             operation.Table == "JournalEntries" && operation.Name == "AccountingBookId" && operation.IsNullable);
+        operations.OfType<AddColumnOperation>().Should().Contain(operation =>
+            operation.Table == "FinancePostingEvents" && operation.Name == "RequestFingerprint" && operation.IsNullable);
         operations.OfType<AlterColumnOperation>().Should().Contain(operation =>
             operation.Table == "JournalEntries" && operation.Name == "AccountingBookId" && !operation.IsNullable);
         operations.OfType<CreateIndexOperation>().Should().Contain(operation =>

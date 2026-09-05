@@ -21,7 +21,11 @@ IF EXISTS (
         NULLIF(LTRIM(RTRIM(j.BookClassification)), '') IS NULL OR
         UPPER(LTRIM(RTRIM(j.BookClassification))) IN ('ALL_ACTIVE_BOOKS', 'ALL_CLASSIFIED_BOOKS', 'ALLCLASSIFIEDBOOKS', 'ALL') OR
         (SELECT COUNT_BIG(*) FROM AccountingBooks b
-         WHERE b.TenantId = j.TenantId AND b.IsDeleted = 0 AND b.Code = j.BookClassification) <> 1)
+         WHERE b.TenantId = j.TenantId AND b.IsDeleted = 0
+           AND b.Code COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM(b.Code))) COLLATE Latin1_General_100_BIN2
+           AND DATALENGTH(b.Code) = DATALENGTH(UPPER(LTRIM(RTRIM(b.Code))))
+           AND b.Code COLLATE Latin1_General_100_BIN2 = j.BookClassification COLLATE Latin1_General_100_BIN2
+           AND DATALENGTH(b.Code) = DATALENGTH(j.BookClassification)) <> 1)
     THROW 51000, 'C1_BOOK_ID_PREFLIGHT_JOURNAL: retained journal book code is blank, pseudo, unknown, ambiguous, or cross-tenant.', 1;
 
 IF EXISTS (
@@ -31,8 +35,14 @@ IF EXISTS (
         NULLIF(LTRIM(RTRIM(t.BookClassification)), '') IS NULL OR
         UPPER(LTRIM(RTRIM(t.BookClassification))) IN ('ALL_ACTIVE_BOOKS', 'ALL_CLASSIFIED_BOOKS', 'ALLCLASSIFIEDBOOKS', 'ALL') OR
         (SELECT COUNT_BIG(*) FROM AccountingBooks b
-         WHERE b.TenantId = t.TenantId AND b.IsDeleted = 0 AND b.Code = t.BookClassification) <> 1 OR
-        j.Id IS NULL OR j.TenantId <> t.TenantId OR j.BookClassification <> t.BookClassification)
+         WHERE b.TenantId = t.TenantId AND b.IsDeleted = 0
+           AND b.Code COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM(b.Code))) COLLATE Latin1_General_100_BIN2
+           AND DATALENGTH(b.Code) = DATALENGTH(UPPER(LTRIM(RTRIM(b.Code))))
+           AND b.Code COLLATE Latin1_General_100_BIN2 = t.BookClassification COLLATE Latin1_General_100_BIN2
+           AND DATALENGTH(b.Code) = DATALENGTH(t.BookClassification)) <> 1 OR
+        j.Id IS NULL OR j.TenantId <> t.TenantId OR NOT (
+            j.BookClassification COLLATE Latin1_General_100_BIN2 = t.BookClassification COLLATE Latin1_General_100_BIN2
+            AND DATALENGTH(j.BookClassification) = DATALENGTH(t.BookClassification)))
     THROW 51000, 'C1_BOOK_ID_PREFLIGHT_TRANSACTION: retained transaction book or journal lineage is inconsistent.', 1;
 
 IF EXISTS (
@@ -42,9 +52,15 @@ IF EXISTS (
         NULLIF(LTRIM(RTRIM(e.BookClassification)), '') IS NULL OR
         UPPER(LTRIM(RTRIM(e.BookClassification))) IN ('ALL_ACTIVE_BOOKS', 'ALL_CLASSIFIED_BOOKS', 'ALLCLASSIFIEDBOOKS', 'ALL') OR
         (SELECT COUNT_BIG(*) FROM AccountingBooks b
-         WHERE b.TenantId = e.TenantId AND b.IsDeleted = 0 AND b.Code = e.BookClassification) <> 1 OR
+         WHERE b.TenantId = e.TenantId AND b.IsDeleted = 0
+           AND b.Code COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM(b.Code))) COLLATE Latin1_General_100_BIN2
+           AND DATALENGTH(b.Code) = DATALENGTH(UPPER(LTRIM(RTRIM(b.Code))))
+           AND b.Code COLLATE Latin1_General_100_BIN2 = e.BookClassification COLLATE Latin1_General_100_BIN2
+           AND DATALENGTH(b.Code) = DATALENGTH(e.BookClassification)) <> 1 OR
         (e.JournalEntryId IS NOT NULL AND
-            (j.Id IS NULL OR j.TenantId <> e.TenantId OR j.BookClassification <> e.BookClassification))
+            (j.Id IS NULL OR j.TenantId <> e.TenantId OR NOT (
+                j.BookClassification COLLATE Latin1_General_100_BIN2 = e.BookClassification COLLATE Latin1_General_100_BIN2
+                AND DATALENGTH(j.BookClassification) = DATALENGTH(e.BookClassification))))
     THROW 51000, 'C1_BOOK_ID_PREFLIGHT_EVENT: retained posting-event book or journal lineage is inconsistent.', 1;
 """);
 
@@ -88,6 +104,23 @@ IF EXISTS (
                 type: "uniqueidentifier",
                 nullable: true);
 
+            // Historical commands did not persist enough normalized producer evidence to derive
+            // a truthful exhaustive fingerprint. These columns intentionally remain null for old
+            // events; runtime rejects legacy duplicate-return retries instead of inventing proof.
+            migrationBuilder.AddColumn<string>(
+                name: "RequestFingerprint",
+                table: "FinancePostingEvents",
+                type: "nvarchar(64)",
+                maxLength: 64,
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "RequestFingerprintVersion",
+                table: "FinancePostingEvents",
+                type: "nvarchar(40)",
+                maxLength: 40,
+                nullable: true);
+
             migrationBuilder.AddColumn<Guid>(
                 name: "AccountingBookId",
                 table: "AccountTransactions",
@@ -95,19 +128,32 @@ IF EXISTS (
                 nullable: true);
 
             // Preserve the immutable code snapshots while adding their stable relational identities.
-            // The preflight above guarantees each join is same-tenant and exactly one-to-one.
+            // BIN2 plus byte-length equality is intentional: ordinary SQL equality can hide case
+            // and trailing-space drift that the ordinal runtime would later reject.
             migrationBuilder.Sql("""
 UPDATE j SET AccountingBookId = b.Id
 FROM JournalEntries j
-JOIN AccountingBooks b ON b.TenantId = j.TenantId AND b.Code = j.BookClassification AND b.IsDeleted = 0;
+JOIN AccountingBooks b ON b.TenantId = j.TenantId AND b.IsDeleted = 0
+ AND b.Code COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM(b.Code))) COLLATE Latin1_General_100_BIN2
+ AND DATALENGTH(b.Code) = DATALENGTH(UPPER(LTRIM(RTRIM(b.Code))))
+ AND b.Code COLLATE Latin1_General_100_BIN2 = j.BookClassification COLLATE Latin1_General_100_BIN2
+ AND DATALENGTH(b.Code) = DATALENGTH(j.BookClassification);
 
 UPDATE t SET AccountingBookId = b.Id
 FROM AccountTransactions t
-JOIN AccountingBooks b ON b.TenantId = t.TenantId AND b.Code = t.BookClassification AND b.IsDeleted = 0;
+JOIN AccountingBooks b ON b.TenantId = t.TenantId AND b.IsDeleted = 0
+ AND b.Code COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM(b.Code))) COLLATE Latin1_General_100_BIN2
+ AND DATALENGTH(b.Code) = DATALENGTH(UPPER(LTRIM(RTRIM(b.Code))))
+ AND b.Code COLLATE Latin1_General_100_BIN2 = t.BookClassification COLLATE Latin1_General_100_BIN2
+ AND DATALENGTH(b.Code) = DATALENGTH(t.BookClassification);
 
 UPDATE e SET AccountingBookId = b.Id
 FROM FinancePostingEvents e
-JOIN AccountingBooks b ON b.TenantId = e.TenantId AND b.Code = e.BookClassification AND b.IsDeleted = 0;
+JOIN AccountingBooks b ON b.TenantId = e.TenantId AND b.IsDeleted = 0
+ AND b.Code COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM(b.Code))) COLLATE Latin1_General_100_BIN2
+ AND DATALENGTH(b.Code) = DATALENGTH(UPPER(LTRIM(RTRIM(b.Code))))
+ AND b.Code COLLATE Latin1_General_100_BIN2 = e.BookClassification COLLATE Latin1_General_100_BIN2
+ AND DATALENGTH(b.Code) = DATALENGTH(e.BookClassification);
 
 IF EXISTS (SELECT 1 FROM JournalEntries WHERE AccountingBookId IS NULL)
  OR EXISTS (SELECT 1 FROM AccountTransactions WHERE AccountingBookId IS NULL)
@@ -316,6 +362,14 @@ IF EXISTS (
 
             migrationBuilder.DropColumn(
                 name: "AccountingBookId",
+                table: "FinancePostingEvents");
+
+            migrationBuilder.DropColumn(
+                name: "RequestFingerprint",
+                table: "FinancePostingEvents");
+
+            migrationBuilder.DropColumn(
+                name: "RequestFingerprintVersion",
                 table: "FinancePostingEvents");
 
             migrationBuilder.DropColumn(

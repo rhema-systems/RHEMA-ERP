@@ -162,6 +162,7 @@
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
     <Compile Include="Services\Finance\JournalBatchServiceTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSqlServerReleaseGateTests.cs" />
+    <Compile Include="Services\Finance\StablePostingBookIdentitySqlServerTests.cs" />
     <Compile Include="Services\Finance\FinancePerformanceReadinessTests.cs" />
     <!-- Operational resilience is a release gate rather than an optional infrastructure note.
          This project disables implicit compile items, so keep the evaluator and health-output

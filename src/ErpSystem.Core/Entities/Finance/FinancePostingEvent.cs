@@ -30,6 +30,16 @@ public class FinancePostingEvent : TenantEntity
     [MaxLength(450)]
     public string? IdempotencyKey { get; set; }
 
+    /// <summary>
+    /// Versioned canonical fingerprint of the complete normalized posting command. Historical
+    /// events remain null and are intentionally ineligible for duplicate-return retry.
+    /// </summary>
+    [MaxLength(40)]
+    public string? RequestFingerprintVersion { get; set; }
+
+    [MaxLength(64)]
+    public string? RequestFingerprint { get; set; }
+
     public Guid? JournalEntryId { get; set; }
 
     [Required]

@@ -3113,6 +3113,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => e.PrimaryExchangeRateId);
             entity.HasIndex(e => new { e.TenantId, e.HasForeignCurrencyLines });
             entity.Property(e => e.PrimaryExchangeRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.RequestFingerprintVersion).HasMaxLength(40);
+            entity.Property(e => e.RequestFingerprint).HasMaxLength(64);
             entity.HasOne(e => e.AccountingBook)
                 .WithMany()
                 .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })

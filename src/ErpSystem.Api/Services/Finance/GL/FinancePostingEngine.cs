@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -16,6 +17,8 @@ namespace ErpSystem.Api.Services.Finance.GL;
 public sealed class FinancePostingEngine : IFinancePostingEngine
 {
     private const string PostedStatus = "Posted";
+    private const string RequestFingerprintVersion = "FINPOST-REQUEST-V1";
+    private const string RequestFingerprintDomain = "RHEMA-FINANCE-POSTING-REQUEST";
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<FinancePostingEngine> _logger;
@@ -150,16 +153,16 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
         await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
 
-        if (request.BudgetReservationIds.Count > 0)
+        if (validation.BudgetReservationIds.Count > 0)
         {
-            if (string.IsNullOrWhiteSpace(request.BudgetReservationSourceDocumentType))
+            if (string.IsNullOrWhiteSpace(validation.BudgetReservationSourceDocumentType))
             {
                 if (_budgetControl == null)
                     throw new InvalidOperationException("Finance budget control is not configured for this budget-controlled posting.");
                 await _budgetControl.ConsumeReservationsAsync(
                     tenantId,
                     validation.SourceDocumentId,
-                    request.BudgetReservationIds,
+                    validation.BudgetReservationIds,
                     journalEntry.Id,
                     postingEvent.Id,
                     cancellationToken);
@@ -170,9 +173,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                     throw new InvalidOperationException("Finance budget commitments are not configured for this producer posting.");
                 await _budgetCommitments.ConsumeForPostingAsync(
                     tenantId,
-                    request.BudgetReservationSourceDocumentType,
+                    validation.BudgetReservationSourceDocumentType,
                     validation.SourceDocumentId,
-                    request.BudgetReservationIds,
+                    validation.BudgetReservationIds,
                     journalEntry.Id,
                     postingEvent.Id,
                     cancellationToken);
@@ -447,6 +450,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             transaction.SourceDocumentId = validation.SourceDocumentId;
             transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
             transaction.SourceDocumentType = validation.SourceDocumentType;
+            transaction.Description = requestLine.Description ?? validation.Description;
+            transaction.SourceReferenceNumber = requestLine.SourceReferenceNumber ?? validation.SourceDocumentReference;
+            transaction.SegmentString = requestLine.SegmentString;
+            transaction.Notes = requestLine.Notes;
+            transaction.TransactionTag = requestLine.TransactionTag;
             transaction.BookClassification = validation.AccountingBookCode;
             transaction.AccountingBookId = validation.AccountingBookId;
             transaction.FunctionalCurrencyCode = validation.FunctionalCurrencyCode;
@@ -707,6 +715,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             PostingAction = validation.PostingAction,
             SourceDocumentReference = validation.SourceDocumentReference,
             IdempotencyKey = validation.IdempotencyKey,
+            RequestFingerprintVersion = validation.RequestFingerprintVersion,
+            RequestFingerprint = validation.RequestFingerprint,
             JournalEntryId = journalEntryId,
             PostingStatus = PostedStatus,
             PostingDate = validation.PostingDate,
@@ -1444,6 +1454,38 @@ WHERE [Id] = {delta.AccountId}
             .ToList();
         var primaryCurrency = distinctCurrencies.Count == 1 ? distinctCurrencies[0] : null;
         var primaryExchangeRateLine = normalizedLines.FirstOrDefault(l => l.ExchangeRateId.HasValue);
+        var budgetReservationIds = (request.BudgetReservationIds ?? Array.Empty<Guid>())
+            .OrderBy(id => id)
+            .ToArray();
+        if (budgetReservationIds.Any(id => id == Guid.Empty)
+            || budgetReservationIds.Distinct().Count() != budgetReservationIds.Length)
+            throw new InvalidOperationException("Budget reservation identities must be non-empty and unique.");
+        var budgetReservationSourceDocumentType = NormalizeOptional(
+            request.BudgetReservationSourceDocumentType, 100, "Budget reservation source document type");
+        var requestFingerprint = BuildRequestFingerprint(
+            tenantId,
+            sourceModule,
+            originModuleCode,
+            sourceDocumentType,
+            request.SourceDocumentId,
+            postingAction,
+            sourceReference,
+            idempotencyKey,
+            request.ExistingJournalEntryId,
+            request.ReversalOfJournalEntryId,
+            reversalReason,
+            reversalType,
+            description,
+            postingDate,
+            fiscalPeriod.Id,
+            journalType,
+            accountingBook.Id,
+            normalizedAccountingBookCode,
+            functionalCurrency,
+            request,
+            normalizedLines,
+            budgetReservationIds,
+            budgetReservationSourceDocumentType);
 
         return new ValidatedPosting(
             route,
@@ -1478,6 +1520,10 @@ WHERE [Id] = {delta.AccountId}
             NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"),
             request.ExchangeRateOverrideApprovedByUserId,
             request.ExchangeRateOverrideApprovedAt,
+            budgetReservationIds,
+            budgetReservationSourceDocumentType,
+            RequestFingerprintVersion,
+            requestFingerprint,
             allowHistoricalMappingException);
     }
 
@@ -1959,21 +2005,13 @@ WHERE [Id] = {delta.AccountId}
             if (_context.Database.CurrentTransaction is null)
                 throw new InvalidOperationException("Parallel-book posting protection requires an active transaction.");
 
-            // The relational indexes intentionally permit future book representations. Until
-            // book-aware balances and Finance orchestration exist, cross-book source/idempotency
-            // locks prevent two leaf requests from racing past this temporary safety gate.
-            var identities = new List<string>
-            {
-                $"SOURCE|{validation.SourceDocumentType}|{validation.SourceDocumentId:N}|{validation.PostingAction}"
-            };
-            if (!string.IsNullOrWhiteSpace(validation.IdempotencyKey))
-                identities.Add($"IDEMPOTENCY|{validation.IdempotencyKey}");
-
-            foreach (var identity in identities.OrderBy(value => value, StringComparer.Ordinal))
-            {
-                var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
-                var resource = $"FIN:POSTING-REPRESENTATION:{tenantId:N}:{digest}";
-                await _context.Database.ExecuteSqlInterpolatedAsync($@"
+            // C1 deliberately serializes every posting representation for a tenant. SQL Server
+            // collations can equate case/trailing-space variants that ordinal CLR strings do not;
+            // a tenant-wide lock is therefore provably at least as coarse as every database key.
+            // Keep this temporary lock until C2/C3 introduces book-aware balances and a Finance
+            // orchestrator that can atomically release several representations.
+            var resource = $"FIN:POSTING-REPRESENTATION:{tenantId:N}";
+            await _context.Database.ExecuteSqlInterpolatedAsync($@"
 DECLARE @result int;
 EXEC @result = sys.sp_getapplock
     @Resource = {resource},
@@ -1981,7 +2019,6 @@ EXEC @result = sys.sp_getapplock
     @LockOwner = 'Transaction',
     @LockTimeout = 15000;
 IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lock.', 1;", cancellationToken);
-            }
         }
 
         var matchingIdentities = await _context.FinancePostingEvents.AsNoTracking()
@@ -2032,6 +2069,29 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
         ValidatedPosting validation)
     {
         EnsureStoredBookEvidence(postingEvent);
+        // Historical events do not contain enough immutable producer evidence to reconstruct an
+        // exhaustive fingerprint. Returning them as a successful retry would invent evidence, so
+        // callers must reconcile them explicitly instead of receiving a potentially false success.
+        if (string.IsNullOrWhiteSpace(postingEvent.RequestFingerprintVersion)
+            || string.IsNullOrWhiteSpace(postingEvent.RequestFingerprint))
+            throw new InvalidOperationException(
+                "LEGACY_POSTING_RETRY_UNAVAILABLE: Existing posting lacks canonical request evidence.");
+        byte[] storedFingerprint;
+        try
+        {
+            if (postingEvent.RequestFingerprint.Length != 64)
+                throw new FormatException();
+            storedFingerprint = Convert.FromHexString(postingEvent.RequestFingerprint);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException(
+                "POSTING_REQUEST_FINGERPRINT_INVALID: Existing posting fingerprint evidence is malformed.");
+        }
+        if (!string.Equals(postingEvent.RequestFingerprintVersion, validation.RequestFingerprintVersion, StringComparison.Ordinal)
+            || !CryptographicOperations.FixedTimeEquals(storedFingerprint, Convert.FromHexString(validation.RequestFingerprint)))
+            throw new InvalidOperationException("Existing Finance posting identity has conflicting canonical request evidence.");
+
         var journal = postingEvent.JournalEntry!;
         if (postingEvent.AccountingBookId != validation.AccountingBookId
             || !string.Equals(postingEvent.BookClassification, validation.AccountingBookCode, StringComparison.Ordinal)
@@ -2142,7 +2202,9 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
                 postingEvent.TotalCreditAmount,
                 postingEvent.FunctionalCurrencyCode,
                 postingEvent.AccountingBookId,
-                postingEvent.BookClassification
+                postingEvent.BookClassification,
+                postingEvent.RequestFingerprintVersion,
+                postingEvent.RequestFingerprint
             },
             Context = new
             {
@@ -2189,7 +2251,9 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
                 postingEvent.PostingStatus,
                 postingEvent.PostingDate,
                 postingEvent.AccountingBookId,
-                postingEvent.BookClassification
+                postingEvent.BookClassification,
+                postingEvent.RequestFingerprintVersion,
+                postingEvent.RequestFingerprint
             },
             Context = new
             {
@@ -2486,6 +2550,166 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             Resource = "Finance.PostingEvent",
             ResourceId = postingEvent.Id.ToString()
         }, cancellationToken);
+    }
+
+    private static string BuildRequestFingerprint(
+        Guid tenantId,
+        string sourceModule,
+        string originModuleCode,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        string postingAction,
+        string? sourceDocumentReference,
+        string? idempotencyKey,
+        Guid? existingJournalEntryId,
+        Guid? reversalOfJournalEntryId,
+        string? reversalReason,
+        string? reversalType,
+        string description,
+        DateTime postingDate,
+        Guid fiscalPeriodId,
+        string journalType,
+        Guid accountingBookId,
+        string accountingBookCode,
+        string functionalCurrencyCode,
+        FinancePostingCommandDto request,
+        IReadOnlyList<ValidatedPostingLine> lines,
+        IReadOnlyList<Guid> budgetReservationIds,
+        string? budgetReservationSourceDocumentType)
+    {
+        // Domain/version separation makes any future canonical-form change explicit. Never alter
+        // this V1 grammar in place: historical duplicate decisions depend on byte-for-byte stability.
+        var canonical = new StringBuilder(4096);
+        void Add(string name, string? value)
+        {
+            canonical.Append(name).Append('=');
+            if (value is null)
+                canonical.Append("-1:");
+            else
+                canonical.Append(value.Length).Append(':').Append(value);
+            canonical.Append('\n');
+        }
+        void AddGuid(string name, Guid? value) => Add(name, value?.ToString("N"));
+        void AddDecimal(string name, decimal? value) => Add(name, value?.ToString("G29", CultureInfo.InvariantCulture));
+        void AddDate(string name, DateTime? value) => Add(name, value?.ToString("O", CultureInfo.InvariantCulture));
+        void AddBool(string name, bool value) => Add(name, value ? "1" : "0");
+        void AddInt(string name, int? value) => Add(name, value?.ToString(CultureInfo.InvariantCulture));
+
+        Add("domain", RequestFingerprintDomain);
+        Add("version", RequestFingerprintVersion);
+        AddGuid("tenantId", tenantId);
+        Add("sourceModule", sourceModule);
+        Add("originModuleCode", originModuleCode);
+        Add("sourceDocumentType", sourceDocumentType);
+        AddGuid("sourceDocumentId", sourceDocumentId);
+        AddGuid("sourceDocumentTenantId", tenantId);
+        Add("postingAction", postingAction);
+        Add("sourceDocumentReference", sourceDocumentReference);
+        Add("idempotencyKey", idempotencyKey);
+        AddGuid("existingJournalEntryId", existingJournalEntryId);
+        AddGuid("reversalOfJournalEntryId", reversalOfJournalEntryId);
+        Add("reversalReason", reversalReason);
+        Add("reversalType", reversalType);
+        Add("description", description);
+        AddDate("postingDate", postingDate);
+        AddGuid("fiscalPeriodId", fiscalPeriodId);
+        Add("journalType", journalType);
+        AddGuid("accountingBookId", accountingBookId);
+        Add("accountingBookCode", accountingBookCode);
+        Add("functionalCurrencyCode", functionalCurrencyCode);
+        Add("exchangeRateTypeOverride", request.ExchangeRateTypeOverride?.Trim().ToUpperInvariant());
+        Add("exchangeRateQuoteSideOverride", request.ExchangeRateQuoteSideOverride?.Trim().ToUpperInvariant());
+        Add("exchangeRateOverrideReason", NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"));
+        AddGuid("exchangeRateOverrideApprovedByUserId", request.ExchangeRateOverrideApprovedByUserId);
+        AddDate("exchangeRateOverrideApprovedAt", request.ExchangeRateOverrideApprovedAt);
+        AddBool("preserveHistoricalExchangeRateSnapshot", request.PreserveHistoricalExchangeRateSnapshot);
+        AddBool("allowPostingToClosedPeriod", request.AllowPostingToClosedPeriod);
+        Add("budgetReservationSourceDocumentType", budgetReservationSourceDocumentType);
+        Add("budgetReservationCount", budgetReservationIds.Count.ToString(CultureInfo.InvariantCulture));
+        for (var index = 0; index < budgetReservationIds.Count; index++)
+            AddGuid($"budgetReservation[{index}]", budgetReservationIds[index]);
+
+        Add("lineCount", lines.Count.ToString(CultureInfo.InvariantCulture));
+        for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+        {
+            var line = lines[lineIndex];
+            var prefix = $"line[{lineIndex}]";
+            AddGuid($"{prefix}.accountId", line.AccountId);
+            AddGuid($"{prefix}.sourceDocumentLineId", line.SourceDocumentLineId);
+            Add($"{prefix}.description", line.Description);
+            AddDecimal($"{prefix}.debitAmount", line.DebitAmount);
+            AddDecimal($"{prefix}.creditAmount", line.CreditAmount);
+            Add($"{prefix}.transactionCurrency", line.TransactionCurrency);
+            AddDecimal($"{prefix}.transactionDebitAmount", line.TransactionDebitAmount);
+            AddDecimal($"{prefix}.transactionCreditAmount", line.TransactionCreditAmount);
+            AddDecimal($"{prefix}.foreignCurrencyAmount", line.ForeignCurrencyAmount);
+            AddGuid($"{prefix}.exchangeRateId", line.ExchangeRateId);
+            AddDecimal($"{prefix}.exchangeRate", line.ExchangeRate);
+            Add($"{prefix}.exchangeRateSource", line.ExchangeRateSource);
+            AddDate($"{prefix}.exchangeRateDate", line.ExchangeRateDate);
+            Add($"{prefix}.sourceReferenceNumber", line.SourceReferenceNumber);
+            AddInt($"{prefix}.lineNumber", line.LineNumber);
+            Add($"{prefix}.segmentString", line.SegmentString);
+            Add($"{prefix}.notes", line.Notes);
+            Add($"{prefix}.transactionTag", line.TransactionTag);
+            AddGuid($"{prefix}.dimensionSetId", line.DimensionSet?.Id);
+            Add($"{prefix}.dimensionHash", line.DimensionSet?.CombinationHash);
+            var dimensionItems = line.DimensionSet?.Items
+                .OrderBy(item => item.DisplayOrder)
+                .ThenBy(item => item.DimensionCode, StringComparer.Ordinal)
+                .ThenBy(item => item.DefinitionId)
+                .ToArray() ?? [];
+            Add($"{prefix}.dimensionCount", dimensionItems.Length.ToString(CultureInfo.InvariantCulture));
+            for (var dimensionIndex = 0; dimensionIndex < dimensionItems.Length; dimensionIndex++)
+            {
+                var item = dimensionItems[dimensionIndex];
+                var dimensionPrefix = $"{prefix}.dimension[{dimensionIndex}]";
+                AddGuid($"{dimensionPrefix}.definitionId", item.DefinitionId);
+                AddGuid($"{dimensionPrefix}.valueId", item.ValueId);
+                Add($"{dimensionPrefix}.code", item.DimensionCode);
+                Add($"{dimensionPrefix}.name", item.DimensionName);
+                Add($"{dimensionPrefix}.valueCode", item.ValueCode);
+                Add($"{dimensionPrefix}.valueName", item.ValueName);
+                AddInt($"{dimensionPrefix}.displayOrder", item.DisplayOrder);
+                AddGuid($"{dimensionPrefix}.ruleId", item.RuleId);
+                AddGuid($"{dimensionPrefix}.ruleFamilyId", item.RuleFamilyId);
+                AddInt($"{dimensionPrefix}.ruleVersion", item.RuleVersion);
+                Add($"{dimensionPrefix}.ruleType", item.RuleType);
+                AddDate($"{dimensionPrefix}.ruleEffectiveDate", item.RuleEffectiveDate);
+                AddDate($"{dimensionPrefix}.ruleExpiryDate", item.RuleExpiryDate);
+            }
+        }
+
+        var taxSnapshots = (request.TaxCalculationSnapshots ?? Array.Empty<FinanceTaxCalculationSnapshotDto>())
+            .OrderBy(item => item.DocumentType, StringComparer.Ordinal)
+            .ThenBy(item => item.DocumentId)
+            .ThenBy(item => item.DocumentLineId)
+            .ThenBy(item => item.CalculationOrder)
+            .ThenBy(item => item.TaxId)
+            .ToArray();
+        Add("taxSnapshotCount", taxSnapshots.Length.ToString(CultureInfo.InvariantCulture));
+        for (var index = 0; index < taxSnapshots.Length; index++)
+        {
+            var item = taxSnapshots[index];
+            var prefix = $"tax[{index}]";
+            Add($"{prefix}.documentType", item.DocumentType?.Trim());
+            AddGuid($"{prefix}.documentId", item.DocumentId);
+            AddGuid($"{prefix}.documentLineId", item.DocumentLineId);
+            AddGuid($"{prefix}.taxId", item.TaxId);
+            AddGuid($"{prefix}.taxGroupId", item.TaxGroupId);
+            AddGuid($"{prefix}.postingAccountId", item.PostingAccountId);
+            AddDecimal($"{prefix}.baseAmount", item.BaseAmount);
+            AddDecimal($"{prefix}.taxableAmount", item.TaxableAmount);
+            AddDecimal($"{prefix}.taxRate", item.TaxRate);
+            AddDecimal($"{prefix}.taxAmount", item.TaxAmount);
+            AddInt($"{prefix}.compoundBasis", (int)item.CompoundBasis);
+            AddInt($"{prefix}.calculationOrder", item.CalculationOrder);
+            AddDate($"{prefix}.calculationDate", item.CalculationDate);
+            AddBool($"{prefix}.manualOverride", item.IsManualOverride);
+            Add($"{prefix}.overrideReason", item.OverrideReason?.Trim());
+        }
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
     }
 
     private static string GeneratePostingJournalNumber(string sourceModule, DateTime now)
@@ -3026,6 +3250,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string? ExchangeRateOverrideReason,
         Guid? ExchangeRateOverrideApprovedByUserId,
         DateTime? ExchangeRateOverrideApprovedAt,
+        IReadOnlyList<Guid> BudgetReservationIds,
+        string? BudgetReservationSourceDocumentType,
+        string RequestFingerprintVersion,
+        string RequestFingerprint,
         bool AllowsHistoricalMappingException);
 
     private sealed record ValidatedPostingLine(
