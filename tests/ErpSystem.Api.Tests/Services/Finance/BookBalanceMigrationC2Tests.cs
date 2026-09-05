@@ -26,8 +26,13 @@ public sealed class BookBalanceMigrationC2Tests
         var up = Operations(migration, "Up");
         var sql = string.Join("\n", up.OfType<SqlOperation>().Select(item => item.Sql));
         sql.Should().Contain("C2_ACCOUNT_BALANCE_PREFLIGHT")
+            .And.Contain("C2_BOOK_AUTHORITY_PREFLIGHT")
+            .And.Contain("C2_FUNCTIONAL_CURRENCY_AUTHORITY_PREFLIGHT")
             .And.Contain("Latin1_General_100_BIN2")
             .And.Contain("DATALENGTH")
+            .And.Contain("UPPER(LTRIM(RTRIM")
+            .And.Contain("ALL_ACTIVE_BOOKS")
+            .And.Contain("ALLCLASSIFIEDBOOKS")
             .And.Contain("duplicate rows collide")
             .And.Contain("C2_PRIMARY_BOOK_PREFLIGHT")
             .And.Contain("FinanceSettings")

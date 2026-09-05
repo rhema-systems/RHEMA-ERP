@@ -245,6 +245,36 @@ public sealed class BookBalanceReadModelC2Tests
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governance evidence*");
     }
 
+    [Theory]
+    [InlineData("account-code")]
+    [InlineData("account-number")]
+    [InlineData("account-type")]
+    [InlineData("mapping-identity")]
+    [InlineData("mapping-disabled")]
+    [InlineData("mapping-book")]
+    [InlineData("classification-id")]
+    [InlineData("classification-code")]
+    [InlineData("classification-core-type")]
+    [InlineData("classification-status")]
+    [InlineData("classification-posting")]
+    public async Task RebuildIdempotency_BindsPrimaryAccountMappingAndClassificationAuthority(string mutation)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.AddPostedEvidence(fixture.Lines(10m, 0m), fixture.Primary);
+        await fixture.Db.SaveChangesAsync();
+        var maker = Guid.NewGuid();
+        var checker = Guid.NewGuid();
+        var command = new BookBalanceReconciliationRequestDto(
+            "IFRS", true, "Governed rebuild", "authority-key", checker);
+        await fixture.Service.ReconcileAsync(fixture.TenantId, command, maker);
+
+        await fixture.MutatePrimaryAuthorityAsync(mutation);
+
+        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, command, maker))
+            .Should().ThrowAsync<InvalidOperationException>(
+                "changed derivation authority must never reuse the prior rebuild as a false no-op");
+    }
+
     [Fact]
     public async Task ReconciliationDrift_CoversDerivedFlagsDatesTotalsAndExposureFingerprint()
     {
@@ -292,6 +322,8 @@ public sealed class BookBalanceReadModelC2Tests
         public AccountingBook Primary { get; private set; } = null!;
         public AccountingBook Parallel { get; private set; } = null!;
         public Account Debit { get; private set; } = null!;
+        public AccountAccountingBook PrimaryMapping { get; private set; } = null!;
+        public AccountClassification PrimaryClassification { get; private set; } = null!;
         public FiscalPeriod Period { get; private set; } = null!;
         private FiscalYear _year = null!;
 
@@ -307,6 +339,24 @@ public sealed class BookBalanceReadModelC2Tests
             f.Parallel = new AccountingBook { Id = Guid.NewGuid(), TenantId = f.TenantId, Code = "LOCAL_STATUTORY", Name = "Local" };
             f.Debit = new Account { Id = Guid.NewGuid(), TenantId = f.TenantId, AccountCode = "1000", AccountNumber = "1000",
                 AccountName = "Cash", AccountType = AccountType.Asset, CurrencyCode = "GHS", Status = AccountStatus.Active };
+            f.PrimaryClassification = new AccountClassification
+            {
+                Id = Guid.NewGuid(), TenantId = f.TenantId, AccountingBookId = f.Primary.Id,
+                Code = "CASH", Name = "Cash", CoreAccountType = AccountType.Asset,
+                Status = AccountClassificationStatus.Active, IsPostingClassification = true
+            };
+            var parallelClassification = new AccountClassification
+            {
+                Id = Guid.NewGuid(), TenantId = f.TenantId, AccountingBookId = f.Parallel.Id,
+                Code = "CASH", Name = "Cash", CoreAccountType = AccountType.Asset,
+                Status = AccountClassificationStatus.Active, IsPostingClassification = true
+            };
+            f.PrimaryMapping = new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = f.TenantId, AccountId = f.Debit.Id,
+                AccountingBookId = f.Primary.Id, AccountClassificationId = f.PrimaryClassification.Id,
+                AccountClassification = f.PrimaryClassification, IsEnabled = true
+            };
             var year = new FiscalYear { Id = Guid.NewGuid(), TenantId = f.TenantId, Year = 2026,
                 FiscalYearName = "2026", FiscalYearCode = "FY2026",
                 StartDate = new(2026, 1, 1), EndDate = new(2026, 12, 31) };
@@ -314,11 +364,51 @@ public sealed class BookBalanceReadModelC2Tests
                 FiscalYear = year, PeriodName = "Sep", PeriodCode = "2026-09", PeriodNumber = 9,
                 StartDate = new(2026, 9, 1), EndDate = new(2026, 9, 30), IsOpen = true };
             f._year = year;
-            f.Db.AddRange(f.Primary, f.Parallel, f.Debit, year, f.Period,
-                new AccountAccountingBook { TenantId = f.TenantId, AccountId = f.Debit.Id, AccountingBookId = f.Primary.Id, IsEnabled = true },
-                new AccountAccountingBook { TenantId = f.TenantId, AccountId = f.Debit.Id, AccountingBookId = f.Parallel.Id, IsEnabled = true },
+            f.Db.AddRange(f.Primary, f.Parallel, f.Debit, f.PrimaryClassification, parallelClassification,
+                year, f.Period, f.PrimaryMapping,
+                new AccountAccountingBook { Id = Guid.NewGuid(), TenantId = f.TenantId, AccountId = f.Debit.Id,
+                    AccountingBookId = f.Parallel.Id, AccountClassificationId = parallelClassification.Id,
+                    AccountClassification = parallelClassification, IsEnabled = true },
                 new AccountCurrencyLink { TenantId = f.TenantId, AccountId = f.Debit.Id, LinkedCurrencyCode = "USD", IsActive = true });
             await f.Db.SaveChangesAsync(); return f;
+        }
+        public async Task MutatePrimaryAuthorityAsync(string mutation)
+        {
+            switch (mutation)
+            {
+                case "account-code": Debit.AccountCode = "1001"; break;
+                case "account-number": Debit.AccountNumber = "01-1001"; break;
+                case "account-type": Debit.AccountType = AccountType.Liability; break;
+                case "mapping-disabled": PrimaryMapping.IsEnabled = false; break;
+                case "mapping-book": PrimaryMapping.AccountingBookId = Parallel.Id; break;
+                case "mapping-identity":
+                    Db.AccountAccountingBooks.Remove(PrimaryMapping);
+                    PrimaryMapping = new AccountAccountingBook
+                    {
+                        Id = Guid.NewGuid(), TenantId = TenantId, AccountId = Debit.Id,
+                        AccountingBookId = Primary.Id, AccountClassificationId = PrimaryClassification.Id,
+                        AccountClassification = PrimaryClassification, IsEnabled = true
+                    };
+                    Db.AccountAccountingBooks.Add(PrimaryMapping);
+                    break;
+                case "classification-id":
+                    var replacement = new AccountClassification
+                    {
+                        Id = Guid.NewGuid(), TenantId = TenantId, AccountingBookId = Primary.Id,
+                        Code = "CASH_REPLACEMENT", Name = "Replacement cash", CoreAccountType = AccountType.Asset,
+                        Status = AccountClassificationStatus.Active, IsPostingClassification = true
+                    };
+                    Db.AccountClassifications.Add(replacement);
+                    PrimaryMapping.AccountClassificationId = replacement.Id;
+                    PrimaryMapping.AccountClassification = replacement;
+                    break;
+                case "classification-code": PrimaryClassification.Code = "CASH_CHANGED"; break;
+                case "classification-core-type": PrimaryClassification.CoreAccountType = AccountType.Liability; break;
+                case "classification-status": PrimaryClassification.Status = AccountClassificationStatus.Retired; break;
+                case "classification-posting": PrimaryClassification.IsPostingClassification = false; break;
+                default: throw new ArgumentOutOfRangeException(nameof(mutation));
+            }
+            await Db.SaveChangesAsync();
         }
         public FiscalPeriod AddPeriod(int number)
         {

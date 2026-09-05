@@ -17,9 +17,22 @@ namespace ErpSystem.Data.Migrations
             // databases fail closed rather than silently laundering legacy evidence through CI collation.
             migrationBuilder.Sql(@"
 IF EXISTS (
+    SELECT 1 FROM [AccountingBooks] b
+    WHERE b.[IsDeleted] = 0 AND (b.[Code] IS NULL OR LEN(b.[Code]) = 0
+       OR b.[Code] COLLATE Latin1_General_100_BIN2
+          <> UPPER(LTRIM(RTRIM(b.[Code]))) COLLATE Latin1_General_100_BIN2
+       OR DATALENGTH(b.[Code]) <> DATALENGTH(UPPER(LTRIM(RTRIM(b.[Code]))))
+       OR b.[Code] COLLATE Latin1_General_100_BIN2 IN
+          (N'ALL_ACTIVE_BOOKS' COLLATE Latin1_General_100_BIN2,
+           N'ALLCLASSIFIEDBOOKS' COLLATE Latin1_General_100_BIN2)))
+    THROW 51000, 'C2_BOOK_AUTHORITY_PREFLIGHT: accounting-book codes must be canonical concrete runtime codes.', 1;
+
+IF EXISTS (
     SELECT 1 FROM [AccountBalances] ab
     WHERE ab.[BookClassification] IS NULL OR LEN(ab.[BookClassification]) = 0
-       OR ab.[BookClassification] = 'ALL_ACTIVE_BOOKS'
+       OR ab.[BookClassification] COLLATE Latin1_General_100_BIN2 IN
+          (N'ALL_ACTIVE_BOOKS' COLLATE Latin1_General_100_BIN2,
+           N'ALLCLASSIFIEDBOOKS' COLLATE Latin1_General_100_BIN2)
        OR ab.[Currency] IS NULL OR DATALENGTH(ab.[Currency]) <> 6)
     THROW 51000, 'C2_ACCOUNT_BALANCE_PREFLIGHT: blank/pseudo book or invalid functional currency evidence.', 1;
 
@@ -32,6 +45,24 @@ IF EXISTS (
         WHERE b.[TenantId] = a.[TenantId] AND b.[IsDeleted] = 0
           AND b.[IsDefault] = 1 AND b.[IsActive] = 1 AND b.[AllowsPosting] = 1) <> 1)
     THROW 51000, 'C2_PRIMARY_BOOK_PREFLIGHT: each Finance tenant requires exactly one active default posting book.', 1;
+
+IF EXISTS (
+    SELECT 1
+    FROM [Tenants] t
+    OUTER APPLY (SELECT COUNT_BIG(*) MatchCount, MAX(fs.[BaseCurrency]) BaseCurrency
+        FROM [FinanceSettings] fs WHERE fs.[TenantId] = t.[Id] AND fs.[IsDeleted] = 0) configured
+    WHERE t.[IsDeleted] = 0 AND (t.[BaseCurrency] IS NULL OR DATALENGTH(t.[BaseCurrency]) <> 6
+       OR t.[BaseCurrency] COLLATE Latin1_General_100_BIN2
+          <> UPPER(LTRIM(RTRIM(t.[BaseCurrency]))) COLLATE Latin1_General_100_BIN2
+       OR configured.MatchCount > 1
+       OR (configured.MatchCount = 1 AND (configured.BaseCurrency IS NULL
+          OR DATALENGTH(configured.BaseCurrency) <> 6
+          OR configured.BaseCurrency COLLATE Latin1_General_100_BIN2
+             <> UPPER(LTRIM(RTRIM(configured.BaseCurrency))) COLLATE Latin1_General_100_BIN2
+          OR configured.BaseCurrency COLLATE Latin1_General_100_BIN2
+             <> t.[BaseCurrency] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(configured.BaseCurrency) <> DATALENGTH(t.[BaseCurrency])))))
+    THROW 51000, 'C2_FUNCTIONAL_CURRENCY_AUTHORITY_PREFLIGHT: tenant and Finance settings currency authority must be canonical and agree exactly.', 1;
 
 IF EXISTS (
     SELECT 1 FROM [AccountBalances] ab

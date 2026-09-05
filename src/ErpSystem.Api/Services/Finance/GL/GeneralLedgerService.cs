@@ -310,6 +310,23 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Take(2).ToListAsync();
             if (primaryBooks.Count != 1)
                 throw new InvalidOperationException("PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Legacy balance inquiry requires exactly one active default posting book.");
+            // Account.Balance is only a primary-book compatibility value. Returning it without the
+            // same governed mapping/classification used by V2 posting would expose an ineligible account.
+            var eligibility = await _context.AccountAccountingBooks.AsNoTracking()
+                .Include(item => item.AccountClassification)
+                .Where(item => item.TenantId == tenantId && item.AccountId == account.Id
+                    && item.AccountingBookId == primaryBooks[0].Id && item.IsEnabled && !item.IsDeleted)
+                .Take(2).ToListAsync();
+            if (eligibility.Count != 1
+                || eligibility[0].AccountClassification is not { } classification
+                || classification.TenantId != tenantId
+                || classification.AccountingBookId != primaryBooks[0].Id
+                || classification.Status != AccountClassificationStatus.Active
+                || !classification.IsPostingClassification
+                || classification.CoreAccountType != account.AccountType
+                || classification.IsDeleted)
+                throw new InvalidOperationException(
+                    "ACCOUNT_BOOK_MAPPING_INVALID: Legacy balance inquiry requires one enabled compatible primary-book classification mapping.");
             var requestedCurrency = string.IsNullOrWhiteSpace(currencyCode)
                 ? await _tenantSettings.GetBaseCurrencyAsync()
                 : currencyCode.Trim().ToUpperInvariant();

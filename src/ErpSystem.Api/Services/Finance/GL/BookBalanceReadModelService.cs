@@ -213,7 +213,8 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             throw new InvalidOperationException("Transaction currency evidence does not exactly match tenant/canonical currency authority.");
         var expectedBalances = BuildBalances(tenantId, book, transactions);
         var expectedExposures = BuildExposures(tenantId, book, transactions);
-        var fingerprint = Fingerprint(transactions);
+        var transactionFingerprint = Fingerprint(transactions);
+        var fingerprint = transactionFingerprint;
         var existingBalances = await _context.AccountBalances.AsNoTracking().Where(item =>
             item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted).ToListAsync(cancellationToken);
         var existingExposures = await _context.AccountCurrencyExposures.AsNoTracking().Where(item =>
@@ -225,8 +226,10 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         Dictionary<Guid, decimal>? primaryCompatibility = null;
         if (book.Id == primaryBook.Id)
         {
-            var accounts = await _context.Accounts.Where(item => item.TenantId == tenantId && !item.IsDeleted)
-                .ToDictionaryAsync(item => item.Id, item => item, cancellationToken);
+            var authority = await LoadPrimaryCompatibilityAuthorityAsync(
+                tenantId, book, transactions, cancellationToken);
+            var accounts = authority.Accounts;
+            fingerprint = ReconciliationFingerprint(transactionFingerprint, authority.Fingerprint);
             primaryCompatibility = BuildPrimaryCompatibility(transactions, accounts);
             compatibilityDrift = accounts.Values.Count(account =>
                 account.Balance != primaryCompatibility.GetValueOrDefault(account.Id));
@@ -553,6 +556,68 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
             tenantId.ToString("N"), book.Id.ToString("N"), book.Code,
             request.IdempotencyKey!.Trim(), request.Reason!.Trim(),
             requestedByUserId.ToString("N"), request.ApprovedByUserId!.Value.ToString("N"), sourceFingerprint);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence)));
+    }
+
+    private async Task<(Dictionary<Guid, Account> Accounts, string Fingerprint)>
+        LoadPrimaryCompatibilityAuthorityAsync(Guid tenantId, AccountingBook book,
+            IReadOnlyCollection<AccountTransaction> transactions, CancellationToken cancellationToken)
+    {
+        var accountIds = transactions.Select(item => item.AccountId).Distinct().OrderBy(item => item).ToArray();
+        var accounts = await _context.Accounts.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && accountIds.Contains(item.Id) && !item.IsDeleted)
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (accounts.Count != accountIds.Length)
+            throw new InvalidOperationException("Primary compatibility evidence references an unavailable account.");
+
+        var mappings = await _context.AccountAccountingBooks.AsNoTracking()
+            .Include(item => item.AccountClassification)
+            .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
+                && accountIds.Contains(item.AccountId) && !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+        foreach (var accountId in accountIds)
+        {
+            var eligible = mappings.Where(item => item.AccountId == accountId && item.IsEnabled).ToArray();
+            var account = accounts[accountId];
+            if (eligible.Length != 1 || eligible[0].AccountClassification is not { } classification
+                || classification.TenantId != tenantId || classification.AccountingBookId != book.Id
+                || classification.Status != AccountClassificationStatus.Active
+                || !classification.IsPostingClassification || classification.IsDeleted
+                || classification.CoreAccountType != account.AccountType)
+                throw new InvalidOperationException(
+                    "Primary compatibility rebuild requires one enabled compatible account/book classification mapping.");
+        }
+
+        return (accounts, CompatibilityAuthorityFingerprint(accounts.Values, mappings.Where(item => item.IsEnabled)));
+    }
+
+    private static string CompatibilityAuthorityFingerprint(
+        IEnumerable<Account> accounts, IEnumerable<AccountAccountingBook> mappings)
+    {
+        var text = new StringBuilder("RHEMA-FINANCE-PRIMARY-COMPATIBILITY-AUTHORITY|V1\n");
+        foreach (var account in accounts.OrderBy(item => item.Id))
+            text.Append("ACCOUNT|").Append(account.Id.ToString("N")).Append('|')
+                .Append(account.TenantId.ToString("N")).Append('|').Append(account.AccountCode).Append('|')
+                .Append(account.AccountNumber).Append('|').Append((int)account.AccountType).Append('\n');
+        foreach (var mapping in mappings.OrderBy(item => item.AccountId).ThenBy(item => item.Id))
+        {
+            var classification = mapping.AccountClassification
+                ?? throw new InvalidOperationException("Primary compatibility classification evidence is unavailable.");
+            text.Append("MAPPING|").Append(mapping.Id.ToString("N")).Append('|')
+                .Append(mapping.TenantId.ToString("N")).Append('|').Append(mapping.AccountId.ToString("N")).Append('|')
+                .Append(mapping.AccountingBookId.ToString("N")).Append('|')
+                .Append(mapping.AccountClassificationId?.ToString("N")).Append('|').Append(mapping.IsEnabled ? '1' : '0').Append('|')
+                .Append(classification.Id.ToString("N")).Append('|').Append(classification.TenantId.ToString("N")).Append('|')
+                .Append(classification.AccountingBookId.ToString("N")).Append('|').Append(classification.Code).Append('|')
+                .Append((int)classification.CoreAccountType).Append('|').Append((int)classification.Status).Append('|')
+                .Append(classification.IsPostingClassification ? '1' : '0').Append('\n');
+        }
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
+    }
+
+    private static string ReconciliationFingerprint(string transactionFingerprint, string authorityFingerprint)
+    {
+        var evidence = $"RHEMA-FINANCE-BOOK-BALANCE-RECONCILIATION|V2|{transactionFingerprint}|{authorityFingerprint}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence)));
     }
 

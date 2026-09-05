@@ -82,6 +82,35 @@ public sealed class BookBalanceMigrationC2SqlServerTests
         }
     }
 
+    [SqlServerFact]
+    public async Task Migration_RejectsNonCanonicalBookAndCurrencyAuthoritiesBeforeMutation()
+    {
+        var cases = new[]
+        {
+            (Book: "ifrs", TenantCurrency: "GHS", SettingsCurrency: "GHS"),
+            (Book: "IFRS ", TenantCurrency: "GHS", SettingsCurrency: "GHS"),
+            (Book: "ALL_ACTIVE_BOOKS", TenantCurrency: "GHS", SettingsCurrency: "GHS"),
+            (Book: "ALLCLASSIFIEDBOOKS", TenantCurrency: "GHS", SettingsCurrency: "GHS"),
+            (Book: "IFRS", TenantCurrency: "ghs", SettingsCurrency: "ghs"),
+            (Book: "IFRS", TenantCurrency: "GHS", SettingsCurrency: "ghs"),
+            (Book: "IFRS", TenantCurrency: "GHS", SettingsCurrency: "USD")
+        };
+        foreach (var item in cases)
+        {
+            await using var database = await DisposableDatabase.CreateAsync();
+            await database.CreatePredecessorAsync(item.Book, item.TenantCurrency,
+                authoritativeBookCode: item.Book, tenantCurrency: item.TenantCurrency,
+                financeSettingsCurrency: item.SettingsCurrency);
+
+            var action = () => database.ApplyAsync(up: true);
+
+            (await action.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+            (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID(N'AccountBalances') AND name=N'AccountingBookId'"))
+                .Should().Be(0);
+            (await database.ScalarAsync<decimal>("SELECT TOP(1) Balance FROM Accounts")).Should().Be(2000m);
+        }
+    }
+
     private sealed class SqlServerFactAttribute : FactAttribute
     {
         public SqlServerFactAttribute()
@@ -116,7 +145,8 @@ public sealed class BookBalanceMigrationC2SqlServerTests
 
         public async Task<(Guid TenantId, Guid BookId)> CreatePredecessorAsync(string balanceBookCode, string currency,
             bool crossTenantBook = false, bool crossTenantAccount = false, bool crossTenantPeriod = false,
-            bool ambiguousBook = false, int defaultBookCount = 1)
+            bool ambiguousBook = false, int defaultBookCount = 1, string authoritativeBookCode = "IFRS",
+            string tenantCurrency = "GHS", string financeSettingsCurrency = "GHS")
         {
             var tenantId = Guid.NewGuid(); var bookId = Guid.NewGuid(); var localBookId = Guid.NewGuid();
             var accountId = Guid.NewGuid(); var periodId = Guid.NewGuid();
@@ -143,16 +173,16 @@ CREATE INDEX IX_AccountBalances_FiscalPeriodId ON AccountBalances(FiscalPeriodId
 CREATE UNIQUE INDEX IX_AccountBalances_TenantId_AccountId_FiscalPeriodId_BookClassification_Currency ON AccountBalances(TenantId,AccountId,FiscalPeriodId,BookClassification,Currency);
 ALTER TABLE AccountBalances ADD CONSTRAINT FK_AccountBalances_Accounts_AccountId FOREIGN KEY(AccountId) REFERENCES Accounts(Id);
 ALTER TABLE AccountBalances ADD CONSTRAINT FK_AccountBalances_FiscalPeriods_FiscalPeriodId FOREIGN KEY(FiscalPeriodId) REFERENCES FiscalPeriods(Id);
-INSERT Tenants VALUES ('{{tenantId}}',N'GHS',0);
-INSERT AccountingBooks VALUES ('{{bookId}}','{{bookTenantId}}',N'IFRS',0,{{primaryDefault}},1,1);
+INSERT Tenants VALUES ('{{tenantId}}',N'{{tenantCurrency.Replace("'", "''")}}',0);
+INSERT AccountingBooks VALUES ('{{bookId}}','{{bookTenantId}}',N'{{authoritativeBookCode.Replace("'", "''")}}',0,{{primaryDefault}},1,1);
 INSERT AccountingBooks VALUES ('{{localBookId}}','{{tenantId}}',N'LOCAL_STATUTORY',0,{{secondDefault}},1,1);
 {{duplicateBook}}
 INSERT Accounts VALUES ('{{accountId}}','{{accountTenantId}}',1,2000,0);
 INSERT FiscalPeriods VALUES ('{{periodId}}','{{periodTenantId}}');
-INSERT FinanceSettings VALUES ('{{Guid.NewGuid()}}','{{tenantId}}',N'GHS',0);
-INSERT JournalEntries VALUES ('{{primaryJournalId}}','{{tenantId}}','{{bookId}}',N'IFRS',N'Posted',0);
+INSERT FinanceSettings VALUES ('{{Guid.NewGuid()}}','{{tenantId}}',N'{{financeSettingsCurrency.Replace("'", "''")}}',0);
+INSERT JournalEntries VALUES ('{{primaryJournalId}}','{{tenantId}}','{{bookId}}',N'{{authoritativeBookCode.Replace("'", "''")}}',N'Posted',0);
 INSERT JournalEntries VALUES ('{{localJournalId}}','{{tenantId}}','{{localBookId}}',N'LOCAL_STATUTORY',N'Posted',0);
-INSERT AccountTransactions VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{primaryJournalId}}','{{bookId}}',N'IFRS',N'Posted',1000,0,0);
+INSERT AccountTransactions VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{primaryJournalId}}','{{bookId}}',N'{{authoritativeBookCode.Replace("'", "''")}}',N'Posted',1000,0,0);
 INSERT AccountTransactions VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{localJournalId}}','{{localBookId}}',N'LOCAL_STATUTORY',N'Posted',1000,0,0);
 INSERT AccountBalances VALUES ('{{Guid.NewGuid()}}','{{tenantId}}','{{accountId}}','{{periodId}}',N'{{balanceBookCode.Replace("'", "''")}}',N'{{currency.Replace("'", "''")}}');
 """);
