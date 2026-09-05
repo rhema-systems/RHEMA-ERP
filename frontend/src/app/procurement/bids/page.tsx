@@ -245,7 +245,7 @@ export default function BidsPage() {
       'Tender Number': bid.tenderNumber,
       'Tender Title': bid.tenderTitle,
       'Business Partner': bid.businessPartnerName,
-      'Total Amount': bid.totalBidAmount,
+      'Total Amount': bid.isSealed || bid.isFinancialProposalSealed ? 'Sealed' : bid.totalBidAmount,
       Currency: bid.currency,
       'Submitted Date': bid.submittedDate
         ? format(new Date(bid.submittedDate), 'PPP')
@@ -446,7 +446,7 @@ export default function BidsPage() {
                         {bid.businessPartnerName}
                       </TableCell>
                       <TableCell className="font-semibold">
-                        {formatCurrency(bid.totalBidAmount, bid.currency)}
+                        {bid.isSealed || bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                       </TableCell>
                       <TableCell>
                         {bid.submittedDate

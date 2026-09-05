@@ -5,6 +5,8 @@ import type { TenderBidInitiationStatus } from '@/lib/tender-bid-initiation';
 // ==================== INTERFACES ====================
 
 export interface TenderBidSummaryDto {
+  isSealed?: boolean;
+  isFinancialProposalSealed?: boolean;
   id: string;
   tenderId: string;
   tenderNumber: string;
@@ -21,6 +23,8 @@ export interface TenderBidSummaryDto {
 }
 
 export interface TenderBidDetailDto {
+  isSealed?: boolean;
+  isFinancialProposalSealed?: boolean;
   id: string;
   tenderId: string;
   tenderNumber: string;

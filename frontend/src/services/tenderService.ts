@@ -355,6 +355,8 @@ export interface CreateTenderRevisionDto {
 }
 
 export interface TenderBidSummaryDto {
+  isSealed?: boolean;
+  isFinancialProposalSealed?: boolean;
   id: string;
   tenderId: string;
   businessPartnerId: string;

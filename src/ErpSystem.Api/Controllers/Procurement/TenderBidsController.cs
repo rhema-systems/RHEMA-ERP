@@ -972,6 +972,8 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var bid = await _bidService.GetBidByIdAsync(bidId);
+            if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
             var lots = await _bidService.GetBidLotsAsync(bidId);
             return Ok(lots);
         }
@@ -995,6 +997,8 @@ public class TenderBidsController : ControllerBase
             {
                 return NotFound($"Bid lot with ID {bidLotId} not found");
             }
+            var bid = await _bidService.GetBidByIdAsync(lot.TenderBidId);
+            if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
             return Ok(lot);
         }
         catch (Exception ex)

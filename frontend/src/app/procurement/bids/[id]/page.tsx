@@ -667,6 +667,46 @@ export default function BidDetailPage() {
     );
   }
 
+  const openBidConfirmation = (
+    <ConfirmationDialog
+      open={showOpenDialog && canAdministerTender}
+      onOpenChange={setShowOpenDialog}
+      title="Mark Bid as Opened"
+      description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."
+      confirmText="Mark as Opened"
+      cancelText="Cancel"
+      variant="default"
+      onConfirm={confirmOpenBid}
+      isLoading={opening}
+    />
+  );
+
+  if (bid.isSealed) {
+    const openingTime = sourceTender?.openingDate ? Date.parse(sourceTender.openingDate) : NaN;
+    const closingTime = sourceTender?.submissionDeadline ? Date.parse(sourceTender.submissionDeadline) : NaN;
+    const canRequestOpening = canAdministerTender && bid.status === 'Submitted' &&
+      sourceTender?.status === 'Closed' && sourceTender.usesControlledTenderLifecycle === false &&
+      closingTime <= Date.now() && openingTime <= Date.now();
+    return (
+      <div className="container mx-auto py-6 space-y-6">
+        <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${bid.tenderId}`)}>
+          <ArrowLeft className="h-4 w-4 mr-2" />Return to tender
+        </Button>
+        <Card>
+          <CardHeader><CardTitle>Bid sealed</CardTitle></CardHeader>
+          <CardContent>
+            <p className="font-mono mb-2">{bid.bidNumber}</p>
+            <p>Prices, proposals and attachments remain confidential until formal bid opening. Complete the committee, closing-time and quorum prerequisites from the tender process flow.</p>
+            {canRequestOpening && (
+              <Button className="mt-4" onClick={handleOpenBid} disabled={opening}>Open bid</Button>
+            )}
+          </CardContent>
+        </Card>
+        {openBidConfirmation}
+      </div>
+    );
+  }
+
   const evaluationRoute: TenderEvaluationRoute | undefined = sourceTender
     ? getTenderEvaluationRoute(sourceTender, bidId)
     : undefined;
@@ -720,7 +760,7 @@ export default function BidDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
-              {formatCurrency(bid.totalBidAmount, bid.currency)}
+              {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
             </p>
           </CardContent>
         </Card>
@@ -857,7 +897,7 @@ export default function BidDetailPage() {
               <div>
                 <p className="text-sm text-gray-500">Total Bid Amount</p>
                 <p className="font-semibold">
-                  {formatCurrency(bid.totalBidAmount, bid.currency)}
+                  {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                 </p>
               </div>
               <div>
@@ -1298,7 +1338,7 @@ export default function BidDetailPage() {
                           Total Bid Amount:
                         </span>
                         <span className="text-2xl font-bold text-blue-600 break-all text-right">
-                          {formatCurrency(bid.totalBidAmount, bid.currency)}
+                          {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                         </span>
                       </div>
                     </div>
@@ -1896,17 +1936,7 @@ export default function BidDetailPage() {
       </Tabs>
 
       {/* Open Bid Confirmation Dialog */}
-      <ConfirmationDialog
-        open={showOpenDialog && canAdministerTender}
-        onOpenChange={setShowOpenDialog}
-        title="Mark Bid as Opened"
-        description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."
-        confirmText="Mark as Opened"
-        cancelText="Cancel"
-        variant="default"
-        onConfirm={confirmOpenBid}
-        isLoading={opening}
-      />
+      {openBidConfirmation}
     </div>
   );
 }

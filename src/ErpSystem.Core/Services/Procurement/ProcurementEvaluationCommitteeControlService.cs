@@ -1508,6 +1508,31 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
 
         if (state is null)
         {
+            var sourcing = tender.SourcingCase;
+            var requiresAdvanced = sourcing is null || ProcurementTenderRouting.RequiresControlledLifecycle(
+                sourcing.SelectedMethod,
+                ProcurementTenderRouting.HasAdvancedAuthority(sourcing.AuthorityRouteId, sourcing.AuthorityRouteReference));
+            if (!requiresAdvanced && (tender.Status is "Published" or "Closed" or "Awarded") &&
+                tender.SubmissionDeadline.HasValue)
+            {
+                var hasSubmission = await _unitOfWork.Repository<TenderBid>().GetQueryable(bid =>
+                        bid.TenantId == _currentUser.TenantId && bid.TenderId == tender.Id && !bid.IsDeleted &&
+                        (bid.Status == "Submitted" || bid.Status == "Opened" || bid.Status == "UnderEvaluation" ||
+                         bid.Status == "Evaluated" || bid.Status == "Awarded") &&
+                        bid.SubmittedDate != default && bid.SubmittedDate <= tender.SubmissionDeadline.Value)
+                    .AnyAsync(cancellationToken);
+                var preparation = hasSubmission ? LifecycleGate.Ready : LifecycleGate.Blocked(
+                    "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED",
+                    "At least one on-time sealed bid must be registered before the evaluation committee is constituted or begins member actions.");
+                return source with
+                {
+                    CommitteePreparationGate = preparation,
+                    MeetingGate = !hasSubmission ? preparation : DateTime.UtcNow < tender.SubmissionDeadline.Value
+                        ? LifecycleGate.Blocked("EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE",
+                            "The bidding window must close before an evaluation meeting, attendance or quorum can be recorded.")
+                        : LifecycleGate.Ready
+                };
+            }
             var notPublished = LifecycleGate.Blocked(
                 "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED",
                 "Publish the approved tender and open its governed bidding window before constituting the evaluation committee.");

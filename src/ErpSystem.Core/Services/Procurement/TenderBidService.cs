@@ -1114,10 +1114,16 @@ public class TenderBidService : ITenderBidService
                     TotalBidAmount = bid.TotalBidAmount,
                     Currency = bid.Currency
                 };
-                if (await ShouldConcealFinancialProposalAsync(tenderId, bid.Id))
+                item.IsSealed = !bid.OpenedDate.HasValue;
+                if (item.IsSealed || await ShouldConcealFinancialProposalAsync(tenderId, bid.Id))
                 {
                     item.TotalBidAmount = 0m;
                     item.Currency = null;
+                    if (item.IsSealed)
+                    {
+                        item.BusinessPartnerName = string.Empty;
+                        item.BusinessPartnerCode = string.Empty;
+                    }
                 }
                 result.Add(item);
             }
@@ -1348,8 +1354,13 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var documents = await _bidDocumentRepository.GetByBidIdAsync(bidId);
-            return documents.Select(MapBidDocumentToDto);
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            if (bid is null || (!_currentUserProvider.IsExternalUser && !bid.OpenedDate.HasValue))
+                return Array.Empty<TenderBidDocumentDto>();
+            var documents = (await _bidDocumentRepository.GetByBidIdAsync(bidId)).Select(MapBidDocumentToDto);
+            return await ShouldConcealFinancialProposalAsync(bid.TenderId, bidId)
+                ? documents.Where(IsExplicitTechnicalProposalDocument).ToList()
+                : documents.ToList();
         }
         catch (Exception ex)
         {
@@ -1763,17 +1774,29 @@ public class TenderBidService : ITenderBidService
 
     private async Task<TenderBidSummaryDto> ProtectFinancialProposalAsync(TenderBidSummaryDto value)
     {
+        if (_currentUserProvider.IsExternalUser)
+        {
+            value.IsSealed = false;
+            return value;
+        }
+        if (value.IsSealed) return ProcurementBidDisclosure.Seal(value);
         if (!await ShouldConcealFinancialProposalAsync(value.TenderId, value.Id)) return value;
+        value.IsFinancialProposalSealed = true;
         value.TotalBidAmount = 0m;
         value.Currency = null;
         value.FinancialScore = null;
         value.CombinedScore = null;
+        value.TotalScore = null;
+        value.Rank = null;
         return value;
     }
 
     private async Task<TenderBidDetailDto> ProtectFinancialProposalAsync(TenderBidDetailDto value)
     {
+        if (!_currentUserProvider.IsExternalUser && !value.OpenedDate.HasValue)
+            return ProcurementBidDisclosure.Seal(value);
         if (!await ShouldConcealFinancialProposalAsync(value.TenderId, value.Id)) return value;
+        value.IsFinancialProposalSealed = true;
         value.TotalBidAmount = 0m;
         value.Currency = null;
         value.PaymentTerms = null;
@@ -1781,12 +1804,15 @@ public class TenderBidService : ITenderBidService
         value.PriceScore = null;
         value.FinancialScore = null;
         value.CombinedScore = null;
+        value.TotalScore = null;
+        value.Rank = null;
         value.Evaluations.Clear();
         foreach (var item in value.Items)
         {
             item.UnitPrice = 0m;
             item.TotalPrice = 0m;
         }
+        value.BidLots = value.BidLots.Select(ProcurementBidDisclosure.HideFinancials).ToList();
         value.Documents = value.Documents.Where(IsExplicitTechnicalProposalDocument).ToList();
         return value;
     }
@@ -1867,6 +1893,7 @@ public class TenderBidService : ITenderBidService
     {
         return new TenderBidSummaryDto
         {
+            IsSealed = !bid.OpenedDate.HasValue,
             Id = bid.Id,
             BidNumber = bid.BidNumber,
             TenderId = bid.TenderId,
@@ -2442,8 +2469,13 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var bidLots = await _bidLotRepository.GetByBidIdAsync(bidId);
-            return bidLots.Select(MapToBidLotDto);
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            if (bid is null || (!_currentUserProvider.IsExternalUser && !bid.OpenedDate.HasValue))
+                return Array.Empty<TenderBidLotDto>();
+            var bidLots = (await _bidLotRepository.GetByBidIdAsync(bidId)).Select(MapToBidLotDto);
+            return await ShouldConcealFinancialProposalAsync(bid.TenderId, bidId)
+                ? bidLots.Select(ProcurementBidDisclosure.HideFinancials).ToList()
+                : bidLots.ToList();
         }
         catch (Exception ex)
         {
@@ -2457,7 +2489,12 @@ public class TenderBidService : ITenderBidService
         try
         {
             var bidLot = await _bidLotRepository.GetByIdWithItemsAsync(bidLotId);
-            return bidLot != null ? MapToBidLotDto(bidLot) : null;
+            if (bidLot is null) return null;
+            var bid = await _bidRepository.GetByIdAsync(bidLot.TenderBidId);
+            if (bid is null || (!_currentUserProvider.IsExternalUser && !bid.OpenedDate.HasValue)) return null;
+            var result = MapToBidLotDto(bidLot);
+            return await ShouldConcealFinancialProposalAsync(bid.TenderId, bid.Id)
+                ? ProcurementBidDisclosure.HideFinancials(result) : result;
         }
         catch (Exception ex)
         {

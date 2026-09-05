@@ -20,6 +20,70 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
     [Fact]
+    public async Task StandardPublishedTenderWithOnTimeBidCanConstituteWithoutAdvancedControl()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var readiness = await fixture.Service.GetReadinessAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        readiness.AllowedActions.Should().Contain("bind");
+        var control = await fixture.BindDraftAsync();
+        control.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Draft);
+        (await fixture.Context.ProcurementTenderControls.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("Draft", -1, false)]
+    [InlineData("Withdrawn", -1, false)]
+    [InlineData("Submitted", 1, false)]
+    [InlineData("Submitted", -1, true)]
+    public async Task StandardTenderDoesNotAcceptDraftWithdrawnLateOrOtherTenantBid(string status, int minutes, bool otherTenant)
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1), status, minutes, otherTenant);
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync()).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED");
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.QualityBasedSelection, false)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection, false)]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, true)]
+    public async Task MissingAdvancedControlCannotDowngradeToStandard(ProcurementMethodType method, bool partialAuthority)
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var source = fixture.Context.Set<ProcurementSourcingCase>().Single();
+        source.SelectedMethod = method;
+        if (partialAuthority) source.AuthorityRouteReference = "AUTH-REQUIRED";
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync()).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED");
+    }
+
+    [Fact]
+    public async Task StandardCommitteeStillCannotMeetBeforeClosing()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchAdministrator();
+        await fixture.Service.Invoking(service => service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical, MeetingMode = "InPerson",
+                MeetingChannel = "UAT room", ScheduledAtUtc = DateTime.UtcNow,
+                EvidenceReference = "LOCAL-UAT", CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "standard-early-meeting"
+            }, "standard-early-meeting")).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE");
+        (await fixture.Context.ProcurementEvaluationMeetings.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public void SqlCommitteeLineageGuardIsRecognisedForStructuredErrorMapping()
     {
         var exception = new DbUpdateException(
@@ -1226,6 +1290,27 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             Context.ProcurementTenderControls.RemoveRange(
                 Context.ProcurementTenderControls.Where(item =>
                     item.TenderId == Tender.Id));
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void SetStandardTender(DateTime deadline, string bidStatus = "Submitted", int minutes = -1, bool otherTenant = false)
+        {
+            Context.ProcurementTenderSubmissionReceipts.RemoveRange(Context.ProcurementTenderSubmissionReceipts);
+            Context.ProcurementTenderControls.RemoveRange(Context.ProcurementTenderControls);
+            var source = Context.Set<ProcurementSourcingCase>().Single(item => item.Id == SourcingCase.Id);
+            source.AuthorityRouteId = null;
+            source.AuthorityRouteReference = null;
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.Status = "Published";
+            tender.PublishDate = DateTime.UtcNow.AddDays(-1);
+            tender.SubmissionDeadline = deadline;
+            Context.Set<TenderBid>().Add(new TenderBid
+            {
+                Id = Guid.NewGuid(), TenantId = otherTenant ? Guid.NewGuid() : TenantId,
+                TenderId = tender.Id, BusinessPartnerId = Guid.NewGuid(), BidNumber = "BID-STANDARD-1",
+                Status = bidStatus, SubmittedDate = minutes < 0 ? DateTime.UtcNow.AddMinutes(minutes) : deadline.AddMinutes(minutes), Currency = "GHS"
+            });
             Context.SaveChanges();
             Context.ChangeTracker.Clear();
         }
