@@ -11,17 +11,17 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C2 — book-aware balance and currency-exposure foundation |
-| Status | `AUTHORIZED_PENDING_IMPLEMENTATION` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
 | Branch | `codex/finance-multibook-balance-foundation` |
-| Worktree | To be created by implementing task from the exact base |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-multibook-balance-foundation` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `a1783dce4b6fe749ba1b9f4a8562213429026478` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C1 approved and integrated; C2 awaiting implementation handoff |
+| Review status | C2 candidate `0467a9eb` rejected by independent Sol High review; corrections dispatched |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -322,3 +322,16 @@ balance queries require and display one exact book; and restrict generic `Accoun
 primary/default-book compatibility without ever summing alternative representations. Preserve the C1
 `PARALLEL_BOOK_POSTING_DISABLED` gate. C2 must not add accounting-book lifecycle/types, book periods,
 initialization workflow, applicability or neutral-event orchestration, and must not issue owner-module work.
+
+Stage C2 review cycle 1 examined clean candidate `0467a9eb59741c11ec7c4557d164f26d936588fe`
+from exact base `a1783dce4b6fe749ba1b9f4a8562213429026478` using GPT-5.6 Sol High and returned
+`CHANGES_REQUIRED`. The independent review found that historical generic `Account.Balance` values are not
+rebuilt to primary-book-only compatibility; migration preflight does not fully enforce C1 canonical book-code
+and tenant functional-currency invariants; existing Finance ratio/allocation consumers remain ambiguous or
+IFRS-hardcoded against multi-book rows; and reconciliation evidence is incomplete because its fingerprint,
+drift comparison, and dry-run consistency boundary omit material derivation state. A backdated posting also
+fails to refresh later-period zero/negative flags. The candidate improperly edits this coordinator-owned
+ledger and must restore it to the exact-base version. Candidate gates otherwise passed 142 focused tests with
+two SQL Server tests environment-gated, 65 lifecycle/FX tests, EF no-pending-model, and diff checks; no database
+was mutated. A substantive Sol Medium correction cycle was dispatched with explicit migration, rebuild,
+consumer, concurrency, and regression requirements. Integration and Stage C3 remain blocked.
