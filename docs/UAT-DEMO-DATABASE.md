@@ -30,35 +30,46 @@ powershell -File .\scripts\New-UatDatabase.ps1
 ErpSystemDB_UAT
 ```
 
-**A4.** Wait. It runs four steps and takes a few minutes. You should see, in order:
+**A4.** Wait. It runs five steps and takes **45–60 minutes** (the fifth is the long one). You should
+see, in order:
 
 ```
   -> Rebuilding schema from the EF model and running base seeders
   -> Seeding workflow definitions (approvals refuse to submit without these)
   -> Seeding HR reference data and TDC organisation structure
   -> Seeding the DEMO workforce, leave calendar and HR/SHE sample data
+  -> Building the transactional layer and checking coverage
 ```
 
-**A5.** It then prints what it built. It should look like this:
+The fifth step starts the scanner stub and the API itself (on port 5000 — nothing else may be on
+it, see B1), runs every demo scenario as the personas, checks the result, and stops what it
+started. It prints one `▶` line per scenario with a `✓` or `✗` under it.
+
+**A5.** It then prints three verdicts. All three must be green:
 
 ```
-    Employees             = 127
-    Leave types           = 9
-    Public holidays       = 26
-    Positions             = 137
-    Organisation units    = 41
-    Units with a head     = 38
-    Active workflow defs  = 90
-    Roles                 = 48
-    -- demo dataset --
-    Demo staff (TDC/...)  = 103
-    Demo logins (linked)  = 8
+  SCENARIOS: <n> ok, 0 failed
+  REQUIRED: <n> of <n> tables hold data; 0 still empty; 48 excluded (logs)
+  RUNBOOK: <n> of <n> required names found; 0 unmet
+  DEMO DATASET COMPLETE: scenarios ok, every required table holds data, runbooks consistent.
 ```
 
-Then run the scenarios (section F) to load the transactions.
+and finally the row counts (`Employees = 127`, `Demo staff (TDC/...) = 103`, `Demo logins
+(linked) = 9`, …). **If the last banner is red, the database is not fit for a demo.** Read the `✗`
+lines, fix the cause, and re-run just the fifth step — it is safe to repeat:
+
+```powershell
+powershell -File .\scripts\Invoke-UatDemoScenarios.ps1
+```
 
 > The script refuses to touch `ErpSystemDB`. If you typo the name into the dev database it stops
 > with `REFUSED:` and does nothing.
+
+**Where the database password comes from.** None of the scripts carries one. Each takes it from
+`-Password`, else `$env:ERP_DB_PASSWORD`, else the `DefaultConnection` string in
+`src/ErpSystem.Api/appsettings.json` — which is gitignored and is the file the API itself reads. So
+a rotated password is changed in one place and everything follows it, and no credential is ever
+staged. See `scripts/ErpDbCredential.ps1`.
 
 ---
 
@@ -161,7 +172,7 @@ TDC's real establishment and everything the HR and SHE screens need to show:
 | Payroll membership: 99 staff on payroll, each with a Payroll employee profile, salary basis and default bank method; 4 off payroll (three national service personnel on an allowance, one contractor on invoice — the four most junior posts, TDC/00100–00103) | `TdcDemoWorkforceSeeder` — HR's `IsOnPayroll` flag AND payroll's profile rows, so the payroll reconciliation screen opens clean |
 | 9 leave types, Ghana statutory holidays for two years | `TdcDemoLeaveCalendarSeeder` |
 | Awards, benefits, emoluments, medical, orientation, appraisal, SHE, external associates | the nine seeders that were previously deferred |
-| Nine persona logins (`hr.head`, `she.officer`, `she.manager`, `head.dev`, `staff`, `new.hire`, `gm.ops`, `md.tdc`, `auditor`), password `Demo123!`, each linked to a seeded employee. Since 2026-09-03 the safety function is its own role pair (DR-10): `she.officer` is the **Safety Officer** on the Environmental Officer post (fallback HSE Assistant) and works the SHE desk; `she.manager` is the **SHE Manager** on the HSE Supervisor post and also holds the Safety (SHE) settings tree (`admin.she`) and deletion. HR is read-only in SHE; the Safety (SHE) menu gates on `she.access`. On a database seeded before that date the seeder re-binds `she.officer`, removes HR from it, creates `she.manager`, and revokes `HR.She.Write` from the HR role on the next start — but the clean path is a rebuild (section E) | `TdcDemoPersonaSeeder`, `DatabaseSeedingService` |
+| Nine persona logins (`hr.head`, `she.officer`, `she.manager`, `head.dev`, `staff`, `new.hire`, `gm.ops`, `md.tdc`, `auditor`), password `Demo123!`, each linked to a seeded employee. Since 2026-09-03 the safety function is its own role pair (DR-10): `she.officer` is the **Safety Officer** on the Environmental Officer post (Cynthia Sarpong, TDC/00081; fallback HSE Assistant) and works the SHE desk; `she.manager` is the **SHE Manager** on the HSE Supervisor post (Josephine Appiah, TDC/00071) and also holds the Safety (SHE) settings tree (`admin.she`) and deletion. HR is read-only in SHE; the Safety (SHE) menu gates on `she.access`. On a database seeded before that date the seeder re-binds `she.officer`, removes HR from it, creates `she.manager`, and revokes `HR.She.Write` from the HR role on the next start — but the clean path is a rebuild (section E) | `TdcDemoPersonaSeeder`, `DatabaseSeedingService` |
 | 25 HR workflow definitions (leave, travel, requisition, separation, movement, discipline …) | `seed-workflows` (`EnsureHrWorkflowsSeededAsync`) |
 
 **Document uploads need a scanner running.** A clean malware scan is mandatory for all 29 HR upload
@@ -176,17 +187,43 @@ powershell -File .\scripts\Start-DemoVirusScanner.ps1     # -Stop to shut it dow
 a shared or networked machine, and never tell an audience that files are being scanned while it is
 running. A real deployment runs clamd on 127.0.0.1:3310 and needs none of this.
 
-**Then run the transactions** — leave requests, travel, requisitions, cases, appraisals, everything
-that sits in an approval queue — through the API as the personas:
+**The transactional layer** — leave requests, travel, requisitions, cases, claims, appraisals,
+everything that sits in an approval queue or carries a number from a sequence — is built **through
+the API as the personas**, not by an EF seeder, because a row written around the service is a row
+the screens then read wrongly. Section A's fifth step does this for you by calling
+`scripts/Invoke-UatDemoScenarios.ps1`, which runs `dev-harness/hr-demo-smoke/scenarios.mjs`: one
+module per area under `scenarios/`, each written as an "ensure" step, so re-running completes
+whatever an earlier run left half-done and never duplicates.
+
+**The coverage rule (agreed 2026-09-04).** Every screen in the five books opens on real data, and
+**every HR/SHE entity a user can create has at least one seeded row.** Two checks enforce it and
+both run inside section A:
+
+| Check | What it proves | Input |
+| --- | --- | --- |
+| `verify-tables.mjs` | every table marked `required` in `demo-coverage-manifest.csv` holds a live row. 42 system-generated tables (reminder runs, dispatch logs, import batches, snapshots) are `excluded` — filling them would be inventing audit history | the manifest, next to the script |
+| `verify-runbook.mjs` | every staff number, person, record number and name the six books cite exists, **and** every headline number they state | `runbook-claims.json`, extracted from `dev-harness/hr-demo-smoke/runbook/*.html` — regenerate it when a book changes — plus `runbook-counts.json`, one query per stated number |
+
+To run them by hand, or to re-run one area while the API is up against UAT:
 
 ```powershell
 cd "D:\Rhema\TDC ERPS\dev-harness\hr-demo-smoke"
-node scenarios.mjs        # 21 scenarios; expect "21 ok, 0 failed"
-node personas.mjs         # proves the eight logins
-node smoke.mjs --user hr.head   # optional: every screen-opening read, expect "0 crash"
+node scenarios.mjs --list           # the modules, in run order
+node scenarios.mjs --only 050       # one module (prefix or a word from its name)
+node verify-tables.mjs --area she   # one area, every table listed with its count
+node verify-tables.mjs --missing    # every required table still empty
+node verify-runbook.mjs --book 3    # one book
+node personas.mjs                   # proves the nine logins
+node smoke.mjs --user hr.head       # optional: every screen-opening read, expect "0 crash"
 ```
 
-The demo runbook that uses all of this is in `docs/demo-runbook/` (Books 0–4 and a cheat sheet).
+`DEMO_API` and `DEMO_DB` override the API base URL and database name when the demo database is
+not `ErpSystemDB_UAT` on port 5000.
+
+The demo runbook that uses all of this — Books 0 to 4 and the cheat sheet — lives with the demo
+pack in `dev-harness/hr-demo-smoke/runbook/`, **outside this repository**. It is a printed
+deliverable that changes with every rehearsal, and it belongs beside `runbook-claims.json`, which is
+extracted from it and is what `verify-runbook.mjs` checks the database against.
 
 **Still deliberately synthetic:** the people, the salaries, the grade bands, who is and is not on
 payroll, the payroll profiles, the incidents and claims. Replace from the real employee file and the

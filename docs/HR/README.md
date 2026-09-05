@@ -82,7 +82,7 @@ plan by the user's decision. Do not fold them in without being asked.
 | `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` | Defects HR found in other teams' modules (#1–#23); recorded, not fixed |
 | `docs/HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md` | Defect #23 hand-off to the payroll owner — the template for raising anything with another module's owner |
 | `docs/UAT-DEMO-DATABASE.md` + `scripts/New-UatDatabase.ps1` | Build / switch / reset / check the `ErpSystemDB_UAT` demo database |
-| `docs/demo-runbook/` | Books 0–4 + cheat-sheet: the per-persona, click-by-click demo script (print-to-PDF HTML) |
+| `dev-harness/hr-demo-smoke/runbook/` | Books 0–4 + cheat-sheet: the per-persona, click-by-click demo script (print-to-PDF HTML) |
 | `docs/hr-port-data-migration.md` | Data-migration runbook for the HR port |
 | `docs/HR_PAYROLL_ORACLE_FORMS_MIGRATION_PLAN.md`, `…_MENU_FIELD_CROSSWALK.md`, `…_REPORTS_CROSSWALK.md` | Legacy Oracle Forms payroll → new system (payroll owner's territory) |
 | `HR_MODULE_PORT_PLAN.md`, `HR_PORT_CROSS_MODULE_CHANGES.md` (repo root) | The original port strategy and its ripple effects |

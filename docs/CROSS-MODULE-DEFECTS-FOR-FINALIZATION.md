@@ -1427,6 +1427,69 @@ is acceptable (the stored `localStorage.user` now carries the full server shape)
 
 ---
 
+## 25. Cross-module findings from the HR/SHE demo-dataset build (2026-09-04)
+
+Found while filling every HR and SHE table in `ErpSystemDB_UAT` through the API as the demo
+personas (34 scenario modules, ~4,000 writes). HR-owned defects from the same exercise are in
+`docs/HR-FINISH-PLAN.md` § Lane 9; only the ones that belong to another module or to the platform
+are here.
+
+### What is broken
+
+1. **Identity / platform — the admin-tier + employee-link contradiction.** Every `HR.*.Admin`
+   approval door (`training-budgets/{id}/approve`, `training-plans/{id}/approve`,
+   `staff-travel/policies/{id}/approve`, `probations/{id}/extend|confirm|terminate`,
+   `talent-reviews/{id}/finalize`, `position-vacancies/reconcile`) is granted only to
+   SuperAdmin/TenantAdmin by `RolePermissions`, and each handler also requires
+   `CurrentUser.EmployeeId`. The only account in those roles (`admin`) has `Users.EmployeeId = NULL`,
+   and the HR role holds none of the 22 `HR.*.Admin` permissions. Result: **nobody can act** — a
+   travel policy is never in force (so `StaffTravelPolicyGuard` resolves `TravelPolicyCaps.None`
+   and no booking cap is ever enforced), no probation can be extended or confirmed, no talent
+   review finalised. Four independent area agents hit this wall on four modules.
+2. **Payroll — `POST /hr/payroll/setup/grades` returns a bare 500 (`Payroll request failed.`)**
+   when `gradeType` exceeds 15 characters (`PayrollGrades.GradeType` is `nvarchar(15)`); the
+   truncation surfaces as an opaque 500 instead of a 400 naming the field. Same shape expected on
+   every `nvarchar(5)`/`nvarchar(15)` column of that DTO.
+3. **Finance workflow — HR asset transfers route to `Asset Transfer Approval`**, whose steps are
+   Accounts Officer → Finance Manager → Financial Controller. Those users have no `EmployeeId`,
+   which `AssetTransferService.ApproveAsync` requires, so `POST /Assets/transfers/{id}/approve`
+   answers 403 for every login. An HR transfer between holders stops at Submitted for ever.
+4. **Fleet / Maintenance coupling — `GroundTransportType.CompanyVehicle` requires a
+   `VehicleAssetId` resolved against `MaintenanceAssets`.** HR's pool vehicles live in
+   `CompanyAssets`, so a travel leg can never name the Corporation's own Hilux.
+5. **Identity — `POST /api/User` without `tenantId` returns a bare 500** (`An error occurred while
+   creating the user`); with `tenantId` it is 200. Should be a 400 naming the field.
+6. **Auth — the login throttle surfaces as a 500** (`An error occurred during login`) for a user
+   whose per-user window is saturated; a 429 follows only once the burst clears. `ApiPolicy` is
+   100 requests/minute per caller and the Staging login limit is 10/minute per IP.
+7. **Platform — cold-start reads of 35–55 s** on the first call of a shape after the API starts
+   (`GET /api/job-candidates/all` 37.8 s for 6 rows; a candidate's qualifications 54.6 s). Later
+   calls of the same shape are 17–50 ms. EF query compilation against a very large model.
+
+### What was proven
+
+Each item was reproduced at least twice against the current build on 2026-09-04 with the exact
+payloads recorded in the area agents' reports (kept with the harness under
+`dev-harness/hr-demo-smoke/out/`). Item 1 was reached independently from Training, Travel,
+Probation and Succession.
+
+### What it blocks
+
+Item 1 blocks five runbook steps and every "approve" screen at Admin tier; the demo works around
+it by seeding the affected tables directly (see `HrDemoSeedOrchestrator`'s second-pass steps).
+Item 3 makes Book 2 §4 step 3 ("transfer between holders, approved") unreachable. Item 7 will make
+the first click on Candidates look hung on stage — Book 0 tells the presenter to pre-open screens.
+
+### What a fix needs
+
+Item 1 is one decision, not seven fixes: either link a TenantAdmin login to an employee record, or
+grant the `HR` role the `HR.*.Admin` tier for the doors HR actually operates. Items 2 and 5 are
+validation before the write. Item 3 needs either an HR-side approval definition for HR asset
+transfers or employee links on the Finance approvers. Item 4 needs a vehicle lookup that accepts
+either register. Item 6 is a status-code mapping. Item 7 is a warm-up on startup or compiled
+queries for the heaviest list shapes.
+
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

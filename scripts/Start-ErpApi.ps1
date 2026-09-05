@@ -42,7 +42,7 @@ param(
     [int]$Port = 5000,
     [string]$Server = '.',
     [string]$UserId = 'sa',
-    [string]$Password = 'ewing25!'
+    [string]$Password
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +57,14 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $apiDir = Join-Path $repoRoot 'src\ErpSystem.Api'
 $dll = Join-Path $apiDir 'bin\Debug\net8.0\ErpSystem.Api.dll'
 if (-not (Test-Path $dll)) { throw "Build output not found at $dll. Build the solution first." }
+
+# The credential is never written down here. It comes from -Password, then ERP_DB_PASSWORD, then
+# the gitignored appsettings.json the API itself uses. See scripts/ErpDbCredential.ps1.
+. (Join-Path $PSScriptRoot 'ErpDbCredential.ps1')
+$credential = Resolve-ErpDbCredential -UserId $UserId -Password $Password -RepoRoot $repoRoot
+$UserId = $credential.UserId
+$Password = $credential.Password
+
 
 # Refuse to start against a database that does not exist. Without this the API comes up, every
 # request 500s, and the cause looks like a code fault rather than a typo in a database name.

@@ -7,8 +7,11 @@ using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Interfaces.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -188,6 +191,14 @@ public class HrDemoSeedOrchestrator
                           .AnyAsync(e => e.TenantId == tenantId && e.EmployeeNumber.StartsWith("TDC/"), ct),
             ct => new TdcDemoWorkforceSeeder(_context, Log<TdcDemoWorkforceSeeder>()).SeedAsync(ct)),
 
+        new SeedStep(
+            // Three lookup tables that have no API door at all (DbSet, table and migration only):
+            // nothing else can ever fill them, so they are seeded here rather than by a scenario.
+            "Legacy org lookups (contract types, divisions, work stations)",
+            ct => _context.Set<EmployeeContractType>().IgnoreQueryFilters()
+                          .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted, ct),
+            ct => new TdcDemoLegacyOrgSeeder(_context, Log<TdcDemoLegacyOrgSeeder>()).SeedAsync(ct)),
+
         // ── Pay and benefits ────────────────────────────────────────────────────────────────────
 
         new SeedStep(
@@ -227,11 +238,31 @@ public class HrDemoSeedOrchestrator
                       .SeedForTenantAsync(tenantId, ct)),
 
         new SeedStep(
+            // A free-text item on the appraisal template. Without one, AppraisalCustomQuestionResponses
+            // can never hold a row, and the template cannot be edited through the API once the demo
+            // cycle is open (409) — so it is added here, before any cycle exists.
+            "Appraisal free-text question",
+            ct => _context.Set<AppraisalTemplateItem>().IgnoreQueryFilters()
+                          .AnyAsync(i => i.TenantId == tenantId && !i.IsDeleted
+                                      && i.CompetencyId == null && i.KpiDefinitionId == null
+                                      && i.CustomQuestion != null, ct),
+            ct => new TdcDemoAppraisalCustomQuestionSeeder(_context, Log<TdcDemoAppraisalCustomQuestionSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
             "Awards and recognition",
             ct => _context.Set<AwardType>().IgnoreQueryFilters()
                           .AnyAsync(a => a.TenantId == tenantId && !a.IsDeleted, ct),
             ct => new AwardDataSeeder(_context, Log<AwardDataSeeder>())
                       .SeedForTenantAsync(tenantId, ct)),
+
+        new SeedStep(
+            // TeamAwardRecipients has a repository and no writer anywhere in the API, so a team
+            // award can be nominated but never conferred through a door. Seeded so the screen has
+            // last year's team award to show.
+            "Team award recipients (the one awards table with no door)",
+            ct => _context.Set<TeamAwardRecipient>().IgnoreQueryFilters()
+                          .AnyAsync(r => r.TenantId == tenantId && !r.IsDeleted, ct),
+            ct => new TdcDemoTeamAwardSeeder(_context, Log<TdcDemoTeamAwardSeeder>()).SeedAsync(ct)),
 
         // ── Health and safety ───────────────────────────────────────────────────────────────────
 
@@ -276,6 +307,33 @@ public class HrDemoSeedOrchestrator
             ct => Task.FromResult(false),
             ct => new HrAwardsReportSeeder(_context, Log<HrAwardsReportSeeder>())
                       .SeedTenantAsync(tenantId, ct)),
+
+        // ── Second pass: tables whose only route is blocked, and which hang off SCENARIO rows ────
+        //
+        // These three read rows that dev-harness/hr-demo-smoke/scenarios.mjs creates through the API
+        // (training budgets, staff movements, probation periods), so on a fresh database they find
+        // nothing and skip. New-UatDatabase.ps1 therefore runs 'seed-hr-demo' a SECOND time after the
+        // scenarios; every other step's guard makes that second pass a no-op. Each of the three exists
+        // because the API door is unusable: the approve doors need an HR.*.Admin permission held only
+        // by accounts with no employee link, and the movement ladder has no writer at all.
+
+        new SeedStep(
+            "Training budget approval and payments (the approve door needs HR.Training.Admin)",
+            ct => _context.Set<TrainingBudgetTransaction>().IgnoreQueryFilters()
+                          .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted, ct),
+            ct => new TdcDemoTrainingBudgetSeeder(_context, Log<TdcDemoTrainingBudgetSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            "Staff-movement approval ladder (needs the movements scenario first)",
+            ct => _context.Set<StaffMovementApprovalLevel>().IgnoreQueryFilters()
+                          .AnyAsync(l => l.TenantId == tenantId && !l.IsDeleted, ct),
+            ct => new TdcDemoMovementApprovalLevelSeeder(_context, Log<TdcDemoMovementApprovalLevelSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            "Probation extension (needs the probation scenario first)",
+            ct => _context.Set<ProbationExtension>().IgnoreQueryFilters()
+                          .AnyAsync(e => e.TenantId == tenantId && !e.IsDeleted, ct),
+            ct => new TdcDemoProbationExtensionSeeder(_context, Log<TdcDemoProbationExtensionSeeder>()).SeedAsync(ct)),
     };
 
     private ILogger<T> Log<T>() => _loggerFactory.CreateLogger<T>();

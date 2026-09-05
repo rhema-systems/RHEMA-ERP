@@ -147,7 +147,7 @@ SuperAdmin token **cannot test gates** — use the HR actor.
 
 ### 4.3 Database
 
-`Server=. ; Database=ErpSystemDB ; User Id=sa ; Password=ewing25!`
+`Server=. ; Database=ErpSystemDB ; User Id=sa ; Password=<the password in appsettings.json>`
 
 **Gotcha:** identity tables are `Users`, `UserRoles`, `AspNetRoles` — *not* `AspNetUsers`. Two
 queries were lost to this. Role grants join `RolePermissions → Permissions` + `AspNetRoles`.

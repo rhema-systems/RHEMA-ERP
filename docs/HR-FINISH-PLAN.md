@@ -39,6 +39,11 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
+▶ **Lane 9 — demo dataset — BUILT 2026-09-04.** Every one of the 551 required HR/SHE tables holds data in
+`ErpSystemDB_UAT`, the six runbooks are checked against the database on every rebuild, and the
+rebuild is one command. **One decision is owed** (admin tier vs employee link — § Lane 9 and the
+cross-module doc § 25) and 27 HR-owned defects are tabled in § Lane 9. Start there.
+
 ▶ **Lane 4 is DONE (2026-09-01): 54 + 32 + 33 assertions, each twice** (see § Lane 4 for the
 row-by-row verification). Lane 6's buildable rows are closed — two of its
 seven were stale, one was verified not live, and the four real ones are built. Lanes 3b and
@@ -1313,3 +1318,65 @@ The module is finished, excluding the `docs/HR/` programme, when all seven hold:
 6. Every money event posts through `IFinancePostingEngine` with contract tests, or carries a
    recorded decision not to.
 7. The hand-offs in lane 9 are filed and acknowledged by their owners.
+
+## Lane 9 — Demo dataset: every HR/SHE table demonstrable · ✅ **BUILT 2026-09-04** · residue below
+
+**What was done.** The UAT demo data had two layers — EF seeders inside `New-UatDatabase.ps1` and
+the API-driven `scenarios.mjs` run by hand afterwards — and the second layer was being skipped
+after rebuilds, so the runbooks named records that did not exist. Now: the rebuild runs both, then
+a second seeder pass, then two checks (`verify-tables.mjs` against `demo-coverage-manifest.csv`,
+`verify-runbook.mjs` against `runbook-claims.json` extracted from the six books), and ends red or
+green. Coverage went from 152 to **551 of 551 required tables**; the runbook checker reads
+**150 of 150**. 34 scenario modules (one per area, `dev-harness/hr-demo-smoke/scenarios/`), seven
+new EF seeders for tables with no API door, `AwardDataSeeder` corrected (`IsTeamAward` was never
+assigned; a `LongService` type was missing, so the awards screen read empty). Details:
+`docs/UAT-DEMO-DATABASE.md` §A and §F.
+
+**Rule agreed with the user (2026-09-04):** every screen in the five books opens on real data, and
+every HR/SHE entity a user can create has at least one seeded row; 48 system-generated tables
+(reminder runs, dispatch logs, import batches, snapshots) are `excluded` in the manifest.
+
+**Decision owed (blocks five doors):** the admin-tier + employee-link contradiction — see
+`CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` § 25 item 1. Either link a TenantAdmin login to an
+employee or grant the `HR` role the `HR.*.Admin` tier. Until then the demo seeds
+`TrainingBudgetTransactions`, `StaffMovementApprovalLevels` and `ProbationExtensions` directly.
+
+**HR-owned defects found by the build (each reproduced twice; payloads in the agents' reports):**
+
+| # | Where | What | Severity |
+| --- | --- | --- | --- |
+| 9.1 | `PUT /hr/Employees/{id}/contacts/{id}` | documented patch-style, but `Apply()` assigns `AddressLine1/2`, `City`, `Region`, `DigitalAddress` unconditionally — a partial edit nulls the rest | **data loss** |
+| 9.2 | `EmployeePositionService.MapToDto:248` | `EmployeeCount` hardcoded 0 — every position reads unfilled; Book 1 §2.2's filled/vacant is wrong off this DTO | high |
+| 9.3 | `POST /PerformanceAppraisals` | no template / criterion snapshot is taken, so self-, manager- and HR-review screens render empty; use `generate-appraisals` | high |
+| 9.4 | `ExtendProbationHandler` | passes `CurrentUserProvider.UserId` into `ProbationExtension.ExtendedById` (an Employee FK) → 500 on approve | high |
+| 9.5 | `StaffMovementApprovalLevel` | DTO and mapper exist, no endpoint or service writes it; three ladder screens open empty on every tenant | high |
+| 9.6 | `TeamAwardRecipient` | repository registered, nothing calls it — a team award can be nominated, never conferred | high |
+| 9.7 | `AwardDataSeeder` | (fixed) `HasLevels`/`IsTeamAward` carried in the record and never assigned; no `LongService` type | fixed |
+| 9.8 | `PreEmploymentCheckService.cs:203` | reference response silently UPSERTS — referee B overwrites referee A with no trace | medium |
+| 9.9 | `JobApplicationService.cs:2012` | `reviewerCount` counts only finalised reviews while `reviews` carries all | medium |
+| 9.10 | `GET /job-candidates/all`, paged | `applicationCount` always 0 | medium |
+| 9.11 | `EmployeeMappingExtensions ~917` | ID-card `documentNumber` and `identificationTypeName` declared, never mapped | medium |
+| 9.12 | `AttendanceAlertServices.EvaluateForAttendanceAsync` | no de-duplication: re-evaluating a day inserts a second identical alert | medium |
+| 9.13 | `POST /employee-portal/profile/change-requests` | 422s the whole request when one item is a no-op | low |
+| 9.14 | `POST /hr/salary-grades/sync` | overwrites `Description` of pre-existing `SalaryGrades` (organogram rows) | low |
+| 9.15 | SHE incident/audit/hazard sub-resources | POST-only — `GET …/witnesses`, `/investigation-team`, `/follow-ups`, `/documents`, `/audits/{id}/team`, `/findings`, `/hazards/{id}/corrective-actions` all 405; screens cannot list what they created | medium |
+| 9.16 | SHE / medical FK guards | `SheHazardCorrectiveActions.CorrectiveActionTemplateId`, several `UploadedById`/`ConductedById`/`EmployeeId` columns, `MedicalInsuranceClaims.MedicalExpenseClaimId`, `MedicalInsurancePolicyDependents (PolicyId, DependentId)` unvalidated → 500 not 404/409 | medium |
+| 9.17 | `POST /onboarding-plans/tasks/{id}/complete` | gated `HR.Orientation.Write`; a new starter cannot tick their own task (Book 1 §6 step 5 implies they can) | medium |
+| 9.18 | `DELETE /safety/incidents/witnesses/{id}` | needs `HR.She.Admin` while the POST needs Write | low |
+| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers | medium |
+| 9.20 | asset requisitions | an approved requisition cannot be edited, withdrawn or rejected (all 409) | low |
+| 9.21 | `StaffDemotion.GradeLevelDecrease` / `StaffPromotion.GradeLevelIncrease` | silently recomputed from optional grade ids → 0 | low |
+| 9.22 | disciplinary termination | raises an `EmployeeSeparation` in Draft with no effective date | low |
+| 9.23 | `PUT /discipline/legal-reviews/{id}` | a complete date completes the review, so `/complete` then 422s | low |
+| 9.24 | `GET /succession-plans` list | omits `currentIncumbentId` (detail has it) | low |
+| 9.25 | list DTO gaps | `TrainingNeedsAssessmentSummaryDto` (no `EmployeeId`), `MentoringPairSummaryDto` (no mentor/mentee ids), training-schedule list (no `programId`), `AssetRequisitionSummaryDto`/`AssetMaintenanceSummaryDto`/`AssetTransferSummaryDto` (no description / asset id), awards list DTOs (names, not ids), `ClientTimesheetConfirmationDto` (no token) — every one defeats an "already there?" probe | low |
+| 9.26 | dead code | `AppraisalCycleService.CreateAppraisalInstancesAsync` has no callers; `ResolveEmployeesFromTargetsAsync` has no `Employee` target case | low |
+| 9.27 | `PublicCvUploadTickets` | feature retired 2026-08-30; `MintCvUploadTicketAsync` survives with no controller | tidy |
+
+**Runbook drift corrected in this lane:** Book 0 §2 (one-command rebuild, three verdicts), cheat
+sheet, README, Book 2 event names and 15 h timesheet, Book 3 §5 nine award types, §7 four cases /
+five action types. `100-movements.mjs` now promotes into a real M5 vacancy (Book 3 §6).
+
+**Lesson (generalises):** a list DTO that omits the id you would dedupe on turns every "ensure"
+step into a duplicator; probe the table, never the summary. And a seeder's probe must ask for a row
+that seeder actually writes — the same lesson as `HrSeedOrchestrator`, met five more times.

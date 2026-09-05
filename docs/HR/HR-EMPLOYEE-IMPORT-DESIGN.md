@@ -474,7 +474,7 @@ the screens are proven only by types until the user runs `npm run dev` and walks
 
 ### 2026-09-03 — committed (`f98d4a38`); runbook written
 
-Book 1 §1.3 of `docs/demo-runbook/` now walks the wizard in seven steps with the demo file
+Book 1 §1.3 of `dev-harness/hr-demo-smoke/runbook/` now walks the wizard in seven steps with the demo file
 `dev-harness\hr-demo-smoke\out\demo-employee-import.xlsx`, produced the evening before by
 `hr-demo-smoke/make-employee-import-file.mjs` (downloads the template from the demo database and
 fills six DEMO-00n rows with demo names; Book 0 step 4). It creates nothing until committed on stage.

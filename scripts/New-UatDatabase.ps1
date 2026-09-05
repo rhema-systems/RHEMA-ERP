@@ -33,25 +33,45 @@
     placeholder figures.
 
     That split is the point. Run 'seed-hr-all' anywhere; run 'seed-hr-demo' only on a database whose
-    purpose is a demonstration. The script prints row counts at the end so a seeder that silently
-    did nothing is visible here rather than on stage.
+    purpose is a demonstration.
+
+    !! THE TRANSACTIONAL LAYER IS BUILT THROUGH THE API, AND THIS SCRIPT NOW RUNS IT
+    Leave requests, requisitions, cases, claims, appraisals -- anything with a number from a
+    sequence or a workflow instance -- cannot be seeded around the service without the screens
+    reading it wrongly. They are created through the API as the demo personas by
+    dev-harness/hr-demo-smoke/scenarios.mjs. Until 2026-09-04 that was a separate manual command
+    and it was being skipped, so the runbooks named records that did not exist. Now
+    Invoke-UatDemoScenarios.ps1 runs at the end of this script: it starts the API and the scanner
+    stub, runs every scenario, checks that EVERY required HR/SHE table holds data
+    (verify-tables.mjs) and that every record the runbooks name exists (verify-runbook.mjs), and
+    stops what it started. A rebuild that ends in red is not fit for a demo.
 
 .PARAMETER Database
     Target database name. Defaults to ErpSystemDB_UAT. The script REFUSES to target the
     development database -- that guard is the whole reason to use this rather than running
     rebuild-db by hand, because rebuild-db drops whatever it is pointed at without asking.
 
+.PARAMETER SkipScenarios
+    Stop after the EF seeders. Only for debugging a seeder; the result is NOT a demo database.
+
+.PARAMETER ApiPort
+    Port the transactional step starts the API on. 5000 by default; pass another to rebuild while a
+    development API is running.
+
 .EXAMPLE
     powershell -File ./scripts/New-UatDatabase.ps1
-    powershell -File ./scripts/New-UatDatabase.ps1 -Database ErpSystemDB_DEMO2
+    powershell -File ./scripts/New-UatDatabase.ps1 -Database ErpSystemDB_DEMO2 -ApiPort 5010
 #>
 [CmdletBinding()]
 param(
     [string]$Database = 'ErpSystemDB_UAT',
     [string]$Server = '.',
     [string]$UserId = 'sa',
-    [string]$Password = 'ewing25!',
-    [switch]$SkipConfirm
+    [string]$Password,
+    [switch]$SkipConfirm,
+    [switch]$SkipScenarios,
+    [int]$ApiPort = 5000,
+    [string]$HarnessDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,6 +87,13 @@ if ($ProtectedDatabases -contains $Database) {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $apiDir = Join-Path $repoRoot 'src\ErpSystem.Api'
 $dll = Join-Path $apiDir 'bin\Debug\net8.0\ErpSystem.Api.dll'
+
+# The credential is never written down here. It comes from -Password, then ERP_DB_PASSWORD, then
+# the gitignored appsettings.json the API itself uses. See scripts/ErpDbCredential.ps1.
+. (Join-Path $PSScriptRoot 'ErpDbCredential.ps1')
+$credential = Resolve-ErpDbCredential -UserId $UserId -Password $Password -RepoRoot $repoRoot
+$UserId = $credential.UserId
+$Password = $credential.Password
 
 if (-not (Test-Path $dll)) {
     throw "Build output not found at $dll. Build the solution first."
@@ -128,6 +155,32 @@ Invoke-ApiCommand -Command 'seed-hr-demo'           -Label 'Seeding the DEMO wor
 # seeder fills them from the 24 estate fixtures. On the first run it made "Ama Estate" the manager of
 # the Chief Internal Auditor. Add it back only for a database seeded WITHOUT seed-hr-demo.
 
+# The transactional layer, through the API as the personas, plus the two checks. See the header.
+$scenarioExit = 0
+if ($SkipScenarios) {
+    Write-Host ""
+    Write-Host "  -SkipScenarios: the transactional layer was NOT built. This is not a demo database yet;" -ForegroundColor Yellow
+    Write-Host "  run ./scripts/Invoke-UatDemoScenarios.ps1 -Database $Database to finish it." -ForegroundColor Yellow
+} else {
+    Write-Host ""
+    Write-Host "  -> Building the transactional layer through the API" -ForegroundColor Green
+    $scenarioArgs = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'Invoke-UatDemoScenarios.ps1'),
+                      '-Database', $Database, '-Port', $ApiPort, '-Server', $Server, '-UserId', $UserId, '-Password', $Password)
+    if ($HarnessDir) { $scenarioArgs += @('-HarnessDir', $HarnessDir) }
+    & powershell @($scenarioArgs + '-SkipVerify')
+    $scenarioExit = $LASTEXITCODE
+
+    # Second seeder pass. Three demo tables have no usable door AND hang off rows the scenarios
+    # create (training budgets, staff movements, probation periods), so their seeder steps find
+    # nothing on the first pass and skip. Every other step's guard makes this pass a no-op.
+    Invoke-ApiCommand -Command 'seed-hr-demo' -Label 'Second pass: demo tables that depend on scenario rows'
+
+    Write-Host ""
+    Write-Host "  -> Checking coverage and runbook consistency" -ForegroundColor Green
+    & powershell @($scenarioArgs + '-VerifyOnly')
+    if ($LASTEXITCODE -ne 0) { $scenarioExit = 1 }
+}
+
 # Report the state rather than assume it. A seeder that silently no-ops is the failure mode this
 # whole programme keeps meeting; counting the rows afterwards is the only thing that catches it.
 $query = @"
@@ -169,9 +222,18 @@ Write-Host "  and the salary-grade bands are placeholder figures. Replace them f
 Write-Host "  employee file and HR questionnaire before this database is anything but a demo." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  STILL MISSING -- deferred, not broken:" -ForegroundColor Yellow
-Write-Host "    - Internal Audit / Managing Director roles, if a separation review is demoed"
+Write-Host "    - SHE reminder notification topics: created by the first SHE reminder sweep (she.manager:"
+Write-Host "      Administration -> Safety (SHE) -> Reminder Engine -> Run now), not by the seed"
 Write-Host "    - Email templates, unless the seed host registered the email catalogues"
 Write-Host ""
+if ($scenarioExit -ne 0) {
+    Write-Host "  !! THE TRANSACTIONAL LAYER OR A COVERAGE CHECK FAILED (see the red lines above)." -ForegroundColor Red
+    Write-Host "  !! This database is NOT ready for a demo. Fix the cause, then re-run:" -ForegroundColor Red
+    Write-Host "       powershell -File ./scripts/Invoke-UatDemoScenarios.ps1 -Database $Database" -ForegroundColor Red
+    Write-Host "     (safe to repeat -- every scenario is an 'ensure' step)." -ForegroundColor Red
+    Write-Host ""
+}
 Write-Host "  Start the API against it with:" -ForegroundColor Cyan
 Write-Host "    powershell -File ./scripts/Start-ErpApi.ps1 -Database Uat"
 Write-Host ""
+if ($scenarioExit -ne 0) { exit 1 }

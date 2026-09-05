@@ -60,7 +60,10 @@ public sealed class AwardDataSeeder
             new { Name = "Customer Service Excellence", Description = "Outstanding customer service delivery", Category = AwardCategory.CustomerService, Frequency = AwardFrequency.Monthly, IsMonetary = true, IsTeamAward = false },
             new { Name = "Team Excellence Award", Description = "Recognizes high-performing teams", Category = AwardCategory.TeamPlayer, Frequency = AwardFrequency.Quarterly, IsMonetary = true, IsTeamAward = true },
             new { Name = "Leadership Award", Description = "Exceptional leadership and mentorship", Category = AwardCategory.Leadership, Frequency = AwardFrequency.Annual, IsMonetary = true, IsTeamAward = false },
-            new { Name = "Peer Recognition", Description = "Peer-to-peer appreciation and recognition", Category = AwardCategory.SpecialRecognition, Frequency = AwardFrequency.Monthly, IsMonetary = false, IsTeamAward = false }
+            new { Name = "Peer Recognition", Description = "Peer-to-peer appreciation and recognition", Category = AwardCategory.SpecialRecognition, Frequency = AwardFrequency.Monthly, IsMonetary = false, IsTeamAward = false },
+            // The long-service screen (administration/hr/awards) filters on Category == LongService; without
+            // a type in that category the whole screen reads "No long-service award" (found 2026-09-04).
+            new { Name = "Long Service Award", Description = "Recognises 5, 10, 15, 20 and 25 years of continuous service", Category = AwardCategory.LongService, Frequency = AwardFrequency.Annual, IsMonetary = true, IsTeamAward = false }
         };
 
         var awardTypes = new Dictionary<string, AwardType>();
@@ -82,13 +85,23 @@ public sealed class AwardDataSeeder
                     Category = data.Category,
                     Frequency = data.Frequency,
 
+                    // Was carried in the record above and never assigned (found 2026-09-04): every type
+                    // shipped flat, so the Team Excellence Award refused every team nomination.
+                    IsTeamAward = data.IsTeamAward,
+
                     // Area 14 slice 2 replaced AutoGenerateNominees (a flag nothing read) with the
                     // two axes of decision D-3. These are the entity defaults, stated explicitly
                     // because this seeder is still deferred pending TDC's real award catalogue —
                     // whoever rewrites it against that catalogue must set them per award type
                     // rather than inherit a default. See HrSeedOrchestrator.DeferredSteps.
-                    NominationSource = AwardNominationSource.OpenNomination,
-                    WinnerDecision = AwardWinnerDecision.CommitteeScore,
+                    // Long service is granted by HR against the milestone ladder, not nominated and
+                    // scored — the only mode in which the service lets an award be conferred directly.
+                    NominationSource = data.Category == AwardCategory.LongService
+                        ? AwardNominationSource.ManagementDirect
+                        : AwardNominationSource.OpenNomination,
+                    WinnerDecision = data.Category == AwardCategory.LongService
+                        ? AwardWinnerDecision.ManagementDecision
+                        : AwardWinnerDecision.CommitteeScore,
                     AllowSelfNomination = false,
 
                     // Performance triggers are left unset: TDC has not said what score or how many

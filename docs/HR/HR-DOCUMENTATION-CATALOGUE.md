@@ -94,7 +94,7 @@ three different homes, not one folder trying to serve everyone —
 - `docs/HR/*.md` ×14 (this folder, as of 2026-09-02) — see `README.md` for the index.
 - `docs/HR-CLOSURE-LEDGER.md` (decisions D-01…D-40, blockers, endpoint checklists),
   `docs/HR-FINISH-PLAN.md` (what is still owed, by lane), `docs/UAT-DEMO-DATABASE.md`,
-  `docs/demo-runbook/`, `docs/HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md`,
+  `dev-harness/hr-demo-smoke/runbook/`, `docs/HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md`,
   `docs/hr-port-data-migration.md`, `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
 - A CI workflow that *would* publish Swagger/OpenAPI + an HTML explorer to `docs/api/` — but the
   artefact has never landed in the repo (corrected 2026-09-02).
