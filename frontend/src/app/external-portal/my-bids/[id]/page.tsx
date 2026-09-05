@@ -468,7 +468,7 @@ export default function BidDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">
             <FileText className="h-4 w-4 mr-2" />
-            Documents ({bid.documents?.filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal').length || 0})
+            Documents ({bid.documents?.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="info">
             <Info className="h-4 w-4 mr-2" />
@@ -765,17 +765,12 @@ export default function BidDetailPage() {
                     const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
                     const requiredCount = requirements.filter((r: any) => r.isRequired).length;
                     const optionalCount = requirements.length - requiredCount;
-                    // Exclude proposal documents from count
-                    const uploadedCount = bid.documents?.filter(
-                      doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-                    ).length || 0;
+                    const uploadedCount = bid.documents?.length ?? 0;
                     return requirements.length > 0
                       ? `${requirements.length} requirement(s) - ${requiredCount} required, ${optionalCount} optional • ${uploadedCount} file(s) uploaded`
                       : `${uploadedCount} file(s) uploaded`;
                   } catch {
-                    const uploadedCount = bid.documents?.filter(
-                      doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-                    ).length || 0;
+                    const uploadedCount = bid.documents?.length ?? 0;
                     return `${uploadedCount} file(s) uploaded`;
                   }
                 })()}
@@ -785,10 +780,8 @@ export default function BidDetailPage() {
               {(() => {
                 try {
                   const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
-                  // Filter out proposal documents - only show required documents
-                  const uploadedDocs = (bid.documents || []).filter(
-                    doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-                  );
+                  // Proposal files can also satisfy explicitly configured document requirements.
+                  const uploadedDocs = bid.documents ?? [];
 
                   if (requirements.length === 0 && uploadedDocs.length === 0) {
                     return <p className="text-center py-8 text-gray-500">No document requirements or uploads</p>;
