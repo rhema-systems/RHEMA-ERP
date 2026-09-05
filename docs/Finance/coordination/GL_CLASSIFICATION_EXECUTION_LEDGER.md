@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C1 — stable accounting-book identity and idempotency foundation |
-| Status | `AUTHORIZED_PENDING_IMPLEMENTATION` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `0b2b8ea04123c4348393cdea49d7734de2042d7a` |
 | Branch | `codex/finance-multibook-identity-foundation` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Architecture decisions approved by user; C1 awaiting implementation handoff |
+| Review status | C1 candidate `af8aef5b` independently reviewed; four P1 corrections issued |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -283,3 +283,16 @@ distinctness and concurrency. It must not add neutral-event orchestration, enume
 posting, or repurpose generic balances. Independently review C1 on GPT-5.6 Sol High before proceeding to the
 book-aware balance/exposure stage. Configured `RHEMAERP` remains read-only until the later reset/migration gate
 is separately reconciled.
+
+Stage C1 review cycle 1 examined clean candidate `af8aef5bbdaa6200116a0c370eddc35f036f15bb`
+using GPT-5.6 Sol High and returned `CHANGES_REQUIRED`. The stable relational book columns, constraints,
+book-qualified indexes, ID propagation and exact-reversal propagation are structurally sound, but four P1
+gates remain: the SQL application-lock key can diverge from case-insensitive database equality and permit
+concurrent cross-book posting; migration preflight/backfill uses collation-sensitive equality rather than exact
+canonical code evidence; same-book duplicate validation omits material header/line/commitment evidence and can
+accept changed budget reservations; and 14 JournalEntry lifecycle tests regress because their fixtures/index
+assertions were not migrated. C1 tests passed 8 with one SQL Server concurrency test environment-skipped; EF
+no-pending-model, migration SQL generation and diff checks passed. Integration remains blocked. The Sol Medium
+correction must add a lock at least as coarse as database identity, binary/exact migration comparisons with
+executable SQL coverage, a durable canonical immutable-request fingerprint (or exhaustive equivalent), and
+repair all affected Finance fixtures before re-review.
