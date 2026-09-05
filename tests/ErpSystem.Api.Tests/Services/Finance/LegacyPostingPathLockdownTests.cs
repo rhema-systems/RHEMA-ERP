@@ -47,6 +47,29 @@ public sealed class LegacyPostingPathLockdownTests
     }
 
     [Fact]
+    [Trait("Category", "Deployment")]
+    public void GlCutoverHarness_ShouldGuardCloneAndSanitizeDurableEvidence()
+    {
+        var root = FindRepositoryRoot();
+        var harness = File.ReadAllText(Path.Combine(
+            root, "scripts", "finance", "Invoke-GlCutoverRehearsal.ps1"));
+
+        harness.Should().Contain("'RehearseClone'")
+            .And.Contain("exact configured RhemaERP catalog")
+            .And.Contain("same SQL Server instance")
+            .And.Contain("Evidence directory must be new or empty")
+            .And.Contain("WITH COPY_ONLY, CHECKSUM")
+            .And.Contain("RESTORE VERIFYONLY")
+            .And.Contain("DBCC CHECKDB")
+            .And.Contain("source-fingerprint-before.txt")
+            .And.Contain("source-fingerprint-after.txt")
+            .And.Contain("targetDerivedBackupExists = $false")
+            .And.Contain("<REDACTED>")
+            .And.Contain("<REPOSITORY>");
+        harness.Should().NotContain("dotnet ef database update");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
     [Trait("Category", "Architecture")]
     public void NormalRuntime_ShouldNotDependOnLegacySubledgerPostingService()

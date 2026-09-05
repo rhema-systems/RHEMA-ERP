@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('InspectSource', 'RehearseEmpty', 'DropRehearsal')]
+    [ValidateSet('InspectSource', 'RehearseEmpty', 'RehearseClone', 'DropRehearsal')]
     [string]$Mode,
 
     [string]$TargetConnectionEnvironmentVariable = 'RHEMA_GL_REHEARSAL_CONNECTION',
@@ -69,6 +69,37 @@ function Invoke-Native([string]$filePath, [string[]]$arguments) {
     }
 }
 
+function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [string]$evidenceFile,
+    [switch]$AllowFailure) {
+    $priorNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $output = @(& $filePath @arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $PSNativeCommandUseErrorActionPreference = $priorNativeErrorPreference
+    }
+
+    $sanitizedOutput = @($output | ForEach-Object {
+        $line = [string]$_
+        $line = $line.Replace($repositoryRoot, '<REPOSITORY>', [StringComparison]::OrdinalIgnoreCase)
+        $line = [regex]::Replace($line, 'C:\\Users\\[^\\\r\n]+', '<USER_PROFILE>', 'IgnoreCase')
+        if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
+            $line = [regex]::Replace($line, [regex]::Escape($env:COMPUTERNAME) + '(\\[^\s;]+)?', '<LOCAL_SQL_SERVER>', 'IgnoreCase')
+        }
+        $line = [regex]::Replace($line, '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*[^;\r\n]+', '$1=<REDACTED>')
+        $line = [regex]::Replace($line, '(?i)ClientConnectionId:[0-9a-f-]+', 'ClientConnectionId:<REDACTED>')
+        $line
+    })
+    $sanitizedOutput | Set-Content -Encoding utf8 -LiteralPath $evidenceFile
+    $output | ForEach-Object { Write-Host $_ }
+    if ($exitCode -ne 0 -and -not $AllowFailure) {
+        throw "Native command failed with exit code ${exitCode}: $filePath. Sanitized output: $evidenceFile"
+    }
+    return $exitCode
+}
+
 function Invoke-Sql([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database,
     [string]$query, [string]$inputFile = '', [string]$outputFile = '') {
     # -I keeps QUOTED_IDENTIFIER enabled for the generated baseline's filtered and
@@ -86,12 +117,70 @@ function Invoke-Sql([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, 
         }
         if (-not [string]::IsNullOrWhiteSpace($inputFile)) { $arguments += @('-i', $inputFile) }
         else { $arguments += @('-Q', $query) }
-        if (-not [string]::IsNullOrWhiteSpace($outputFile)) { $arguments += @('-o', $outputFile, '-u') }
+        if (-not [string]::IsNullOrWhiteSpace($outputFile)) { $arguments += @('-o', $outputFile) }
         Invoke-Native 'sqlcmd' $arguments
     }
     finally {
         [Environment]::SetEnvironmentVariable('SQLCMDPASSWORD', $oldPassword, 'Process')
     }
+}
+
+function Invoke-SqlScalar([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database,
+    [string]$query) {
+    $connectionBuilder = [System.Data.SqlClient.SqlConnectionStringBuilder]::new($builder.ConnectionString)
+    $connectionBuilder.set_InitialCatalog($database)
+    $connection = [System.Data.SqlClient.SqlConnection]::new($connectionBuilder.ConnectionString)
+    try {
+        $connection.Open()
+        $command = $connection.CreateCommand()
+        $command.CommandTimeout = 600
+        $command.CommandText = $query
+        return $command.ExecuteScalar()
+    }
+    finally { $connection.Dispose() }
+}
+
+function Get-SourceFingerprint([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database) {
+    [string](Invoke-SqlScalar $builder $database @"
+SELECT CONCAT(
+    (SELECT COUNT_BIG(*) FROM dbo.__EFMigrationsHistory), '|',
+    (SELECT MAX(MigrationId) FROM dbo.__EFMigrationsHistory), '|',
+    (SELECT COUNT_BIG(*) FROM dbo.FxRevaluationBatches WHERE IsDeleted=0), '|',
+    (SELECT COUNT_BIG(*) FROM dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1), '|',
+    (SELECT COUNT_BIG(*) FROM dbo.JournalEntries WHERE IsDeleted=0));
+"@)
+}
+
+function Get-ServerDefaultPath([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$property) {
+    $allowed = @('InstanceDefaultBackupPath', 'InstanceDefaultDataPath', 'InstanceDefaultLogPath')
+    if ($property -notin $allowed) { throw "Unsupported SQL Server path property '$property'." }
+    $value = [string](Invoke-SqlScalar $builder 'master' "SELECT CAST(SERVERPROPERTY('$property') AS nvarchar(4000));")
+    if ([string]::IsNullOrWhiteSpace($value)) { throw "SQL Server did not expose $property." }
+    return $value.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+}
+
+function Get-DatabaseLogicalFiles([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database) {
+    $master = [System.Data.SqlClient.SqlConnectionStringBuilder]::new($builder.ConnectionString)
+    $master.set_InitialCatalog('master')
+    $connection = [System.Data.SqlClient.SqlConnection]::new($master.ConnectionString)
+    try {
+        $connection.Open()
+        $command = $connection.CreateCommand()
+        $command.CommandText = 'SELECT name, type FROM sys.master_files WHERE database_id=DB_ID(@database) ORDER BY file_id;'
+        [void]$command.Parameters.AddWithValue('@database', $database)
+        $reader = $command.ExecuteReader()
+        $files = @()
+        while ($reader.Read()) {
+            $files += [pscustomobject]@{ Name = $reader.GetString(0); Type = $reader.GetByte(1) }
+        }
+        return $files
+    }
+    finally { $connection.Dispose() }
+}
+
+function Get-CloneBackupPath($target) {
+    $backupRoot = Get-ServerDefaultPath $target.Builder 'InstanceDefaultBackupPath'
+    Join-Path $backupRoot "$($target.Database)_COPYONLY.bak"
 }
 
 function Assert-TargetAbsent($target) {
@@ -150,14 +239,182 @@ if ($Mode -eq 'DropRehearsal') {
     $escapedName = $target.Database.Replace(']', ']]')
     Write-Host '[DROP] Prefix assertion passed; dropping the exact resolved rehearsal database.'
     Invoke-Sql $target.Builder 'master' "IF DB_ID(N'$($target.Database.Replace("'", "''"))') IS NOT NULL BEGIN ALTER DATABASE [$escapedName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$escapedName]; END;"
+    $backupPath = Get-CloneBackupPath $target
+    $escapedBackupPath = $backupPath.Replace("'", "''")
+    # Clone backups are named only from the already prefix-validated target. Deleting this exact
+    # COPY_ONLY artifact makes cleanup reproducible without accepting an operator-supplied path.
+    Invoke-Sql $target.Builder 'master' @"
+DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+IF EXISTS (SELECT 1 FROM @exists WHERE FileExists=1 AND FileIsDirectory=0)
+    EXEC master.dbo.xp_delete_file 0, N'$escapedBackupPath', N'bak';
+"@
+    $remainingDatabase = [long](Invoke-SqlScalar $target.Builder 'master' "SELECT COUNT_BIG(*) FROM sys.databases WHERE name=N'$($target.Database.Replace("'", "''"))';")
+    $remainingBackup = [int](Invoke-SqlScalar $target.Builder 'master' @"
+DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+SELECT COALESCE(MAX(FileExists),0) FROM @exists;
+"@)
+    if ($remainingDatabase -ne 0 -or $remainingBackup -ne 0) {
+        throw 'Guarded cleanup did not remove both the exact database and target-derived backup.'
+    }
+    $cleanupEvidence = if ($EvidenceDirectory) { $EvidenceDirectory } else { Get-DefaultEvidenceDirectory $target.Database }
+    New-Item -ItemType Directory -Force -Path $cleanupEvidence | Out-Null
+    [ordered]@{
+        status = 'CLEAN'
+        database = $target.Database
+        databaseExists = $false
+        targetDerivedBackupExists = $false
+        completedAtUtc = [DateTime]::UtcNow.ToString('O')
+    } | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath (Join-Path $cleanupEvidence 'cleanup.json')
     return
 }
 
-Assert-TargetAbsent $target
+$cloneSource = $null
+if ($Mode -eq 'RehearseClone') {
+    $sourceConnection = Get-ProcessConnectionString $SourceConnectionEnvironmentVariable
+    $cloneSource = ConvertTo-ConnectionTarget $sourceConnection $false
+    Write-TargetLog 'READ-ONLY SOURCE + COPY_ONLY BACKUP' $cloneSource
+    if ($cloneSource.Database.ToUpperInvariant() -match $approvedNamePattern) {
+        throw 'Clone source must be the retained development database, not another rehearsal database.'
+    }
+    if (-not [string]::Equals($cloneSource.Database, 'RhemaERP', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Guarded Stage A clone source must be the exact configured RhemaERP catalog. Resolved '$($cloneSource.Database)'."
+    }
+    if (-not [string]::Equals($cloneSource.Server, $target.Server, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Clone source and rehearsal target must resolve to the same SQL Server instance.'
+    }
+    if ([string]::Equals($cloneSource.Database, $target.Database, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Clone source and rehearsal target must be different databases.'
+    }
+}
+
 $evidenceDirectoryResolved = if ($EvidenceDirectory) { $EvidenceDirectory } else { Get-DefaultEvidenceDirectory $target.Database }
+if (Test-Path -LiteralPath $evidenceDirectoryResolved) {
+    if (Get-ChildItem -LiteralPath $evidenceDirectoryResolved -Force | Select-Object -First 1) {
+        throw "Evidence directory must be new or empty to prevent stale evidence mixing: $evidenceDirectoryResolved"
+    }
+}
 New-Item -ItemType Directory -Force -Path $evidenceDirectoryResolved | Out-Null
-$baselineScript = Join-Path $evidenceDirectoryResolved 'initial-baseline.sql'
+$evidenceDirectoryResolved = (Resolve-Path $evidenceDirectoryResolved).Path
 $escapedDatabase = $target.Database.Replace(']', ']]')
+Assert-TargetAbsent $target
+
+if ($Mode -eq 'RehearseClone') {
+    $source = $cloneSource
+
+    Push-Location $repositoryRoot
+    try {
+        $cloneBuildLog = Join-Path $evidenceDirectoryResolved 'clone-build.log'
+        $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') $cloneBuildLog
+    }
+    finally { Pop-Location }
+
+    $sourceFingerprintBefore = Get-SourceFingerprint $source.Builder $source.Database
+    $sourceFingerprintBefore | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-fingerprint-before.txt')
+    $backupPath = Get-CloneBackupPath $target
+    $escapedBackupPath = $backupPath.Replace("'", "''")
+    $backupExists = [int](Invoke-SqlScalar $target.Builder 'master' @"
+DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+SELECT COALESCE(MAX(FileExists),0) FROM @exists;
+"@)
+    if ($backupExists -ne 0) {
+        throw "The exact target-derived rehearsal backup already exists. Run guarded DropRehearsal first: $backupPath"
+    }
+
+    $logicalFiles = @(Get-DatabaseLogicalFiles $source.Builder $source.Database)
+    $dataFiles = @($logicalFiles | Where-Object Type -eq 0)
+    $logFiles = @($logicalFiles | Where-Object Type -eq 1)
+    if ($dataFiles.Count -ne 1 -or $logFiles.Count -ne 1) {
+        throw 'Guarded clone currently requires exactly one ROWS file and one LOG file; no backup or restore was attempted.'
+    }
+    $dataRoot = Get-ServerDefaultPath $target.Builder 'InstanceDefaultDataPath'
+    $logRoot = Get-ServerDefaultPath $target.Builder 'InstanceDefaultLogPath'
+    $dataPath = (Join-Path $dataRoot "$($target.Database).mdf").Replace("'", "''")
+    $logPath = (Join-Path $logRoot "$($target.Database)_log.ldf").Replace("'", "''")
+    $sourceDatabase = $source.Database.Replace(']', ']]')
+    $sourceDataLogical = $dataFiles[0].Name.Replace("'", "''")
+    $sourceLogLogical = $logFiles[0].Name.Replace("'", "''")
+
+    try {
+        $backupRestoreEvidence = Join-Path $evidenceDirectoryResolved 'backup-restore-checkdb.txt'
+        Invoke-Sql $source.Builder 'master' @"
+SET NOCOUNT ON;
+SELECT N'BACKUP_COPY_ONLY_CHECKSUM_START';
+BACKUP DATABASE [$sourceDatabase] TO DISK=N'$escapedBackupPath'
+WITH COPY_ONLY, CHECKSUM, INIT, NAME=N'GL cutover guarded representative clone';
+SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
+RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
+SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
+RESTORE DATABASE [$escapedDatabase] FROM DISK=N'$escapedBackupPath'
+WITH MOVE N'$sourceDataLogical' TO N'$dataPath',
+     MOVE N'$sourceLogLogical' TO N'$logPath', CHECKSUM, RECOVERY;
+SELECT N'RESTORE_TARGET_COMPLETE';
+DBCC CHECKDB(N'$($target.Database.Replace("'", "''"))') WITH PHYSICAL_ONLY, NO_INFOMSGS;
+SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
+"@ '' $backupRestoreEvidence
+        $backupRestoreText = Get-Content -Raw -LiteralPath $backupRestoreEvidence
+        foreach ($marker in @('BACKUP_COPY_ONLY_CHECKSUM_COMPLETE', 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE',
+            'RESTORE_TARGET_COMPLETE', 'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE')) {
+            if ($backupRestoreText -notmatch [regex]::Escape($marker)) {
+                throw "Backup/restore evidence did not contain required marker '$marker'."
+            }
+        }
+
+        Push-Location $repositoryRoot
+        try {
+            $applyLog = Join-Path $evidenceDirectoryResolved 'clone-apply-migrations.log'
+            $exitCode = Set-ApplicationConnection $targetConnection {
+                Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                    '--project', $apiProject, '--', 'apply-migrations') $applyLog -AllowFailure
+            }
+            $applyText = Get-Content -Raw -LiteralPath $applyLog
+            if ($exitCode -eq 0 -or $applyText -notmatch 'Phase 4 preflight failed: existing FX revaluation batches') {
+                throw 'Representative clone did not stop at the required Phase 4 historical-FX-evidence guard.'
+            }
+        }
+        finally { Pop-Location }
+
+        $cloneState = [string](Invoke-SqlScalar $target.Builder $target.Database @"
+SELECT CONCAT(
+    (SELECT COUNT_BIG(*) FROM dbo.__EFMigrationsHistory), '|',
+    (SELECT MAX(MigrationId) FROM dbo.__EFMigrationsHistory), '|',
+    CASE WHEN EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId=N'20260903130000_AddFinancialStatementClassificationSnapshots') THEN 1 ELSE 0 END, '|',
+    CASE WHEN EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId=N'20260903190453_AddBookScopedFxRevaluationPolicy') THEN 1 ELSE 0 END, '|',
+    (SELECT COUNT_BIG(*) FROM dbo.FxRevaluationBatches WHERE IsDeleted=0));
+"@)
+        if ($cloneState -notmatch '^449\|20260903130000_AddFinancialStatementClassificationSnapshots\|1\|0\|1$') {
+            throw "Representative clone stopped in an unexpected state: $cloneState"
+        }
+        $cloneState | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'clone-state-at-stop.txt')
+
+        $sourceFingerprintAfter = Get-SourceFingerprint $source.Builder $source.Database
+        $sourceFingerprintAfter | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-fingerprint-after.txt')
+        if ($sourceFingerprintAfter -ne $sourceFingerprintBefore) {
+            throw 'Configured source fingerprint changed during guarded clone rehearsal.'
+        }
+
+        [ordered]@{
+            status = 'EXPECTED_PHASE4_STOP'
+            gitHead = (git rev-parse HEAD).Trim()
+            sourceDatabase = $source.Database
+            targetDatabase = $target.Database
+            sourceFingerprint = $sourceFingerprintAfter
+            cloneState = $cloneState
+            backupPolicy = 'COPY_ONLY_CHECKSUM_VERIFYONLY'
+            completedAtUtc = [DateTime]::UtcNow.ToString('O')
+        } | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'summary.json')
+        Write-Host "GL cutover representative clone reached its expected Phase 4 stop. Evidence: $evidenceDirectoryResolved"
+        return
+    }
+    catch {
+        Write-Error "Clone rehearsal failed or stopped unexpectedly. The prefix-safe target and exact target-derived backup were preserved for inspection: $($target.Database). $($_.Exception.Message)"
+        throw
+    }
+}
+
+$baselineScript = Join-Path $evidenceDirectoryResolved 'initial-baseline.sql'
 
 Write-Host '[CREATE] Prefix assertion passed; creating the exact resolved rehearsal database.'
 Invoke-Sql $target.Builder 'master' "CREATE DATABASE [$escapedDatabase];"
@@ -197,16 +454,21 @@ END;
         Set-ApplicationConnection $targetConnection {
             # Exercise the same controlled deployment entry point operators use. It runs
             # Database.MigrateAsync without starting the HTTP host or invoking seeders.
-            Invoke-Native 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                '--project', $apiProject, '--', 'apply-migrations')
-            Invoke-Native 'dotnet' @('run', '--no-build', '--configuration', 'Debug', '--project', $apiProject, '--', 'seed-db')
+            $migrationLog = Join-Path $evidenceDirectoryResolved 'migration-apply.log'
+            $seedPassOneLog = Join-Path $evidenceDirectoryResolved 'seed-pass-1.log'
+            $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                '--project', $apiProject, '--', 'apply-migrations') $migrationLog
+            $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                '--project', $apiProject, '--', 'seed-db') $seedPassOneLog
         }
 
         $passOne = Join-Path $evidenceDirectoryResolved 'invariants-pass-1.txt'
         Invoke-Sql $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-rehearsal-invariants.sql') $passOne
 
         Set-ApplicationConnection $targetConnection {
-            Invoke-Native 'dotnet' @('run', '--no-build', '--configuration', 'Debug', '--project', $apiProject, '--', 'seed-db')
+            $seedPassTwoLog = Join-Path $evidenceDirectoryResolved 'seed-pass-2.log'
+            $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                '--project', $apiProject, '--', 'seed-db') $seedPassTwoLog
         }
 
         $passTwo = Join-Path $evidenceDirectoryResolved 'invariants-pass-2.txt'
@@ -216,17 +478,37 @@ END;
         if ($first -ne $second) { throw 'Second seed changed the canonical Finance invariant snapshot.' }
 
         Set-ApplicationConnection $targetConnection {
-            Invoke-Native 'dotnet' @('ef', 'migrations', 'has-pending-model-changes', '--project', $dataProject,
-                '--startup-project', $apiProject, '--configuration', 'Debug', '--context', 'ApplicationDbContext', '--no-build')
+            $modelLog = Join-Path $evidenceDirectoryResolved 'ef-no-pending-model.log'
+            $migrationListLog = Join-Path $evidenceDirectoryResolved 'migration-discovery.log'
+            $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',
+                '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
+                '--context', 'ApplicationDbContext', '--no-build') $modelLog
+            $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'list',
+                '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
+                '--context', 'ApplicationDbContext', '--no-build', '--no-connect') $migrationListLog
         }
+
+        $migrationCount = @(Get-Content -LiteralPath (Join-Path $evidenceDirectoryResolved 'migration-discovery.log') |
+            Where-Object { $_.Trim() -match '^\d{14}_.+' }).Count
+        $appliedMigrationCount = [long](Invoke-SqlScalar $target.Builder $target.Database 'SELECT COUNT_BIG(*) FROM dbo.__EFMigrationsHistory;')
+        if ($migrationCount -ne 448 -or $appliedMigrationCount -ne 448) {
+            throw "Migration discovery/history mismatch. Discovered=$migrationCount; Applied=$appliedMigrationCount."
+        }
+
+        @(
+            "$first  invariants-pass-1.txt",
+            "$second  invariants-pass-2.txt"
+        ) | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectoryResolved 'checksums.sha256')
 
         $summary = [ordered]@{
             status = 'PASS'
             gitHead = (git rev-parse HEAD).Trim()
-            server = $target.Server
             database = $target.Database
+            migrationCount = $migrationCount
             latestMigration = '20260904003118_AddGovernedAccountSegmentIdentity'
-            semanticSnapshotSha256 = $first
+            invariantPass1Sha256 = $first
+            invariantPass2Sha256 = $second
+            applicationMigrationCommand = 'dotnet run --no-build --configuration Debug --project src/ErpSystem.Api/ErpSystem.Api.csproj -- apply-migrations'
             seedPasses = 2
             completedAtUtc = [DateTime]::UtcNow.ToString('O')
         }
