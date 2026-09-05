@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage B1 — Procurement owner V2/provisioning conversion |
-| Status | `CHANGES_REQUIRED` |
+| Phase | Post-Phase-6 Stage C1 — stable accounting-book identity and idempotency foundation |
+| Status | `AUTHORIZED_PENDING_IMPLEMENTATION` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `0f88eff289ba563cdd0707166df6b3e10fe585af` |
-| Branch | `codex/procurement-finance-v2-cutover` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-procurement-finance-v2-cutover` |
+| Exact base | `4172e1cafee90bceef8385eef4102cf8718e4696` |
+| Branch | `codex/finance-multibook-identity-foundation` |
+| Worktree | To be created by implementing task from the exact base |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `0f88eff289ba563cdd0707166df6b3e10fe585af` |
+| Primary HEAD at activation | `4172e1cafee90bceef8385eef4102cf8718e4696` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Model routing | Implementer: GPT-5.6 Terra Medium; independent contract review: GPT-5.6 Sol High |
-| Review status | Stage B1 candidate `102c67b9` independently reviewed; corrections issued |
+| Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
+| Review status | Architecture decisions approved by user; C1 awaiting implementation handoff |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -222,6 +222,16 @@ governed book lifecycle/types, book-aware balances, stable book IDs, book-period
 and a neutral `AccountingEvent`/per-book representation orchestrator. Automatic parallel-book posting must
 remain disabled while generic `Account.Balance` can combine alternative book representations.
 
+On 2026-09-05 the user approved the Finance-owned multi-book accounting baseline: exactly one primary full
+book; optional parallel-full and delta books; shared tenant functional currency and fiscal calendar for full
+books initially; effective-dated Finance-owned applicability with primary-only default; atomic release of all
+required book representations; delta books excluded from automatic posting by default; `Account.Balance`
+retained only as primary-book compatibility while book-specific balances become authoritative; mandatory
+initialization/reconciliation/approval and book-period readiness before activation; and explicit-book reporting
+that never sums alternative full books automatically. This authorizes staged Finance foundation work and later
+owner-packet revision, but not migration application, configured-database mutation or automatic parallel-book
+enablement before every prerequisite gate passes.
+
 Independent Sol High re-review of Stage A.1 candidate `0263b16a` found the migration, downgrade,
 owner-comment, guarded-rehearsal, sanitized-evidence and documentation corrections technically sound. One
 P1 integration-control correction remains: the durable handoff/evidence stops at `b85d88b1` and omits the
@@ -262,11 +272,14 @@ coordinator integration verification passed 39/39 Core and 79/79 expanded Financ
 passed, the candidate remained clean, and no database or migration command was run. Unrelated primary-worktree
 changes were preserved.
 
-Do not issue Inventory or enable automatic parallel-book posting yet. The Finance-owned architecture checkpoint
-confirmed that current posting-event uniqueness is not book-qualified, journal/transaction/event rows lack
-stable relational `AccountingBookId`, generic `Account.Balance` and account/currency exposure can commingle
-alternative-book representations, and accounting-book lifecycle/initialization/book-period controls do not yet
-support governed parallel posting. The next safe action is to obtain the recorded accounting/product decisions,
-then implement the Finance-owned foundation in reviewed stages before revising the Inventory, Sales and HR/Payroll
-owner packets. Configured `RHEMAERP` remains read-only until the later reset/migration gate is separately
-reconciled.
+Do not issue Inventory or enable automatic parallel-book posting yet. Begin Stage C1 from exact primary base
+`4172e1cafee90bceef8385eef4102cf8718e4696` on GPT-5.6 Sol Medium. C1 adds/backfills stable relational
+`AccountingBookId` on journal headers,
+account transactions and posting events; preserves immutable book-code snapshots; enforces tenant/book lineage;
+and makes source/action plus idempotency uniqueness book-qualified. It must update posting, retry and reversal
+lookups consistently, fail closed on ambiguous/unknown/pseudo-book historical evidence, provide an unapplied
+forward migration with preflight, and prove same-event/same-book idempotency plus same-event/different-book
+distinctness and concurrency. It must not add neutral-event orchestration, enumerate books, enable parallel
+posting, or repurpose generic balances. Independently review C1 on GPT-5.6 Sol High before proceeding to the
+book-aware balance/exposure stage. Configured `RHEMAERP` remains read-only until the later reset/migration gate
+is separately reconciled.
