@@ -154,7 +154,8 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
             Mock.Of<IInventoryTrackingControlService>(), Mock.Of<IInventoryNegativeStockControlService>(),
             Mock.Of<IInventoryProjectReservationService>(), Mock.Of<IProcurementAccessControlService>(),
             Mock.Of<IProcurementControlEventService>(), Mock.Of<IInventoryReturnControlService>(),
-            Mock.Of<IInventoryIssueFinanceAssetService>(), NullLogger<InventoryRequisitionService>.Instance);
+            Mock.Of<IInventoryIssueFinanceAssetService>(), Mock.Of<IInventoryValuationService>(),
+            NullLogger<InventoryRequisitionService>.Instance);
     }
 
     private InventoryLayer Layer(Guid tenant, Guid location, decimal cost, int day) => new()

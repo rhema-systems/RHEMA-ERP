@@ -48,6 +48,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IInventoryReturnControlService _returnControls;
     private readonly IInventoryIssueFinanceAssetService _issueFinanceAssets;
+    private readonly IInventoryValuationService _valuation;
     private readonly ILogger<InventoryRequisitionService> _logger;
 
     public InventoryRequisitionService(
@@ -72,6 +73,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         IProcurementControlEventService controlEvents,
         IInventoryReturnControlService returnControls,
         IInventoryIssueFinanceAssetService issueFinanceAssets,
+        IInventoryValuationService valuation,
         ILogger<InventoryRequisitionService> logger)
     {
         _requisitionRepository = requisitionRepository;
@@ -95,6 +97,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _controlEvents = controlEvents;
         _returnControls = returnControls;
         _issueFinanceAssets = issueFinanceAssets;
+        _valuation = valuation;
         _logger = logger;
     }
 
@@ -465,6 +468,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
                 try
                 {
+                    _valuation.ResetProcessingAttempt();
                     await _unitOfWork.AcquireTransactionLockAsync($"inventory-requisition-issue:{_currentUserProvider.TenantId:N}:{id:N}");
                     var result = await IssueCoreAsync(id, dto);
                     await _unitOfWork.CommitAsync();
@@ -569,7 +573,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             requisition.LocationId,
             requisition.RequestedById,
             requisition.ApprovedById,
-            dto.MovementReasonCode
+            dto.MovementReasonCode,
+            ApprovedEstimates = requisition.Items.Select(line => new
+            {
+                line.Id, line.InventoryItemId, line.ApprovedQuantity, line.UnitCost
+            }).ToList()
         });
         var voucher = new InventoryIssueVoucher
         {
@@ -714,10 +722,19 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 CorrelationId = $"requisition:{requisition.Id:N}:issue"
             });
 
-            // Update issued quantity
+            // The approval retains the demand estimate. Actual issue value comes from the
+            // authoritative valuation owner inside this same transaction, before Finance posts.
+            var issueValue = await _valuation.ProcessIssueAsync(
+                requisitionItem.InventoryItemId, effectiveWarehouseId, effectiveLocationId,
+                issueItem.IssuedQuantity, InventoryMovementType.RequisitionIssue,
+                ReferenceType.Requisition, requisition.RequisitionNumber, requisition.Id, lotNumber, serialNumber);
+            var issueUnitCost = decimal.Round(issueValue / issueItem.IssuedQuantity, 4);
+            issueValue = decimal.Round(issueValue, 2);
+
+            // Update issued quantity without repricing the approved estimate.
             requisitionItem.IssuedQuantity += issueItem.IssuedQuantity;
             requisitionItem.TrackingSequence = trackingSequence;
-            requisitionItem.LineValue = requisitionItem.IssuedQuantity * requisitionItem.UnitCost;
+            requisitionItem.LineValue += issueValue;
             if (issueItem.LocationId.HasValue) requisitionItem.LocationId = issueItem.LocationId;
             requisitionItem.LotNumber = lotNumber;
             requisitionItem.BatchNumber = batchNumber;
@@ -779,8 +796,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 MovementType = "Issue",
                 MovementDate = DateTime.UtcNow,
                 Quantity = -issueItem.IssuedQuantity,
-                UnitCost = requisitionItem.UnitCost,
-                TotalValue = -issueItem.IssuedQuantity * requisitionItem.UnitCost,
+                UnitCost = issueUnitCost,
+                TotalValue = -issueValue,
                 ReferenceType = ReferenceType.Requisition,
                 ReferenceNumber = requisition.RequisitionNumber,
                 ReferenceId = requisition.Id,
@@ -808,8 +825,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 WarehouseId = effectiveWarehouseId,
                 LocationId = effectiveLocationId,
                 Quantity = issueItem.IssuedQuantity,
-                UnitCost = requisitionItem.UnitCost,
-                TotalValue = issueItem.IssuedQuantity * requisitionItem.UnitCost,
+                UnitCost = issueUnitCost,
+                TotalValue = issueValue,
                 UnitOfMeasure = requisitionItem.UnitOfMeasure,
                 LotNumber = lotNumber,
                 BatchNumber = batchNumber,
