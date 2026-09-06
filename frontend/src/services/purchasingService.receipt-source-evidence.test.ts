@@ -28,7 +28,7 @@ describe('purchase receipt governed source-evidence client', () => {
   });
 
   it('posts typed evidence as multipart without overriding the browser boundary', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'evidence-1' }), {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'evidence-1', evidenceKind: 'Waybill' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }));
@@ -53,5 +53,26 @@ describe('purchase receipt governed source-evidence client', () => {
     expect(uploadedFile.name).toBe('waybill.pdf');
     expect(uploadedFile.type).toBe('application/pdf');
     expect(uploadedFile.size).toBe(file.size);
+  });
+
+  it.each([[1, 1], ['1', 1], ['Waybill', 1], [2, 2], ['2', 2], ['VatInvoiceCopy', 2]])(
+    'normalizes API evidence kind %s without hiding retained files', async (wireKind, expected) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        waybillReady: true, canUpload: false,
+        evidence: [{ id: 'retained-file', evidenceKind: wireKind, originalFileName: 'LOCAL-UAT-ONLY.pdf' }],
+      }), { status: 200 })));
+
+      const result = await purchasingService.getReceiptSourceEvidence('receipt-1');
+
+      expect(result).toMatchObject({ waybillReady: true, canUpload: false,
+        evidence: [{ id: 'retained-file', evidenceKind: expected, originalFileName: 'LOCAL-UAT-ONLY.pdf' }] });
+    }
+  );
+
+  it('rejects unknown kinds instead of presenting missing evidence as ready', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      evidence: [{ evidenceKind: 'UnknownKind' }],
+    }), { status: 200 })));
+    await expect(purchasingService.getReceiptSourceEvidence('receipt-1')).rejects.toThrow('Unrecognized receipt evidence type');
   });
 });
