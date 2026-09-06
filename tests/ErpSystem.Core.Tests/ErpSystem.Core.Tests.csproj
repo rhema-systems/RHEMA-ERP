@@ -44,6 +44,7 @@
     <Compile Include="Services\Inventory\InventoryDirectedOperationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueValuationTests.cs" />
+    <Compile Include="Services\Inventory\InventoryReturnValuationSqlTests.cs" />
     <Compile Include="Services\Inventory\InventoryRequisitionDraftTests.cs" />
     <Compile Include="Services\Inventory\InventoryReturnAdjustmentControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryOpeningStockGovernanceTests.cs" />

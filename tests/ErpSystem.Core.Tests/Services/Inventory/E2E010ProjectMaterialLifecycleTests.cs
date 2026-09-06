@@ -260,6 +260,24 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
                 WasAudited = true
             });
         var issueFinanceAssets = _issueFinanceAssets.Object;
+        // This fixture does not host Finance. Supply its posted issue-line evidence,
+        // using actual voucher values; never manufacture a return cost from the request estimate.
+        _issueFinanceAssets.Setup(value => value.PostIssueAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid voucherId, CancellationToken token) =>
+            {
+                var lines = await _context.Set<InventoryIssueVoucherLine>()
+                    .Where(value => value.InventoryIssueVoucherId == voucherId).ToListAsync(token);
+                foreach (var line in lines)
+                    _context.Add(new InventoryIssueFinanceLineage
+                    {
+                        TenantId = _tenantId, InventoryIssueVoucherLineId = line.Id,
+                        IssuedQuantity = line.Quantity, IssuedValue = line.TotalValue,
+                        MovementReasonCode = "PROJECT_CONSUMPTION"
+                    });
+                await _context.SaveChangesAsync(token);
+            });
+        var valuation = new InventoryValuationService(_unitOfWork, NullLogger<InventoryValuationService>.Instance,
+            _currentUser, Mock.Of<IProcurementReceiptSourceControlService>());
 
         _returns = new InventoryReturnControlService(
             _unitOfWork,
@@ -278,6 +296,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             controlEvents.Object,
             projectService,
             issueFinanceAssets,
+            valuation,
             _currentUser);
 
         _requisitions = new InventoryRequisitionService(
@@ -302,8 +321,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             controlEvents.Object,
             _returns,
             issueFinanceAssets,
-            new InventoryValuationService(_unitOfWork, NullLogger<InventoryValuationService>.Instance,
-                _currentUser, Mock.Of<IProcurementReceiptSourceControlService>()),
+            valuation,
             NullLogger<InventoryRequisitionService>.Instance);
     }
 
@@ -697,6 +715,36 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         (await WarehouseStock()).CurrentStock.Should().Be(18m);
         _issueFinanceAssets.Verify(value => value.PostIssueAsync(voucher.Id, It.IsAny<CancellationToken>()), Times.Once);
         await AssertProjectCostAsync(3800m, 0m, 3800m);
+        var returned = await _returns.RequestAsync(_requisitionId, new ReturnRequisitionDto
+        {
+            IdempotencyKey = "actual-fifo-return", CorrelationId = "actual-fifo-return",
+            RowVersion = Convert.ToBase64String(_requisitionRowVersion),
+            ReasonCode = InventoryReturnReasonCodes.Unused, Reason = "Unused original issue returned.",
+            Items = [new() { ItemId = _requisitionLineId, ReturnedQuantity = 1, LocationId = _locationId }]
+        });
+        returned.TotalValue.Should().Be(1900);
+        _currentUser.Switch(_returnApproverId, "stores.return-approver");
+        var approved = await _returns.DecideAsync(returned.Id, new DecideInventoryReturnVoucherRequest
+        {
+            Approved = true, Comment = "Independent review", IdempotencyKey = "fifo-return-approved", RowVersion = returned.RowVersion
+        });
+        var post = new PostInventoryReturnVoucherRequest { IdempotencyKey = "fifo-return-posted", RowVersion = approved.RowVersion };
+        await _returns.PostAsync(returned.Id, post);
+        await _returns.PostAsync(returned.Id, post);
+        _context.ChangeTracker.Clear();
+        source = await _context.Set<InventoryRequisitionItem>().SingleAsync();
+        source.UnitCost.Should().Be(2000);
+        source.LineValue.Should().Be(1900);
+        source.IssuedQuantity.Should().Be(1);
+        balance = await _context.Set<InventoryBalance>().SingleAsync();
+        balance.QuantityOnHand.Should().Be(19);
+        balance.TotalValue.Should().Be(36100);
+        (await _context.Set<InventoryLayer>().SumAsync(value => value.RemainingValue)).Should().Be(36100);
+        (await _context.Set<InventoryMovement>().SingleAsync(value => value.MovementType == InventoryMovementType.RequisitionReturn))
+            .RunningValue.Should().Be(36100);
+        (await WarehouseStock()).CurrentStock.Should().Be(19);
+        _issueFinanceAssets.Verify(value => value.PostReturnAsync(returned.Id, It.IsAny<CancellationToken>()), Times.Once);
+        await AssertProjectCostAsync(3800, -1900, 1900);
     }
 
     public Task DisposeAsync()

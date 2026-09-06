@@ -83,6 +83,90 @@ public sealed class InventoryIssueValuationTests : IDisposable
         _db.ChangeTracker.Entries<InventoryMovement>().Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(ValuationMethod.FIFO, 38000)]
+    [InlineData(ValuationMethod.WeightedAverage, 38000)]
+    [InlineData(ValuationMethod.StandardCost, 40000)]
+    public async Task Return_and_reversal_restore_exact_original_value_once(ValuationMethod method, decimal openingValue)
+    {
+        var service = await Setup(method);
+        var line = await ReturnLine();
+        await service.ProcessReturnAsync(line.Id);
+        await _db.SaveChangesAsync();
+        var balance = await _db.Set<InventoryBalance>().SingleAsync();
+        balance.QuantityOnHand.Should().Be(21);
+        balance.TotalValue.Should().Be(openingValue + 1900);
+        var movement = await _db.Set<InventoryMovement>().SingleAsync();
+        movement.RunningValue.Should().Be(openingValue + 1900);
+        movement.RunningBalance.Should().Be(21);
+        movement.TotalValue.Should().Be(1900);
+        Func<Task> duplicate = () => service.ProcessReturnAsync(line.Id);
+        await duplicate.Should().ThrowAsync<InvalidOperationException>();
+        line.InventoryReturnVoucher.Status = InventoryReturnVoucherStatus.Reversed;
+        await _db.SaveChangesAsync();
+        await service.ProcessReturnAsync(line.Id, true);
+        await _db.SaveChangesAsync();
+        balance.QuantityOnHand.Should().Be(20);
+        balance.TotalValue.Should().Be(openingValue);
+        (await _db.Set<InventoryMovement>().SingleAsync(value => value.IsReversal)).ReversedMovementId.Should().Be(movement.Id);
+        if (method == ValuationMethod.FIFO)
+            (await _db.Set<InventoryLayer>().SingleAsync(value => value.SourceId == line.Id)).RemainingQuantity.Should().Be(0);
+        duplicate = () => service.ProcessReturnAsync(line.Id, true);
+        await duplicate.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Return_reversal_cannot_consume_an_unrelated_fifo_layer()
+    {
+        var service = await Setup(ValuationMethod.FIFO);
+        var line = await ReturnLine();
+        await service.ProcessReturnAsync(line.Id);
+        await _db.SaveChangesAsync();
+        var layer = await _db.Set<InventoryLayer>().SingleAsync(value => value.SourceId == line.Id);
+        layer.RemainingQuantity = 0;
+        layer.RemainingValue = 0;
+        layer.IsFullyConsumed = true;
+        line.InventoryReturnVoucher.Status = InventoryReturnVoucherStatus.Reversed;
+        await _db.SaveChangesAsync();
+        Func<Task> reverse = () => service.ProcessReturnAsync(line.Id, true);
+        await reverse.Should().ThrowAsync<InvalidOperationException>().WithMessage("*unrelated stock*");
+        (await _db.Set<InventoryBalance>().SingleAsync()).QuantityOnHand.Should().Be(21);
+        (await _db.Set<InventoryLayer>().SingleAsync(value => value.SourceId != line.Id)).RemainingQuantity.Should().Be(20);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Return_rejects_unapproved_or_other_tenant_source(bool otherTenant)
+    {
+        var service = await Setup(ValuationMethod.FIFO);
+        var line = await ReturnLine();
+        if (otherTenant) line.TenantId = Guid.NewGuid();
+        else line.InventoryReturnVoucher.Status = InventoryReturnVoucherStatus.PendingApproval;
+        await _db.SaveChangesAsync();
+        Func<Task> action = () => service.ProcessReturnAsync(line.Id);
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        (await _db.Set<InventoryBalance>().SingleAsync()).QuantityOnHand.Should().Be(20);
+        _db.ChangeTracker.Entries<InventoryMovement>().Should().BeEmpty();
+    }
+
+    private async Task<InventoryReturnVoucherLine> ReturnLine()
+    {
+        var line = new InventoryReturnVoucherLine
+        {
+            TenantId = _tenant, InventoryItemId = _item.Id, LocationId = _location,
+            Quantity = 1, UnitCost = 1900, TotalValue = 1900,
+            InventoryReturnVoucher = new InventoryReturnVoucher
+            {
+                TenantId = _tenant, WarehouseId = _warehouse, VoucherNumber = "SRV-TEST",
+                InventoryRequisitionId = Guid.NewGuid(), Status = InventoryReturnVoucherStatus.Posted
+            }
+        };
+        _db.Add(line);
+        await _db.SaveChangesAsync();
+        return line;
+    }
+
     private Task<decimal> Issue(InventoryValuationService service, decimal quantity) => service.ProcessIssueAsync(
         _item.Id, _warehouse, _location, quantity, InventoryMovementType.RequisitionIssue,
         ReferenceType.Requisition, "SIV-TEST", Guid.NewGuid());
